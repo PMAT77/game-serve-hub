@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import type { DbGameInstance } from '../../shared/db/index'
 import { findUserByToken, getGameInstanceById } from '../../shared/db/index'
 import { instanceRuntimeRegistry } from '../../shared/instance-runtime/registry'
 import { businessError, success, unauthorized } from '../../shared/http/response'
@@ -56,18 +57,25 @@ function normalizeInstanceId(value: string | undefined) {
   return value?.trim() ?? ''
 }
 
-async function resolveLocalInstance(instanceId: string, request: FastifyRequest) {
+type ResolveLocalInstanceResult =
+  | { ok: false; error: ApiErrorResponse }
+  | { ok: true; instance: DbGameInstance }
+
+async function resolveLocalInstance(
+  instanceId: string,
+  request: FastifyRequest,
+): Promise<ResolveLocalInstanceResult> {
   if (!instanceId) {
-    return { error: businessError('实例 ID 不能为空', request) }
+    return { ok: false, error: businessError('实例 ID 不能为空', request) }
   }
   const instance = await getGameInstanceById(instanceId)
   if (!instance) {
-    return { error: businessError('实例不存在', request) }
+    return { ok: false, error: businessError('实例不存在', request) }
   }
   if (instance.nodeId !== LOCAL_NODE_ID) {
-    return { error: businessError('当前仅支持本地节点实例控制台', request) }
+    return { ok: false, error: businessError('当前仅支持本地节点实例控制台', request) }
   }
-  return { instance }
+  return { ok: true, instance }
 }
 
 function writeSse(reply: FastifyReply, event: string, data: unknown) {
@@ -91,7 +99,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     const query = request.query as ConsoleLogsQuery
     const instanceId = normalizeInstanceId(query.instanceId)
     const resolved = await resolveLocalInstance(instanceId, request)
-    if ('error' in resolved) {
+    if (!resolved.ok) {
       return resolved.error
     }
     const afterId = Number.parseInt(query.afterId ?? '0', 10)
@@ -110,7 +118,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     const body = (request.body ?? {}) as ConsoleInstanceBody
     const instanceId = normalizeInstanceId(body.instanceId)
     const resolved = await resolveLocalInstance(instanceId, request)
-    if ('error' in resolved) {
+    if (!resolved.ok) {
       return resolved.error
     }
     instanceRuntimeRegistry.clearLogs(instanceId)
@@ -126,7 +134,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     const instanceId = normalizeInstanceId(body.instanceId)
     const command = body.command?.trim() ?? ''
     const resolved = await resolveLocalInstance(instanceId, request)
-    if ('error' in resolved) {
+    if (!resolved.ok) {
       return resolved.error
     }
     if (resolved.instance.status !== 'running') {
@@ -148,7 +156,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     const query = request.query as ConsoleStreamQuery
     const instanceId = normalizeInstanceId(query.instanceId)
     const resolved = await resolveLocalInstance(instanceId, request)
-    if ('error' in resolved) {
+    if (!resolved.ok) {
       reply.status(400).send(resolved.error)
       return
     }

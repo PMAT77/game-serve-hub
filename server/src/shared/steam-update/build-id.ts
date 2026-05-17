@@ -51,6 +51,33 @@ export function readLocalBuildId(installPath: string, appId: string): string | n
   }
 }
 
+/** 将 appmanifest 中的 buildid 与远端对齐（安装成功但清单未刷新时使用） */
+export function writeLocalBuildId(installPath: string, appId: string, buildId: string): boolean {
+  const manifestPath = resolveAppManifestPath(installPath, appId)
+  const normalizedBuildId = buildId.trim()
+  if (!manifestPath || !normalizedBuildId) {
+    return false
+  }
+  try {
+    const content = fs.readFileSync(manifestPath, 'utf8')
+    if (!/"buildid"/i.test(content)) {
+      return false
+    }
+    const next = content.replace(
+      /"buildid"\s+"\d+"/i,
+      `"buildid"\t\t"${normalizedBuildId}"`,
+    )
+    if (next === content) {
+      return false
+    }
+    fs.writeFileSync(manifestPath, next, 'utf8')
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
 function parsePublicBuildIdFromAppInfo(output: string): string | null {
   const publicIndex = output.indexOf('"public"')
   if (publicIndex >= 0) {

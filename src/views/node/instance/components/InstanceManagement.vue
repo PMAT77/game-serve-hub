@@ -1,11 +1,24 @@
 <script setup lang="ts">
 import type { DataTableColumns, FormInst, FormRules } from 'naive-ui'
-import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceInstallLogSource, InstanceItem, InstanceStatus } from '@/api/modules/instance'
+import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceItem, InstanceStatus } from '@/api/modules/instance'
 import type { NodeListItem } from '@/api/modules/node'
-import { NAlert, NButton, NProgress, NTag, useDialog } from 'naive-ui'
+import type { NotificationReactive } from 'naive-ui'
+import { NButton, NProgress, NTag, useDialog, useNotification } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
 import { blurFocusedElement } from '@/utils'
+import {
+  canOpenInstallLog,
+  extractInstallProgressPercent,
+  formatPollIntervalHint,
+  getInstallLogSourceLabel,
+  getInstallLogStatusLabel,
+  getStatusBadgeClass,
+  getStatusLabel,
+  isInstanceInstallingStatus,
+  resolveInstallPhase,
+  shouldShowInstallDetail,
+} from '../instanceDisplay'
 import { formatDateTime } from '../utils'
 
 defineOptions({
@@ -23,6 +36,7 @@ interface Props {
 const { nodes, steamcmdInstalled, steamcmdConfigured } = toRefs(props)
 
 const dialog = useDialog()
+const notification = useNotification()
 const router = useRouter()
 
 const instanceLoading = ref(false)
@@ -45,9 +59,24 @@ const installLogInstanceName = ref('')
 const installLogTargetId = ref('')
 let installLogPollTimer: ReturnType<typeof setInterval> | undefined
 
+// --- 常量 ---
 /** 列宽总和，启用横向滚动，避免中间列被挤压为 0 */
 const INSTANCE_TABLE_SCROLL_X = 1340
-const UPDATE_NOTIFY_STORAGE_KEY = 'gsh-instance-update-notified'
+const INSTANCE_INSTALL_POLL_MS = 1000
+const INSTANCE_INSTALL_LOG_POLL_MS = 1000
+/** 用户手动关闭通知后记录签名，避免同一批更新反复弹出 */
+const UPDATE_NOTIFY_DISMISSED_KEY = 'gsh-instance-update-dismissed'
+/** @deprecated 旧版在弹出 toast 时即写入，会阻止通知显示，挂载时清理 */
+const UPDATE_NOTIFY_STORAGE_KEY_LEGACY = 'gsh-instance-update-notified'
+
+const STAT_CARDS = [
+  { key: 'total' as const, label: '实例总数', valueClass: 'text-lg font-semibold' },
+  { key: 'running' as const, label: '运行中', valueClass: 'text-lg font-semibold text-emerald-600 dark:text-emerald-400' },
+  { key: 'stopped' as const, label: '已停止', valueClass: 'text-lg font-semibold text-slate-600 dark:text-slate-300' },
+  { key: 'error' as const, label: '异常', valueClass: 'text-lg font-semibold text-red-600 dark:text-red-400' },
+]
+
+const instanceUpdateNotificationRef = ref<NotificationReactive | null>(null)
 
 const createForm = reactive<CreateInstancePayload>({
   nodeId: '',
@@ -118,21 +147,59 @@ const createFormRules: FormRules = {
   ],
 }
 
+/** 按状态单次遍历统计实例数量 */
 const statusCount = computed(() => {
-  return {
-    total: instances.value.length,
-    pendingInstall: instances.value.filter(item => item.status === 'pending_install').length,
-    running: instances.value.filter(item => item.status === 'running').length,
-    stopped: instances.value.filter(item => item.status === 'stopped').length,
-    installing: instances.value.filter(item => item.status === 'installing').length,
-    error: instances.value.filter(item => item.status === 'error').length,
+  const counts = {
+    total: 0,
+    pendingInstall: 0,
+    running: 0,
+    stopped: 0,
+    installing: 0,
+    error: 0,
   }
+  for (const item of instances.value) {
+    counts.total++
+    switch (item.status) {
+      case 'pending_install':
+        counts.pendingInstall++
+        break
+      case 'running':
+        counts.running++
+        break
+      case 'stopped':
+        counts.stopped++
+        break
+      case 'installing':
+        counts.installing++
+        break
+      case 'error':
+        counts.error++
+        break
+    }
+  }
+  return counts
 })
 
-const filteredInstances = computed(() => instances.value)
+const instancesWithUpdate = computed(() =>
+  instances.value.filter(item => item.updateAvailable),
+)
 
-const instancesWithUpdate = computed(() => {
-  return instances.value.filter(item => item.updateAvailable)
+/** 安装日志弹窗顶部辅助提示 */
+const installLogHint = computed(() => {
+  if (installLogMeta.value?.source === 'status_summary') {
+    return {
+      class: 'text-amber-600 dark:text-amber-400',
+      text: '以下为最近状态摘要，不是完整 SteamCMD 输出；安装进行中请保持弹窗打开以自动刷新。',
+    }
+  }
+  if (shouldPollInstallLog()) {
+    const interval = formatPollIntervalHint(INSTANCE_INSTALL_LOG_POLL_MS)
+    return {
+      class: 'text-sky-600 dark:text-sky-400',
+      text: `安装进行中，${interval}自动刷新日志。`,
+    }
+  }
+  return null
 })
 
 const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
@@ -178,7 +245,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '安装',
       key: 'install',
-      width: 200,
+      width: 150,
       ellipsis: { tooltip: true },
       render: row => renderInstallColumn(row),
     },
@@ -204,7 +271,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '更新时间',
       key: 'updatedAt',
-      width: 150,
+      width: 180,
       render: row => formatDateTime(row.updatedAt),
     },
     {
@@ -214,73 +281,43 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
       fixed: 'right',
       render: row =>
         h('div', { class: 'flex flex-wrap gap-4' }, [
-          h(
-            NButton,
-            {
-              size: 'small',
-              text: true,
-              disabled: row.status === 'pending_install' || row.status === 'installing',
-              onClick: () => router.push({
-                name: 'nodeInstanceConsole',
-                params: { instanceId: row.id },
-              }),
-            },
-            { default: () => '控制台' },
-          ),
-          h(
-            NButton,
-            {
-              size: 'small',
-              text: true,
-              loading: isActionLoading(row.id, 'update'),
-              disabled: !canUpdateInstance(row),
-              title: getUpdateInstanceButtonTitle(row),
-              onClick: () => confirmUpdateInstance(row),
-            },
-            { default: () => '更新服务端' },
-          ),
-          h(
-            NButton,
-            {
-              size: 'small',
-              text: true,
-              loading: isActionLoading(row.id, 'start'),
-              disabled: row.status === 'running' || row.status === 'pending_install' || row.status === 'installing',
-              onClick: () => runInstanceAction(row.id, 'start'),
-            },
-            { default: () => '启动' },
-          ),
-          h(
-            NButton,
-            {
-              size: 'small',
-              text: true,
-              loading: isActionLoading(row.id, 'stop'),
-              disabled: row.status === 'stopped',
-              onClick: () => confirmDangerousInstanceAction(row, 'stop'),
-            },
-            { default: () => '停止' },
-          ),
-          h(
-            NButton,
-            {
-              size: 'small',
-              text: true,
-              loading: isActionLoading(row.id, 'restart'),
-              onClick: () => confirmDangerousInstanceAction(row, 'restart'),
-            },
-            { default: () => '重启' },
-          ),
-          h(
-            NButton,
-            {
-              type: 'error',
-              size: 'small',
-              text: true,
-              onClick: () => confirmDangerousInstanceAction(row, 'delete'),
-            },
-            { default: () => '删除' },
-          ),
+          createTextActionButton({
+            label: '控制台',
+            disabled: row.status === 'pending_install' || row.status === 'installing',
+            onClick: () => router.push({
+              name: 'nodeInstanceConsole',
+              params: { instanceId: row.id },
+            }),
+          }),
+          createTextActionButton({
+            label: '更新服务端',
+            loading: isActionLoading(row.id, 'update'),
+            disabled: !canUpdateInstance(row),
+            title: getUpdateInstanceButtonTitle(row),
+            onClick: () => confirmUpdateInstance(row),
+          }),
+          createTextActionButton({
+            label: '启动',
+            loading: isActionLoading(row.id, 'start'),
+            disabled: row.status === 'running' || row.status === 'pending_install' || row.status === 'installing',
+            onClick: () => runInstanceAction(row.id, 'start'),
+          }),
+          createTextActionButton({
+            label: '停止',
+            loading: isActionLoading(row.id, 'stop'),
+            disabled: row.status === 'stopped',
+            onClick: () => confirmDangerousInstanceAction(row, 'stop'),
+          }),
+          createTextActionButton({
+            label: '重启',
+            loading: isActionLoading(row.id, 'restart'),
+            onClick: () => confirmDangerousInstanceAction(row, 'restart'),
+          }),
+          createTextActionButton({
+            label: '删除',
+            type: 'error',
+            onClick: () => confirmDangerousInstanceAction(row, 'delete'),
+          }),
         ]),
     },
   ]
@@ -292,122 +329,36 @@ watch(nodes, (list) => {
   }
 }, { immediate: true })
 
+/** 数据表行唯一键 */
 function getInstanceRowKey(row: InstanceItem) {
   return row.id
 }
 
-function getStatusLabel(status: InstanceStatus) {
-  switch (status) {
-    case 'pending_install':
-      return '未安装'
-    case 'running':
-      return '运行中'
-    case 'stopped':
-      return '已停止'
-    case 'installing':
-      return '安装中'
-    case 'error':
-      return '异常'
-  }
+/** 渲染表格操作列中的文本按钮 */
+function createTextActionButton(options: {
+  label: string
+  disabled?: boolean
+  loading?: boolean
+  title?: string
+  type?: 'default' | 'error'
+  onClick: () => void
+}) {
+  return h(
+    NButton,
+    {
+      size: 'small',
+      text: true,
+      type: options.type,
+      disabled: options.disabled,
+      loading: options.loading,
+      title: options.title,
+      onClick: options.onClick,
+    },
+    { default: () => options.label },
+  )
 }
 
-function getStatusBadgeClass(status: InstanceStatus) {
-  switch (status) {
-    case 'pending_install':
-      return 'bg-amber-500/10 text-amber-600 dark:text-amber-300'
-    case 'running':
-      return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-    case 'stopped':
-      return 'bg-slate-500/10 text-slate-600 dark:text-slate-300'
-    case 'installing':
-      return 'bg-sky-500/10 text-sky-600 dark:text-sky-300'
-    case 'error':
-      return 'bg-red-500/10 text-red-600 dark:text-red-300'
-  }
-}
-
-function looksLikeRuntimeCommand(text: string | null | undefined) {
-  if (!text?.trim()) {
-    return false
-  }
-  return /\.(?:sh|bat|cmd)\b/i.test(text)
-    || /\bdontstarve\b/i.test(text)
-    || /\bdedicated_server\b/i.test(text)
-}
-
-function resolveInstallPhase(instance: InstanceItem): string {
-  const command = instance.lastCommand?.trim() ?? ''
-  const error = instance.lastError?.trim() ?? ''
-  const text = `${command}\n${error}`.trim()
-
-  if (instance.status === 'error') {
-    if (error.includes('安装失败') || command.includes('安装失败')) {
-      return '安装失败'
-    }
-    return error ? '安装失败' : '安装异常'
-  }
-
-  if (!text) {
-    return instance.status === 'pending_install' ? '等待安装' : '安装中'
-  }
-  if (text.includes('等待安装')) {
-    return '等待安装'
-  }
-  if (text.includes('正在准备更新')) {
-    return '准备更新'
-  }
-  if (text.includes('正在准备')) {
-    return '准备安装'
-  }
-  if (text.includes('登录重试') || text.includes('账号登录')) {
-    return '账号登录重试'
-  }
-  if (/安装进度\s*\d+%/.test(text) || /\[\s*\d+%\]/.test(text) || /update state/i.test(text) || /downloading/i.test(text)) {
-    return '下载游戏'
-  }
-  if (text.includes('安装完成') || text.includes('启动脚本')) {
-    return '生成启动脚本'
-  }
-  if (/\d{1,3}\s*%/.test(text)) {
-    return '下载游戏'
-  }
-  if (instance.status === 'installing' || instance.status === 'pending_install') {
-    return '安装处理中'
-  }
-  return '—'
-}
-
-function extractInstallProgressPercent(instance: InstanceItem): number | null {
-  if (typeof instance.installPercent === 'number' && Number.isFinite(instance.installPercent)) {
-    return Math.max(0, Math.min(100, instance.installPercent))
-  }
-  const sources = [instance.lastCommand, instance.lastError]
-  for (const text of sources) {
-    if (!text) {
-      continue
-    }
-    const normalizedMatch = text.match(/安装进度\s*(\d{1,3})\s*%/)
-    if (normalizedMatch) {
-      return Math.max(0, Math.min(100, Number(normalizedMatch[1])))
-    }
-    const bracketMatch = text.match(/\[\s*(\d{1,3})%\]/)
-    if (bracketMatch) {
-      return Math.max(0, Math.min(100, Number(bracketMatch[1])))
-    }
-    const genericMatch = text.match(/(\d{1,3})\s*%/)
-    if (genericMatch) {
-      return Math.max(0, Math.min(100, Number(genericMatch[1])))
-    }
-  }
-  return null
-}
-
-function shouldShowInstallDetail(instance: InstanceItem) {
-  return instance.status === 'pending_install'
-    || instance.status === 'installing'
-    || instance.status === 'error'
-}
-
+/** 渲染安装列：进度条或阶段文案 */
 function renderInstallColumn(instance: InstanceItem) {
   if (instance.status === 'running' || instance.status === 'stopped') {
     return h('span', { class: 'text-sm text-muted-foreground' }, '已安装')
@@ -444,58 +395,12 @@ function renderInstallColumn(instance: InstanceItem) {
   ])
 }
 
-function canOpenInstallLog(instance: InstanceItem) {
-  if (instance.status === 'pending_install' || instance.status === 'installing' || instance.status === 'error') {
-    return true
-  }
-  if (instance.lastError?.trim()) {
-    return true
-  }
-  const command = instance.lastCommand?.trim()
-  if (!command) {
-    return false
-  }
-  if (looksLikeRuntimeCommand(command)) {
-    return false
-  }
-  return command.includes('安装')
-    || command.includes('Steam')
-    || command.includes('steamcmd')
-    || command.includes('脚本')
-}
-
-function getInstallLogSourceLabel(source: InstanceInstallLogSource | undefined) {
-  switch (source) {
-    case 'install_log':
-      return '完整 SteamCMD 输出'
-    case 'status_summary':
-      return '最近状态摘要（非完整日志）'
-    case 'empty':
-      return '暂无日志'
-    default:
-      return '未知'
-  }
-}
-
-function getInstallLogStatusLabel(status: InstanceInstallLogPayload['status'] | undefined) {
-  switch (status) {
-    case 'running':
-      return '安装进行中'
-    case 'success':
-      return '安装成功'
-    case 'failed':
-      return '安装失败'
-    case 'unknown':
-      return '未知'
-    default:
-      return '未知'
-  }
-}
-
+/** 根据节点 ID 解析节点名称 */
 function getNodeName(nodeId: string) {
   return nodes.value.find(node => node.id === nodeId)?.name ?? nodeId
 }
 
+/** 是否已检查且为最新版本 */
 function isInstanceUpToDate(instance: InstanceItem) {
   return Boolean(
     instance.updateCheckedAt
@@ -505,6 +410,7 @@ function isInstanceUpToDate(instance: InstanceItem) {
   )
 }
 
+/** 是否允许点击「更新服务端」 */
 function canUpdateInstance(instance: InstanceItem) {
   if (instance.status !== 'stopped' && instance.status !== 'error') {
     return false
@@ -512,6 +418,7 @@ function canUpdateInstance(instance: InstanceItem) {
   return !isInstanceUpToDate(instance)
 }
 
+/** 「更新服务端」按钮禁用时的 tooltip */
 function getUpdateInstanceButtonTitle(instance: InstanceItem) {
   if (instance.status === 'running') {
     return '请先停止实例'
@@ -636,13 +543,13 @@ function stopInstallLogPolling() {
   }
 }
 
+/** 当前目标实例是否仍需轮询安装日志 */
 function shouldPollInstallLog() {
   if (!installLogTargetId.value) {
     return false
   }
   const row = instances.value.find(item => item.id === installLogTargetId.value)
-  const status = row?.status
-  return status === 'pending_install' || status === 'installing'
+  return isInstanceInstallingStatus(row?.status)
 }
 
 async function fetchInstallLogContent(options?: { silent?: boolean }) {
@@ -656,6 +563,9 @@ async function fetchInstallLogContent(options?: { silent?: boolean }) {
     const res = await apiInstance.getInstanceInstallLog(installLogTargetId.value)
     installLogMeta.value = res.data
     installLogContent.value = res.data.content || '暂无 SteamCMD 安装输出'
+    if (res.data.status === 'success' || res.data.status === 'failed') {
+      void fetchInstances({ silent: true })
+    }
   }
   finally {
     if (!options?.silent) {
@@ -664,6 +574,12 @@ async function fetchInstallLogContent(options?: { silent?: boolean }) {
   }
 }
 
+/** 安装完成后静默刷新列表 */
+function refreshInstancesAfterInstallComplete() {
+  void fetchInstances({ silent: true })
+}
+
+/** 在弹窗打开且实例安装中时启动日志轮询 */
 function startInstallLogPolling() {
   stopInstallLogPolling()
   if (!shouldPollInstallLog()) {
@@ -679,8 +595,9 @@ function startInstallLogPolling() {
     }
     else {
       stopInstallLogPolling()
+      refreshInstancesAfterInstallComplete()
     }
-  }, 3000)
+  }, INSTANCE_INSTALL_LOG_POLL_MS)
 }
 
 async function openInstallLogModal(instance: InstanceItem) {
@@ -694,6 +611,12 @@ async function openInstallLogModal(instance: InstanceItem) {
   startInstallLogPolling()
 }
 
+/** 关闭安装日志弹窗并停止轮询 */
+function closeInstallLogModal() {
+  installLogVisible.value = false
+  stopInstallLogPolling()
+}
+
 function buildUpdateNotifySignature(list: InstanceItem[]) {
   return list
     .filter(item => item.updateAvailable)
@@ -702,28 +625,59 @@ function buildUpdateNotifySignature(list: InstanceItem[]) {
     .join('|')
 }
 
-function notifyInstanceUpdatesIfNeeded() {
-  const pending = instancesWithUpdate.value
+/** 关闭版本更新全局通知 */
+function dismissInstanceUpdateNotification() {
+  instanceUpdateNotificationRef.value?.destroy()
+  instanceUpdateNotificationRef.value = null
+}
+
+/** 同步「有新版本」全局通知（尊重用户手动关闭记录） */
+function syncInstanceUpdateNotification(pending: InstanceItem[]) {
   if (pending.length === 0) {
+    dismissInstanceUpdateNotification()
     return
   }
   const signature = buildUpdateNotifySignature(instances.value)
   if (!signature) {
     return
   }
-  const lastSignature = sessionStorage.getItem(UPDATE_NOTIFY_STORAGE_KEY)
-  if (lastSignature === signature) {
+  if (sessionStorage.getItem(UPDATE_NOTIFY_DISMISSED_KEY) === signature) {
     return
   }
-  sessionStorage.setItem(UPDATE_NOTIFY_STORAGE_KEY, signature)
   const names = pending.map(item => item.name).join('、')
-  faToast.warning(`检测到游戏服务端新版本：${names}。请先停止实例，再使用「更新服务端」。`, {
-    duration: 8000,
+  dismissInstanceUpdateNotification()
+  instanceUpdateNotificationRef.value = notification.warning({
+    title: '发现游戏服务端新版本',
+    content: `${names} 在 Steam 上有新版本。请先停止实例，使用「更新服务端」拉取最新文件后再启动。`,
+    duration: 0,
+    closable: true,
+    onClose: () => {
+      sessionStorage.setItem(UPDATE_NOTIFY_DISMISSED_KEY, signature)
+      instanceUpdateNotificationRef.value = null
+    },
   })
 }
 
-async function fetchInstances() {
-  instanceLoading.value = true
+watch(
+  instancesWithUpdate,
+  pending => syncInstanceUpdateNotification(pending),
+  { deep: true, immediate: true },
+)
+
+watch(
+  () => installLogMeta.value?.status,
+  (status, previous) => {
+    if (previous === 'running' && (status === 'success' || status === 'failed')) {
+      refreshInstancesAfterInstallComplete()
+    }
+  },
+)
+
+/** 按当前筛选条件拉取实例列表 */
+async function fetchInstances(options?: { silent?: boolean }) {
+  if (!options?.silent) {
+    instanceLoading.value = true
+  }
   try {
     const res = await apiInstance.getInstanceList({
       nodeId: selectedNodeId.value !== 'all' ? selectedNodeId.value : undefined,
@@ -731,11 +685,17 @@ async function fetchInstances() {
       keyword: keywordFilter.value.trim() || undefined,
     })
     instances.value = res.data
-    notifyInstanceUpdatesIfNeeded()
   }
   finally {
-    instanceLoading.value = false
+    if (!options?.silent) {
+      instanceLoading.value = false
+    }
   }
+}
+
+/** 关键词搜索：触发列表刷新 */
+async function searchInstances() {
+  await fetchInstances()
 }
 
 async function checkAllInstanceUpdates() {
@@ -744,26 +704,19 @@ async function checkAllInstanceUpdates() {
     return
   }
   updateCheckLoading.value = true
-  faToast.info('正在检查游戏版本，约需数秒；期间可继续查询列表或操作其他实例', {
+  faToast.info('正在检查游戏版本，约需数秒…', {
     duration: 5000,
   })
   try {
     const res = await apiInstance.checkInstanceUpdates()
     await fetchInstances()
-    if (res.data.updateAvailableCount > 0) {
-      faToast.warning(`发现 ${res.data.updateAvailableCount} 个实例有可用更新`)
-    }
-    else {
+    if (res.data.updateAvailableCount === 0) {
       faToast.success('已检查全部实例，当前均为最新版本')
     }
   }
   finally {
     updateCheckLoading.value = false
   }
-}
-
-async function handleFilterChange() {
-  await fetchInstances()
 }
 
 async function refreshInstancesAndResetKeyword() {
@@ -841,26 +794,37 @@ async function runInstanceAction(
   }
 }
 
+/** 操作按钮是否处于 loading（格式 action:instanceId） */
 function isActionLoading(instanceId: string, action: 'start' | 'stop' | 'restart' | 'delete' | 'update') {
   return actionLoadingId.value === `${action}:${instanceId}`
 }
 
 onMounted(async () => {
+  sessionStorage.removeItem(UPDATE_NOTIFY_STORAGE_KEY_LEGACY)
   await Promise.all([
     fetchInstallableGames(),
     fetchInstances(),
   ])
 })
 
+let hadInstallingInstance = false
 const instancePollingTimer = setInterval(() => {
-  if (instances.value.some(item => item.status === 'pending_install' || item.status === 'installing')) {
-    void fetchInstances()
+  const hasInstalling = instances.value.some(item => isInstanceInstallingStatus(item.status))
+  if (hasInstalling) {
+    hadInstallingInstance = true
+    void fetchInstances({ silent: true })
+    return
   }
-}, 4000)
+  if (hadInstallingInstance) {
+    hadInstallingInstance = false
+    refreshInstancesAfterInstallComplete()
+  }
+}, INSTANCE_INSTALL_POLL_MS)
 
 onBeforeUnmount(() => {
   clearInterval(instancePollingTimer)
   stopInstallLogPolling()
+  dismissInstanceUpdateNotification()
 })
 </script>
 
@@ -868,104 +832,89 @@ onBeforeUnmount(() => {
   <FaPageMain title="实例管理">
     <section class="p-4 border border-border rounded-xl bg-card space-y-4">
       <div class="gap-3 grid md:grid-cols-4">
-        <div class="p-3 rounded-md bg-muted/40">
+        <div
+          v-for="card in STAT_CARDS"
+          :key="card.key"
+          class="p-3 rounded-md bg-muted/40"
+        >
           <p class="text-xs text-muted-foreground">
-            实例总数
+            {{ card.label }}
           </p>
-          <p class="text-lg font-semibold mt-1">
-            {{ statusCount.total }}
-          </p>
-        </div>
-        <div class="p-3 rounded-md bg-muted/40">
-          <p class="text-xs text-muted-foreground">
-            运行中
-          </p>
-          <p class="text-lg text-emerald-600 font-semibold mt-1 dark:text-emerald-400">
-            {{ statusCount.running }}
-          </p>
-        </div>
-        <div class="p-3 rounded-md bg-muted/40">
-          <p class="text-xs text-muted-foreground">
-            已停止
-          </p>
-          <p class="text-lg text-slate-600 font-semibold mt-1 dark:text-slate-300">
-            {{ statusCount.stopped }}
-          </p>
-        </div>
-        <div class="p-3 rounded-md bg-muted/40">
-          <p class="text-xs text-muted-foreground">
-            异常
-          </p>
-          <p class="text-lg text-red-600 font-semibold mt-1 dark:text-red-400">
-            {{ statusCount.error }}
+          <p class="mt-1" :class="card.valueClass">
+            {{ statusCount[card.key] }}
           </p>
         </div>
       </div>
 
-      <NAlert
-        v-if="instancesWithUpdate.length > 0"
-        type="warning"
-        title="发现游戏服务端新版本"
-      >
-        <p class="text-sm leading-relaxed">
-          {{ instancesWithUpdate.map(item => item.name).join('、') }} 在 Steam 上有新版本。请先停止实例，使用「更新服务端」拉取最新文件后再启动。
-        </p>
-      </NAlert>
-
       <div class="gap-3 grid">
-        <div class="flex flex-wrap gap-2 items-center">
+        <div class="flex gap-2 items-center">
           <NInput
             v-model:value="keywordFilter"
             class="w-64"
             placeholder="实例名称/Steam AppID"
-            @keydown.enter="fetchInstances"
+            @keydown.enter="searchInstances"
           />
-          <NButton type="primary" strong secondary @click="fetchInstances">
+          <NButton type="primary" strong secondary @click="searchInstances">
             查询
-          </NButton>
-          <NButton :loading="updateCheckLoading" :disabled="!steamcmdInstalled" @click="checkAllInstanceUpdates">
-            检查更新
           </NButton>
           <NButton @click="refreshInstancesAndResetKeyword">
             重置
           </NButton>
         </div>
-        <div class="filter-toolbar">
-          <div class="filter-field">
-            <label class="text-sm text-muted-foreground">节点：</label>
-            <NSelect
-              v-model:value="selectedNodeId"
-              :options="nodeOptions"
-              class="filter-select"
-              @update:value="handleFilterChange"
-            />
+        <div class="flex flex-col gap-3 md:flex-row md:flex-nowrap md:items-center">
+          <div class="flex gap-3 min-w-0 md:flex-initial md:shrink">
+            <div class="flex flex-1 gap-2 items-center min-w-0 md:flex-none md:w-auto">
+              <label class="text-sm text-muted-foreground shrink-0">节点：</label>
+              <NSelect
+                v-model:value="selectedNodeId"
+                :options="nodeOptions"
+                class="flex-1 min-w-0 md:flex-none md:w-44"
+                @update:value="fetchInstances"
+              />
+            </div>
+            <div class="flex flex-1 gap-2 items-center min-w-0 md:flex-none md:w-auto">
+              <label class="text-sm text-muted-foreground shrink-0">状态：</label>
+              <NSelect
+                v-model:value="statusFilter"
+                :options="statusFilterOptions"
+                class="flex-1 min-w-0 md:flex-none md:w-44"
+                @update:value="fetchInstances"
+              />
+            </div>
           </div>
-          <div class="filter-field">
-            <label class="text-sm text-muted-foreground">状态：</label>
-            <NSelect
-              v-model:value="statusFilter"
-              :options="statusFilterOptions"
-              class="filter-select"
-              @update:value="handleFilterChange"
-            />
+          <div class="flex gap-2 w-full md:ml-auto md:shrink-0 md:w-auto">
+            <NButton
+              class="flex-1 min-w-0 md:flex-none"
+              type="warning"
+              strong
+              secondary
+              :loading="updateCheckLoading"
+              :disabled="!steamcmdInstalled"
+              @click="checkAllInstanceUpdates"
+            >
+              <template #icon>
+                <FaIcon name="i-ri:refresh-line" />
+              </template>
+              检查更新
+            </NButton>
+            <NButton class="flex-1 min-w-0 md:flex-none" type="primary" @click="openCreateModal">
+              <template #icon>
+                <FaIcon name="i-ri:add-line" />
+              </template>
+              创建实例
+            </NButton>
           </div>
-          <NButton type="primary" class="create-instance-btn" @click="openCreateModal">
-            <template #icon>
-              <FaIcon name="i-ri:add-line" />
-            </template>
-            创建实例
-          </NButton>
         </div>
       </div>
 
-      <div class="instance-table-shell">
+      <div class="min-h-80 overflow-x-auto">
         <NDataTable
           :bordered="false"
           :single-line="false"
           size="small"
           :scroll-x="INSTANCE_TABLE_SCROLL_X"
           :columns="instanceColumns"
-          :data="filteredInstances"
+          :data="instances"
           :row-key="getInstanceRowKey"
           :loading="instanceLoading"
           class="w-full"
@@ -1040,11 +989,8 @@ onBeforeUnmount(() => {
             <span class="ml-4">状态：{{ getInstallLogStatusLabel(installLogMeta?.status) }}</span>
             <span class="ml-4">更新时间：{{ formatDateTime(installLogMeta?.updatedAt || null) }}</span>
           </p>
-          <p v-if="installLogMeta?.source === 'status_summary'" class="text-amber-600 dark:text-amber-400">
-            以下为最近状态摘要，不是完整 SteamCMD 输出；安装进行中请保持弹窗打开以自动刷新。
-          </p>
-          <p v-else-if="shouldPollInstallLog()" class="text-sky-600 dark:text-sky-400">
-            安装进行中，每 3 秒自动刷新日志。
+          <p v-if="installLogHint" :class="installLogHint.class">
+            {{ installLogHint.text }}
           </p>
         </div>
         <NSpin :show="installLogLoading">
@@ -1056,7 +1002,7 @@ onBeforeUnmount(() => {
           <NButton :loading="installLogLoading" @click="fetchInstallLogContent()">
             刷新
           </NButton>
-          <NButton @click="installLogVisible = false">
+          <NButton @click="closeInstallLogModal">
             关闭
           </NButton>
         </NSpace>
@@ -1065,53 +1011,3 @@ onBeforeUnmount(() => {
   </FaPageMain>
 </template>
 
-<style scoped>
-.instance-table-shell {
-  min-height: 20rem;
-  overflow-x: auto;
-}
-
-.filter-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.filter-field {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  width: 100%;
-}
-
-.filter-select {
-  flex: 1;
-  min-width: 0;
-}
-
-.create-instance-btn {
-  width: 100%;
-}
-
-@media (width >= 768px) {
-  .filter-toolbar {
-    display: flex;
-    flex-flow: row wrap;
-    align-items: center;
-  }
-
-  .filter-field {
-    width: auto;
-  }
-
-  .filter-select {
-    flex: none;
-    width: 13rem;
-  }
-
-  .create-instance-btn {
-    width: auto;
-    margin-left: auto;
-  }
-}
-</style>

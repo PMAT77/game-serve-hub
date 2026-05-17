@@ -28,8 +28,10 @@ import {
 import { instanceRuntimeRegistry } from '../../shared/instance-runtime/registry'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 import type { InstanceCheckUpdatesResponse } from './update-check'
+import { readLocalBuildId } from '../../shared/steam-update/build-id'
 import {
   checkInstancesForUpdates,
+  needsRemoteUpdatePrecheck,
   refreshInstanceUpdateStatus,
   refreshInstanceUpdateStatusAfterInstall,
   refreshStaleInstanceUpdateChecks,
@@ -573,7 +575,7 @@ async function installInstanceFilesInBackground(
         lastError: startScriptResult.ok ? null : startScriptResult.message ?? null,
         installPercent: 100,
       })
-      void refreshInstanceUpdateStatusAfterInstall(
+      await refreshInstanceUpdateStatusAfterInstall(
         input.instanceId,
         input.installPath,
         input.appId,
@@ -628,7 +630,7 @@ async function installInstanceFilesInBackground(
         lastError: startScriptResult.ok ? null : startScriptResult.message ?? null,
         installPercent: 100,
       })
-      void refreshInstanceUpdateStatusAfterInstall(
+      await refreshInstanceUpdateStatusAfterInstall(
         input.instanceId,
         input.installPath,
         input.appId,
@@ -1349,19 +1351,33 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (!checkSteamcmdInstalled(steamcmdCommand)) {
       return businessError('SteamCMD 未安装或路径不可用，请先完成 SteamCMD 安装配置', request)
     }
-    const checked = await refreshInstanceUpdateStatus(current, {
-      steamcmdCommand,
-      forceRemote: true,
-    })
+    const localBuildId = readLocalBuildId(installPath, current.gameCode)
     if (
-      checked.localBuildId
-      && checked.remoteBuildId
-      && !checked.updateAvailable
+      !current.updateAvailable
+      && localBuildId
+      && current.remoteBuildId
+      && localBuildId === current.remoteBuildId
     ) {
       return businessError(
-        `当前已是最新版本（Build ${checked.localBuildId}），无需更新`,
+        `当前已是最新版本（Build ${localBuildId}），无需更新`,
         request,
       )
+    }
+    if (needsRemoteUpdatePrecheck(current, localBuildId)) {
+      const checked = await refreshInstanceUpdateStatus(current, {
+        steamcmdCommand,
+        forceRemote: true,
+      })
+      if (
+        checked.localBuildId
+        && checked.remoteBuildId
+        && !checked.updateAvailable
+      ) {
+        return businessError(
+          `当前已是最新版本（Build ${checked.localBuildId}），无需更新`,
+          request,
+        )
+      }
     }
     const started = startInstanceInstallJob(app, {
       instanceId: id,

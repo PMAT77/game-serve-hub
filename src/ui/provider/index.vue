@@ -77,7 +77,7 @@ watch([
   <NConfigProvider :locale="zhCN" :date-locale="dateZhCN" :theme="appSettingsStore.currentColorScheme === 'dark' ? darkTheme : undefined" :theme-overrides="themeOverrides" class="h-full">
     <NLoadingBarProvider>
       <NDialogProvider>
-        <NNotificationProvider>
+        <NNotificationProvider placement="top-right">
           <NMessageProvider>
             <NModalProvider>
               <slot />

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { ServerConfig } from './shared/config'
 import Fastify from 'fastify'
 import { registerAuthModule } from './modules/auth'
+import { registerConsoleModule } from './modules/console'
 import { registerInstanceModule } from './modules/instance'
 import { registerNodeModule } from './modules/node'
 import { registerSystemModule } from './modules/system'
@@ -74,6 +75,7 @@ export function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLevel'>)
   registerSystemModule(app)
   registerNodeModule(app)
   registerInstanceModule(app)
+  registerConsoleModule(app)
 
   return app
 }

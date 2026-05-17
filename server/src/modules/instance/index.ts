@@ -18,6 +18,7 @@ import {
   listGameInstances,
   updateGameInstanceRuntime,
 } from '../../shared/db/index'
+import { instanceRuntimeRegistry } from '../../shared/instance-runtime/registry'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 
 interface InstanceListQuery {
@@ -83,7 +84,6 @@ const INSTALLABLE_GAMES: InstallableGameItem[] = [
   },
 ]
 
-const runtimeProcessMap = new Map<string, ChildProcess>()
 const stoppingInstanceIds = new Set<string>()
 const instanceInstallLogMap = new Map<string, InstanceInstallLogSnapshot>()
 
@@ -915,6 +915,51 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+function isInstanceProcessAlive(instanceId: string, runtimePid: number | null | undefined): boolean {
+  const registryProcess = instanceRuntimeRegistry.getProcess(instanceId)
+  if (registryProcess && !registryProcess.killed && registryProcess.pid && isPidAlive(registryProcess.pid)) {
+    return true
+  }
+  if (runtimePid && isPidAlive(runtimePid)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * 服务重启后内存注册表会清空，但 DB 可能仍保留 running。
+ * 将已无对应进程的实例同步为 stopped，避免 UI 误显示「运行中」。
+ */
+async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<number> {
+  const instances = await listGameInstances({ status: 'running' })
+  let reconciled = 0
+  for (const instance of instances) {
+    if (instance.nodeId !== LOCAL_NODE_ID) {
+      continue
+    }
+    if (isInstanceProcessAlive(instance.id, instance.runtimePid)) {
+      const registryProcess = instanceRuntimeRegistry.getProcess(instance.id)
+      if (!registryProcess && instance.runtimePid) {
+        app.log.warn({
+          instanceId: instance.id,
+          pid: instance.runtimePid,
+        }, '实例进程仍在运行，但控制台未附着（可能因服务重启），请重启实例以恢复控制台')
+      }
+      continue
+    }
+    instanceRuntimeRegistry.deleteProcess(instance.id)
+    stoppingInstanceIds.delete(instance.id)
+    await updateGameInstanceRuntime(instance.id, {
+      status: 'stopped',
+      containerId: null,
+      runtimePid: null,
+    })
+    reconciled++
+    app.log.info({ instanceId: instance.id }, '实例进程不存在，已同步状态为已停止')
+  }
+  return reconciled
+}
+
 function killProcessTree(pid: number) {
   if (!Number.isInteger(pid) || pid <= 0) {
     return
@@ -972,7 +1017,7 @@ async function stopInstanceRuntime(input: {
 }): Promise<void> {
   const { instanceId, runtimePid, runningProcess } = input
   if (!isPidAlive(runtimePid)) {
-    runtimeProcessMap.delete(instanceId)
+    instanceRuntimeRegistry.deleteProcess(instanceId)
     await updateGameInstanceRuntime(instanceId, {
       status: 'stopped',
       containerId: null,
@@ -984,7 +1029,7 @@ async function stopInstanceRuntime(input: {
   killProcessTree(runtimePid)
   if (runningProcess) {
     await waitForProcessExit(runningProcess, 3000, runtimePid)
-    runtimeProcessMap.delete(instanceId)
+    instanceRuntimeRegistry.deleteProcess(instanceId)
   }
   if (!isPidAlive(runtimePid)) {
     stoppingInstanceIds.delete(instanceId)
@@ -998,6 +1043,7 @@ async function stopInstanceRuntime(input: {
 }
 
 async function handleListInstances(
+  app: FastifyInstance,
   request: FastifyRequest,
   payload: InstanceListQuery,
 ): Promise<ApiSuccessResponse<Awaited<ReturnType<typeof listGameInstances>>> | ApiErrorResponse> {
@@ -1005,6 +1051,7 @@ async function handleListInstances(
   if (authError) {
     return authError
   }
+  await reconcileStaleRunningInstances(app)
   const status = payload.status
   return success(await listGameInstances({
     nodeId: payload.nodeId?.trim() || undefined,
@@ -1020,7 +1067,7 @@ async function handleListInstances(
  * 负责游戏实例生命周期管理（创建、启动、停止、重启、删除）。
  */
 export function registerInstanceModule(app: FastifyInstance) {
-  app.post('/app/instance/list', async request => handleListInstances(request, (request.body ?? {}) as InstanceListQuery))
+  app.post('/app/instance/list', async request => handleListInstances(app, request, (request.body ?? {}) as InstanceListQuery))
 
   app.get('/app/instance/games', async (request): Promise<ApiSuccessResponse<InstallableGameItem[]> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
@@ -1273,12 +1320,22 @@ export function registerInstanceModule(app: FastifyInstance) {
       })
       return businessError(errorMessage, request)
     }
-    const runningProcess = runtimeProcessMap.get(id)
-    if (runningProcess && !runningProcess.killed && runningProcess.pid && isPidAlive(runningProcess.pid)) {
-      return success({ isSuccess: true }, request)
+    const runningProcess = instanceRuntimeRegistry.getProcess(id)
+    if (isInstanceProcessAlive(id, current.runtimePid)) {
+      if (runningProcess && !runningProcess.killed && runningProcess.pid && isPidAlive(runningProcess.pid)) {
+        return success({ isSuccess: true }, request)
+      }
+      return businessError('实例进程仍在运行，但面板未附着控制台，请先停止或重启实例', request)
     }
     if (runningProcess) {
-      runtimeProcessMap.delete(id)
+      instanceRuntimeRegistry.deleteProcess(id)
+    }
+    if (current.status === 'running') {
+      await updateGameInstanceRuntime(id, {
+        status: 'stopped',
+        containerId: null,
+        runtimePid: null,
+      })
     }
     const displayCommand = launch.display
     app.log.info({
@@ -1290,27 +1347,12 @@ export function registerInstanceModule(app: FastifyInstance) {
     const child = spawn(launch.command, launch.args, {
       cwd: launch.cwd,
       windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     })
-    runtimeProcessMap.set(id, child)
+    instanceRuntimeRegistry.setProcess(id, child)
     stoppingInstanceIds.delete(id)
-    const stderrChunks: string[] = []
-    child.stderr?.on('data', (chunk) => {
-      const text = chunk.toString().trim()
-      if (!text) {
-        return
-      }
-      stderrChunks.push(text)
-      if (stderrChunks.length > 20) {
-        stderrChunks.shift()
-      }
-      app.log.warn({
-        instanceId: id,
-        stderr: text,
-      }, '实例进程 stderr')
-    })
     child.on('error', (error) => {
-      runtimeProcessMap.delete(id)
+      instanceRuntimeRegistry.deleteProcess(id)
       app.log.error({
         instanceId: id,
         command: displayCommand,
@@ -1325,9 +1367,14 @@ export function registerInstanceModule(app: FastifyInstance) {
       })
     })
     child.on('close', (code, signal) => {
-      runtimeProcessMap.delete(id)
+      const stderrText = instanceRuntimeRegistry.listLogs(id)
+        .filter(line => line.stream === 'stderr')
+        .slice(-20)
+        .map(line => line.text)
+        .join('\n')
+        .trim()
+      instanceRuntimeRegistry.deleteProcess(id)
       const wasStopping = stoppingInstanceIds.delete(id)
-      const stderrText = stderrChunks.join('\n').trim()
       const finalError = wasStopping
         ? null
         : stderrText || (code === 0 ? null : `实例异常退出，信号=${signal ?? 'none'}，退出码=${code ?? 'null'}（若曾出现系统安全弹窗，请确认已允许运行）`)
@@ -1379,7 +1426,7 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (current.status === 'stopped') {
       return success({ isSuccess: true }, request)
     }
-    const runningProcess = runtimeProcessMap.get(id)
+    const runningProcess = instanceRuntimeRegistry.getProcess(id)
     const runtimePid = runningProcess?.pid ?? current.runtimePid
     if (!runtimePid) {
       await updateGameInstanceRuntime(id, {
@@ -1436,7 +1483,7 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (current.nodeId !== LOCAL_NODE_ID) {
       return businessError('当前仅支持本地节点执行实例命令', request)
     }
-    const runningProcess = runtimeProcessMap.get(id)
+    const runningProcess = instanceRuntimeRegistry.getProcess(id)
     const runtimePid = runningProcess?.pid ?? current.runtimePid
     if (runtimePid) {
       stoppingInstanceIds.add(id)
@@ -1495,7 +1542,7 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (current.nodeId !== LOCAL_NODE_ID) {
       return businessError('当前仅支持本地节点执行实例命令', request)
     }
-    const runningProcess = runtimeProcessMap.get(id)
+    const runningProcess = instanceRuntimeRegistry.getProcess(id)
     const runtimePid = runningProcess?.pid ?? current.runtimePid
     if (runtimePid && isPidAlive(runtimePid)) {
       stoppingInstanceIds.add(id)
@@ -1517,7 +1564,7 @@ export function registerInstanceModule(app: FastifyInstance) {
       }
     }
     else if (current.status === 'running') {
-      runtimeProcessMap.delete(id)
+      instanceRuntimeRegistry.deleteProcess(id)
       stoppingInstanceIds.delete(id)
       await updateGameInstanceRuntime(id, {
         status: 'stopped',
@@ -1526,7 +1573,7 @@ export function registerInstanceModule(app: FastifyInstance) {
         lastError: null,
       })
     }
-    runtimeProcessMap.delete(id)
+    instanceRuntimeRegistry.deleteProcess(id)
     instanceInstallLogMap.delete(id)
     stoppingInstanceIds.delete(id)
     const installPath = normalizeInstallPath(current.installPath ?? undefined)
@@ -1554,5 +1601,12 @@ export function registerInstanceModule(app: FastifyInstance) {
       return businessError('实例不存在', request)
     }
     return success({ isSuccess: true }, request)
+  })
+
+  app.addHook('onReady', async () => {
+    const reconciled = await reconcileStaleRunningInstances(app)
+    if (reconciled > 0) {
+      app.log.info({ reconciled }, '已校正因服务重启而残留的实例运行状态')
+    }
   })
 }

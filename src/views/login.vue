@@ -61,8 +61,7 @@ function handleLogin() {
   </div>
   <div class="login-box" :class="layoutAlign">
     <div class="login-banner">
-      <img src="@/assets/images/logo.svg" class="rounded h-8 inset-s-4 inset-t-4 absolute">
-      <img src="@/assets/images/login-banner.png" class="banner">
+      <AppHello :compact="layoutAlign === 'center'" />
       <AppCopyright v-if="appSettingsStore.mode === 'pc' && ['left', 'right'].includes(layoutAlign)" class="w-full bottom-0 absolute" />
     </div>
     <div class="login-form flex-col-center">

@@ -52,6 +52,20 @@ export interface InstanceInstallLogPayload {
   source: InstanceInstallLogSource
 }
 
+export type InstanceConsoleLogStream = 'stdout' | 'stderr' | 'system'
+
+export interface InstanceConsoleLogLine {
+  id: number
+  stream: InstanceConsoleLogStream
+  text: string
+  at: string
+}
+
+export interface InstanceConsoleLogsPayload {
+  lines: InstanceConsoleLogLine[]
+  running: boolean
+}
+
 export default {
   getInstanceList: (data?: InstanceListQuery) => api.post('app/instance/list', data),
   getInstallableGames: () => api.get('app/instance/games') as Promise<{ data: InstallableGameItem[] }>,
@@ -63,4 +77,20 @@ export default {
   stopInstance: (id: string) => api.post('app/instance/stop', { id }),
   restartInstance: (id: string) => api.post('app/instance/restart', { id }),
   deleteInstance: (id: string) => api.post('app/instance/delete', { id }),
+  getInstanceConsoleLogs: (instanceId: string, afterId = 0) => api.get('app/instance/console/logs', {
+    params: { instanceId, afterId },
+  }) as Promise<{ data: InstanceConsoleLogsPayload }>,
+  clearInstanceConsoleLogs: (instanceId: string) => api.post('app/instance/console/logs/clear', { instanceId }),
+  sendInstanceConsoleCommand: (instanceId: string, command: string) => api.post('app/instance/console/command', {
+    instanceId,
+    command,
+  }),
+  buildInstanceConsoleStreamUrl(instanceId: string, token: string) {
+    const prefix = (import.meta.env.DEV && import.meta.env.VITE_ENABLE_PROXY)
+      ? '/proxy/'
+      : import.meta.env.VITE_APP_API_BASEURL
+    const base = prefix.endsWith('/') ? prefix : `${prefix}/`
+    const params = new URLSearchParams({ instanceId, token })
+    return `${base}app/instance/console/stream?${params.toString()}`
+  },
 }

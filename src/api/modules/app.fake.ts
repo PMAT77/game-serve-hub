@@ -56,6 +56,18 @@ const routeList = [
               auth: 'pages.node.instance:manage',
             },
           },
+          {
+            path: 'instance/console/:instanceId',
+            name: 'nodeInstanceConsole',
+            component: 'node/instance/console.vue',
+            meta: {
+              title: '实例控制台',
+              icon: 'ri:terminal-line',
+              auth: 'pages.node.instance:manage',
+              activeMenu: '/node/instance',
+              menu: false,
+            },
+          },
         ],
       },
     ],

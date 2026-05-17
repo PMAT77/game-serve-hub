@@ -4,11 +4,11 @@ import { randomUUID } from 'node:crypto'
 import { createSession, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
 import { ErrorCode } from '../../../../shared/constants/error-code'
 import { businessError, success, unauthorized } from '../../shared/http/response'
+import type { RouteMetaRaw } from '../../../../packages/types/types'
 
-interface RouteMeta {
+/** 与前端 `vue-router` RouteMeta（RouteMetaRaw）对齐，避免后端菜单字段遗漏 */
+type RouteMeta = RouteMetaRaw & {
   title: string
-  icon?: string
-  auth?: string | string[]
 }
 
 interface RouteItem {
@@ -102,6 +102,18 @@ const routeList: RouteItem[] = [
               title: '实例管理',
               icon: 'ri:stack-line',
               auth: NODE_INSTANCE_MANAGE_PERMISSION,
+            },
+          },
+          {
+            path: 'instance/console/:instanceId',
+            name: 'nodeInstanceConsole',
+            component: 'node/instance/console.vue',
+            meta: {
+              title: '实例控制台',
+              icon: 'ri:terminal-line',
+              auth: NODE_INSTANCE_MANAGE_PERMISSION,
+              activeMenu: '/node/instance',
+              menu: false,
             },
           },
         ],

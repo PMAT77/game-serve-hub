@@ -23,6 +23,7 @@ interface Props {
 const { nodes, steamcmdInstalled, steamcmdConfigured } = toRefs(props)
 
 const dialog = useDialog()
+const router = useRouter()
 
 const instanceLoading = ref(false)
 const createLoading = ref(false)
@@ -194,10 +195,23 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '操作',
       key: 'actions',
-      width: 220,
+      width: 280,
       fixed: 'right',
       render: row =>
         h('div', { class: 'flex flex-wrap gap-4' }, [
+          h(
+            NButton,
+            {
+              size: 'small',
+              text: true,
+              disabled: row.status === 'pending_install' || row.status === 'installing',
+              onClick: () => router.push({
+                name: 'nodeInstanceConsole',
+                params: { instanceId: row.id },
+              }),
+            },
+            { default: () => '控制台' },
+          ),
           h(
             NButton,
             {

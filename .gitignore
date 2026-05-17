@@ -6,3 +6,4 @@ data/
 *.sqlite*
 .env*.local
 .agents
+.cursor/

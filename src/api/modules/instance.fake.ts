@@ -193,4 +193,52 @@ export default defineFakeRoute([
       }
     },
   },
+  {
+    url: '/fake/app/instance/console/logs',
+    method: 'get',
+    response: ({ query }) => {
+      const instanceId = typeof query.instanceId === 'string' ? query.instanceId : ''
+      const target = instanceList.find(item => item.id === instanceId)
+      return {
+        error: '',
+        status: 1,
+        data: {
+          lines: target
+            ? [{
+                id: 1,
+                stream: 'system',
+                text: `[fake] 实例「${target.name}」控制台已连接`,
+                at: nowIso(),
+              }]
+            : [],
+          running: target?.status === 'running',
+        },
+      }
+    },
+  },
+  {
+    url: '/fake/app/instance/console/logs/clear',
+    method: 'post',
+    response: () => ({
+      error: '',
+      status: 1,
+      data: { isSuccess: true },
+    }),
+  },
+  {
+    url: '/fake/app/instance/console/command',
+    method: 'post',
+    response: ({ body }) => {
+      const instanceId = body.instanceId as string
+      const command = String(body.command ?? '').trim()
+      const target = instanceList.find(item => item.id === instanceId)
+      return {
+        error: '',
+        status: 1,
+        data: {
+          isSuccess: Boolean(target && command),
+        },
+      }
+    },
+  },
 ])

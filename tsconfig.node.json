@@ -23,6 +23,7 @@
     "package.json",
     "vite.config.ts",
     "uno.config.ts",
-    "vite/**/*.ts"
+    "vite/**/*.ts",
+    "server/src/**/*.ts"
   ]
 }

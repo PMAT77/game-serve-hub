@@ -13,6 +13,7 @@ import {
   transformerVariantGroup,
 } from 'unocss'
 import { presetAnimations } from 'unocss-preset-animations'
+import { appHelloShortcuts } from './src/components/AppHello/uno'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 
@@ -44,6 +45,7 @@ export default defineConfig({
       }
       return cls.join(' ')
     }],
+    ...appHelloShortcuts,
   ],
   presets: [
     presetWind4(),

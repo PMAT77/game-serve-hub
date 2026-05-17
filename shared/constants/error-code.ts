@@ -1,0 +1,10 @@
+export const ErrorCode = {
+  OK: 'OK',
+  INVALID_PARAMS: 'COMMON_INVALID_PARAMS',
+  BUSINESS_RULE_VIOLATION: 'COMMON_BUSINESS_RULE_VIOLATION',
+  UNAUTHORIZED: 'AUTH_UNAUTHORIZED',
+  NOT_FOUND: 'COMMON_NOT_FOUND',
+  INTERNAL_ERROR: 'COMMON_INTERNAL_ERROR',
+} as const
+
+export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

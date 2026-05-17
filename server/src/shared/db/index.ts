@@ -1,0 +1,895 @@
+import { Buffer } from 'node:buffer'
+import { randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import process from 'node:process'
+import { DatabaseSync } from 'node:sqlite'
+import { and, asc, eq, isNull } from 'drizzle-orm'
+import { readMigrationFiles } from 'drizzle-orm/migrator'
+import { drizzle } from 'drizzle-orm/sqlite-proxy'
+import { migrate } from 'drizzle-orm/sqlite-proxy/migrator'
+import { authSessions, gameInstances, serverNodes, systemSettings, userPermissions, users } from './schema/index'
+
+interface DbUserRow {
+  id: string
+  account: string
+  password_hash: string
+  email: string
+  avatar: string
+  status: number
+  updated_at: string
+}
+
+interface DbDefaultUserSeed {
+  account: string
+  password: string
+  email: string
+  avatar: string
+  permissions: string[]
+}
+
+export interface DbSystemNetworkConfig {
+  mode: 'bootstrap_pending' | 'managed'
+  httpPort: number
+  domain: string
+  tls: {
+    enabled: boolean
+    provider: 'none' | 'letsencrypt' | 'custom'
+  }
+}
+
+export interface DbSystemPanelSettings {
+  panelPort: number
+  theme: 'light' | 'dark' | 'system'
+  autoUpdate: boolean
+}
+
+export interface DbSystemSteamcmdConfig {
+  steamcmdPath: string
+  installRoot: string
+}
+
+export interface DbServerNode {
+  id: string
+  name: string
+  host: string
+  sshPort: number
+  status: 'online' | 'offline'
+  cpuUsage: number
+  memoryUsage: number
+  diskUsage: number
+  lastHeartbeatAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SaveServerNodeInput {
+  id: string
+  name: string
+  host: string
+  sshPort?: number
+  status?: 'online' | 'offline'
+  cpuUsage?: number
+  memoryUsage?: number
+  diskUsage?: number
+  lastHeartbeatAt?: string | null
+}
+
+export type DbGameInstanceStatus = 'pending_install' | 'running' | 'stopped' | 'installing' | 'error'
+
+export interface DbGameInstance {
+  id: string
+  nodeId: string
+  name: string
+  gameCode: string
+  status: DbGameInstanceStatus
+  containerId: string | null
+  runtimePid: number | null
+  installPath: string | null
+  configPath: string | null
+  queryPort: number | null
+  gamePort: number | null
+  rconPort: number | null
+  lastCommand: string | null
+  lastExitCode: number | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateGameInstanceInput {
+  id?: string
+  nodeId: string
+  name: string
+  gameCode: string
+  status?: DbGameInstanceStatus
+  containerId?: string | null
+  runtimePid?: number | null
+  installPath?: string | null
+  configPath?: string | null
+  queryPort?: number | null
+  gamePort?: number | null
+  rconPort?: number | null
+  lastCommand?: string | null
+  lastExitCode?: number | null
+  lastError?: string | null
+}
+
+export interface UpdateGameInstanceRuntimeInput {
+  status?: DbGameInstanceStatus
+  containerId?: string | null
+  runtimePid?: number | null
+  lastCommand?: string | null
+  lastExitCode?: number | null
+  lastError?: string | null
+}
+
+const defaultUserSeeds: DbDefaultUserSeed[] = [
+  {
+    account: 'superman',
+    password: '123456',
+    email: 'superman@game.com',
+    avatar: 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=superman',
+    permissions: [
+      'pages.general:browse',
+      'pages.form:browse',
+      'pages.list:browse',
+      'pages.shop:browse',
+      'pages.node.instance:manage',
+    ],
+  },
+  {
+    account: 'test',
+    password: '123456',
+    email: 'test@game.com',
+    avatar: 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=test',
+    permissions: ['pages.general:browse'],
+  },
+]
+
+let sqliteDb: DatabaseSync | undefined
+let drizzleDb: ReturnType<typeof drizzle> | undefined
+
+function nowIso() {
+  return new Date().toISOString()
+}
+
+function hashPassword(password: string, salt = randomUUID()) {
+  const derivedKey = scryptSync(password, salt, 64).toString('hex')
+  return `${salt}:${derivedKey}`
+}
+
+export function verifyPassword(password: string, storedHash: string) {
+  const [salt, hashed] = storedHash.split(':')
+  if (!salt || !hashed) {
+    return false
+  }
+  const passwordBuffer = scryptSync(password, salt, 64)
+  const hashBuffer = Buffer.from(hashed, 'hex')
+  if (passwordBuffer.length !== hashBuffer.length) {
+    return false
+  }
+  return timingSafeEqual(passwordBuffer, hashBuffer)
+}
+
+function ensureDb() {
+  if (!sqliteDb || !drizzleDb) {
+    throw new Error('SQLite database is not initialized')
+  }
+  return {
+    sqliteDb,
+    drizzleDb,
+  }
+}
+
+async function applyMigrations(migrationsFolder: string) {
+  const { sqliteDb, drizzleDb } = ensureDb()
+  sqliteDb.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = ON;
+  `)
+  bootstrapLegacyMigrationBaseline(sqliteDb, migrationsFolder)
+  await migrate(
+    drizzleDb,
+    async (queries) => {
+      for (const query of queries) {
+        sqliteDb.exec(query)
+      }
+    },
+    { migrationsFolder },
+  )
+}
+
+function bootstrapLegacyMigrationBaseline(database: DatabaseSync, migrationsFolder: string) {
+  const migrationsTable = '__drizzle_migrations'
+  const usersTableExists = database.prepare(`
+    SELECT 1 AS ok
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'users'
+    LIMIT 1
+  `).get() as { ok: number } | undefined
+
+  if (!usersTableExists) {
+    return
+  }
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS ${migrationsTable} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hash TEXT NOT NULL,
+      created_at NUMERIC
+    );
+  `)
+  const migrationExists = database.prepare(`
+    SELECT 1 AS ok
+    FROM ${migrationsTable}
+    LIMIT 1
+  `).get() as { ok: number } | undefined
+
+  if (migrationExists) {
+    return
+  }
+
+  const migrations = readMigrationFiles({ migrationsFolder })
+  const latestMigration = migrations.at(-1)
+  if (!latestMigration) {
+    return
+  }
+  database.prepare(`
+    INSERT INTO ${migrationsTable} (hash, created_at)
+    VALUES (?, ?)
+  `).run(latestMigration.hash, latestMigration.folderMillis)
+}
+
+async function seedDefaultUsers() {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+
+  for (const user of defaultUserSeeds) {
+    const existing = await drizzleDb
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.account, user.account))
+      .limit(1)
+    const existingUser = existing[0]
+    const userId = existingUser?.id ?? randomUUID()
+    if (!existingUser) {
+      await drizzleDb.insert(users).values({
+        id: userId,
+        account: user.account,
+        passwordHash: hashPassword(user.password),
+        email: user.email,
+        avatar: user.avatar,
+        status: 1,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+    for (const permission of user.permissions) {
+      await drizzleDb
+        .insert(userPermissions)
+        .values({
+          userId,
+          permission,
+          createdAt: now,
+        })
+        .onConflictDoNothing()
+    }
+  }
+}
+
+export async function initDatabase(dbPath: string, migrationsFolder: string) {
+  const absolutePath = path.resolve(dbPath)
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true })
+  sqliteDb = new DatabaseSync(absolutePath)
+  drizzleDb = drizzle(async (query, params, method) => {
+    if (!sqliteDb) {
+      throw new Error('SQLite database is not initialized')
+    }
+    const stmt = sqliteDb.prepare(query)
+
+    switch (method) {
+      case 'run':
+        stmt.run(...params)
+        return { rows: [] }
+      case 'get': {
+        stmt.setReturnArrays(true)
+        const row = stmt.get(...params)
+        return { rows: row ? row as unknown as unknown[] : [] }
+      }
+      case 'values':
+        stmt.setReturnArrays(true)
+        return { rows: stmt.all(...params) as unknown[] }
+      case 'all':
+      default:
+        stmt.setReturnArrays(true)
+        return { rows: stmt.all(...params) as unknown[] }
+    }
+  })
+  await applyMigrations(path.resolve(migrationsFolder))
+  await seedDefaultUsers()
+  return absolutePath
+}
+
+export async function findUserByAccount(account: string): Promise<DbUserRow | undefined> {
+  const { drizzleDb } = ensureDb()
+  const result = await drizzleDb
+    .select({
+      id: users.id,
+      account: users.account,
+      password_hash: users.passwordHash,
+      email: users.email,
+      avatar: users.avatar,
+      status: users.status,
+      updated_at: users.updatedAt,
+    })
+    .from(users)
+    .where(
+      and(
+        eq(users.account, account),
+        eq(users.status, 1),
+      ),
+    )
+    .limit(1)
+  return result[0]
+}
+
+export async function createSession(token: string, userId: string) {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  await drizzleDb.insert(authSessions).values({
+    token,
+    userId,
+    createdAt: now,
+    lastSeenAt: now,
+    revokedAt: null,
+  })
+}
+
+export async function revokeSession(token: string) {
+  const { drizzleDb } = ensureDb()
+  await drizzleDb
+    .update(authSessions)
+    .set({
+      revokedAt: nowIso(),
+    })
+    .where(
+      and(
+        eq(authSessions.token, token),
+        isNull(authSessions.revokedAt),
+      ),
+    )
+}
+
+export async function findUserByToken(token: string): Promise<DbUserRow | undefined> {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  await drizzleDb
+    .update(authSessions)
+    .set({
+      lastSeenAt: now,
+    })
+    .where(eq(authSessions.token, token))
+
+  const result = await drizzleDb
+    .select({
+      id: users.id,
+      account: users.account,
+      password_hash: users.passwordHash,
+      email: users.email,
+      avatar: users.avatar,
+      status: users.status,
+      updated_at: users.updatedAt,
+    })
+    .from(authSessions)
+    .innerJoin(users, eq(authSessions.userId, users.id))
+    .where(
+      and(
+        eq(authSessions.token, token),
+        isNull(authSessions.revokedAt),
+        eq(users.status, 1),
+      ),
+    )
+    .limit(1)
+  return result[0]
+}
+
+export async function findPermissionsByUserId(userId: string): Promise<string[]> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      permission: userPermissions.permission,
+    })
+    .from(userPermissions)
+    .where(eq(userPermissions.userId, userId))
+    .orderBy(asc(userPermissions.permission))
+  return rows.map(row => row.permission)
+}
+
+export async function updateUserPassword(userId: string, newPassword: string) {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  await drizzleDb
+    .update(users)
+    .set({
+      passwordHash: hashPassword(newPassword),
+      updatedAt: now,
+    })
+    .where(eq(users.id, userId))
+}
+
+export async function getSystemNetworkConfig(): Promise<DbSystemNetworkConfig | undefined> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      value: systemSettings.value,
+    })
+    .from(systemSettings)
+    .where(eq(systemSettings.key, 'network.config'))
+    .limit(1)
+
+  const row = rows[0]
+  if (!row?.value) {
+    return undefined
+  }
+  return JSON.parse(row.value) as DbSystemNetworkConfig
+}
+
+export async function saveSystemNetworkConfig(config: DbSystemNetworkConfig) {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  await drizzleDb
+    .insert(systemSettings)
+    .values({
+      key: 'network.config',
+      value: JSON.stringify(config),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: systemSettings.key,
+      set: {
+        value: JSON.stringify(config),
+        updatedAt: now,
+      },
+    })
+}
+
+function normalizePanelSettings(raw: unknown): DbSystemPanelSettings {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      panelPort: 80,
+      theme: 'system',
+      autoUpdate: true,
+    }
+  }
+  const value = raw as Partial<DbSystemPanelSettings>
+  const panelPort = Number.isInteger(value.panelPort) ? value.panelPort as number : 80
+  const theme = value.theme === 'light' || value.theme === 'dark' || value.theme === 'system'
+    ? value.theme
+    : 'system'
+  return {
+    panelPort: panelPort > 0 && panelPort <= 65535 ? panelPort : 80,
+    theme,
+    autoUpdate: typeof value.autoUpdate === 'boolean' ? value.autoUpdate : true,
+  }
+}
+
+function normalizeSteamcmdConfig(raw: unknown): DbSystemSteamcmdConfig {
+  const defaultConfig: DbSystemSteamcmdConfig = {
+    steamcmdPath: process.platform === 'win32' ? 'steamcmd.exe' : 'steamcmd',
+    installRoot: process.platform === 'win32'
+      ? path.resolve(process.cwd(), 'data', 'instances')
+      : '/var/lib/game-server-hub/instances',
+  }
+  if (!raw || typeof raw !== 'object') {
+    return defaultConfig
+  }
+  const value = raw as Partial<DbSystemSteamcmdConfig>
+  const steamcmdPath = value.steamcmdPath?.trim() || defaultConfig.steamcmdPath
+  const installRoot = value.installRoot?.trim() || defaultConfig.installRoot
+  return {
+    steamcmdPath,
+    installRoot,
+  }
+}
+
+export async function getSystemPanelSettings(): Promise<DbSystemPanelSettings | undefined> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      value: systemSettings.value,
+    })
+    .from(systemSettings)
+    .where(eq(systemSettings.key, 'panel.settings'))
+    .limit(1)
+
+  const row = rows[0]
+  if (!row?.value) {
+    return undefined
+  }
+  return normalizePanelSettings(JSON.parse(row.value))
+}
+
+export async function saveSystemPanelSettings(settings: DbSystemPanelSettings) {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  await drizzleDb
+    .insert(systemSettings)
+    .values({
+      key: 'panel.settings',
+      value: JSON.stringify(settings),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: systemSettings.key,
+      set: {
+        value: JSON.stringify(settings),
+        updatedAt: now,
+      },
+    })
+}
+
+export async function getSystemSteamcmdConfig(): Promise<DbSystemSteamcmdConfig | undefined> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      value: systemSettings.value,
+    })
+    .from(systemSettings)
+    .where(eq(systemSettings.key, 'steamcmd.config'))
+    .limit(1)
+  const row = rows[0]
+  if (!row?.value) {
+    return undefined
+  }
+  return normalizeSteamcmdConfig(JSON.parse(row.value))
+}
+
+export async function saveSystemSteamcmdConfig(config: DbSystemSteamcmdConfig) {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  const normalized = normalizeSteamcmdConfig(config)
+  await drizzleDb
+    .insert(systemSettings)
+    .values({
+      key: 'steamcmd.config',
+      value: JSON.stringify(normalized),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: systemSettings.key,
+      set: {
+        value: JSON.stringify(normalized),
+        updatedAt: now,
+      },
+    })
+}
+
+function normalizeNodeUsage(value: number | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0
+  }
+  return Math.max(0, Math.min(100, Number(value.toFixed(2))))
+}
+
+export async function saveServerNode(input: SaveServerNodeInput): Promise<DbServerNode> {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  const payload: DbServerNode = {
+    id: input.id,
+    name: input.name,
+    host: input.host,
+    sshPort: Number.isInteger(input.sshPort) ? input.sshPort as number : 22,
+    status: input.status ?? 'offline',
+    cpuUsage: normalizeNodeUsage(input.cpuUsage),
+    memoryUsage: normalizeNodeUsage(input.memoryUsage),
+    diskUsage: normalizeNodeUsage(input.diskUsage),
+    lastHeartbeatAt: input.lastHeartbeatAt ?? null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await drizzleDb
+    .insert(serverNodes)
+    .values(payload)
+    .onConflictDoUpdate({
+      target: serverNodes.id,
+      set: {
+        name: payload.name,
+        host: payload.host,
+        sshPort: payload.sshPort,
+        status: payload.status,
+        cpuUsage: payload.cpuUsage,
+        memoryUsage: payload.memoryUsage,
+        diskUsage: payload.diskUsage,
+        lastHeartbeatAt: payload.lastHeartbeatAt,
+        updatedAt: now,
+      },
+    })
+  const current = await getServerNodeById(input.id)
+  if (!current) {
+    throw new Error(`server node upsert failed: ${input.id}`)
+  }
+  return current
+}
+
+export async function getServerNodeById(id: string): Promise<DbServerNode | undefined> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      id: serverNodes.id,
+      name: serverNodes.name,
+      host: serverNodes.host,
+      sshPort: serverNodes.sshPort,
+      status: serverNodes.status,
+      cpuUsage: serverNodes.cpuUsage,
+      memoryUsage: serverNodes.memoryUsage,
+      diskUsage: serverNodes.diskUsage,
+      lastHeartbeatAt: serverNodes.lastHeartbeatAt,
+      createdAt: serverNodes.createdAt,
+      updatedAt: serverNodes.updatedAt,
+    })
+    .from(serverNodes)
+    .where(eq(serverNodes.id, id))
+    .limit(1)
+  const row = rows[0]
+  if (!row) {
+    return undefined
+  }
+  return {
+    ...row,
+    status: row.status === 'online' ? 'online' : 'offline',
+    cpuUsage: Number(row.cpuUsage),
+    memoryUsage: Number(row.memoryUsage),
+    diskUsage: Number(row.diskUsage),
+  }
+}
+
+export async function listServerNodes(): Promise<DbServerNode[]> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      id: serverNodes.id,
+      name: serverNodes.name,
+      host: serverNodes.host,
+      sshPort: serverNodes.sshPort,
+      status: serverNodes.status,
+      cpuUsage: serverNodes.cpuUsage,
+      memoryUsage: serverNodes.memoryUsage,
+      diskUsage: serverNodes.diskUsage,
+      lastHeartbeatAt: serverNodes.lastHeartbeatAt,
+      createdAt: serverNodes.createdAt,
+      updatedAt: serverNodes.updatedAt,
+    })
+    .from(serverNodes)
+    .orderBy(asc(serverNodes.createdAt))
+  return rows.map(row => ({
+    ...row,
+    status: row.status === 'online' ? 'online' : 'offline',
+    cpuUsage: Number(row.cpuUsage),
+    memoryUsage: Number(row.memoryUsage),
+    diskUsage: Number(row.diskUsage),
+  }))
+}
+
+function normalizeInstanceStatus(status: string | undefined): DbGameInstanceStatus {
+  if (status === 'pending_install' || status === 'running' || status === 'stopped' || status === 'installing' || status === 'error') {
+    return status
+  }
+  return 'stopped'
+}
+
+function normalizeOptionalPort(value: number | null | undefined): number | null {
+  if (value === null || typeof value === 'undefined') {
+    return null
+  }
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    return null
+  }
+  return value
+}
+
+function mapDbGameInstance(row: {
+  id: string
+  nodeId: string
+  name: string
+  gameCode: string
+  status: string
+  containerId: string | null
+  runtimePid: number | null
+  installPath: string | null
+  configPath: string | null
+  queryPort: number | null
+  gamePort: number | null
+  rconPort: number | null
+  lastCommand: string | null
+  lastExitCode: number | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
+}): DbGameInstance {
+  return {
+    ...row,
+    status: normalizeInstanceStatus(row.status),
+    runtimePid: row.runtimePid === null ? null : Number(row.runtimePid),
+    queryPort: row.queryPort === null ? null : Number(row.queryPort),
+    gamePort: row.gamePort === null ? null : Number(row.gamePort),
+    rconPort: row.rconPort === null ? null : Number(row.rconPort),
+    lastExitCode: row.lastExitCode === null ? null : Number(row.lastExitCode),
+  }
+}
+
+export async function createGameInstance(input: CreateGameInstanceInput): Promise<DbGameInstance> {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  const id = input.id?.trim() || randomUUID()
+  await drizzleDb
+    .insert(gameInstances)
+    .values({
+      id,
+      nodeId: input.nodeId,
+      name: input.name,
+      gameCode: input.gameCode,
+      status: input.status ?? 'stopped',
+      containerId: input.containerId ?? null,
+      runtimePid: input.runtimePid ?? null,
+      installPath: input.installPath ?? null,
+      configPath: input.configPath ?? null,
+      queryPort: normalizeOptionalPort(input.queryPort),
+      gamePort: normalizeOptionalPort(input.gamePort),
+      rconPort: normalizeOptionalPort(input.rconPort),
+      lastCommand: input.lastCommand ?? null,
+      lastExitCode: input.lastExitCode ?? null,
+      lastError: input.lastError ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+  const created = await getGameInstanceById(id)
+  if (!created) {
+    throw new Error(`create game instance failed: ${id}`)
+  }
+  return created
+}
+
+export async function getGameInstanceById(id: string): Promise<DbGameInstance | undefined> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      id: gameInstances.id,
+      nodeId: gameInstances.nodeId,
+      name: gameInstances.name,
+      gameCode: gameInstances.gameCode,
+      status: gameInstances.status,
+      containerId: gameInstances.containerId,
+      runtimePid: gameInstances.runtimePid,
+      installPath: gameInstances.installPath,
+      configPath: gameInstances.configPath,
+      queryPort: gameInstances.queryPort,
+      gamePort: gameInstances.gamePort,
+      rconPort: gameInstances.rconPort,
+      lastCommand: gameInstances.lastCommand,
+      lastExitCode: gameInstances.lastExitCode,
+      lastError: gameInstances.lastError,
+      createdAt: gameInstances.createdAt,
+      updatedAt: gameInstances.updatedAt,
+    })
+    .from(gameInstances)
+    .where(eq(gameInstances.id, id))
+    .limit(1)
+  const row = rows[0]
+  if (!row) {
+    return undefined
+  }
+  return mapDbGameInstance(row)
+}
+
+export async function listGameInstances(filters?: {
+  nodeId?: string
+  status?: DbGameInstanceStatus
+  keyword?: string
+}): Promise<DbGameInstance[]> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      id: gameInstances.id,
+      nodeId: gameInstances.nodeId,
+      name: gameInstances.name,
+      gameCode: gameInstances.gameCode,
+      status: gameInstances.status,
+      containerId: gameInstances.containerId,
+      runtimePid: gameInstances.runtimePid,
+      installPath: gameInstances.installPath,
+      configPath: gameInstances.configPath,
+      queryPort: gameInstances.queryPort,
+      gamePort: gameInstances.gamePort,
+      rconPort: gameInstances.rconPort,
+      lastCommand: gameInstances.lastCommand,
+      lastExitCode: gameInstances.lastExitCode,
+      lastError: gameInstances.lastError,
+      createdAt: gameInstances.createdAt,
+      updatedAt: gameInstances.updatedAt,
+    })
+    .from(gameInstances)
+    .orderBy(asc(gameInstances.createdAt))
+
+  const keyword = filters?.keyword?.trim().toLowerCase() ?? ''
+  return rows
+    .map(mapDbGameInstance)
+    .filter((item) => {
+      if (filters?.nodeId && item.nodeId !== filters.nodeId) {
+        return false
+      }
+      if (filters?.status && item.status !== filters.status) {
+        return false
+      }
+      if (!keyword) {
+        return true
+      }
+      return item.name.toLowerCase().includes(keyword)
+        || item.gameCode.toLowerCase().includes(keyword)
+    })
+}
+
+export async function updateGameInstanceStatus(id: string, status: DbGameInstanceStatus): Promise<DbGameInstance | undefined> {
+  const { drizzleDb } = ensureDb()
+  await drizzleDb
+    .update(gameInstances)
+    .set({
+      status,
+      updatedAt: nowIso(),
+    })
+    .where(eq(gameInstances.id, id))
+  return getGameInstanceById(id)
+}
+
+export async function updateGameInstanceRuntime(
+  id: string,
+  input: UpdateGameInstanceRuntimeInput,
+): Promise<DbGameInstance | undefined> {
+  const { drizzleDb } = ensureDb()
+  const setPayload: {
+    status?: DbGameInstanceStatus
+    containerId?: string | null
+    runtimePid?: number | null
+    lastCommand?: string | null
+    lastExitCode?: number | null
+    lastError?: string | null
+    updatedAt: string
+  } = {
+    updatedAt: nowIso(),
+  }
+  if (typeof input.status !== 'undefined') {
+    setPayload.status = input.status
+  }
+  if (typeof input.containerId !== 'undefined') {
+    setPayload.containerId = input.containerId
+  }
+  if (typeof input.runtimePid !== 'undefined') {
+    setPayload.runtimePid = Number.isInteger(input.runtimePid) ? input.runtimePid : null
+  }
+  if (typeof input.lastCommand !== 'undefined') {
+    setPayload.lastCommand = input.lastCommand?.trim() || null
+  }
+  if (typeof input.lastExitCode !== 'undefined') {
+    setPayload.lastExitCode = Number.isInteger(input.lastExitCode) ? input.lastExitCode : null
+  }
+  if (typeof input.lastError !== 'undefined') {
+    setPayload.lastError = input.lastError?.trim() || null
+  }
+  await drizzleDb
+    .update(gameInstances)
+    .set(setPayload)
+    .where(eq(gameInstances.id, id))
+  return getGameInstanceById(id)
+}
+
+export async function deleteGameInstanceById(id: string): Promise<boolean> {
+  const { drizzleDb } = ensureDb()
+  const exists = await getGameInstanceById(id)
+  if (!exists) {
+    return false
+  }
+  await drizzleDb
+    .delete(gameInstances)
+    .where(eq(gameInstances.id, id))
+  return true
+}

@@ -1,0 +1,58 @@
+import type { SelectOption } from 'naive-ui'
+
+export interface SystemInfoData {
+  cpu: {
+    cores: number
+    model: string
+    usageRate: number
+  }
+  load: {
+    oneMinute: number
+    fiveMinutes: number
+    fifteenMinutes: number
+    usageRate: number
+    isSynthetic: boolean
+    cpuQueueLength: number | null
+    diskQueueLength: number | null
+  }
+  memory: {
+    totalGb: number
+    usedGb: number
+    freeGb: number
+    usageRate: number
+  }
+  disk: {
+    totalGb: number
+    usedGb: number
+    freeGb: number
+  }
+  os: {
+    platform: string
+    release: string
+    arch: string
+    hostname: string
+  }
+  panelVersion: string
+  dockerStatus: 'running' | 'stopped'
+}
+
+export interface NetworkInterfaceRealtimeData {
+  name: string
+  upBps: number
+  downBps: number
+  totalSentBytes: number
+  totalReceivedBytes: number
+}
+
+export interface NetworkRealtimeData {
+  timestamp: number
+  interfaces: NetworkInterfaceRealtimeData[]
+}
+
+export interface NetworkChartPoint {
+  time: string
+  upBps: number
+  downBps: number
+}
+
+export type MonitorNetworkOption = SelectOption

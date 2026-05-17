@@ -1,0 +1,15 @@
+Game Server Hub (standalone)
+
+This distribution embeds portions of Fantastic-admin under the MIT License.
+
+Embedded packages (copied from https://github.com/fantastic-admin/fantastic-admin):
+
+- packages/components
+- packages/settings
+- packages/types
+- packages/themes
+- packages/copyright
+
+See LICENSE for the full MIT license text. Copyright (c) 2020 fantastic-admin applies to the embedded framework packages listed above.
+
+Application-specific code under src/, server/, shared/, scripts/, and docs/ is part of this project unless otherwise noted.

@@ -27,6 +27,8 @@ defineProps<{
   items: (MenuItem | MenuSubItem)[][]
 }>()
 
+const open = defineModel<boolean>('open', { default: false })
+
 const slots = defineSlots<{
   default?: () => VNode
   header?: () => VNode
@@ -60,13 +62,23 @@ function hasIcon(group: (MenuItem | MenuSubItem)[][]) {
   }))
 }
 
-function handleItemClick(item: { handle?: () => void }) {
+function blurFocusedElement() {
+  const active = document.activeElement
+  if (active instanceof HTMLElement) {
+    active.blur()
+  }
+}
+
+async function handleItemClick(item: { handle?: () => void }) {
+  open.value = false
+  blurFocusedElement()
+  await nextTick()
   item.handle?.()
 }
 </script>
 
 <template>
-  <DropdownMenu :modal="false" :dir="dir === 'ltr' ? 'ltr' : 'rtl'">
+  <DropdownMenu v-model:open="open" :modal="false" :dir="dir === 'ltr' ? 'ltr' : 'rtl'">
     <DropdownMenuTrigger as-child>
       <slot />
     </DropdownMenuTrigger>

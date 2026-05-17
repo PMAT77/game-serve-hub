@@ -4,6 +4,7 @@ import type { DirectoryItem, SteamcmdConfigPayload } from '@/api/modules/system'
 import { h, onMounted, reactive, ref, watch } from 'vue'
 import apiRequest from '@/api'
 import apiSystem from '@/api/modules/system'
+import { blurFocusedElement } from '@/utils'
 
 defineOptions({
   name: 'NodeInstanceSteamcmdPanel',
@@ -218,6 +219,7 @@ function triggerDirectorySearchByEnter() {
 }
 
 async function openInstallRootPicker() {
+  blurFocusedElement()
   installRootPickerVisible.value = true
   directoryTreePattern.value = ''
   selectedDirectoryKeys.value = steamcmdForm.steamcmdPath.trim()

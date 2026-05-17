@@ -5,6 +5,7 @@ import type { NodeListItem } from '@/api/modules/node'
 import { NButton, NProgress, useDialog } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
+import { blurFocusedElement } from '@/utils'
 import { formatDateTime } from '../utils'
 
 defineOptions({
@@ -449,6 +450,7 @@ function getNodeName(nodeId: string) {
 }
 
 function confirmDangerousInstanceAction(row: InstanceItem, action: 'stop' | 'restart' | 'delete') {
+  blurFocusedElement()
   const actionConfig = {
     stop: {
       title: '确认停止',
@@ -495,6 +497,7 @@ function resetCreateForm() {
 }
 
 function openCreateModal() {
+  blurFocusedElement()
   if (!createForm.nodeId && nodes.value.length > 0) {
     createForm.nodeId = nodes.value[0].id
   }
@@ -573,6 +576,7 @@ function startInstallLogPolling() {
 }
 
 async function openInstallLogModal(instance: InstanceItem) {
+  blurFocusedElement()
   installLogTargetId.value = instance.id
   installLogInstanceName.value = instance.name
   installLogVisible.value = true

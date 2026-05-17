@@ -1,4 +1,5 @@
 import axios from 'axios'
+import router from '@/router'
 // import qs from 'qs'
 
 // 请求重试配置
@@ -48,6 +49,15 @@ api.interceptors.request.use(
 
 // 处理错误信息的函数
 function handleError(error: any) {
+  const responseData = error.response?.data
+  if (responseData?.code === 'AUTH_FORCE_PASSWORD_CHANGE') {
+    const appAccountStore = useAppAccountStore()
+    appAccountStore.mustChangePassword = true
+    if (router.currentRoute.value.name !== 'forceChangePassword') {
+      router.push({ name: 'forceChangePassword' })
+    }
+    return Promise.reject(error)
+  }
   if (error.status === 401) {
     useAppAccountStore().requestLogout()
   }

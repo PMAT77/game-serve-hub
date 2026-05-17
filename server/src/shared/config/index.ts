@@ -11,6 +11,9 @@ const envSchema = z.object({
   DB_PATH: z.string().trim().min(1).default('./data/game-server-hub.sqlite'),
   SERVER_LOG_DIR: z.string().trim().min(1).default('./logs'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  FORCE_PASSWORD_CHANGE: z.string().trim().optional(),
+  ADMIN_USERNAME: z.string().trim().optional(),
+  ADMIN_PASSWORD: z.string().optional(),
 })
 
 function resolveMode() {
@@ -33,6 +36,9 @@ export interface ServerConfig {
   logDir: string
   logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent'
   envFile: string
+  forcePasswordChange: boolean
+  adminUsername: string
+  adminPassword: string
 }
 
 export function loadServerConfig(): ServerConfig {
@@ -45,6 +51,9 @@ export function loadServerConfig(): ServerConfig {
     DB_PATH: process.env.DB_PATH ?? env.DB_PATH,
     SERVER_LOG_DIR: process.env.SERVER_LOG_DIR ?? env.SERVER_LOG_DIR,
     LOG_LEVEL: process.env.LOG_LEVEL ?? env.LOG_LEVEL,
+    FORCE_PASSWORD_CHANGE: process.env.FORCE_PASSWORD_CHANGE ?? env.FORCE_PASSWORD_CHANGE,
+    ADMIN_USERNAME: process.env.ADMIN_USERNAME ?? env.ADMIN_USERNAME,
+    ADMIN_PASSWORD: process.env.ADMIN_PASSWORD ?? env.ADMIN_PASSWORD,
   }
   const parsed = envSchema.parse(merged)
   return {
@@ -55,7 +64,15 @@ export function loadServerConfig(): ServerConfig {
     logDir: path.resolve(serverRootDir, parsed.SERVER_LOG_DIR),
     logLevel: parsed.LOG_LEVEL,
     envFile: path.resolve(serverRootDir, `.env.${mode}`),
+    forcePasswordChange: isTruthyEnv(parsed.FORCE_PASSWORD_CHANGE),
+    adminUsername: parsed.ADMIN_USERNAME || 'admin',
+    adminPassword: parsed.ADMIN_PASSWORD ?? '',
   }
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase() ?? ''
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
 }
 
 export function ensureServerRuntimeDirs(config: Pick<ServerConfig, 'dbPath' | 'logDir'>) {

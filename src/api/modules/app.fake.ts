@@ -115,6 +115,7 @@ export default defineFakeRoute([
           avatar: `https://api.dicebear.com/9.x/bottts-neutral/svg?seed=${body.account}`,
           email: `${body.account}@game.com`,
           remember: body.remember === true,
+          mustChangePassword: body.account === 'superman',
         },
       }
     },
@@ -156,6 +157,7 @@ export default defineFakeRoute([
         status: 1,
         data: {
           permissions,
+          mustChangePassword: headers.token?.startsWith('superman:') ?? false,
         },
       }
     },
@@ -169,6 +171,7 @@ export default defineFakeRoute([
         status: 1,
         data: {
           isSuccess: true,
+          mustChangePassword: false,
         },
       }
     },

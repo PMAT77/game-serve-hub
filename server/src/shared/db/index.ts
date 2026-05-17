@@ -17,8 +17,29 @@ interface DbUserRow {
   email: string
   avatar: string
   status: number
+  must_change_password: number
   updated_at: string
 }
+
+interface InitDatabaseOptions {
+  forcePasswordChange?: boolean
+  adminUsername?: string
+  adminPassword?: string
+}
+
+interface AuthForcePasswordChangeState {
+  pending: boolean
+  completed: boolean
+}
+
+const AUTH_FORCE_PASSWORD_CHANGE_KEY = 'auth.force_password_change'
+const ADMIN_DEFAULT_PERMISSIONS = [
+  'pages.general:browse',
+  'pages.form:browse',
+  'pages.list:browse',
+  'pages.shop:browse',
+  'pages.node.instance:manage',
+]
 
 interface DbDefaultUserSeed {
   account: string
@@ -182,6 +203,47 @@ function ensureDb() {
   }
 }
 
+function tableHasColumn(database: DatabaseSync, tableName: string, columnName: string): boolean {
+  const rows = database.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  return rows.some(row => row.name === columnName)
+}
+
+function ensureColumn(database: DatabaseSync, tableName: string, columnName: string, columnDefinition: string) {
+  if (tableHasColumn(database, tableName, columnName)) {
+    return
+  }
+  database.exec(`ALTER TABLE ${tableName} ADD ${columnName} ${columnDefinition}`)
+}
+
+function ensureSchemaCompatibility(database: DatabaseSync) {
+  const usersTableExists = database.prepare(`
+    SELECT 1 AS ok
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'users'
+    LIMIT 1
+  `).get() as { ok: number } | undefined
+  if (!usersTableExists) {
+    return
+  }
+
+  ensureColumn(database, 'users', 'must_change_password', 'integer DEFAULT 0 NOT NULL')
+
+  const gameInstancesTableExists = database.prepare(`
+    SELECT 1 AS ok
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'game_instances'
+    LIMIT 1
+  `).get() as { ok: number } | undefined
+  if (!gameInstancesTableExists) {
+    return
+  }
+
+  ensureColumn(database, 'game_instances', 'runtime_pid', 'integer')
+  ensureColumn(database, 'game_instances', 'last_command', 'text')
+  ensureColumn(database, 'game_instances', 'last_exit_code', 'integer')
+  ensureColumn(database, 'game_instances', 'last_error', 'text')
+}
+
 async function applyMigrations(migrationsFolder: string) {
   const { sqliteDb, drizzleDb } = ensureDb()
   sqliteDb.exec(`
@@ -198,6 +260,7 @@ async function applyMigrations(migrationsFolder: string) {
     },
     { migrationsFolder },
   )
+  ensureSchemaCompatibility(sqliteDb)
 }
 
 function bootstrapLegacyMigrationBaseline(database: DatabaseSync, migrationsFolder: string) {
@@ -231,14 +294,15 @@ function bootstrapLegacyMigrationBaseline(database: DatabaseSync, migrationsFold
   }
 
   const migrations = readMigrationFiles({ migrationsFolder })
-  const latestMigration = migrations.at(-1)
-  if (!latestMigration) {
+  const baselineMigration = migrations[0]
+  if (!baselineMigration) {
     return
   }
+  // 仅标记首条迁移为已应用，避免旧库跳过 0001/0002 等后续增量 SQL。
   database.prepare(`
     INSERT INTO ${migrationsTable} (hash, created_at)
     VALUES (?, ?)
-  `).run(latestMigration.hash, latestMigration.folderMillis)
+  `).run(baselineMigration.hash, baselineMigration.folderMillis)
 }
 
 async function seedDefaultUsers() {
@@ -261,6 +325,7 @@ async function seedDefaultUsers() {
         email: user.email,
         avatar: user.avatar,
         status: 1,
+        mustChangePassword: 0,
         createdAt: now,
         updatedAt: now,
       })
@@ -278,7 +343,143 @@ async function seedDefaultUsers() {
   }
 }
 
-export async function initDatabase(dbPath: string, migrationsFolder: string) {
+function parseAuthForcePasswordChangeState(raw: string | undefined): AuthForcePasswordChangeState | undefined {
+  if (!raw) {
+    return undefined
+  }
+  try {
+    const value = JSON.parse(raw) as Partial<AuthForcePasswordChangeState>
+    if (typeof value.pending !== 'boolean' || typeof value.completed !== 'boolean') {
+      return undefined
+    }
+    return {
+      pending: value.pending,
+      completed: value.completed,
+    }
+  }
+  catch {
+    return undefined
+  }
+}
+
+async function getAuthForcePasswordChangeState(): Promise<AuthForcePasswordChangeState | undefined> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      value: systemSettings.value,
+    })
+    .from(systemSettings)
+    .where(eq(systemSettings.key, AUTH_FORCE_PASSWORD_CHANGE_KEY))
+    .limit(1)
+  return parseAuthForcePasswordChangeState(rows[0]?.value)
+}
+
+async function saveAuthForcePasswordChangeState(state: AuthForcePasswordChangeState) {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  await drizzleDb
+    .insert(systemSettings)
+    .values({
+      key: AUTH_FORCE_PASSWORD_CHANGE_KEY,
+      value: JSON.stringify(state),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: systemSettings.key,
+      set: {
+        value: JSON.stringify(state),
+        updatedAt: now,
+      },
+    })
+}
+
+async function setMustChangePasswordForAccount(account: string, mustChange: boolean) {
+  const { drizzleDb } = ensureDb()
+  await drizzleDb
+    .update(users)
+    .set({
+      mustChangePassword: mustChange ? 1 : 0,
+      updatedAt: nowIso(),
+    })
+    .where(eq(users.account, account))
+}
+
+async function seedAdminUserFromEnv(options: InitDatabaseOptions) {
+  const adminUsername = options.adminUsername?.trim() ?? ''
+  const adminPassword = options.adminPassword ?? ''
+  if (!adminUsername || !adminPassword) {
+    return
+  }
+
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  const existing = await drizzleDb
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.account, adminUsername))
+    .limit(1)
+  const userId = existing[0]?.id ?? randomUUID()
+  const mustChangePassword = options.forcePasswordChange ? 1 : 0
+
+  if (!existing[0]) {
+    await drizzleDb.insert(users).values({
+      id: userId,
+      account: adminUsername,
+      passwordHash: hashPassword(adminPassword),
+      email: `${adminUsername}@local`,
+      avatar: `https://api.dicebear.com/9.x/bottts-neutral/svg?seed=${adminUsername}`,
+      status: 1,
+      mustChangePassword,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+  else {
+    await drizzleDb
+      .update(users)
+      .set({
+        passwordHash: hashPassword(adminPassword),
+        mustChangePassword,
+        updatedAt: now,
+      })
+      .where(eq(users.id, userId))
+  }
+
+  for (const permission of ADMIN_DEFAULT_PERMISSIONS) {
+    await drizzleDb
+      .insert(userPermissions)
+      .values({
+        userId,
+        permission,
+        createdAt: now,
+      })
+      .onConflictDoNothing()
+  }
+}
+
+async function applyForcePasswordChangePolicy(options: InitDatabaseOptions) {
+  if (!options.forcePasswordChange) {
+    return
+  }
+
+  const adminAccount = options.adminUsername?.trim() || 'admin'
+  const state = await getAuthForcePasswordChangeState()
+  if (state?.completed) {
+    return
+  }
+
+  await setMustChangePasswordForAccount(adminAccount, true)
+  await saveAuthForcePasswordChangeState({
+    pending: true,
+    completed: false,
+  })
+}
+
+export async function initDatabase(
+  dbPath: string,
+  migrationsFolder: string,
+  options: InitDatabaseOptions = {},
+) {
   const absolutePath = path.resolve(dbPath)
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true })
   sqliteDb = new DatabaseSync(absolutePath)
@@ -308,7 +509,13 @@ export async function initDatabase(dbPath: string, migrationsFolder: string) {
   })
   await applyMigrations(path.resolve(migrationsFolder))
   await seedDefaultUsers()
+  await seedAdminUserFromEnv(options)
+  await applyForcePasswordChangePolicy(options)
   return absolutePath
+}
+
+export function userMustChangePassword(user: Pick<DbUserRow, 'must_change_password'>): boolean {
+  return user.must_change_password === 1
 }
 
 export async function findUserByAccount(account: string): Promise<DbUserRow | undefined> {
@@ -321,6 +528,7 @@ export async function findUserByAccount(account: string): Promise<DbUserRow | un
       email: users.email,
       avatar: users.avatar,
       status: users.status,
+      must_change_password: users.mustChangePassword,
       updated_at: users.updatedAt,
     })
     .from(users)
@@ -379,6 +587,7 @@ export async function findUserByToken(token: string): Promise<DbUserRow | undefi
       email: users.email,
       avatar: users.avatar,
       status: users.status,
+      must_change_password: users.mustChangePassword,
       updated_at: users.updatedAt,
     })
     .from(authSessions)
@@ -413,9 +622,18 @@ export async function updateUserPassword(userId: string, newPassword: string) {
     .update(users)
     .set({
       passwordHash: hashPassword(newPassword),
+      mustChangePassword: 0,
       updatedAt: now,
     })
     .where(eq(users.id, userId))
+
+  const state = await getAuthForcePasswordChangeState()
+  if (state?.pending) {
+    await saveAuthForcePasswordChangeState({
+      pending: false,
+      completed: true,
+    })
+  }
 }
 
 export async function getSystemNetworkConfig(): Promise<DbSystemNetworkConfig | undefined> {

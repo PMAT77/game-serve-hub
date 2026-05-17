@@ -31,6 +31,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
 
   // 权限信息
   const permissions = ref<string[]>([])
+  const mustChangePassword = ref(false)
 
   // 登录状态
   const isLogin = computed(() => {
@@ -62,6 +63,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     token.value = res.data.token
     avatar.value = res.data.avatar
     email.value = res.data.email
+    mustChangePassword.value = res.data.mustChangePassword === true
   }
 
   // 手动登出
@@ -104,6 +106,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     avatar.value = ''
     email.value = ''
     permissions.value = []
+    mustChangePassword.value = false
     appSettingsStore.updateSettings({}, true)
     appTabbarStore.clean()
     appRouteStore.removeRoutes()
@@ -114,6 +117,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   async function getPermissions() {
     const res = await apiApp.permission()
     permissions.value = res.data.permissions
+    mustChangePassword.value = res.data.mustChangePassword === true
   }
 
   // 修改密码
@@ -121,7 +125,10 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     password: string
     newPassword: string
   }) {
-    await apiApp.passwordEdit(data)
+    const res = await apiApp.passwordEdit(data)
+    if (res.data.mustChangePassword === false) {
+      mustChangePassword.value = false
+    }
   }
 
   // 锁屏
@@ -145,6 +152,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     avatar,
     email,
     permissions,
+    mustChangePassword,
     isLogin,
     login,
     logout,

@@ -41,7 +41,11 @@ export async function bootstrap() {
   bindProcessLifecycle(app, gracefulShutdown)
 
   const migrationsFolder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../drizzle')
-  const dbFilePath = await initDatabase(config.dbPath, migrationsFolder)
+  const dbFilePath = await initDatabase(config.dbPath, migrationsFolder, {
+    forcePasswordChange: config.forcePasswordChange,
+    adminUsername: config.adminUsername,
+    adminPassword: config.adminPassword,
+  })
 
   try {
     await app.listen({ port: config.port, host: config.host })

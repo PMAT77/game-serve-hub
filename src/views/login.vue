@@ -23,8 +23,12 @@ const account = ref<string>()
 const formType = ref<'login' | 'register' | 'resetPassword'>('login')
 
 function handleLogin() {
+  const appAccountStore = useAppAccountStore()
   const data = diffTwoObj(settingsDefault, appSettingsStore.settings)
-  router.push(redirect.value).then(() => {
+  const target = appAccountStore.mustChangePassword
+    ? { name: 'forceChangePassword' as const }
+    : redirect.value
+  router.push(target).then(() => {
     if (Object.keys(data).length > 0) {
       appSettingsStore.updateSettings(data)
     }

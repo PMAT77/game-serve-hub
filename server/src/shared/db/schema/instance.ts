@@ -16,6 +16,13 @@ export const gameInstances = sqliteTable('game_instances', {
   lastCommand: text('last_command'),
   lastExitCode: integer('last_exit_code'),
   lastError: text('last_error'),
+  installLogStatus: text('install_log_status'),
+  installPercent: integer('install_percent'),
+  installLogUpdatedAt: text('install_log_updated_at'),
+  updateAvailable: integer('update_available').notNull().default(0),
+  localBuildId: text('local_build_id'),
+  remoteBuildId: text('remote_build_id'),
+  updateCheckedAt: text('update_checked_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

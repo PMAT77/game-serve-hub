@@ -16,9 +16,29 @@ interface FakeInstanceItem {
   rconPort: number | null
   lastCommand: string | null
   lastError: string | null
+  installLogStatus: 'running' | 'success' | 'failed' | null
+  installPercent: number | null
+  installLogUpdatedAt: string | null
+  updateAvailable: boolean
+  localBuildId: string | null
+  remoteBuildId: string | null
+  updateCheckedAt: string | null
   createdAt: string
   updatedAt: string
 }
+
+const defaultInstallMeta = {
+  installLogStatus: null,
+  installPercent: null,
+  installLogUpdatedAt: null,
+} as const
+
+const defaultUpdateMeta = {
+  updateAvailable: false,
+  localBuildId: null,
+  remoteBuildId: null,
+  updateCheckedAt: null,
+} as const
 
 interface InstallableGameItem {
   appId: string
@@ -59,10 +79,25 @@ export default defineFakeRoute([
       const id = typeof query.id === 'string' ? query.id : ''
       const target = instanceList.find(item => item.id === id)
       const summary = [target?.lastCommand, target?.lastError].filter(Boolean).join('\n').trim()
+      const persistedLog = target?.installLogStatus === 'success'
+        ? 'SteamCMD 安装完成（fake 持久化日志示例）\nUpdate state (0x61) downloading, progress: 100.00'
+        : null
+      if (persistedLog) {
+        return {
+          error: '',
+          status: 1,
+          data: {
+            content: persistedLog,
+            status: target?.installLogStatus ?? 'unknown',
+            updatedAt: target?.installLogUpdatedAt ?? target?.updatedAt ?? null,
+            source: 'install_log' as const,
+          },
+        }
+      }
       const source = summary ? 'status_summary' as const : 'empty' as const
       const content = summary
         ? ['【最近状态摘要，非完整 SteamCMD 输出】', '', summary].join('\n')
-        : '暂无完整 SteamCMD 安装输出（Hub 重启后内存日志已丢失，且当前无状态摘要）。'
+        : '暂无 SteamCMD 安装输出。'
       return {
         error: '',
         status: 1,
@@ -122,6 +157,8 @@ export default defineFakeRoute([
         rconPort: Number.isInteger(body.rconPort) ? body.rconPort : null,
         lastCommand: '等待安装任务启动',
         lastError: null,
+        ...defaultInstallMeta,
+        ...defaultUpdateMeta,
         createdAt,
         updatedAt: createdAt,
       }
@@ -130,6 +167,91 @@ export default defineFakeRoute([
         error: '',
         status: 1,
         data: item,
+      }
+    },
+  },
+  {
+    url: '/fake/app/instance/check-updates',
+    method: 'post',
+    response: () => {
+      const items = instanceList
+        .filter(item => item.status === 'stopped' || item.status === 'running')
+        .map(item => ({
+          id: item.id,
+          name: item.name,
+          updateAvailable: item.id.endsWith('1'),
+          localBuildId: '100',
+          remoteBuildId: item.id.endsWith('1') ? '101' : '100',
+          updateCheckedAt: nowIso(),
+        }))
+      instanceList = instanceList.map((item) => {
+        const hit = items.find(row => row.id === item.id)
+        if (!hit) {
+          return item
+        }
+        return {
+          ...item,
+          updateAvailable: hit.updateAvailable,
+          localBuildId: hit.localBuildId,
+          remoteBuildId: hit.remoteBuildId,
+          updateCheckedAt: hit.updateCheckedAt,
+          updatedAt: nowIso(),
+        }
+      })
+      return {
+        error: '',
+        status: 1,
+        data: {
+          items,
+          updateAvailableCount: items.filter(item => item.updateAvailable).length,
+        },
+      }
+    },
+  },
+  {
+    url: '/fake/app/instance/update',
+    method: 'post',
+    response: ({ body }) => {
+      const id = body.id as string
+      const updatedAt = nowIso()
+      instanceList = instanceList.map((item) => {
+        if (item.id !== id) {
+          return item
+        }
+        return {
+          ...item,
+          status: 'installing',
+          lastCommand: '正在准备更新服务端...',
+          lastError: null,
+          installLogStatus: 'running',
+          installPercent: 12,
+          installLogUpdatedAt: updatedAt,
+          updatedAt,
+        }
+      })
+      setTimeout(() => {
+        instanceList = instanceList.map((item) => {
+          if (item.id !== id) {
+            return item
+          }
+          return {
+            ...item,
+            status: 'stopped',
+            lastCommand: '更新完成（fake）',
+            lastError: null,
+            installLogStatus: 'success',
+            installPercent: 100,
+            installLogUpdatedAt: nowIso(),
+            updatedAt: nowIso(),
+          }
+        })
+      }, 2500)
+      return {
+        error: '',
+        status: 1,
+        data: {
+          isSuccess: true,
+        },
       }
     },
   },

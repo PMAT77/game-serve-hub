@@ -8,6 +8,7 @@ import { once } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import type { DbInstallLogStatus } from '../../shared/db/index'
 import {
   createGameInstance,
   deleteGameInstanceById,
@@ -18,8 +19,23 @@ import {
   listGameInstances,
   updateGameInstanceRuntime,
 } from '../../shared/db/index'
+import { loadServerConfig, resolveInstallLogsDir } from '../../shared/config'
+import {
+  deleteInstallLogFile,
+  InstanceInstallLogWriter,
+  readInstallLogContent,
+} from '../../shared/instance-install/log-store'
 import { instanceRuntimeRegistry } from '../../shared/instance-runtime/registry'
 import { businessError, success, unauthorized } from '../../shared/http/response'
+import type { InstanceCheckUpdatesResponse } from './update-check'
+import {
+  checkInstancesForUpdates,
+  refreshInstanceUpdateStatus,
+  refreshInstanceUpdateStatusAfterInstall,
+  refreshStaleInstanceUpdateChecks,
+  resolveSteamcmdCommandForUpdateCheck,
+  scheduleInstanceUpdateChecks,
+} from './update-check'
 
 interface InstanceListQuery {
   nodeId?: string
@@ -51,14 +67,17 @@ interface InstallableGameItem {
   name: string
 }
 
-interface InstanceInstallLogSnapshot {
-  instanceId: string
-  status: 'success' | 'failed' | 'running'
-  content: string
-  updatedAt: string
-}
-
 type InstallLogSource = 'install_log' | 'status_summary' | 'empty'
+
+interface InstanceInstallJobInput {
+  instanceId: string
+  appId: string
+  instanceName: string
+  gamePort?: number | null
+  installPath: string
+  steamcmdCommand: string
+  steamcmdCredentials?: { username: string, password: string }
+}
 
 interface InstallLogResponse {
   content: string
@@ -85,7 +104,57 @@ const INSTALLABLE_GAMES: InstallableGameItem[] = [
 ]
 
 const stoppingInstanceIds = new Set<string>()
-const instanceInstallLogMap = new Map<string, InstanceInstallLogSnapshot>()
+const installingInstanceIds = new Set<string>()
+
+function getInstallLogsDirPath() {
+  return resolveInstallLogsDir(loadServerConfig().dbPath)
+}
+
+async function writeInstallLogMeta(
+  instanceId: string,
+  status: DbInstallLogStatus,
+  installPercent?: number | null,
+) {
+  const updatedAt = new Date().toISOString()
+  await updateGameInstanceRuntime(instanceId, {
+    installLogStatus: status,
+    installLogUpdatedAt: updatedAt,
+    ...(typeof installPercent !== 'undefined' ? { installPercent } : {}),
+  })
+}
+
+function mapDbInstallLogStatusToResponse(
+  installLogStatus: DbInstallLogStatus | null,
+  instanceStatus: string,
+): InstallLogResponse['status'] {
+  if (installLogStatus === 'running' || installLogStatus === 'success' || installLogStatus === 'failed') {
+    return installLogStatus
+  }
+  if (instanceStatus === 'installing' || instanceStatus === 'pending_install') {
+    return 'running'
+  }
+  if (instanceStatus === 'error') {
+    return 'failed'
+  }
+  return 'unknown'
+}
+
+function startInstanceInstallJob(
+  app: FastifyInstance,
+  input: InstanceInstallJobInput,
+): boolean {
+  if (installingInstanceIds.has(input.instanceId)) {
+    return false
+  }
+  installingInstanceIds.add(input.instanceId)
+  const logWriter = new InstanceInstallLogWriter(getInstallLogsDirPath(), input.instanceId)
+  logWriter.clear()
+  void installInstanceFilesInBackground(app, input, logWriter)
+    .finally(() => {
+      installingInstanceIds.delete(input.instanceId)
+    })
+  return true
+}
 
 function normalizeToken(tokenHeader: string | string[] | undefined): string {
   if (Array.isArray(tokenHeader)) {
@@ -444,56 +513,36 @@ async function runSteamcmdAppUpdateStreaming(
 
 async function installInstanceFilesInBackground(
   app: FastifyInstance,
-  input: {
-    instanceId: string
-    appId: string
-    instanceName: string
-    gamePort?: number | null
-    installPath: string
-    steamcmdCommand: string
-    steamcmdCredentials?: { username: string, password: string }
-  },
+  input: InstanceInstallJobInput,
+  logWriter: InstanceInstallLogWriter,
 ) {
-  const installLogLines: string[] = []
-  const appendInstallLog = (line: string) => {
-    const text = line.trim()
-    if (!text) {
-      return
-    }
-    installLogLines.push(text)
-    if (installLogLines.length > 500) {
-      installLogLines.shift()
-    }
-  }
-  const persistInstallLog = (status: InstanceInstallLogSnapshot['status']) => {
-    instanceInstallLogMap.set(input.instanceId, {
-      instanceId: input.instanceId,
-      status,
-      content: installLogLines.join('\n'),
-      updatedAt: new Date().toISOString(),
-    })
-  }
   const updateProgress = async (line: string) => {
-    appendInstallLog(line)
-    persistInstallLog('running')
+    logWriter.appendLine(line)
     const progressMatch = line.match(/\[\s*(\d+)%\]/)
-    const progressText = progressMatch
-      ? `安装进度 ${Math.min(100, Number(progressMatch[1]))}%`
+    const progressPercent = progressMatch
+      ? Math.min(100, Number(progressMatch[1]))
+      : null
+    const progressText = progressPercent !== null
+      ? `安装进度 ${progressPercent}%`
       : line
     await updateGameInstanceRuntime(input.instanceId, {
       status: 'installing',
       lastCommand: progressText,
       lastError: null,
+      installLogStatus: 'running',
+      installLogUpdatedAt: new Date().toISOString(),
+      ...(progressPercent !== null ? { installPercent: progressPercent } : {}),
     })
   }
 
   try {
-    appendInstallLog('安装任务启动')
-    persistInstallLog('running')
+    logWriter.appendLine('安装任务启动')
+    await writeInstallLogMeta(input.instanceId, 'running', null)
     await updateGameInstanceRuntime(input.instanceId, {
       status: 'installing',
       lastCommand: '正在准备安装...',
       lastError: null,
+      installPercent: null,
     })
 
     const anonymousResult = await runSteamcmdAppUpdateStreaming(
@@ -504,31 +553,38 @@ async function installInstanceFilesInBackground(
       line => void updateProgress(line),
     )
     if (anonymousResult.ok) {
-      appendInstallLog('安装完成（anonymous）')
+      logWriter.appendLine('安装完成（anonymous）')
       const startScriptResult = ensureInstanceStartScripts(input.installPath, input.appId, {
         instanceName: input.instanceName,
         gamePort: input.gamePort,
       })
       if (startScriptResult.ok) {
-        appendInstallLog('启动脚本已生成')
+        logWriter.appendLine('启动脚本已生成')
       }
       else {
-        appendInstallLog(`启动脚本生成失败: ${startScriptResult.message ?? '未知错误'}`)
+        logWriter.appendLine(`启动脚本生成失败: ${startScriptResult.message ?? '未知错误'}`)
       }
-      persistInstallLog('success')
+      await writeInstallLogMeta(input.instanceId, 'success', 100)
       await updateGameInstanceRuntime(input.instanceId, {
         status: 'stopped',
         lastCommand: startScriptResult.ok
           ? '安装完成（anonymous），启动脚本已生成'
           : `安装完成（anonymous），启动脚本生成失败: ${startScriptResult.message ?? '未知错误'}`,
         lastError: startScriptResult.ok ? null : startScriptResult.message ?? null,
+        installPercent: 100,
       })
+      void refreshInstanceUpdateStatusAfterInstall(
+        input.instanceId,
+        input.installPath,
+        input.appId,
+        input.steamcmdCommand,
+      )
       return
     }
 
     if (!input.steamcmdCredentials) {
-      appendInstallLog(`安装失败（anonymous）：${anonymousResult.output}`)
-      persistInstallLog('failed')
+      logWriter.appendLine(`安装失败（anonymous）：${anonymousResult.output}`)
+      await writeInstallLogMeta(input.instanceId, 'failed', null)
       await updateGameInstanceRuntime(input.instanceId, {
         status: 'error',
         lastCommand: null,
@@ -542,7 +598,7 @@ async function installInstanceFilesInBackground(
       lastCommand: 'anonymous 失败，正在尝试账号登录重试...',
       lastError: null,
     })
-    appendInstallLog('anonymous 失败，正在尝试账号登录重试...')
+    logWriter.appendLine('anonymous 失败，正在尝试账号登录重试...')
 
     const accountResult = await runSteamcmdAppUpdateStreaming(
       input.steamcmdCommand,
@@ -552,30 +608,37 @@ async function installInstanceFilesInBackground(
       line => void updateProgress(line),
     )
     if (accountResult.ok) {
-      appendInstallLog('安装完成（account）')
+      logWriter.appendLine('安装完成（account）')
       const startScriptResult = ensureInstanceStartScripts(input.installPath, input.appId, {
         instanceName: input.instanceName,
         gamePort: input.gamePort,
       })
       if (startScriptResult.ok) {
-        appendInstallLog('启动脚本已生成')
+        logWriter.appendLine('启动脚本已生成')
       }
       else {
-        appendInstallLog(`启动脚本生成失败: ${startScriptResult.message ?? '未知错误'}`)
+        logWriter.appendLine(`启动脚本生成失败: ${startScriptResult.message ?? '未知错误'}`)
       }
-      persistInstallLog('success')
+      await writeInstallLogMeta(input.instanceId, 'success', 100)
       await updateGameInstanceRuntime(input.instanceId, {
         status: 'stopped',
         lastCommand: startScriptResult.ok
           ? '安装完成（account），启动脚本已生成'
           : `安装完成（account），启动脚本生成失败: ${startScriptResult.message ?? '未知错误'}`,
         lastError: startScriptResult.ok ? null : startScriptResult.message ?? null,
+        installPercent: 100,
       })
+      void refreshInstanceUpdateStatusAfterInstall(
+        input.instanceId,
+        input.installPath,
+        input.appId,
+        input.steamcmdCommand,
+      )
       return
     }
 
-    appendInstallLog(`安装失败。\n--- anonymous ---\n${anonymousResult.output}\n--- account ---\n${accountResult.output}`)
-    persistInstallLog('failed')
+    logWriter.appendLine(`安装失败。\n--- anonymous ---\n${anonymousResult.output}\n--- account ---\n${accountResult.output}`)
+    await writeInstallLogMeta(input.instanceId, 'failed', null)
     await updateGameInstanceRuntime(input.instanceId, {
       status: 'error',
       lastCommand: null,
@@ -584,8 +647,8 @@ async function installInstanceFilesInBackground(
   }
   catch (error) {
     const message = error instanceof Error ? error.message : '安装任务异常中断'
-    appendInstallLog(message)
-    persistInstallLog('failed')
+    logWriter.appendLine(message)
+    await writeInstallLogMeta(input.instanceId, 'failed', null)
     app.log.error({
       instanceId: input.instanceId,
       installPath: input.installPath,
@@ -1053,13 +1116,18 @@ async function handleListInstances(
   }
   await reconcileStaleRunningInstances(app)
   const status = payload.status
-  return success(await listGameInstances({
+  const instances = await listGameInstances({
     nodeId: payload.nodeId?.trim() || undefined,
     status: status && ['pending_install', 'running', 'stopped', 'installing', 'error'].includes(status)
       ? status
       : undefined,
     keyword: payload.keyword?.trim() || undefined,
-  }), request)
+  })
+  const steamcmdCommand = await resolveSteamcmdCommandForUpdateCheck()
+  if (checkSteamcmdInstalled(steamcmdCommand)) {
+    void refreshStaleInstanceUpdateChecks(app, instances, steamcmdCommand)
+  }
+  return success(instances, request)
 }
 
 /**
@@ -1087,18 +1155,26 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (!id) {
       return businessError('实例 ID 不能为空', request)
     }
-    const installLog = instanceInstallLogMap.get(id)
-    if (installLog) {
-      return success<InstallLogResponse>({
-        content: installLog.content || '暂无 SteamCMD 安装输出',
-        status: installLog.status,
-        updatedAt: installLog.updatedAt,
-        source: 'install_log',
-      }, request)
-    }
     const instance = await getGameInstanceById(id)
     if (!instance) {
       return businessError('实例不存在', request)
+    }
+    const fileContent = readInstallLogContent(getInstallLogsDirPath(), id)
+    if (fileContent) {
+      return success<InstallLogResponse>({
+        content: fileContent,
+        status: mapDbInstallLogStatusToResponse(instance.installLogStatus, instance.status),
+        updatedAt: instance.installLogUpdatedAt ?? instance.updatedAt,
+        source: 'install_log',
+      }, request)
+    }
+    if (installingInstanceIds.has(id)) {
+      return success<InstallLogResponse>({
+        content: '安装任务已启动，等待 SteamCMD 输出...',
+        status: 'running',
+        updatedAt: instance.installLogUpdatedAt ?? instance.updatedAt,
+        source: 'install_log',
+      }, request)
     }
     const summaryLines = [instance.lastCommand, instance.lastError]
       .filter(Boolean)
@@ -1106,7 +1182,7 @@ export function registerInstanceModule(app: FastifyInstance) {
       .trim()
     if (!summaryLines) {
       return success<InstallLogResponse>({
-        content: '暂无完整 SteamCMD 安装输出（Hub 重启后内存日志已丢失，且当前无状态摘要）。',
+        content: '暂无 SteamCMD 安装输出。',
         status: 'unknown',
         updatedAt: instance.updatedAt,
         source: 'empty',
@@ -1118,8 +1194,8 @@ export function registerInstanceModule(app: FastifyInstance) {
         '',
         summaryLines,
       ].join('\n'),
-      status: 'unknown',
-      updatedAt: instance.updatedAt,
+      status: mapDbInstallLogStatusToResponse(instance.installLogStatus, instance.status),
+      updatedAt: instance.installLogUpdatedAt ?? instance.updatedAt,
       source: 'status_summary',
     }, request)
   })
@@ -1195,7 +1271,7 @@ export function registerInstanceModule(app: FastifyInstance) {
       lastCommand: '等待安装任务启动',
       lastError: null,
     })
-    void installInstanceFilesInBackground(app, {
+    const started = startInstanceInstallJob(app, {
       instanceId,
       appId: gameCode,
       instanceName: name,
@@ -1204,7 +1280,113 @@ export function registerInstanceModule(app: FastifyInstance) {
       steamcmdCommand,
       steamcmdCredentials,
     })
+    if (!started) {
+      return businessError('该实例已有安装任务进行中', request)
+    }
     return success(instance, request)
+  })
+
+  app.post('/app/instance/check-updates', async (request): Promise<ApiSuccessResponse<InstanceCheckUpdatesResponse> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    const body = (request.body ?? {}) as { ids?: string[] }
+    const steamcmdCommand = await resolveSteamcmdCommandForUpdateCheck()
+    if (!checkSteamcmdInstalled(steamcmdCommand)) {
+      return businessError('SteamCMD 未安装或路径不可用，无法检查更新', request)
+    }
+    const instanceIds = Array.isArray(body.ids)
+      ? body.ids.map(id => (typeof id === 'string' ? id.trim() : '')).filter(Boolean)
+      : undefined
+    const result = await checkInstancesForUpdates({
+      steamcmdCommand,
+      instanceIds,
+      force: true,
+    })
+    return success(result, request)
+  })
+
+  app.post('/app/instance/update', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    const body = (request.body ?? {}) as InstanceActionBody
+    const id = normalizeInstanceId(body.id)
+    if (!id) {
+      return businessError('实例 ID 不能为空', request)
+    }
+    const current = await getGameInstanceById(id)
+    if (!current) {
+      return businessError('实例不存在', request)
+    }
+    if (current.nodeId !== LOCAL_NODE_ID) {
+      return businessError('当前仅支持本地节点执行实例命令', request)
+    }
+    if (current.status === 'running') {
+      return businessError('请先停止实例后再更新服务端', request)
+    }
+    if (current.status === 'pending_install' || current.status === 'installing') {
+      return businessError('实例正在安装中，请稍后再试', request)
+    }
+    if (installingInstanceIds.has(id)) {
+      return businessError('该实例已有安装任务进行中', request)
+    }
+    const installPath = normalizeInstallPath(current.installPath ?? undefined)
+      || await getDefaultSteamInstallPath(current.gameCode, current.id)
+    const installPathError = validateInstallPath(installPath)
+    if (installPathError) {
+      return businessError(installPathError, request)
+    }
+    const ensureDirError = ensureInstallPathDirectory(installPath)
+    if (ensureDirError) {
+      return businessError(`安装目录创建失败: ${ensureDirError}`, request)
+    }
+    const steamcmdCredentials = getSteamcmdLoginCredentials()
+    const steamcmdConfig = await getSystemSteamcmdConfig()
+    const steamcmdCommand = steamcmdConfig?.steamcmdPath?.trim() || (process.platform === 'win32' ? 'steamcmd.exe' : 'steamcmd')
+    if (!checkSteamcmdInstalled(steamcmdCommand)) {
+      return businessError('SteamCMD 未安装或路径不可用，请先完成 SteamCMD 安装配置', request)
+    }
+    const checked = await refreshInstanceUpdateStatus(current, {
+      steamcmdCommand,
+      forceRemote: true,
+    })
+    if (
+      checked.localBuildId
+      && checked.remoteBuildId
+      && !checked.updateAvailable
+    ) {
+      return businessError(
+        `当前已是最新版本（Build ${checked.localBuildId}），无需更新`,
+        request,
+      )
+    }
+    const started = startInstanceInstallJob(app, {
+      instanceId: id,
+      appId: current.gameCode,
+      instanceName: current.name,
+      gamePort: current.gamePort,
+      installPath,
+      steamcmdCommand,
+      steamcmdCredentials,
+    })
+    if (!started) {
+      return businessError('该实例已有安装任务进行中', request)
+    }
+    await updateGameInstanceRuntime(id, {
+      status: 'installing',
+      lastCommand: '正在准备更新服务端...',
+      lastError: null,
+      installPercent: null,
+    })
+    app.log.info({
+      instanceId: id,
+      gameCode: current.gameCode,
+      installPath,
+    }, '实例开始执行 SteamCMD 手动更新')
+    return success({ isSuccess: true }, request)
   })
 
   app.post('/app/instance/start', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {
@@ -1574,7 +1756,8 @@ export function registerInstanceModule(app: FastifyInstance) {
       })
     }
     instanceRuntimeRegistry.deleteProcess(id)
-    instanceInstallLogMap.delete(id)
+    installingInstanceIds.delete(id)
+    deleteInstallLogFile(getInstallLogsDirPath(), id)
     stoppingInstanceIds.delete(id)
     const installPath = normalizeInstallPath(current.installPath ?? undefined)
       || await getDefaultSteamInstallPath(current.gameCode, current.id)
@@ -1608,5 +1791,6 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (reconciled > 0) {
       app.log.info({ reconciled }, '已校正因服务重启而残留的实例运行状态')
     }
+    scheduleInstanceUpdateChecks(app)
   })
 }

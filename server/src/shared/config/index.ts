@@ -75,7 +75,12 @@ function isTruthyEnv(value: string | undefined): boolean {
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
 }
 
+export function resolveInstallLogsDir(dbPath: string) {
+  return path.join(path.dirname(dbPath), 'install-logs')
+}
+
 export function ensureServerRuntimeDirs(config: Pick<ServerConfig, 'dbPath' | 'logDir'>) {
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true })
   fs.mkdirSync(config.logDir, { recursive: true })
+  fs.mkdirSync(resolveInstallLogsDir(config.dbPath), { recursive: true })
 }

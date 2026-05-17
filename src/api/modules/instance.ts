@@ -16,8 +16,28 @@ export interface InstanceItem {
   rconPort: number | null
   lastCommand: string | null
   lastError: string | null
+  installLogStatus: 'running' | 'success' | 'failed' | null
+  installPercent: number | null
+  installLogUpdatedAt: string | null
+  updateAvailable: boolean
+  localBuildId: string | null
+  remoteBuildId: string | null
+  updateCheckedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface InstanceCheckUpdatesPayload {
+  items: Array<{
+    id: string
+    name: string
+    updateAvailable: boolean
+    localBuildId: string | null
+    remoteBuildId: string | null
+    updateCheckedAt: string | null
+    message?: string
+  }>
+  updateAvailableCount: number
 }
 
 export interface InstanceListQuery {
@@ -73,6 +93,8 @@ export default {
     params: { id },
   }) as Promise<{ data: InstanceInstallLogPayload }>,
   createInstance: (data: CreateInstancePayload) => api.post('app/instance/create', data),
+  updateInstance: (id: string) => api.post('app/instance/update', { id }),
+  checkInstanceUpdates: (ids?: string[]) => api.post('app/instance/check-updates', ids?.length ? { ids } : {}) as Promise<{ data: InstanceCheckUpdatesPayload }>,
   startInstance: (id: string) => api.post('app/instance/start', { id }),
   stopInstance: (id: string) => api.post('app/instance/stop', { id }),
   restartInstance: (id: string) => api.post('app/instance/restart', { id }),

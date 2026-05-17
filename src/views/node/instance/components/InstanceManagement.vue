@@ -2,7 +2,7 @@
 import type { DataTableColumns, FormInst, FormRules } from 'naive-ui'
 import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceInstallLogSource, InstanceItem, InstanceStatus } from '@/api/modules/instance'
 import type { NodeListItem } from '@/api/modules/node'
-import { NButton, NProgress, useDialog } from 'naive-ui'
+import { NAlert, NButton, NProgress, NTag, useDialog } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
 import { blurFocusedElement } from '@/utils'
@@ -26,6 +26,7 @@ const dialog = useDialog()
 const router = useRouter()
 
 const instanceLoading = ref(false)
+const updateCheckLoading = ref(false)
 const createLoading = ref(false)
 const actionLoadingId = ref('')
 const instances = ref<InstanceItem[]>([])
@@ -45,7 +46,8 @@ const installLogTargetId = ref('')
 let installLogPollTimer: ReturnType<typeof setInterval> | undefined
 
 /** 列宽总和，启用横向滚动，避免中间列被挤压为 0 */
-const INSTANCE_TABLE_SCROLL_X = 1260
+const INSTANCE_TABLE_SCROLL_X = 1340
+const UPDATE_NOTIFY_STORAGE_KEY = 'gsh-instance-update-notified'
 
 const createForm = reactive<CreateInstancePayload>({
   nodeId: '',
@@ -129,12 +131,25 @@ const statusCount = computed(() => {
 
 const filteredInstances = computed(() => instances.value)
 
+const instancesWithUpdate = computed(() => {
+  return instances.value.filter(item => item.updateAvailable)
+})
+
 const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
   return [
     {
       title: '实例名称',
       key: 'name',
-      width: 180,
+      width: 200,
+      render: (row) => {
+        const children = [h('span', row.name)]
+        if (row.updateAvailable) {
+          children.push(
+            h(NTag, { type: 'warning', size: 'small', round: true }, { default: () => '有新版本' }),
+          )
+        }
+        return h('div', { class: 'flex flex-wrap items-center gap-2' }, children)
+      },
     },
     {
       title: 'Steam AppID',
@@ -195,7 +210,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '操作',
       key: 'actions',
-      width: 280,
+      width: 360,
       fixed: 'right',
       render: row =>
         h('div', { class: 'flex flex-wrap gap-4' }, [
@@ -211,6 +226,18 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
               }),
             },
             { default: () => '控制台' },
+          ),
+          h(
+            NButton,
+            {
+              size: 'small',
+              text: true,
+              loading: isActionLoading(row.id, 'update'),
+              disabled: !canUpdateInstance(row),
+              title: getUpdateInstanceButtonTitle(row),
+              onClick: () => confirmUpdateInstance(row),
+            },
+            { default: () => '更新服务端' },
           ),
           h(
             NButton,
@@ -326,6 +353,9 @@ function resolveInstallPhase(instance: InstanceItem): string {
   if (text.includes('等待安装')) {
     return '等待安装'
   }
+  if (text.includes('正在准备更新')) {
+    return '准备更新'
+  }
   if (text.includes('正在准备')) {
     return '准备安装'
   }
@@ -348,6 +378,9 @@ function resolveInstallPhase(instance: InstanceItem): string {
 }
 
 function extractInstallProgressPercent(instance: InstanceItem): number | null {
+  if (typeof instance.installPercent === 'number' && Number.isFinite(instance.installPercent)) {
+    return Math.max(0, Math.min(100, instance.installPercent))
+  }
   const sources = [instance.lastCommand, instance.lastError]
   for (const text of sources) {
     if (!text) {
@@ -461,6 +494,67 @@ function getInstallLogStatusLabel(status: InstanceInstallLogPayload['status'] | 
 
 function getNodeName(nodeId: string) {
   return nodes.value.find(node => node.id === nodeId)?.name ?? nodeId
+}
+
+function isInstanceUpToDate(instance: InstanceItem) {
+  return Boolean(
+    instance.updateCheckedAt
+    && instance.localBuildId
+    && instance.remoteBuildId
+    && !instance.updateAvailable,
+  )
+}
+
+function canUpdateInstance(instance: InstanceItem) {
+  if (instance.status !== 'stopped' && instance.status !== 'error') {
+    return false
+  }
+  return !isInstanceUpToDate(instance)
+}
+
+function getUpdateInstanceButtonTitle(instance: InstanceItem) {
+  if (instance.status === 'running') {
+    return '请先停止实例'
+  }
+  if (instance.status === 'pending_install' || instance.status === 'installing') {
+    return '安装进行中'
+  }
+  if (isInstanceUpToDate(instance)) {
+    return `已是最新版本（Build ${instance.localBuildId}）`
+  }
+  return '通过 SteamCMD 拉取最新服务端'
+}
+
+function confirmUpdateInstance(row: InstanceItem) {
+  blurFocusedElement()
+  dialog.warning({
+    title: '确认更新服务端',
+    content: `将通过 SteamCMD 拉取「${row.name}」的最新服务端文件。更新前请确保实例已停止，过程可在「查看日志」中查看进度。`,
+    positiveText: '开始更新',
+    negativeText: '取消',
+    positiveButtonProps: {
+      type: 'warning',
+    },
+    onPositiveClick: () => {
+      void runUpdateInstance(row)
+    },
+  })
+}
+
+async function runUpdateInstance(row: InstanceItem) {
+  actionLoadingId.value = `update:${row.id}`
+  try {
+    await apiInstance.updateInstance(row.id)
+    faToast.success('已开始更新服务端，请查看安装日志了解进度')
+    await fetchInstances()
+    await openInstallLogModal(row)
+  }
+  catch {
+    await fetchInstances()
+  }
+  finally {
+    actionLoadingId.value = ''
+  }
 }
 
 function confirmDangerousInstanceAction(row: InstanceItem, action: 'stop' | 'restart' | 'delete') {
@@ -600,6 +694,34 @@ async function openInstallLogModal(instance: InstanceItem) {
   startInstallLogPolling()
 }
 
+function buildUpdateNotifySignature(list: InstanceItem[]) {
+  return list
+    .filter(item => item.updateAvailable)
+    .map(item => `${item.id}:${item.remoteBuildId ?? ''}`)
+    .sort()
+    .join('|')
+}
+
+function notifyInstanceUpdatesIfNeeded() {
+  const pending = instancesWithUpdate.value
+  if (pending.length === 0) {
+    return
+  }
+  const signature = buildUpdateNotifySignature(instances.value)
+  if (!signature) {
+    return
+  }
+  const lastSignature = sessionStorage.getItem(UPDATE_NOTIFY_STORAGE_KEY)
+  if (lastSignature === signature) {
+    return
+  }
+  sessionStorage.setItem(UPDATE_NOTIFY_STORAGE_KEY, signature)
+  const names = pending.map(item => item.name).join('、')
+  faToast.warning(`检测到游戏服务端新版本：${names}。请先停止实例，再使用「更新服务端」。`, {
+    duration: 8000,
+  })
+}
+
 async function fetchInstances() {
   instanceLoading.value = true
   try {
@@ -609,9 +731,34 @@ async function fetchInstances() {
       keyword: keywordFilter.value.trim() || undefined,
     })
     instances.value = res.data
+    notifyInstanceUpdatesIfNeeded()
   }
   finally {
     instanceLoading.value = false
+  }
+}
+
+async function checkAllInstanceUpdates() {
+  if (!steamcmdInstalled.value) {
+    faToast.error('请先安装 SteamCMD')
+    return
+  }
+  updateCheckLoading.value = true
+  faToast.info('正在检查游戏版本，约需数秒；期间可继续查询列表或操作其他实例', {
+    duration: 5000,
+  })
+  try {
+    const res = await apiInstance.checkInstanceUpdates()
+    await fetchInstances()
+    if (res.data.updateAvailableCount > 0) {
+      faToast.warning(`发现 ${res.data.updateAvailableCount} 个实例有可用更新`)
+    }
+    else {
+      faToast.success('已检查全部实例，当前均为最新版本')
+    }
+  }
+  finally {
+    updateCheckLoading.value = false
   }
 }
 
@@ -694,7 +841,7 @@ async function runInstanceAction(
   }
 }
 
-function isActionLoading(instanceId: string, action: 'start' | 'stop' | 'restart' | 'delete') {
+function isActionLoading(instanceId: string, action: 'start' | 'stop' | 'restart' | 'delete' | 'update') {
   return actionLoadingId.value === `${action}:${instanceId}`
 }
 
@@ -755,16 +902,29 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <NAlert
+        v-if="instancesWithUpdate.length > 0"
+        type="warning"
+        title="发现游戏服务端新版本"
+      >
+        <p class="text-sm leading-relaxed">
+          {{ instancesWithUpdate.map(item => item.name).join('、') }} 在 Steam 上有新版本。请先停止实例，使用「更新服务端」拉取最新文件后再启动。
+        </p>
+      </NAlert>
+
       <div class="gap-3 grid">
-        <div class="flex gap-2 items-center">
+        <div class="flex flex-wrap gap-2 items-center">
           <NInput
             v-model:value="keywordFilter"
             class="w-64"
             placeholder="实例名称/Steam AppID"
             @keydown.enter="fetchInstances"
           />
-          <NButton type="primary" strong secondary :loading="instanceLoading" @click="fetchInstances">
+          <NButton type="primary" strong secondary @click="fetchInstances">
             查询
+          </NButton>
+          <NButton :loading="updateCheckLoading" :disabled="!steamcmdInstalled" @click="checkAllInstanceUpdates">
+            检查更新
           </NButton>
           <NButton @click="refreshInstancesAndResetKeyword">
             重置

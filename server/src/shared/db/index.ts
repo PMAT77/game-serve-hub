@@ -97,6 +97,7 @@ export interface SaveServerNodeInput {
 }
 
 export type DbGameInstanceStatus = 'pending_install' | 'running' | 'stopped' | 'installing' | 'error'
+export type DbInstallLogStatus = 'running' | 'success' | 'failed'
 
 export interface DbGameInstance {
   id: string
@@ -114,6 +115,13 @@ export interface DbGameInstance {
   lastCommand: string | null
   lastExitCode: number | null
   lastError: string | null
+  installLogStatus: DbInstallLogStatus | null
+  installPercent: number | null
+  installLogUpdatedAt: string | null
+  updateAvailable: boolean
+  localBuildId: string | null
+  remoteBuildId: string | null
+  updateCheckedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -143,6 +151,13 @@ export interface UpdateGameInstanceRuntimeInput {
   lastCommand?: string | null
   lastExitCode?: number | null
   lastError?: string | null
+  installLogStatus?: DbInstallLogStatus | null
+  installPercent?: number | null
+  installLogUpdatedAt?: string | null
+  updateAvailable?: boolean
+  localBuildId?: string | null
+  remoteBuildId?: string | null
+  updateCheckedAt?: string | null
 }
 
 const defaultUserSeeds: DbDefaultUserSeed[] = [
@@ -242,6 +257,30 @@ function ensureSchemaCompatibility(database: DatabaseSync) {
   ensureColumn(database, 'game_instances', 'last_command', 'text')
   ensureColumn(database, 'game_instances', 'last_exit_code', 'integer')
   ensureColumn(database, 'game_instances', 'last_error', 'text')
+  // install_log_* 由 drizzle 0003 迁移维护，勿在此 ensureColumn，避免与未入账的 0003 SQL 重复 ADD
+}
+
+function isDuplicateColumnSqliteError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+  const withCode = error as Error & { code?: string, errcode?: number }
+  if (withCode.code === 'ERR_SQLITE_ERROR' && withCode.errcode === 1) {
+    return /duplicate column name/i.test(error.message)
+  }
+  return /duplicate column name/i.test(error.message)
+}
+
+function execMigrationQuery(database: DatabaseSync, query: string) {
+  try {
+    database.exec(query)
+  }
+  catch (error) {
+    if (isDuplicateColumnSqliteError(error)) {
+      return
+    }
+    throw error
+  }
 }
 
 async function applyMigrations(migrationsFolder: string) {
@@ -255,12 +294,20 @@ async function applyMigrations(migrationsFolder: string) {
     drizzleDb,
     async (queries) => {
       for (const query of queries) {
-        sqliteDb.exec(query)
+        execMigrationQuery(sqliteDb, query)
       }
     },
     { migrationsFolder },
   )
   ensureSchemaCompatibility(sqliteDb)
+  // 旧库若曾通过历史 ensureColumn 写入 install_log_* 但 0003 未入账，补列后仍保证三列存在
+  ensureColumn(sqliteDb, 'game_instances', 'install_log_status', 'text')
+  ensureColumn(sqliteDb, 'game_instances', 'install_percent', 'integer')
+  ensureColumn(sqliteDb, 'game_instances', 'install_log_updated_at', 'text')
+  ensureColumn(sqliteDb, 'game_instances', 'update_available', 'integer DEFAULT 0 NOT NULL')
+  ensureColumn(sqliteDb, 'game_instances', 'local_build_id', 'text')
+  ensureColumn(sqliteDb, 'game_instances', 'remote_build_id', 'text')
+  ensureColumn(sqliteDb, 'game_instances', 'update_checked_at', 'text')
 }
 
 function bootstrapLegacyMigrationBaseline(database: DatabaseSync, migrationsFolder: string) {
@@ -922,9 +969,17 @@ function mapDbGameInstance(row: {
   lastCommand: string | null
   lastExitCode: number | null
   lastError: string | null
+  installLogStatus: string | null
+  installPercent: number | null
+  installLogUpdatedAt: string | null
+  updateAvailable: number | null
+  localBuildId: string | null
+  remoteBuildId: string | null
+  updateCheckedAt: string | null
   createdAt: string
   updatedAt: string
 }): DbGameInstance {
+  const installLogStatus = row.installLogStatus?.trim()
   return {
     ...row,
     status: normalizeInstanceStatus(row.status),
@@ -933,6 +988,44 @@ function mapDbGameInstance(row: {
     gamePort: row.gamePort === null ? null : Number(row.gamePort),
     rconPort: row.rconPort === null ? null : Number(row.rconPort),
     lastExitCode: row.lastExitCode === null ? null : Number(row.lastExitCode),
+    installLogStatus: installLogStatus === 'running' || installLogStatus === 'success' || installLogStatus === 'failed'
+      ? installLogStatus
+      : null,
+    installPercent: row.installPercent === null ? null : Number(row.installPercent),
+    installLogUpdatedAt: row.installLogUpdatedAt ?? null,
+    updateAvailable: Number(row.updateAvailable ?? 0) === 1,
+    localBuildId: row.localBuildId ?? null,
+    remoteBuildId: row.remoteBuildId ?? null,
+    updateCheckedAt: row.updateCheckedAt ?? null,
+  }
+}
+
+function gameInstanceSelectFields() {
+  return {
+    id: gameInstances.id,
+    nodeId: gameInstances.nodeId,
+    name: gameInstances.name,
+    gameCode: gameInstances.gameCode,
+    status: gameInstances.status,
+    containerId: gameInstances.containerId,
+    runtimePid: gameInstances.runtimePid,
+    installPath: gameInstances.installPath,
+    configPath: gameInstances.configPath,
+    queryPort: gameInstances.queryPort,
+    gamePort: gameInstances.gamePort,
+    rconPort: gameInstances.rconPort,
+    lastCommand: gameInstances.lastCommand,
+    lastExitCode: gameInstances.lastExitCode,
+    lastError: gameInstances.lastError,
+    installLogStatus: gameInstances.installLogStatus,
+    installPercent: gameInstances.installPercent,
+    installLogUpdatedAt: gameInstances.installLogUpdatedAt,
+    updateAvailable: gameInstances.updateAvailable,
+    localBuildId: gameInstances.localBuildId,
+    remoteBuildId: gameInstances.remoteBuildId,
+    updateCheckedAt: gameInstances.updateCheckedAt,
+    createdAt: gameInstances.createdAt,
+    updatedAt: gameInstances.updatedAt,
   }
 }
 
@@ -971,25 +1064,7 @@ export async function createGameInstance(input: CreateGameInstanceInput): Promis
 export async function getGameInstanceById(id: string): Promise<DbGameInstance | undefined> {
   const { drizzleDb } = ensureDb()
   const rows = await drizzleDb
-    .select({
-      id: gameInstances.id,
-      nodeId: gameInstances.nodeId,
-      name: gameInstances.name,
-      gameCode: gameInstances.gameCode,
-      status: gameInstances.status,
-      containerId: gameInstances.containerId,
-      runtimePid: gameInstances.runtimePid,
-      installPath: gameInstances.installPath,
-      configPath: gameInstances.configPath,
-      queryPort: gameInstances.queryPort,
-      gamePort: gameInstances.gamePort,
-      rconPort: gameInstances.rconPort,
-      lastCommand: gameInstances.lastCommand,
-      lastExitCode: gameInstances.lastExitCode,
-      lastError: gameInstances.lastError,
-      createdAt: gameInstances.createdAt,
-      updatedAt: gameInstances.updatedAt,
-    })
+    .select(gameInstanceSelectFields())
     .from(gameInstances)
     .where(eq(gameInstances.id, id))
     .limit(1)
@@ -1007,25 +1082,7 @@ export async function listGameInstances(filters?: {
 }): Promise<DbGameInstance[]> {
   const { drizzleDb } = ensureDb()
   const rows = await drizzleDb
-    .select({
-      id: gameInstances.id,
-      nodeId: gameInstances.nodeId,
-      name: gameInstances.name,
-      gameCode: gameInstances.gameCode,
-      status: gameInstances.status,
-      containerId: gameInstances.containerId,
-      runtimePid: gameInstances.runtimePid,
-      installPath: gameInstances.installPath,
-      configPath: gameInstances.configPath,
-      queryPort: gameInstances.queryPort,
-      gamePort: gameInstances.gamePort,
-      rconPort: gameInstances.rconPort,
-      lastCommand: gameInstances.lastCommand,
-      lastExitCode: gameInstances.lastExitCode,
-      lastError: gameInstances.lastError,
-      createdAt: gameInstances.createdAt,
-      updatedAt: gameInstances.updatedAt,
-    })
+    .select(gameInstanceSelectFields())
     .from(gameInstances)
     .orderBy(asc(gameInstances.createdAt))
 
@@ -1071,6 +1128,13 @@ export async function updateGameInstanceRuntime(
     lastCommand?: string | null
     lastExitCode?: number | null
     lastError?: string | null
+    installLogStatus?: DbInstallLogStatus | null
+    installPercent?: number | null
+    installLogUpdatedAt?: string | null
+    updateAvailable?: number
+    localBuildId?: string | null
+    remoteBuildId?: string | null
+    updateCheckedAt?: string | null
     updatedAt: string
   } = {
     updatedAt: nowIso(),
@@ -1092,6 +1156,32 @@ export async function updateGameInstanceRuntime(
   }
   if (typeof input.lastError !== 'undefined') {
     setPayload.lastError = input.lastError?.trim() || null
+  }
+  if (typeof input.installLogStatus !== 'undefined') {
+    setPayload.installLogStatus = input.installLogStatus
+  }
+  if (typeof input.installPercent !== 'undefined') {
+    const percent = input.installPercent
+    setPayload.installPercent = percent === null
+      ? null
+      : Number.isInteger(percent)
+        ? Math.max(0, Math.min(100, percent))
+        : null
+  }
+  if (typeof input.installLogUpdatedAt !== 'undefined') {
+    setPayload.installLogUpdatedAt = input.installLogUpdatedAt?.trim() || null
+  }
+  if (typeof input.updateAvailable !== 'undefined') {
+    setPayload.updateAvailable = input.updateAvailable ? 1 : 0
+  }
+  if (typeof input.localBuildId !== 'undefined') {
+    setPayload.localBuildId = input.localBuildId?.trim() || null
+  }
+  if (typeof input.remoteBuildId !== 'undefined') {
+    setPayload.remoteBuildId = input.remoteBuildId?.trim() || null
+  }
+  if (typeof input.updateCheckedAt !== 'undefined') {
+    setPayload.updateCheckedAt = input.updateCheckedAt?.trim() || null
   }
   await drizzleDb
     .update(gameInstances)

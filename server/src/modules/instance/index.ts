@@ -26,7 +26,12 @@ import {
   readInstallLogContent,
 } from '../../shared/instance-install/log-store'
 import { instanceRuntimeRegistry } from '../../shared/instance-runtime/registry'
+import {
+  processStartIsoFromElapsed,
+  sampleProcessMetrics,
+} from '../../shared/instance-runtime/process-metrics'
 import { businessError, success, unauthorized } from '../../shared/http/response'
+import { registerInstanceMetricsRoute } from './metrics'
 import type { InstanceCheckUpdatesResponse } from './update-check'
 import { readLocalBuildId } from '../../shared/steam-update/build-id'
 import {
@@ -1010,6 +1015,14 @@ async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<num
           pid: instance.runtimePid,
         }, '实例进程仍在运行，但控制台未附着（可能因服务重启），请重启实例以恢复控制台')
       }
+      if (!instance.runtimeStartedAt && instance.runtimePid) {
+        const sample = await sampleProcessMetrics(instance.runtimePid)
+        if (sample) {
+          await updateGameInstanceRuntime(instance.id, {
+            runtimeStartedAt: processStartIsoFromElapsed(sample.elapsedSeconds),
+          })
+        }
+      }
       continue
     }
     instanceRuntimeRegistry.deleteProcess(instance.id)
@@ -1018,6 +1031,7 @@ async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<num
       status: 'stopped',
       containerId: null,
       runtimePid: null,
+      runtimeStartedAt: null,
     })
     reconciled++
     app.log.info({ instanceId: instance.id }, '实例进程不存在，已同步状态为已停止')
@@ -1087,6 +1101,7 @@ async function stopInstanceRuntime(input: {
       status: 'stopped',
       containerId: null,
       runtimePid: null,
+      runtimeStartedAt: null,
       lastError: null,
     })
     return
@@ -1102,6 +1117,7 @@ async function stopInstanceRuntime(input: {
       status: 'stopped',
       containerId: null,
       runtimePid: null,
+      runtimeStartedAt: null,
       lastError: null,
     })
   }
@@ -1137,6 +1153,7 @@ async function handleListInstances(
  * 负责游戏实例生命周期管理（创建、启动、停止、重启、删除）。
  */
 export function registerInstanceModule(app: FastifyInstance) {
+  registerInstanceMetricsRoute(app)
   app.post('/app/instance/list', async request => handleListInstances(app, request, (request.body ?? {}) as InstanceListQuery))
 
   app.get('/app/instance/games', async (request): Promise<ApiSuccessResponse<InstallableGameItem[]> | ApiErrorResponse> => {
@@ -1533,6 +1550,7 @@ export function registerInstanceModule(app: FastifyInstance) {
         status: 'stopped',
         containerId: null,
         runtimePid: null,
+        runtimeStartedAt: null,
       })
     }
     const displayCommand = launch.display
@@ -1560,6 +1578,7 @@ export function registerInstanceModule(app: FastifyInstance) {
         status: 'error',
         containerId: null,
         runtimePid: null,
+        runtimeStartedAt: null,
         lastCommand: displayCommand,
         lastError: error.message,
       })
@@ -1588,6 +1607,7 @@ export function registerInstanceModule(app: FastifyInstance) {
         status: wasStopping ? 'stopped' : (code === 0 ? 'stopped' : 'error'),
         containerId: null,
         runtimePid: null,
+        runtimeStartedAt: null,
         lastCommand: displayCommand,
         lastExitCode: code === null ? null : code,
         lastError: finalError,
@@ -1597,6 +1617,7 @@ export function registerInstanceModule(app: FastifyInstance) {
       status: 'running',
       containerId: child.pid ? String(child.pid) : null,
       runtimePid: child.pid ?? null,
+      runtimeStartedAt: new Date().toISOString(),
       lastCommand: displayCommand,
       lastExitCode: null,
       lastError: null,
@@ -1631,6 +1652,7 @@ export function registerInstanceModule(app: FastifyInstance) {
         status: 'stopped',
         containerId: null,
         runtimePid: null,
+        runtimeStartedAt: null,
         lastError: null,
       })
       return success({ isSuccess: true }, request)
@@ -1768,6 +1790,7 @@ export function registerInstanceModule(app: FastifyInstance) {
         status: 'stopped',
         containerId: null,
         runtimePid: null,
+        runtimeStartedAt: null,
         lastError: null,
       })
     }

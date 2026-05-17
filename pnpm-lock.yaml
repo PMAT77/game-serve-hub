@@ -312,6 +312,9 @@ importers:
       path-to-regexp:
         specifier: 'catalog:'
         version: 8.4.2
+      pidusage:
+        specifier: ^4.0.1
+        version: 4.0.1
       pinia:
         specifier: 'catalog:'
         version: 3.0.4(typescript@5.9.3)(vue@3.5.34(typescript@5.9.3))
@@ -4453,6 +4456,10 @@ packages:
     resolution: {integrity: sha512-eG2dWTVw5bzqGRztnHExczNxt5VGsE6OwTeCG3fdUf9KBsZzO3R5OIIIzWR+iZA0NtZ+RDVdaoE2dK1cn6jH4g==}
     engines: {node: '>=0.10'}
     hasBin: true
+
+  pidusage@4.0.1:
+    resolution: {integrity: sha512-yCH2dtLHfEBnzlHUJymR/Z1nN2ePG3m392Mv8TFlTP1B0xkpMQNHAnfkY0n2tAi6ceKO6YWhxYfZ96V4vVkh/g==}
+    engines: {node: '>=18'}
 
   pinia-plugin-persistedstate@4.7.1:
     resolution: {integrity: sha512-WHOqh2esDlR3eAaknPbqXrkkj0D24h8shrDPqysgCFR6ghqP/fpFfJmMPJp0gETHsvrh9YNNg6dQfo2OEtDnIQ==}
@@ -9203,6 +9210,10 @@ snapshots:
   picomatch@4.0.4: {}
 
   pidtree@0.6.0: {}
+
+  pidusage@4.0.1:
+    dependencies:
+      safe-buffer: 5.2.1
 
   pinia-plugin-persistedstate@4.7.1(pinia@3.0.4(typescript@5.9.3)(vue@3.5.34(typescript@5.9.3))):
     dependencies:

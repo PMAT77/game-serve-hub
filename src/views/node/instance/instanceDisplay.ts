@@ -174,6 +174,48 @@ export function isInstanceInstallingStatus(status: InstanceStatus | undefined) {
   return status === 'pending_install' || status === 'installing'
 }
 
+/** 格式化处理进程内存占用（MB） */
+export function formatMemoryMb(mb: number | null | undefined) {
+  if (mb === null || typeof mb === 'undefined' || !Number.isFinite(mb)) {
+    return '—'
+  }
+  return `${Math.round(mb)} MB`
+}
+
+/** 格式化运行时长（秒） */
+export function formatUptime(seconds: number | null | undefined) {
+  if (seconds === null || typeof seconds === 'undefined' || !Number.isFinite(seconds) || seconds < 0) {
+    return '—'
+  }
+  const total = Math.floor(seconds)
+  const days = Math.floor(total / 86400)
+  const hours = Math.floor((total % 86400) / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const secs = total % 60
+  if (days > 0) {
+    return `${days}天 ${hours}时`
+  }
+  if (hours > 0) {
+    return `${hours}时 ${minutes}分`
+  }
+  if (minutes > 0) {
+    return `${minutes}分 ${secs}秒`
+  }
+  return `${secs}秒`
+}
+
+/** 根据 runtimeStartedAt 计算当前运行秒数（纯前端 tick） */
+export function computeUptimeSecondsFromStartedAt(runtimeStartedAt: string | null | undefined, nowMs = Date.now()) {
+  if (!runtimeStartedAt?.trim()) {
+    return null
+  }
+  const started = Date.parse(runtimeStartedAt)
+  if (!Number.isFinite(started)) {
+    return null
+  }
+  return Math.max(0, Math.floor((nowMs - started) / 1000))
+}
+
 /** 将轮询间隔毫秒转为用户可读刷新文案 */
 export function formatPollIntervalHint(ms: number) {
   const seconds = Math.round(ms / 1000)

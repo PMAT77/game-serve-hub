@@ -24,6 +24,7 @@
     "vite.config.ts",
     "uno.config.ts",
     "vite/**/*.ts",
-    "server/src/**/*.ts"
+    "server/src/**/*.ts",
+    "server/src/**/*.d.ts"
   ]
 }

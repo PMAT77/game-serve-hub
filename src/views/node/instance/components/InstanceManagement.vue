@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DataTableColumns, FormInst, FormRules } from 'naive-ui'
-import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceItem, InstanceStatus } from '@/api/modules/instance'
+import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceItem, InstanceRuntimeMetrics, InstanceStatus } from '@/api/modules/instance'
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
 import { NButton, NProgress, NTag, useDialog, useNotification } from 'naive-ui'
@@ -9,8 +9,11 @@ import apiInstance from '@/api/modules/instance'
 import { blurFocusedElement } from '@/utils'
 import {
   canOpenInstallLog,
+  computeUptimeSecondsFromStartedAt,
   extractInstallProgressPercent,
+  formatMemoryMb,
   formatPollIntervalHint,
+  formatUptime,
   getInstallLogSourceLabel,
   getInstallLogStatusLabel,
   getStatusBadgeClass,
@@ -44,6 +47,8 @@ const updateCheckLoading = ref(false)
 const createLoading = ref(false)
 const actionLoadingId = ref('')
 const instances = ref<InstanceItem[]>([])
+const instanceMetrics = ref<Record<string, InstanceRuntimeMetrics | null>>({})
+const uptimeNowMs = ref(Date.now())
 
 const keywordFilter = ref('')
 const statusFilter = ref<'all' | InstanceStatus>('all')
@@ -58,12 +63,15 @@ const installLogMeta = ref<InstanceInstallLogPayload | null>(null)
 const installLogInstanceName = ref('')
 const installLogTargetId = ref('')
 let installLogPollTimer: ReturnType<typeof setInterval> | undefined
+let metricsPollingTimer: ReturnType<typeof setInterval> | undefined
+let uptimeTickTimer: ReturnType<typeof setInterval> | undefined
 
 // --- 常量 ---
 /** 列宽总和，启用横向滚动，避免中间列被挤压为 0 */
-const INSTANCE_TABLE_SCROLL_X = 1340
+const INSTANCE_TABLE_SCROLL_X = 1560
 const INSTANCE_INSTALL_POLL_MS = 1000
 const INSTANCE_INSTALL_LOG_POLL_MS = 1000
+const INSTANCE_METRICS_POLL_MS = 5000
 /** 用户手动关闭通知后记录签名，避免同一批更新反复弹出 */
 const UPDATE_NOTIFY_DISMISSED_KEY = 'gsh-instance-update-dismissed'
 /** @deprecated 旧版在弹出 toast 时即写入，会阻止通知显示，挂载时清理 */
@@ -243,6 +251,24 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
         ),
     },
     {
+      title: 'CPU',
+      key: 'cpu',
+      width: 90,
+      render: row => renderInstanceCpuColumn(row),
+    },
+    {
+      title: '内存',
+      key: 'memory',
+      width: 100,
+      render: row => renderInstanceMemoryColumn(row),
+    },
+    {
+      title: '运行时长',
+      key: 'uptime',
+      width: 110,
+      render: row => renderInstanceUptimeColumn(row),
+    },
+    {
       title: '安装',
       key: 'install',
       width: 150,
@@ -398,6 +424,141 @@ function renderInstallColumn(instance: InstanceItem) {
 /** 根据节点 ID 解析节点名称 */
 function getNodeName(nodeId: string) {
   return nodes.value.find(node => node.id === nodeId)?.name ?? nodeId
+}
+
+function formatCpuPercent(rate: number | null | undefined) {
+  if (rate === null || typeof rate === 'undefined' || !Number.isFinite(rate)) {
+    return '—'
+  }
+  return `${rate.toFixed(1)}%`
+}
+
+function getMetricsForInstance(instanceId: string) {
+  return instanceMetrics.value[instanceId] ?? null
+}
+
+function renderRuntimePlaceholder() {
+  return h('span', { class: 'text-sm text-muted-foreground' }, '—')
+}
+
+function renderInstanceCpuColumn(row: InstanceItem) {
+  if (row.status !== 'running') {
+    return renderRuntimePlaceholder()
+  }
+  const metrics = getMetricsForInstance(row.id)
+  if (metrics?.cpuUsageRate === null || typeof metrics?.cpuUsageRate === 'undefined') {
+    return renderRuntimePlaceholder()
+  }
+  return h(
+    'span',
+    {
+      class: 'text-sm',
+      title: '进程 CPU 占用（非整机）',
+    },
+    formatCpuPercent(metrics.cpuUsageRate),
+  )
+}
+
+function renderInstanceMemoryColumn(row: InstanceItem) {
+  if (row.status !== 'running') {
+    return renderRuntimePlaceholder()
+  }
+  const metrics = getMetricsForInstance(row.id)
+  return h(
+    'span',
+    {
+      class: 'text-sm',
+      title: '进程常驻内存（RSS）',
+    },
+    formatMemoryMb(metrics?.memoryMb),
+  )
+}
+
+function getUptimeSecondsForRow(row: InstanceItem) {
+  if (row.status !== 'running') {
+    return null
+  }
+  const fromStarted = computeUptimeSecondsFromStartedAt(row.runtimeStartedAt, uptimeNowMs.value)
+  if (fromStarted !== null) {
+    return fromStarted
+  }
+  return getMetricsForInstance(row.id)?.uptimeSeconds ?? null
+}
+
+function renderInstanceUptimeColumn(row: InstanceItem) {
+  if (row.status !== 'running') {
+    return renderRuntimePlaceholder()
+  }
+  return h(
+    'span',
+    {
+      class: 'text-sm',
+      title: '自本次启动以来的运行时长',
+    },
+    formatUptime(getUptimeSecondsForRow(row)),
+  )
+}
+
+function stopMetricsPolling() {
+  if (metricsPollingTimer) {
+    clearInterval(metricsPollingTimer)
+    metricsPollingTimer = undefined
+  }
+}
+
+function stopUptimeTick() {
+  if (uptimeTickTimer) {
+    clearInterval(uptimeTickTimer)
+    uptimeTickTimer = undefined
+  }
+}
+
+function syncRuntimeObservabilityPolling() {
+  const hasRunning = instances.value.some(item => item.status === 'running')
+  if (!hasRunning) {
+    stopMetricsPolling()
+    stopUptimeTick()
+    instanceMetrics.value = {}
+    return
+  }
+  uptimeNowMs.value = Date.now()
+  if (!metricsPollingTimer) {
+    void fetchInstanceMetrics({ silent: true })
+    metricsPollingTimer = setInterval(() => {
+      if (!instances.value.some(item => item.status === 'running')) {
+        syncRuntimeObservabilityPolling()
+        return
+      }
+      void fetchInstanceMetrics({ silent: true })
+    }, INSTANCE_METRICS_POLL_MS)
+  }
+  if (!uptimeTickTimer) {
+    uptimeTickTimer = setInterval(() => {
+      uptimeNowMs.value = Date.now()
+      if (!instances.value.some(item => item.status === 'running')) {
+        syncRuntimeObservabilityPolling()
+      }
+    }, 1000)
+  }
+}
+
+async function fetchInstanceMetrics(options?: { silent?: boolean }) {
+  const runningIds = instances.value
+    .filter(item => item.status === 'running')
+    .map(item => item.id)
+  if (runningIds.length === 0) {
+    instanceMetrics.value = {}
+    return
+  }
+  try {
+    const res = await apiInstance.getInstanceMetrics(runningIds)
+    instanceMetrics.value = res.data.items
+  }
+  catch {
+    if (!options?.silent) {
+      faToast.error('实例资源指标刷新失败')
+    }
+  }
 }
 
 /** 是否已检查且为最新版本 */
@@ -685,6 +846,7 @@ async function fetchInstances(options?: { silent?: boolean }) {
       keyword: keywordFilter.value.trim() || undefined,
     })
     instances.value = res.data
+    syncRuntimeObservabilityPolling()
   }
   finally {
     if (!options?.silent) {
@@ -805,6 +967,7 @@ onMounted(async () => {
     fetchInstallableGames(),
     fetchInstances(),
   ])
+  void fetchInstanceMetrics({ silent: true })
 })
 
 let hadInstallingInstance = false
@@ -824,6 +987,8 @@ const instancePollingTimer = setInterval(() => {
 onBeforeUnmount(() => {
   clearInterval(instancePollingTimer)
   stopInstallLogPolling()
+  stopMetricsPolling()
+  stopUptimeTick()
   dismissInstanceUpdateNotification()
 })
 </script>

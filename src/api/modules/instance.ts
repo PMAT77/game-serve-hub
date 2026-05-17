@@ -23,8 +23,20 @@ export interface InstanceItem {
   localBuildId: string | null
   remoteBuildId: string | null
   updateCheckedAt: string | null
+  runtimeStartedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface InstanceRuntimeMetrics {
+  cpuUsageRate: number | null
+  memoryMb: number | null
+  uptimeSeconds: number | null
+}
+
+export interface InstanceMetricsPayload {
+  items: Record<string, InstanceRuntimeMetrics | null>
+  collectedAt: string
 }
 
 export interface InstanceCheckUpdatesPayload {
@@ -88,6 +100,7 @@ export interface InstanceConsoleLogsPayload {
 
 export default {
   getInstanceList: (data?: InstanceListQuery) => api.post('app/instance/list', data),
+  getInstanceMetrics: (ids?: string[]) => api.post('app/instance/metrics', ids?.length ? { ids } : {}) as Promise<{ data: InstanceMetricsPayload }>,
   getInstallableGames: () => api.get('app/instance/games') as Promise<{ data: InstallableGameItem[] }>,
   getInstanceInstallLog: (id: string) => api.get('app/instance/install-log', {
     params: { id },

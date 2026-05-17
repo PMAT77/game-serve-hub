@@ -8,6 +8,7 @@ export const gameInstances = sqliteTable('game_instances', {
   status: text('status').notNull().default('stopped'),
   containerId: text('container_id'),
   runtimePid: integer('runtime_pid'),
+  runtimeStartedAt: text('runtime_started_at'),
   installPath: text('install_path'),
   configPath: text('config_path'),
   queryPort: integer('query_port'),

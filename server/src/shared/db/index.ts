@@ -107,6 +107,7 @@ export interface DbGameInstance {
   status: DbGameInstanceStatus
   containerId: string | null
   runtimePid: number | null
+  runtimeStartedAt: string | null
   installPath: string | null
   configPath: string | null
   queryPort: number | null
@@ -148,6 +149,7 @@ export interface UpdateGameInstanceRuntimeInput {
   status?: DbGameInstanceStatus
   containerId?: string | null
   runtimePid?: number | null
+  runtimeStartedAt?: string | null
   lastCommand?: string | null
   lastExitCode?: number | null
   lastError?: string | null
@@ -254,6 +256,7 @@ function ensureSchemaCompatibility(database: DatabaseSync) {
   }
 
   ensureColumn(database, 'game_instances', 'runtime_pid', 'integer')
+  ensureColumn(database, 'game_instances', 'runtime_started_at', 'text')
   ensureColumn(database, 'game_instances', 'last_command', 'text')
   ensureColumn(database, 'game_instances', 'last_exit_code', 'integer')
   ensureColumn(database, 'game_instances', 'last_error', 'text')
@@ -961,6 +964,7 @@ function mapDbGameInstance(row: {
   status: string
   containerId: string | null
   runtimePid: number | null
+  runtimeStartedAt: string | null
   installPath: string | null
   configPath: string | null
   queryPort: number | null
@@ -984,6 +988,7 @@ function mapDbGameInstance(row: {
     ...row,
     status: normalizeInstanceStatus(row.status),
     runtimePid: row.runtimePid === null ? null : Number(row.runtimePid),
+    runtimeStartedAt: row.runtimeStartedAt?.trim() || null,
     queryPort: row.queryPort === null ? null : Number(row.queryPort),
     gamePort: row.gamePort === null ? null : Number(row.gamePort),
     rconPort: row.rconPort === null ? null : Number(row.rconPort),
@@ -1009,6 +1014,7 @@ function gameInstanceSelectFields() {
     status: gameInstances.status,
     containerId: gameInstances.containerId,
     runtimePid: gameInstances.runtimePid,
+    runtimeStartedAt: gameInstances.runtimeStartedAt,
     installPath: gameInstances.installPath,
     configPath: gameInstances.configPath,
     queryPort: gameInstances.queryPort,
@@ -1125,6 +1131,7 @@ export async function updateGameInstanceRuntime(
     status?: DbGameInstanceStatus
     containerId?: string | null
     runtimePid?: number | null
+    runtimeStartedAt?: string | null
     lastCommand?: string | null
     lastExitCode?: number | null
     lastError?: string | null
@@ -1147,6 +1154,9 @@ export async function updateGameInstanceRuntime(
   }
   if (typeof input.runtimePid !== 'undefined') {
     setPayload.runtimePid = Number.isInteger(input.runtimePid) ? input.runtimePid : null
+  }
+  if (typeof input.runtimeStartedAt !== 'undefined') {
+    setPayload.runtimeStartedAt = input.runtimeStartedAt?.trim() || null
   }
   if (typeof input.lastCommand !== 'undefined') {
     setPayload.lastCommand = input.lastCommand?.trim() || null

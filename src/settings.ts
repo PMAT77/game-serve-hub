@@ -1,22 +1,26 @@
 import { setSettings } from '@fantastic-admin/settings'
 
 export default setSettings({
-  app: {
-    account: {
-      auth: true,
+  "app": {
+    "account": {
+      "auth": true
     },
-    routeBaseOn: 'backend',
+    "routeBaseOn": "backend",
+    "dynamicTitle": true
   },
-  menu: {
-    mainMenuClickMode: 'smart',
+  "menu": {
+    "mainMenuClickMode": "smart"
   },
-  topbar: {
-    tabbar: true,
-    mode: 'fixed',
+  "topbar": {
+    "tabbar": true,
+    "mode": "fixed"
   },
-  toolbar: {
-    fullscreen: true,
-    pageReload: true,
-    colorScheme: true,
+  "tabbar": {
+    "icon": true
   },
+  "toolbar": {
+    "fullscreen": true,
+    "pageReload": true,
+    "colorScheme": true
+  }
 })

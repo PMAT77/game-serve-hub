@@ -1,9 +1,35 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build outputs
 dist/
 dist-*/
+dist-test/
+*.tsbuildinfo
+
+# Local runtime data & logs
 server/data/
+server/logs/
 data/
+logs/
 *.sqlite*
+**/install-logs/
+
+# Environment & secrets (keep *.example / tracked Vite env templates)
 .env*.local
+.env.local
+panel.env
+
+# IDE & local tooling
 .agents
 .cursor/
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Vite / tooling cache
+.vite/

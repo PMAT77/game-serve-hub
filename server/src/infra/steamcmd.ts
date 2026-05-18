@@ -79,42 +79,8 @@ export function runSteamcmdInstallCommand(): {
   ok: boolean
   message: string
 } {
-  if (process.platform !== 'linux') {
-    return {
-      ok: false,
-      message: '当前平台不支持自动安装，请手动安装 SteamCMD',
-    }
-  }
-  const installScript = `
-if command -v steamcmd >/dev/null 2>&1; then
-  echo "SteamCMD already installed"
-  exit 0
-fi
-if [ "$(id -u)" -ne 0 ]; then
-  echo "当前进程非 root，无法自动安装 SteamCMD，请使用 root 启动服务或手动安装" >&2
-  exit 1
-fi
-dpkg --add-architecture i386 || true
-apt-get update -y
-apt-get install -y libc6:i386 libstdc++6:i386 steamcmd
-`
-  const result = spawnSync('bash', ['-lc', installScript], {
-    encoding: 'utf8',
-    stdio: 'pipe',
-    timeout: 120_000,
-  })
-  if (result.status === 0) {
-    return {
-      ok: true,
-      message: (result.stdout || 'SteamCMD 安装完成').trim(),
-    }
-  }
-  const errorOutput = [result.stdout, result.stderr]
-    .filter(Boolean)
-    .join('\n')
-    .trim()
   return {
-    ok: false,
-    message: errorOutput || 'SteamCMD 自动安装失败',
+    ok: true,
+    message: 'SteamCMD 由 Docker 镜像提供（GSH_STEAMCMD_IMAGE），无需在面板容器内安装宿主机 SteamCMD',
   }
 }

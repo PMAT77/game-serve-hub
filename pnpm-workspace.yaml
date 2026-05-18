@@ -31,8 +31,12 @@ catalog:
   boxen: ^8.0.1
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
+  '@fastify/cors': ^10.0.1
+  '@fastify/static': ^8.2.0
+  '@types/dockerode': ^3.3.47
   dayjs: ^1.11.20
   defu: ^6.1.7
+  dockerode: ^4.0.9
   drizzle-kit: ^0.31.10
   drizzle-orm: ^0.45.2
   echarts: ^6.0.0

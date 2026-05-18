@@ -1,0 +1,9 @@
+# Production bind-mount overlay (used by install.linux.sh on the host).
+services:
+  panel:
+    volumes:
+      - ${PANEL_DATA_DIR}:/app/data
+      - ${PANEL_LOG_DIR}:/app/logs
+      - ${PANEL_INSTANCES_DIR:-${PANEL_DATA_DIR}/instances}:/var/lib/game-server-hub/instances
+      - ${PANEL_BACKUPS_DIR:-${PANEL_DATA_DIR}/backups}:/var/lib/game-server-hub/backups
+      - /var/run/docker.sock:/var/run/docker.sock

@@ -14,6 +14,12 @@ const envSchema = z.object({
   FORCE_PASSWORD_CHANGE: z.string().trim().optional(),
   ADMIN_USERNAME: z.string().trim().optional(),
   ADMIN_PASSWORD: z.string().optional(),
+  DOCKER_HOST: z.string().trim().optional(),
+  GSH_INSTANCES_ROOT: z.string().trim().optional(),
+  GSH_BACKUPS_ROOT: z.string().trim().optional(),
+  GSH_GAME_DST_IMAGE: z.string().trim().optional(),
+  GSH_STEAMCMD_IMAGE: z.string().trim().optional(),
+  GSH_EDITION: z.string().trim().optional(),
 })
 
 function resolveMode() {
@@ -39,6 +45,12 @@ export interface ServerConfig {
   forcePasswordChange: boolean
   adminUsername: string
   adminPassword: string
+  dockerHost: string
+  instancesRoot: string
+  backupsRoot: string
+  gameDstImage: string
+  steamcmdImage: string
+  edition: string
 }
 
 export function loadServerConfig(): ServerConfig {
@@ -54,8 +66,20 @@ export function loadServerConfig(): ServerConfig {
     FORCE_PASSWORD_CHANGE: process.env.FORCE_PASSWORD_CHANGE ?? env.FORCE_PASSWORD_CHANGE,
     ADMIN_USERNAME: process.env.ADMIN_USERNAME ?? env.ADMIN_USERNAME,
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD ?? env.ADMIN_PASSWORD,
+    DOCKER_HOST: process.env.DOCKER_HOST ?? env.DOCKER_HOST,
+    GSH_INSTANCES_ROOT: process.env.GSH_INSTANCES_ROOT ?? env.GSH_INSTANCES_ROOT,
+    GSH_BACKUPS_ROOT: process.env.GSH_BACKUPS_ROOT ?? env.GSH_BACKUPS_ROOT,
+    GSH_GAME_DST_IMAGE: process.env.GSH_GAME_DST_IMAGE ?? env.GSH_GAME_DST_IMAGE,
+    GSH_STEAMCMD_IMAGE: process.env.GSH_STEAMCMD_IMAGE ?? env.GSH_STEAMCMD_IMAGE,
+    GSH_EDITION: process.env.GSH_EDITION ?? env.GSH_EDITION,
   }
   const parsed = envSchema.parse(merged)
+  const defaultInstancesRoot = process.platform === 'win32'
+    ? path.resolve(serverRootDir, 'data', 'instances')
+    : '/var/lib/game-server-hub/instances'
+  const defaultBackupsRoot = process.platform === 'win32'
+    ? path.resolve(serverRootDir, 'data', 'backups')
+    : '/var/lib/game-server-hub/backups'
   return {
     mode,
     host: parsed.SERVER_HOST,
@@ -67,6 +91,12 @@ export function loadServerConfig(): ServerConfig {
     forcePasswordChange: isTruthyEnv(parsed.FORCE_PASSWORD_CHANGE),
     adminUsername: parsed.ADMIN_USERNAME || 'admin',
     adminPassword: parsed.ADMIN_PASSWORD ?? '',
+    dockerHost: parsed.DOCKER_HOST || 'unix:///var/run/docker.sock',
+    instancesRoot: path.resolve(parsed.GSH_INSTANCES_ROOT || defaultInstancesRoot),
+    backupsRoot: path.resolve(parsed.GSH_BACKUPS_ROOT || defaultBackupsRoot),
+    gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/pmat77/game-server-hub-dst:latest',
+    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'cm2network/steamcmd:root',
+    edition: parsed.GSH_EDITION || 'community',
   }
 }
 
@@ -79,8 +109,10 @@ export function resolveInstallLogsDir(dbPath: string) {
   return path.join(path.dirname(dbPath), 'install-logs')
 }
 
-export function ensureServerRuntimeDirs(config: Pick<ServerConfig, 'dbPath' | 'logDir'>) {
+export function ensureServerRuntimeDirs(config: Pick<ServerConfig, 'dbPath' | 'logDir' | 'instancesRoot' | 'backupsRoot'>) {
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true })
   fs.mkdirSync(config.logDir, { recursive: true })
+  fs.mkdirSync(config.instancesRoot, { recursive: true })
+  fs.mkdirSync(config.backupsRoot, { recursive: true })
   fs.mkdirSync(resolveInstallLogsDir(config.dbPath), { recursive: true })
 }

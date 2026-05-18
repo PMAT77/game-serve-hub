@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-TARGET_NODE_MAJOR=22 # 目标 Node.js 主版本（安装 NodeSource 22.x）。
+INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-https://raw.githubusercontent.com/PMAT77/game-server-hub/main}"
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
 RETRY_MAX=3 # 可重试操作的最大重试次数。
 RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
@@ -14,7 +14,10 @@ RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
 PANEL_PORT="${PANEL_PORT:-80}" # 面板对外暴露端口（默认使用常见放行端口）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
-PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_REPOSITORY:-ghcr.io/fantastic-admin/game-server-hub}" # 容器镜像仓库地址。
+PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_REPOSITORY:-ghcr.io/pmat77/game-server-hub}" # 容器镜像仓库地址。
+PANEL_INSTANCES_DIR="${PANEL_INSTANCES_DIR:-${PANEL_DATA_DIR}/instances}" # 游戏实例数据目录。
+PANEL_BACKUPS_DIR="${PANEL_BACKUPS_DIR:-${PANEL_DATA_DIR}/backups}" # 备份目录。
+PANEL_BIND_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.bind.yml"
 PANEL_IMAGE_TAG="${PANEL_IMAGE_TAG:-latest}" # 容器镜像标签。
 PANEL_IMAGE="${PANEL_IMAGE_REPOSITORY}:${PANEL_IMAGE_TAG}" # 完整镜像引用（仓库:标签）。
 PANEL_INSTALL_DIR="${PANEL_INSTALL_DIR:-/opt/game-server-hub}" # 安装目录（放置 env/compose）。
@@ -50,7 +53,7 @@ log_error() {
 # 输出错误并立即退出脚本。
 abort() {
   log_error "$*"
-  exit 1·
+  exit 1
 }
 
 # 以 root 执行命令；若非 root 则自动走 sudo。
@@ -177,83 +180,7 @@ install_docker() {
   run_as_root docker compose version >/dev/null 2>&1 || abort "docker compose plugin is required."
 }
 
-# 安装 Node.js；若当前版本满足要求则跳过。
-install_nodejs() {
-  local current_major
-  if command -v node >/dev/null 2>&1; then
-    current_major="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
-    if [[ "${current_major}" -ge 20 ]]; then
-      log_info "Node.js $(node -v) already satisfies project requirement. Skipping install."
-      return
-    fi
-  fi
-
-  log_info "Installing Node.js ${TARGET_NODE_MAJOR}.x (LTS)..."
-  curl -fsSL "https://deb.nodesource.com/setup_${TARGET_NODE_MAJOR}.x" | run_as_root bash
-  apt_install nodejs
-}
-
-# Debian 安装 steamcmd 需要在 apt 源中启用 contrib/non-free 组件。
-ensure_debian_non_free_components() {
-  if [[ "${DISTRO_ID}" != "debian" ]]; then
-    return
-  fi
-
-  local sources_file
-  sources_file="/etc/apt/sources.list"
-
-  if [[ ! -f "${sources_file}" ]]; then
-    return
-  fi
-
-  if run_as_root grep -Eq '^[^#].*deb .* non-free' "${sources_file}"; then
-    return
-  fi
-
-  log_warn "Debian sources do not contain non-free components. Appending contrib/non-free entries."
-  run_as_root sed -E -i 's/^(deb\s+\S+\s+\S+\s+main)$/\1 contrib non-free non-free-firmware/g' "${sources_file}"
-}
-
-# 通过系统仓库安装 SteamCMD，并在失败时自动回退。
-install_steamcmd_from_apt() {
-  log_info "Installing SteamCMD from apt repository..."
-  run_as_root dpkg --add-architecture i386 || true
-  run_as_root apt-get update -y
-  apt_install libc6:i386 libstdc++6:i386
-
-  if [[ "${DISTRO_ID}" == "ubuntu" ]]; then
-    run_as_root add-apt-repository -y multiverse || true
-    run_as_root apt-get update -y
-  fi
-
-  if [[ "${DISTRO_ID}" == "debian" ]]; then
-    ensure_debian_non_free_components
-    run_as_root apt-get update -y
-  fi
-
-  if run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y steamcmd; then
-    return
-  fi
-
-  # 当发行版仓库元数据或镜像异常时，回退到官方 tarball 安装。
-  log_warn "steamcmd package install failed. Falling back to official tarball."
-  install_steamcmd_from_tarball
-}
-
-# 通过官方 tarball 安装 SteamCMD，作为跨发行版兜底方案。
-install_steamcmd_from_tarball() {
-  local install_dir archive_path
-  install_dir="/opt/steamcmd"
-  archive_path="/tmp/steamcmd_linux.tar.gz"
-
-  run_as_root mkdir -p "${install_dir}"
-  curl -fsSL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" -o "${archive_path}"
-  run_as_root tar -xzf "${archive_path}" -C "${install_dir}"
-  run_as_root ln -sf "${install_dir}/steamcmd.sh" /usr/local/bin/steamcmd
-  run_as_root rm -f "${archive_path}"
-}
-
-# 将当前执行用户加入 docker 组，避免每次都使用 sudo。
+# 将当前执行用户加入 docker 组，避免非 root 场景下无法使用 Docker CLI。
 add_user_to_docker_group() {
   local target_user
   target_user="${SUDO_USER:-${USER:-}}"
@@ -264,7 +191,6 @@ add_user_to_docker_group() {
   fi
 
   if [[ "${target_user}" == "root" ]]; then
-    log_warn "Current user is root. Skipping docker group assignment."
     return
   fi
 
@@ -363,41 +289,51 @@ preflight_checks() {
 
 # 生成运行目录、环境变量文件与 compose 配置。
 prepare_panel_files() {
+  local script_dir repo_compose compose_source
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_compose="${script_dir}/../docker-compose.yml"
+  compose_source="${COMPOSE_SOURCE:-${repo_compose}}"
+
   write_status "deploy" "start" "Preparing runtime files"
-  run_as_root mkdir -p "${PANEL_INSTALL_DIR}" "${PANEL_DATA_DIR}" "${PANEL_LOG_DIR}"
+  run_as_root mkdir -p "${PANEL_INSTALL_DIR}" "${PANEL_DATA_DIR}" "${PANEL_LOG_DIR}" "${PANEL_INSTANCES_DIR}"
   run_as_root chmod 700 "${PANEL_INSTALL_DIR}"
-  run_as_root chmod 750 "${PANEL_DATA_DIR}" "${PANEL_LOG_DIR}"
+  run_as_root chmod 750 "${PANEL_DATA_DIR}" "${PANEL_LOG_DIR}" "${PANEL_INSTANCES_DIR}"
 
   detect_host_ip
   PANEL_ACCESS_URL="${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}"
   generate_admin_credentials
 
-  # panel.env 包含敏感信息，仅允许 root 读取。
+  if [[ -f "${compose_source}" ]]; then
+    run_as_root cp "${compose_source}" "${PANEL_COMPOSE_FILE}"
+  else
+    log_info "Local compose not found, downloading from ${INSTALLER_REPO_RAW}/docker-compose.yml"
+    curl -fsSL "${INSTALLER_REPO_RAW}/docker-compose.yml" | run_as_root tee "${PANEL_COMPOSE_FILE}" >/dev/null
+  fi
+  bind_compose="${script_dir}/../docker-compose.bind.yml"
+  if [[ -f "${bind_compose}" ]]; then
+    run_as_root cp "${bind_compose}" "${PANEL_BIND_COMPOSE_FILE}"
+  else
+    curl -fsSL "${INSTALLER_REPO_RAW}/docker-compose.bind.yml" | run_as_root tee "${PANEL_BIND_COMPOSE_FILE}" >/dev/null
+  fi
+
   run_as_root bash -c "cat > \"${PANEL_ENV_FILE}\" <<EOF
 PANEL_PORT=${PANEL_PORT}
+PANEL_DATA_DIR=${PANEL_DATA_DIR}
+PANEL_LOG_DIR=${PANEL_LOG_DIR}
+PANEL_INSTANCES_DIR=${PANEL_INSTANCES_DIR}
+PANEL_BACKUPS_DIR=${PANEL_BACKUPS_DIR}
+PANEL_IMAGE=${PANEL_IMAGE}
 PANEL_PUBLIC_URL=${PANEL_ACCESS_URL}
 ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 FORCE_PASSWORD_CHANGE=1
+GSH_EDITION=community
+DOCKER_HOST=unix:///var/run/docker.sock
+GSH_GAME_DST_IMAGE=ghcr.io/pmat77/game-server-hub-dst:${PANEL_IMAGE_TAG}
+GSH_STEAMCMD_IMAGE=cm2network/steamcmd:root
 TZ=UTC
 EOF"
   run_as_root chmod 600 "${PANEL_ENV_FILE}"
-
-  # 固化 Compose 配置，确保容器启动行为可预测。
-  run_as_root bash -c "cat > \"${PANEL_COMPOSE_FILE}\" <<EOF
-services:
-  panel:
-    image: ${PANEL_IMAGE}
-    container_name: game-server-hub-panel
-    restart: unless-stopped
-    ports:
-      - \"${PANEL_PORT}:3000\"
-    env_file:
-      - ${PANEL_ENV_FILE}
-    volumes:
-      - ${PANEL_DATA_DIR}:/app/data
-      - ${PANEL_LOG_DIR}:/app/logs
-EOF"
 }
 
 # 仅在部署阶段开始后启用容器栈回滚。
@@ -408,7 +344,7 @@ rollback_install() {
 
   write_status "rollback" "start" "Rolling back failed deployment"
   log_warn "Deployment failed, rolling back container stack..."
-  run_as_root docker compose -f "${PANEL_COMPOSE_FILE}" down --remove-orphans >/dev/null 2>&1 || true
+  run_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" down --remove-orphans >/dev/null 2>&1 || true
   write_status "rollback" "ok" "Rollback finished"
 }
 
@@ -420,7 +356,7 @@ deploy_panel() {
 
   write_status "deploy" "start" "Starting panel stack"
   ROLLBACK_ENABLED=1
-  run_with_retry "docker compose up" run_as_root docker compose -f "${PANEL_COMPOSE_FILE}" up -d
+  run_with_retry "docker compose up" run_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" up -d
   write_status "deploy" "ok" "Panel stack started"
 }
 
@@ -451,10 +387,8 @@ main() {
   write_status "deps" "start" "Installing base dependencies"
   install_base_packages
   install_docker
-  install_nodejs
-  install_steamcmd_from_apt
   add_user_to_docker_group
-  write_status "deps" "ok" "Dependencies installed"
+  write_status "deps" "ok" "Dependencies installed (Docker only, no host Node/SteamCMD)"
 
   preflight_checks
 

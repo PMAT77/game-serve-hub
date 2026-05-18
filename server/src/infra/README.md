@@ -14,13 +14,15 @@
 - 面向接口编程，由业务模块依赖抽象，不直接依赖外部 SDK 细节。
 - 外部调用异常统一转换为业务可识别错误。
 
-## 已落地适配（2026-05-17）
+## 已落地适配（2026-05-18）
 
 | 文件 | 职责 |
 |------|------|
 | `powershell.ts` | Windows PowerShell 命令执行 |
 | `docker.ts` | Docker 运行状态探测与缓存 |
-| `steamcmd.ts` | SteamCMD 路径解析与 Linux 自动安装 |
+| `steamcmd.ts` | SteamCMD 路径解析（安装由容器镜像承担） |
 | `filesystem-browse.ts` | 受控目录浏览与搜索 |
+| `container/` | `ContainerRuntime`、SteamCMD 容器安装任务 |
+| `game-adapter/dst/` | DST Cluster 布局与 Master 容器 spec |
 
 业务模块 `server/src/modules/system/` 通过上述适配层访问外部能力，路由注册保留在 `system/index.ts`，指标采集在 `system/metrics.ts`。

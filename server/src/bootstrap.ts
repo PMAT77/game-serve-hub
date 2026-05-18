@@ -15,7 +15,7 @@ import { initDatabase } from './shared/db/index'
 export async function bootstrap() {
   const config = loadServerConfig()
   ensureServerRuntimeDirs(config)
-  const app = createServerApp(config)
+  const app = await createServerApp(config)
   let isClosing = false
   let isListening = false
 

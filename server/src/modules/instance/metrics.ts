@@ -1,18 +1,13 @@
-import process from 'node:process'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import type { DbGameInstance } from '../../shared/db/index'
 import {
   findUserByToken,
   listGameInstances,
-  updateGameInstanceRuntime,
 } from '../../shared/db/index'
+import { getContainerRuntime } from '../../infra/container'
 import { success, unauthorized } from '../../shared/http/response'
-import {
-  computeUptimeSeconds,
-  processStartIsoFromElapsed,
-  sampleProcessMetrics,
-} from '../../shared/instance-runtime/process-metrics'
+import { isInstanceContainerRunning, resolveInstanceContainerRef } from './container-lifecycle'
 
 const LOCAL_NODE_ID = 'local-node'
 
@@ -49,48 +44,43 @@ async function verifyAuthorized(request: FastifyRequest): Promise<ApiErrorRespon
   }
 }
 
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
+function computeUptimeSeconds(startedAt: string | null | undefined): number | null {
+  if (!startedAt) {
+    return null
   }
-  catch (error) {
-    const code = error && typeof error === 'object' && 'code' in error
-      ? String((error as NodeJS.ErrnoException).code)
-      : ''
-    return code !== 'ESRCH'
+  const startedMs = Date.parse(startedAt)
+  if (Number.isNaN(startedMs)) {
+    return null
   }
+  return Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
 }
 
 async function collectMetricsForInstance(instance: DbGameInstance): Promise<InstanceRuntimeMetrics | null> {
   if (instance.status !== 'running' || instance.nodeId !== LOCAL_NODE_ID) {
     return null
   }
-  const pid = instance.runtimePid
-  if (!pid || !Number.isInteger(pid) || pid <= 0) {
+  if (!await isInstanceContainerRunning(instance.id)) {
     return null
   }
-  if (!isPidAlive(pid)) {
+  const ref = await resolveInstanceContainerRef(instance.id)
+  if (!ref) {
     return null
   }
-
-  let runtimeStartedAt = instance.runtimeStartedAt
-  const sample = await sampleProcessMetrics(pid)
-  if (!sample) {
-    return null
+  try {
+    const runtime = getContainerRuntime()
+    const stats = await runtime.stats(ref)
+    return {
+      cpuUsageRate: stats.cpuUsageRate,
+      memoryMb: stats.memoryMb,
+      uptimeSeconds: computeUptimeSeconds(instance.runtimeStartedAt),
+    }
   }
-
-  if (!runtimeStartedAt) {
-    runtimeStartedAt = processStartIsoFromElapsed(sample.elapsedSeconds)
-    await updateGameInstanceRuntime(instance.id, {
-      runtimeStartedAt,
-    })
-  }
-
-  return {
-    cpuUsageRate: sample.cpuUsageRate,
-    memoryMb: sample.memoryMb,
-    uptimeSeconds: computeUptimeSeconds(runtimeStartedAt, sample.elapsedSeconds),
+  catch {
+    return {
+      cpuUsageRate: null,
+      memoryMb: null,
+      uptimeSeconds: computeUptimeSeconds(instance.runtimeStartedAt),
+    }
   }
 }
 

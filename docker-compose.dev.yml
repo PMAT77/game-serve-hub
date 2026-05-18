@@ -1,0 +1,49 @@
+# Development overlay: bind-mount 源码，容器内 pnpm install，避免 Windows 下 Docker build context 扫 node_modules。
+services:
+  panel:
+    build: !reset null
+    image: node:22-bookworm-slim
+    container_name: game-server-hub-panel
+    working_dir: /app
+    command: ["sh", "-c", "corepack enable && pnpm install && pnpm run dev:server:watch"]
+    environment:
+      NODE_ENV: development
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "3000"
+      DB_PATH: /app/data/game-server-hub.sqlite
+      SERVER_LOG_DIR: /app/logs
+      GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
+      GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
+      DOCKER_HOST: unix:///var/run/docker.sock
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub-dst:latest}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:root}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+    volumes:
+      - .:/app
+      - panel-node-modules:/app/node_modules
+      - gsh-data:/app/data
+      - gsh-logs:/app/logs
+      - gsh-instances:/var/lib/game-server-hub/instances
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "${PANEL_PORT:-3000}:3000"
+
+  web:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    command: ["sh", "-c", "corepack enable && pnpm install && pnpm run dev:web"]
+    environment:
+      VITE_APP_API_BASEURL: http://panel:3000
+      VITE_ENABLE_PROXY: "true"
+    volumes:
+      - .:/app
+      - web-node-modules:/app/node_modules
+    ports:
+      - "9000:9000"
+    depends_on:
+      - panel
+
+volumes:
+  panel-node-modules:
+  web-node-modules:

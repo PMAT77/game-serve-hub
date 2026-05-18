@@ -1,0 +1,67 @@
+export type ShardRole = 'master' | 'caves'
+
+export interface ContainerRef {
+  id: string
+  name: string
+}
+
+export interface PortMapping {
+  hostPort: number
+  containerPort: number
+  protocol: 'udp' | 'tcp'
+}
+
+export interface ShardContainerSpec {
+  instanceId: string
+  shard: ShardRole
+  image: string
+  name: string
+  hostInstallPath: string
+  containerGameRoot?: string
+  cmd: string[]
+  workingDir: string
+  env?: Record<string, string>
+  ports?: PortMapping[]
+}
+
+export interface LogOpts {
+  tail?: number
+  follow?: boolean
+  since?: number
+}
+
+export interface LogLine {
+  stream: 'stdout' | 'stderr'
+  text: string
+  timestamp?: string
+}
+
+export interface ExecResult {
+  exitCode: number
+  output: string
+}
+
+export interface ContainerInspect {
+  id: string
+  name: string
+  running: boolean
+  startedAt?: string
+}
+
+export interface ContainerStats {
+  cpuUsageRate: number | null
+  memoryMb: number | null
+}
+
+export interface ContainerRuntime {
+  createShardContainer(spec: ShardContainerSpec): Promise<ContainerRef>
+  start(ref: ContainerRef): Promise<void>
+  stop(ref: ContainerRef, timeoutSec?: number): Promise<void>
+  remove(ref: ContainerRef): Promise<void>
+  logs(ref: ContainerRef, opts?: LogOpts): AsyncIterable<LogLine>
+  exec(ref: ContainerRef, cmd: string[]): Promise<ExecResult>
+  execStdin(ref: ContainerRef, input: string): Promise<ExecResult>
+  inspect(ref: ContainerRef): Promise<ContainerInspect>
+  stats(ref: ContainerRef): Promise<ContainerStats>
+  findByName(name: string): Promise<ContainerRef | undefined>
+}

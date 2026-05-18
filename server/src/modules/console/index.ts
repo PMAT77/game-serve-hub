@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import type { DbGameInstance } from '../../shared/db/index'
 import { findUserByToken, getGameInstanceById } from '../../shared/db/index'
-import { instanceRuntimeRegistry } from '../../shared/instance-runtime/registry'
+import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
+import { isInstanceContainerRunning, sendInstanceContainerCommand } from '../instance/container-lifecycle'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 
 const LOCAL_NODE_ID = 'local-node'
@@ -89,7 +90,7 @@ function writeSse(reply: FastifyReply, event: string, data: unknown) {
  */
 export function registerConsoleModule(app: FastifyInstance) {
   app.get('/app/instance/console/logs', async (request): Promise<ApiSuccessResponse<{
-    lines: ReturnType<typeof instanceRuntimeRegistry.listLogs>
+    lines: ReturnType<typeof instanceConsoleLogStore.listLogs>
     running: boolean
   }> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
@@ -103,10 +104,10 @@ export function registerConsoleModule(app: FastifyInstance) {
       return resolved.error
     }
     const afterId = Number.parseInt(query.afterId ?? '0', 10)
-    const process = instanceRuntimeRegistry.getProcess(instanceId)
+    const running = await isInstanceContainerRunning(instanceId)
     return success({
-      lines: instanceRuntimeRegistry.listLogs(instanceId, Number.isNaN(afterId) ? 0 : afterId),
-      running: Boolean(process && !process.killed),
+      lines: instanceConsoleLogStore.listLogs(instanceId, Number.isNaN(afterId) ? 0 : afterId),
+      running,
     }, request)
   })
 
@@ -121,7 +122,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     if (!resolved.ok) {
       return resolved.error
     }
-    instanceRuntimeRegistry.clearLogs(instanceId)
+    instanceConsoleLogStore.clearLogs(instanceId)
     return success({ isSuccess: true }, request)
   })
 
@@ -140,7 +141,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     if (resolved.instance.status !== 'running') {
       return businessError('实例未运行，无法发送控制台命令', request)
     }
-    const result = instanceRuntimeRegistry.sendCommand(instanceId, command)
+    const result = await sendInstanceContainerCommand(instanceId, command)
     if (!result.ok) {
       return businessError(result.message ?? '命令发送失败', request)
     }
@@ -168,16 +169,16 @@ export function registerConsoleModule(app: FastifyInstance) {
       Connection: 'keep-alive',
     })
 
-    const process = instanceRuntimeRegistry.getProcess(instanceId)
+    const running = await isInstanceContainerRunning(instanceId)
     writeSse(reply, 'ready', {
       instanceId,
-      running: Boolean(process && !process.killed),
+      running,
     })
-    for (const line of instanceRuntimeRegistry.listLogs(instanceId)) {
+    for (const line of instanceConsoleLogStore.listLogs(instanceId)) {
       writeSse(reply, 'log', line)
     }
 
-    const unsubscribe = instanceRuntimeRegistry.subscribe(instanceId, (line) => {
+    const unsubscribe = instanceConsoleLogStore.subscribe(instanceId, (line) => {
       writeSse(reply, 'log', line)
     })
 

@@ -1,0 +1,23 @@
+# 避免 Windows 下 pnpm 的 node_modules/.ignored 导致 build context 失败
+**/node_modules
+**/.ignored
+**/.pnpm-store
+.pnpm-store
+
+node_modules
+dist
+dist-test
+.git
+.cursor
+*.sqlite
+server/data
+server/logs
+data
+logs
+.env*
+!.env.example
+panel.env
+**/*.md
+docs
+.agent
+.agents

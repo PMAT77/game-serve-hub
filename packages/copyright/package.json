@@ -5,7 +5,7 @@
   "exports": {
     ".": {
       "types": "./index.ts",
-      "import": "./dist/index.mjs"
+      "import": "./index.ts"
     }
   },
   "scripts": {

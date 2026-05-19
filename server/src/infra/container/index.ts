@@ -14,4 +14,18 @@ export function getContainerRuntime(): ContainerRuntime {
 
 export * from './types'
 export * from './naming'
-export { runSteamcmdAppUpdateInContainer, ensureSteamcmdImageAvailable } from './steamcmd-runner'
+export {
+  runSteamcmdAppUpdateInContainer,
+  runSteamcmdAppInfoInContainer,
+  cancelSteamcmdInstallContainer,
+  cleanupOrphanedSteamcmdInstallContainers,
+  isSteamcmdJobRunning,
+  isSteamcmdImagePresent,
+  pullSteamcmdImage,
+} from './steamcmd-runner'
+export {
+  formatGameDstImageError,
+  isGameDstImagePresent,
+  pullGameDstImage,
+} from './game-dst-image'
+export { ensureSteamcmdImage } from './runtime-images'

@@ -4,10 +4,13 @@ import process from 'node:process'
 import type { DbGameInstance } from '../../shared/db/index'
 import {
   getGameInstanceById,
+  getSystemPanelSettings,
   getSystemSteamcmdConfig,
   listGameInstances,
   updateGameInstanceRuntime,
 } from '../../shared/db/index'
+import { getDefaultPanelSettings } from '../system/defaults'
+import { resolveDockerStatus } from '../../infra/docker'
 import {
   checkGameUpdateAvailable,
   clearRemoteBuildCache,
@@ -217,6 +220,10 @@ export async function refreshStaleInstanceUpdateChecks(
 export function scheduleInstanceUpdateChecks(app: FastifyInstance) {
   const run = async () => {
     try {
+      if ((await resolveDockerStatus()) !== 'running') {
+        app.log.debug('Docker 未运行，跳过定时游戏服务端更新检查')
+        return
+      }
       const steamcmdCommand = await resolveSteamcmdCommandForUpdateCheck()
       const instances = await listGameInstances()
       await checkInstancesForUpdates({
@@ -276,4 +283,39 @@ export function needsRemoteUpdatePrecheck(
     return true
   }
   return localBuildId === instance.remoteBuildId
+}
+
+export async function resolveCheckUpdateBeforeStartEnabled(): Promise<boolean> {
+  const settings = await getSystemPanelSettings()
+  return settings?.checkUpdateBeforeStart
+    ?? getDefaultPanelSettings().checkUpdateBeforeStart
+}
+
+/**
+ * 启动前向 Steam 拉取远端 Build ID；若开启系统设置且存在更新则返回拦截文案。
+ */
+export async function resolveStartBlockedByPendingUpdate(
+  instance: DbGameInstance,
+): Promise<string | undefined> {
+  if (!await resolveCheckUpdateBeforeStartEnabled()) {
+    return undefined
+  }
+  if (!canCheckInstanceUpdate(instance)) {
+    return undefined
+  }
+  const installPath = instance.installPath?.trim()
+  if (!installPath || !fs.existsSync(installPath)) {
+    return undefined
+  }
+  const steamcmdCommand = await resolveSteamcmdCommandForUpdateCheck()
+  const updated = await refreshInstanceUpdateStatus(instance, {
+    steamcmdCommand,
+    forceRemote: true,
+  })
+  if (!updated.updateAvailable) {
+    return undefined
+  }
+  const local = updated.localBuildId ?? '未知'
+  const remote = updated.remoteBuildId ?? '未知'
+  return `检测到 Steam 服务端有新版本（本地 Build ${local}，最新 Build ${remote}），请先在实例页点击「更新服务端」后再启动`
 }

@@ -1,5 +1,12 @@
 FROM debian:bookworm-slim
 
+ARG GSH_RELEASE_VERSION=dev
+ARG GSH_BUILD_SHA=unknown
+ENV GSH_RELEASE_VERSION=${GSH_RELEASE_VERSION}
+ENV GSH_BUILD_SHA=${GSH_BUILD_SHA}
+LABEL org.opencontainers.image.version="${GSH_RELEASE_VERSION}"
+LABEL org.opencontainers.image.revision="${GSH_BUILD_SHA}"
+
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -7,6 +14,7 @@ RUN apt-get update \
     lib32gcc-s1 \
     lib32stdc++6 \
     libc6-i386 \
+    libcurl3-gnutls \
     libcurl4 \
     libstdc++6 \
     libgcc-s1 \

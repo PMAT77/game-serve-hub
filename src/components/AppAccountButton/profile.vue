@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import EditPassword from '@/components/AppAccountForm/edit-password.vue'
 
-const active = ref(0)
+const props = withDefaults(defineProps<{
+  initialTab?: number
+}>(), {
+  initialTab: 0,
+})
+
+const active = ref(props.initialTab)
+
+watch(() => props.initialTab, (tab) => {
+  active.value = tab
+})
 const tabs = ref([
   {
     title: '基本设置',

@@ -4,6 +4,10 @@ import { cn } from '@/utils'
 import eventBus from '@/utils/eventBus'
 import Profile from './profile.vue'
 
+interface AccountProfileOpenPayload {
+  tab?: number
+}
+
 defineOptions({
   name: 'AppAccountButton',
 })
@@ -27,6 +31,8 @@ const appAccountStore = useAppAccountStore()
 
 const { generateTitle } = useAppMenu()
 
+const profileInitialTab = ref(0)
+
 const profileModal = useFaModal().create({
   alignCenter: true,
   header: false,
@@ -35,7 +41,23 @@ const profileModal = useFaModal().create({
   closeOnPressEscape: false,
   class: 'h-[500px] sm:max-w-xl overflow-hidden',
   contentClass: 'min-h-full p-0 flex',
-  content: () => h(Profile),
+  content: () => h(Profile, {
+    key: profileInitialTab.value,
+    initialTab: profileInitialTab.value,
+  }),
+})
+
+function openProfile(payload?: AccountProfileOpenPayload) {
+  profileInitialTab.value = payload?.tab ?? 0
+  profileModal.open()
+}
+
+onMounted(() => {
+  eventBus.on('global-account-profile-open', openProfile)
+})
+
+onBeforeUnmount(() => {
+  eventBus.off('global-account-profile-open', openProfile)
 })
 </script>
 
@@ -46,7 +68,7 @@ const profileModal = useFaModal().create({
         ...(appSettingsStore.settings.app.home.enable
           ? [{ label: generateTitle(appSettingsStore.settings.app.home.title), icon: 'i-mdi:home', handle: () => router.push({ path: appSettingsStore.settings.app.home.fullPath }) }]
           : []),
-        { label: '个人设置', icon: 'i-mdi:account', handle: () => profileModal.open() },
+        { label: '个人设置', icon: 'i-mdi:account', handle: () => openProfile() },
       ],
       [
         ...(appSettingsStore.mode === 'pc'

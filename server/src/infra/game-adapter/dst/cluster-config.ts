@@ -6,6 +6,7 @@ import {
   DST_DEFAULT_GAME_PORT,
   DST_STORAGE_DIR,
 } from './constants'
+import { buildGameFilesBlockedMessage, diagnoseDstInstallReadiness } from './install-readiness'
 
 export interface DstServerBinary {
   binDir: string
@@ -26,15 +27,36 @@ function writeFileIfMissing(filePath: string, content: string) {
 }
 
 export function findDstServerBinary(installPath: string): DstServerBinary | undefined {
-  const candidates = [
-    { binDir: 'bin64', executable: 'dontstarve_dedicated_server_x64' },
-    { binDir: 'bin64', executable: 'dontstarve_dedicated_server_nullrenderer_x64' },
-    { binDir: 'bin', executable: 'dontstarve_dedicated_server_nullrenderer' },
-  ]
+  const candidates = listDstServerBinaryCandidates()
   for (const candidate of candidates) {
     const executablePath = path.join(installPath, candidate.binDir, candidate.executable)
     if (fs.existsSync(executablePath)) {
       return candidate
+    }
+  }
+}
+
+function listDstServerBinaryCandidates(): DstServerBinary[] {
+  return [
+    { binDir: 'bin64', executable: 'dontstarve_dedicated_server_x64' },
+    { binDir: 'bin64', executable: 'dontstarve_dedicated_server_nullrenderer_x64' },
+    { binDir: 'bin', executable: 'dontstarve_dedicated_server_nullrenderer' },
+  ]
+}
+
+/** SteamCMD 安装后或权限修复流程可能去掉 +x，启动前补齐可执行位。 */
+export function ensureDstServerBinaryExecutable(installPath: string): void {
+  for (const candidate of listDstServerBinaryCandidates()) {
+    const executablePath = path.join(installPath, candidate.binDir, candidate.executable)
+    if (!fs.existsSync(executablePath)) {
+      continue
+    }
+    try {
+      const stat = fs.statSync(executablePath)
+      fs.chmodSync(executablePath, stat.mode | 0o755)
+    }
+    catch {
+      // best-effort
     }
   }
 }
@@ -119,13 +141,15 @@ export function ensureDstLayout(installPath: string, input: EnsureDstClusterInpu
 } {
   const binary = findDstServerBinary(installPath)
   if (!binary) {
+    const readiness = diagnoseDstInstallReadiness(installPath)
     return {
       ok: false,
-      message: '未在安装目录找到饥荒联机服务端可执行文件（bin64/bin），请确认 SteamCMD 安装已完成',
+      message: buildGameFilesBlockedMessage(readiness, { instanceStatus: 'error' }),
     }
   }
   ensureDstSteamAppId(installPath, binary)
   ensureDstClusterConfig(installPath, input)
+  ensureDstServerBinaryExecutable(installPath)
   return { ok: true }
 }
 

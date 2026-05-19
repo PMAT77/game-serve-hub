@@ -1,7 +1,6 @@
 import type { DbSystemNetworkConfig, DbSystemPanelSettings, DbSystemSteamcmdConfig } from '../../shared/db/index'
 import path from 'node:path'
-import process from 'node:process'
-import { resolveDefaultInstallRoot, resolveEffectiveInstallRoot } from '../../infra/steamcmd'
+import { getServerContainerConfig } from '../../shared/config/container'
 
 export interface NetworkConfigBody {
   mode?: 'bootstrap_pending' | 'managed'
@@ -17,6 +16,8 @@ export interface PanelSettingsBody {
   panelPort?: number
   theme?: 'light' | 'dark' | 'system'
   autoUpdate?: boolean
+  checkUpdateBeforeStart?: boolean
+  updateCheckIntervalHours?: number
 }
 
 export interface SteamcmdConfigBody {
@@ -41,21 +42,23 @@ export function getDefaultPanelSettings(): DbSystemPanelSettings {
     panelPort: 80,
     theme: 'system',
     autoUpdate: true,
+    checkUpdateBeforeStart: false,
+    updateCheckIntervalHours: 1,
   }
 }
 
 export function getDefaultSteamcmdConfig(): DbSystemSteamcmdConfig {
-  const defaultSteamcmdCommand = process.platform === 'win32' ? 'steamcmd.exe' : 'steamcmd'
+  const { steamcmdImage, instancesRoot } = getServerContainerConfig()
   return {
-    steamcmdPath: defaultSteamcmdCommand,
-    installRoot: resolveDefaultInstallRoot(defaultSteamcmdCommand),
+    steamcmdPath: steamcmdImage,
+    installRoot: instancesRoot,
   }
 }
 
 export function normalizeSteamcmdConfigBody(body: SteamcmdConfigBody): DbSystemSteamcmdConfig {
   const defaults = getDefaultSteamcmdConfig()
   const steamcmdPath = body.steamcmdPath?.trim() || defaults.steamcmdPath
-  const installRoot = resolveEffectiveInstallRoot(body.installRoot, steamcmdPath)
+  const installRoot = body.installRoot?.trim() || defaults.installRoot
   return {
     steamcmdPath,
     installRoot,

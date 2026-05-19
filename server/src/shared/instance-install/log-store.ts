@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { formatInstallLogContent, normalizeInstallLogLine } from './log-format'
 
 const MAX_LINES = 500
 
@@ -20,7 +21,7 @@ export function readInstallLogContent(installLogsDir: string, instanceId: string
   if (!fs.existsSync(filePath)) {
     return null
   }
-  const content = fs.readFileSync(filePath, 'utf8').trimEnd()
+  const content = formatInstallLogContent(fs.readFileSync(filePath, 'utf8'))
   return content || null
 }
 
@@ -46,7 +47,7 @@ export class InstanceInstallLogWriter {
   }
 
   appendLine(line: string) {
-    const text = line.trim()
+    const text = normalizeInstallLogLine(line)
     if (!text) {
       return
     }
@@ -61,7 +62,7 @@ export class InstanceInstallLogWriter {
     if (!fs.existsSync(this.filePath)) {
       return ''
     }
-    return fs.readFileSync(this.filePath, 'utf8').trimEnd()
+    return formatInstallLogContent(fs.readFileSync(this.filePath, 'utf8'))
   }
 
   private trimFileToMaxLines() {

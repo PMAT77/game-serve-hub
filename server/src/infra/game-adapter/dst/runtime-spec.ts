@@ -18,13 +18,14 @@ export function buildDstMasterShardContainerSpec(input: {
   hostInstallPath: string
   image: string
   clusterInput: EnsureDstClusterInput
+  containerGameRoot?: string
 }): ShardContainerSpec | undefined {
   const binary = findDstServerBinary(input.hostInstallPath)
   if (!binary) {
     return undefined
   }
   ensureDstClusterConfig(input.hostInstallPath, input.clusterInput)
-  const containerGameRoot = DST_CONTAINER_GAME_ROOT
+  const containerGameRoot = input.containerGameRoot ?? DST_CONTAINER_GAME_ROOT
   const containerStorageRoot = path.posix.join(containerGameRoot, DST_STORAGE_DIR)
   const executable = path.posix.join(containerGameRoot, binary.binDir, binary.executable)
   const workingDir = path.posix.join(containerGameRoot, binary.binDir)

@@ -2,8 +2,8 @@
 import type { SystemInfoData } from './types'
 import CpuInfoCard from './CpuInfoCard.vue'
 import DiskInfoCard from './DiskInfoCard.vue'
+import DockerInfoCard from './DockerInfoCard.vue'
 import MemoryInfoCard from './MemoryInfoCard.vue'
-import SystemLoadCard from './SystemLoadCard.vue'
 
 defineOptions({
   name: 'MonitorStatus',
@@ -17,13 +17,11 @@ defineProps<{
 
 <template>
   <div class="space-y-4">
-    <div class="space-y-4">
-      <div class="gap-3 grid grid-cols-1 md-grid-cols-4">
-        <SystemLoadCard :loading="loading" :info="info" mode="charts" />
-        <CpuInfoCard :loading="loading" :info="info" mode="charts" />
-        <MemoryInfoCard :loading="loading" :info="info" mode="charts" />
-        <DiskInfoCard :loading="loading" :info="info" mode="charts" />
-      </div>
+    <div class="gap-3 grid grid-cols-1 md:grid-cols-4">
+      <CpuInfoCard :loading="loading" :info="info" mode="charts" />
+      <MemoryInfoCard :loading="loading" :info="info" mode="charts" />
+      <DiskInfoCard :loading="loading" :info="info" mode="charts" />
+      <DockerInfoCard :loading="loading" :info="info" mode="charts" />
     </div>
   </div>
 </template>

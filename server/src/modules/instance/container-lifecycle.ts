@@ -1,13 +1,22 @@
 import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
-import { getCachedDockerStatus } from '../../infra/docker'
+import DockerClient from 'dockerode'
+import { resolveDockerStatus } from '../../infra/docker'
+import { resolveDockerConnectOptions } from '../../infra/docker-connect'
 import {
-  ensureSteamcmdImageAvailable,
+  formatGameDstImageError,
+  isSteamcmdImagePresent,
+  pullGameDstImage,
   getContainerRuntime,
 } from '../../infra/container'
+import { resolveInstanceContainerBind } from '../../infra/container/steamcmd-install-bind'
 import { buildMasterContainerName } from '../../infra/container/naming'
-import type { ContainerRef } from '../../infra/container/types'
+import type { ContainerRef, ContainerRuntime } from '../../infra/container/types'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
+import {
+  buildDstStartBlockedMessage,
+  diagnoseDstInstallReadiness,
+} from '../../infra/game-adapter/dst/install-readiness'
 import { buildDstMasterShardContainerSpec } from '../../infra/game-adapter/dst/runtime-spec'
 import { getServerContainerConfig } from '../../shared/config/container'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
@@ -16,12 +25,12 @@ import { getGameInstanceById, updateGameInstanceRuntime } from '../../shared/db/
 const logFollowAbortControllers = new Map<string, AbortController>()
 
 export async function ensureContainerRuntimeReady(): Promise<{ ok: boolean, message?: string }> {
-  if (getCachedDockerStatus() !== 'running') {
-    return { ok: false, message: 'Docker 未运行，请确认面板已挂载 docker.sock 且 Docker 服务正常' }
+  if ((await resolveDockerStatus()) !== 'running') {
+    return { ok: false, message: '无法连接 Docker，请确认面板已挂载 docker.sock（或 Windows 下 Docker Desktop 已启动）' }
   }
-  const imageReady = await ensureSteamcmdImageAvailable()
+  const imageReady = await isSteamcmdImagePresent()
   if (!imageReady) {
-    return { ok: false, message: 'SteamCMD 镜像不可用，请检查网络或 GSH_STEAMCMD_IMAGE 配置' }
+    return { ok: false, message: 'SteamCMD 镜像未就绪，请在实例页点击「拉取 / 检测 SteamCMD 镜像」后再操作' }
   }
   return { ok: true }
 }
@@ -82,6 +91,19 @@ export function startContainerLogFollow(instanceId: string, ref: ContainerRef) {
   })()
 }
 
+async function readRecentContainerLogs(runtime: ContainerRuntime, ref: ContainerRef, tail = 20): Promise<string> {
+  const lines: string[] = []
+  try {
+    for await (const line of runtime.logs(ref, { tail })) {
+      lines.push(line.text)
+    }
+  }
+  catch {
+    return ''
+  }
+  return lines.slice(-tail).join('\n').trim()
+}
+
 export async function startInstanceContainer(
   app: FastifyInstance,
   input: {
@@ -95,28 +117,58 @@ export async function startInstanceContainer(
   if (input.gameCode.trim() !== DST_APP_ID) {
     return { ok: false, message: '当前仅支持饥荒（343050）容器化启动' }
   }
-  const { gameDstImage } = getServerContainerConfig()
+  const { gameDstImage, instancesRoot, dockerHost } = getServerContainerConfig()
+  const docker = new DockerClient(resolveDockerConnectOptions(dockerHost))
+  const bindPlan = await resolveInstanceContainerBind(docker, input.installPath, instancesRoot)
   const spec = buildDstMasterShardContainerSpec({
     instanceId: input.instanceId,
     hostInstallPath: input.installPath,
     image: gameDstImage,
+    containerGameRoot: bindPlan.containerGameRoot,
     clusterInput: {
       instanceName: input.instanceName,
       gamePort: input.gamePort,
     },
   })
   if (!spec) {
-    return { ok: false, message: '未在安装目录找到饥荒服务端可执行文件，请确认 SteamCMD 安装已完成' }
+    const readiness = diagnoseDstInstallReadiness(input.installPath)
+    const steamcmdImageReady = await isSteamcmdImagePresent()
+    return {
+      ok: false,
+      message: buildDstStartBlockedMessage(readiness, steamcmdImageReady, {
+        instanceStatus: 'error',
+      }),
+    }
   }
+  app.log.info({ gameDstImage, bindMode: bindPlan.mode, hostBinds: bindPlan.hostBinds }, '确保 DST 运行镜像可用')
+  const imagePull = await pullGameDstImage()
+  if (!imagePull.ok) {
+    return { ok: false, message: imagePull.error }
+  }
+  spec.hostBinds = bindPlan.hostBinds
   const runtime = getContainerRuntime()
-  const ref = await runtime.createShardContainer(spec)
+  let ref: ContainerRef
+  try {
+    ref = await runtime.createShardContainer(spec)
+  }
+  catch (error) {
+    const raw = error instanceof Error ? error.message : '创建实例容器失败'
+    return { ok: false, message: formatGameDstImageError(raw, gameDstImage) }
+  }
   try {
     await runtime.start(ref)
   }
   catch (error) {
     await runtime.remove(ref)
-    const message = error instanceof Error ? error.message : '容器启动失败'
-    return { ok: false, message }
+    const raw = error instanceof Error ? error.message : '容器启动失败'
+    return { ok: false, message: formatGameDstImageError(raw, gameDstImage) }
+  }
+  const inspect = await runtime.inspect(ref)
+  if (!inspect.running) {
+    const logTail = await readRecentContainerLogs(runtime, ref)
+    await runtime.remove(ref)
+    const hint = logTail || '容器启动后立即退出，请检查安装目录挂载与游戏文件是否完整'
+    return { ok: false, message: hint }
   }
   const displayCommand = spec.cmd.join(' ')
   app.log.info({
@@ -131,15 +183,18 @@ export async function startInstanceContainer(
 
 export async function stopInstanceContainer(instanceId: string): Promise<void> {
   stopLogFollow(instanceId)
+  const instance = await getGameInstanceById(instanceId)
   const ref = await resolveInstanceContainerRef(instanceId)
   if (!ref) {
-    await updateGameInstanceRuntime(instanceId, {
-      status: 'stopped',
-      containerId: null,
-      runtimePid: null,
-      runtimeStartedAt: null,
-      lastError: null,
-    })
+    if (instance?.status === 'running') {
+      await updateGameInstanceRuntime(instanceId, {
+        status: 'stopped',
+        containerId: null,
+        runtimePid: null,
+        runtimeStartedAt: null,
+        lastError: null,
+      })
+    }
     return
   }
   const runtime = getContainerRuntime()

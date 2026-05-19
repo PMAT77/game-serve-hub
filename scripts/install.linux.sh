@@ -331,6 +331,9 @@ GSH_EDITION=community
 DOCKER_HOST=unix:///var/run/docker.sock
 GSH_GAME_DST_IMAGE=ghcr.io/pmat77/game-server-hub-dst:${PANEL_IMAGE_TAG}
 GSH_STEAMCMD_IMAGE=cm2network/steamcmd:root
+GSH_STACK_DIR=${PANEL_INSTALL_DIR}
+GSH_COMPOSE_FILES=docker-compose.yml:docker-compose.bind.yml
+GSH_GITHUB_REPO=PMAT77/game-server-hub
 TZ=UTC
 EOF"
   run_as_root chmod 600 "${PANEL_ENV_FILE}"

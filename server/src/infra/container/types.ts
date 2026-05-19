@@ -18,6 +18,7 @@ export interface ShardContainerSpec {
   name: string
   hostInstallPath: string
   containerGameRoot?: string
+  hostBinds?: string[]
   cmd: string[]
   workingDir: string
   env?: Record<string, string>

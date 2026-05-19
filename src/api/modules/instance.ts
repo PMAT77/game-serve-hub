@@ -106,7 +106,7 @@ export default {
     params: { id },
   }) as Promise<{ data: InstanceInstallLogPayload }>,
   createInstance: (data: CreateInstancePayload) => api.post('app/instance/create', data),
-  updateInstance: (id: string) => api.post('app/instance/update', { id }),
+  updateInstance: (id: string, options?: { force?: boolean }) => api.post('app/instance/update', { id, force: options?.force }),
   checkInstanceUpdates: (ids?: string[]) => api.post('app/instance/check-updates', ids?.length ? { ids } : {}) as Promise<{ data: InstanceCheckUpdatesPayload }>,
   startInstance: (id: string) => api.post('app/instance/start', { id }),
   stopInstance: (id: string) => api.post('app/instance/stop', { id }),

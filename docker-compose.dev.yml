@@ -5,9 +5,13 @@ services:
     image: node:22-bookworm-slim
     container_name: game-server-hub-panel
     working_dir: /app
-    command: ["sh", "-c", "corepack enable && pnpm install && pnpm run dev:server:watch"]
+    command: ["sh", "-c", "corepack enable && if [ ! -f node_modules/.modules.yaml ]; then pnpm install; fi && pnpm run dev:server:watch"]
     environment:
       NODE_ENV: development
+      GSH_PANEL_CONTAINER_NAME: game-server-hub-panel
+      GSH_DEV_COMPOSE_QUIET: "1"
+      NODE_NO_WARNINGS: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "3000"
       DB_PATH: /app/data/game-server-hub.sqlite
@@ -16,7 +20,9 @@ services:
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
       GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub-dst:latest}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:root}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:root-bookworm}
+      STEAMCMD_USERNAME: ${STEAMCMD_USERNAME:-}
+      STEAMCMD_PASSWORD: ${STEAMCMD_PASSWORD:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
     volumes:
@@ -32,10 +38,11 @@ services:
   web:
     image: node:22-bookworm-slim
     working_dir: /app
-    command: ["sh", "-c", "corepack enable && pnpm install && pnpm run dev:web"]
+    command: ["sh", "-c", "corepack enable && if [ ! -f node_modules/.modules.yaml ]; then pnpm install; fi && pnpm run dev:web"]
     environment:
       VITE_APP_API_BASEURL: http://panel:3000
       VITE_ENABLE_PROXY: "true"
+      GSH_DEV_COMPOSE_QUIET: "1"
     volumes:
       - .:/app
       - web-node-modules:/app/node_modules

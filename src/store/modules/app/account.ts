@@ -31,7 +31,8 @@ export const useAppAccountStore = defineStore('appAccount', () => {
 
   // 权限信息
   const permissions = ref<string[]>([])
-  const mustChangePassword = ref(false)
+  /** 仅本次登录：服务端在「首次登录」时返回 true，用于右上角改密建议（与 DB 长期标记无关） */
+  const suggestPasswordChangeOnFirstLogin = ref(false)
 
   // 登录状态
   const isLogin = computed(() => {
@@ -63,7 +64,11 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     token.value = res.data.token
     avatar.value = res.data.avatar
     email.value = res.data.email
-    mustChangePassword.value = res.data.mustChangePassword === true
+    suggestPasswordChangeOnFirstLogin.value = res.data.mustChangePassword === true
+  }
+
+  function clearSuggestPasswordChangeOnFirstLogin() {
+    suggestPasswordChangeOnFirstLogin.value = false
   }
 
   // 手动登出
@@ -106,7 +111,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     avatar.value = ''
     email.value = ''
     permissions.value = []
-    mustChangePassword.value = false
+    suggestPasswordChangeOnFirstLogin.value = false
     appSettingsStore.updateSettings({}, true)
     appTabbarStore.clean()
     appRouteStore.removeRoutes()
@@ -117,7 +122,6 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   async function getPermissions() {
     const res = await apiApp.permission()
     permissions.value = res.data.permissions
-    mustChangePassword.value = res.data.mustChangePassword === true
   }
 
   // 修改密码
@@ -125,10 +129,8 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     password: string
     newPassword: string
   }) {
-    const res = await apiApp.passwordEdit(data)
-    if (res.data.mustChangePassword === false) {
-      mustChangePassword.value = false
-    }
+    await apiApp.passwordEdit(data)
+    clearSuggestPasswordChangeOnFirstLogin()
   }
 
   // 锁屏
@@ -152,13 +154,14 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     avatar,
     email,
     permissions,
-    mustChangePassword,
+    suggestPasswordChangeOnFirstLogin,
     isLogin,
     login,
     logout,
     requestLogout,
     getPermissions,
     editPassword,
+    clearSuggestPasswordChangeOnFirstLogin,
     lock,
     unlock,
   }

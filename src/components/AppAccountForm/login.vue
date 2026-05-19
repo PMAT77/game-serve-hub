@@ -26,17 +26,28 @@ const loading = ref(false)
 // 登录方式，default 账号密码登录，qrcode 扫码登录
 const type = ref<'default' | 'qrcode'>('default')
 
+function resolveLoginInitialValues() {
+  if (import.meta.env.DEV) {
+    return {
+      account: import.meta.env.VITE_DEV_LOGIN_ACCOUNT?.trim() || 'admin',
+      password: import.meta.env.VITE_DEV_LOGIN_PASSWORD || 'admin',
+      remember: false,
+    }
+  }
+  return {
+    account: props.account ?? localStorage.getItem('login_account') ?? '',
+    password: '',
+    remember: localStorage.getItem('login_remember') === '1',
+  }
+}
+
 const form = useForm({
   validationSchema: toTypedSchema(z.object({
     account: z.string().min(1, '请输入用户名'),
     password: z.string().min(1, '请输入密码'),
     remember: z.boolean(),
   })),
-  initialValues: {
-    account: props.account ?? localStorage.getItem('login_account') ?? '',
-    password: '',
-    remember: localStorage.getItem('login_remember') === '1',
-  },
+  initialValues: resolveLoginInitialValues(),
 })
 const onSubmit = form.handleSubmit((values) => {
   loading.value = true

@@ -1,8 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import { randomUUID } from 'node:crypto'
-import { createSession, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
-import { ErrorCode } from '../../../../shared/constants/error-code'
+import { consumeFirstLoginPasswordChangePrompt, createSession, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 import type { RouteMetaRaw } from '../../../../packages/types/types'
 
@@ -42,12 +41,6 @@ const PASSWORD_CHANGE_WINDOW_MS = 10 * 60 * 1000
 const PASSWORD_CHANGE_BLOCK_MS = 15 * 60 * 1000
 const PASSWORD_CHANGE_MIN_INTERVAL_MS = 60 * 1000
 const passwordChangeRateMap = new Map<string, PasswordChangeRateState>()
-const FORCE_PASSWORD_CHANGE_ALLOWLIST = new Set([
-  '/app/account/login',
-  '/app/account/logout',
-  '/app/account/permission',
-  '/app/account/password/edit',
-])
 
 const routeList: RouteItem[] = [
   {
@@ -213,29 +206,6 @@ function clearPasswordChangeFailures(userId: string) {
  * 负责认证、登录态、密码管理等能力。
  */
 export function registerAuthModule(app: FastifyInstance) {
-  app.addHook('onRequest', async (request, reply) => {
-    const path = request.url.split('?')[0] ?? ''
-    if (!path.startsWith('/app/') || FORCE_PASSWORD_CHANGE_ALLOWLIST.has(path)) {
-      return
-    }
-
-    const token = getTokenByRequest(request)
-    if (!token) {
-      return
-    }
-
-    const user = await findUserByToken(token)
-    if (!user || !userMustChangePassword(user)) {
-      return
-    }
-
-    reply.status(403).send(businessError(
-      '请先修改初始密码后再使用其他功能',
-      request,
-      ErrorCode.FORCE_PASSWORD_CHANGE,
-    ))
-  })
-
   app.get('/app/route/list', async (request): Promise<ApiSuccessResponse<RouteItem[]>> => {
     return success(routeList, request)
   })
@@ -262,13 +232,18 @@ export function registerAuthModule(app: FastifyInstance) {
     const token = `${user.account}:${randomUUID()}`
     await createSession(token, user.id)
 
+    const suggestPasswordChangeOnFirstLogin = userMustChangePassword(user)
+    if (suggestPasswordChangeOnFirstLogin) {
+      await consumeFirstLoginPasswordChangePrompt(user.id)
+    }
+
     return success({
       account: user.account,
       token,
       avatar: user.avatar,
       email: user.email,
       remember,
-      mustChangePassword: userMustChangePassword(user),
+      mustChangePassword: suggestPasswordChangeOnFirstLogin,
     }, request)
   })
 
@@ -300,7 +275,7 @@ export function registerAuthModule(app: FastifyInstance) {
 
     return success({
       permissions: await findPermissionsByUserId(user.id),
-      mustChangePassword: userMustChangePassword(user),
+      mustChangePassword: false,
     }, request)
   })
 

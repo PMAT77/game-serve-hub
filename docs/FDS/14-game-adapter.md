@@ -1,83 +1,56 @@
-# FDS-14：游戏适配器框架
+# FDS-14：游戏适配器
 
-- **里程碑**：M0/M1 框架，v1.x 第二游戏  
-- **优先级**：P0（框架）  
-- **状态**：仅 DST 硬编码分支
+- 里程碑：M0/M1
+- 优先级：P0
+- 状态：已实现（DST v1，M0 已完成 2026-05-19）
 
 ## 1. 背景与目标
 
-用统一接口隔离「面板通用能力」与「各游戏差异」，v1 仅实现 DST，后续泰拉瑞亚等以新 adapter 注册方式接入。
+通过适配器抽象隔离游戏差异，支撑从 DST 单游戏向多游戏扩展。
 
-## 2. 适配器接口（规划）
+## 2. 角色与前置条件
 
-```typescript
-interface GameAdapter {
-  readonly gameCode: string
-  readonly displayName: string
-  readonly steamAppId: string
+- 角色：平台研发与运维
+- 前置：实例模块可按 `gameCode` 分流
 
-  validateInstallPath(path: string): string | undefined
-  install(ctx: InstallContext): Promise<void>
-  ensureDefaultLayout(ctx: InstanceContext): Promise<void>
+## 3. 功能范围
 
-  buildShardContainers(ctx: InstanceContext): ShardContainerSpec[]
-  getConsolePresets(): ConsolePreset[]
+- 游戏安装参数抽象
+- 目录与配置初始化抽象
+- 运行规格抽象
 
-  getBackupPaths(ctx: InstanceContext): string[]
-  getModPaths?(ctx: InstanceContext): ModPaths
-}
-```
+## 4. 功能清单
 
-注册表：`registerGameAdapter(adapter)`，`getAdapter(gameCode)`。
+- DST 适配实现（Community）
+- 适配器注册中心（规划）
+- 多游戏扩展（规划）
 
-## 3. DST 实现要点（v1）
+## 5. 接口与输入输出
 
-| 职责 | 实现位置（规划） |
-|------|----------------|
-| SteamCMD 343050 | `infra/game-adapter/dst/install.ts` |
-| Cluster/Shard 初始化 | 自 `ensureDstClusterConfig` 迁移 |
-| 启动参数 | `-cluster`、`-shard`、`-console` |
-| 控制台预设 | FDS-09 表 |
-| 备份范围 | Cluster 根目录 |
+- 输入：`gameCode` 与实例上下文
+- 输出：安装/运行所需的具体规格与行为
+- 对外接口：`GET /app/instance/games`
 
-## 4. 与实例模块协作
+## 6. 业务规则
 
-```text
-instance.create → getAdapter(gameCode).install
-instance.start  → runtime.start(adapter.buildShardContainers(...))
-mod.install     → adapter.getModPaths
-backup.create   → adapter.getBackupPaths
-```
+- v1 仅允许 DST（`343050`）。
+- 非支持游戏必须明确拒绝并提示。
 
-## 5. 可安装游戏列表
+## 7. 异常与边界
 
-`GET /app/instance/games` 返回注册表中游戏元数据（封面、简介、appId），v1 数组长度 1。
+- 适配器缺失 -> 返回不支持错误
+- 适配器异常 -> 中断流程并记录日志
 
-## 6. 验收标准
+## 8. 非功能要求
 
-- [ ] 新增 mock adapter 可在不改编核心的情况下注册（开发自测）。  
-- [ ] DST 行为与迁移前一致（M0 后容器态）。  
-- [ ] 文档列出添加新游戏检查清单。
+- 适配器边界清晰，避免核心模块硬编码扩散
 
-## 7. 添加新游戏检查清单（v1.x）
+## 9. 验收标准
 
-- [ ] 实现 `GameAdapter`  
-- [ ] Steam AppID 与安装脚本  
-- [ ] FDS 房间/世界等价物（若有）  
-- [ ] 控制台命令表  
-- [ ] ACCEPTANCE 场景扩展  
-- [ ] `app.fake.ts` 游戏市场卡片
+- DST 路径在适配器架构下保持可用
+- 扩展第二游戏时无需重写核心生命周期
 
-## 8. 不在 v1 范围
+## 10. 后续里程碑
 
-- 热加载 adapter 插件（无需动态 so，npm 注册即可）  
-- 非 Steam 游戏
-
-## 9. 依赖
-
-- [FDS-00](00-install-runtime.md)  
-- [DOMAIN.md](../DOMAIN.md) gameCode 约定
-
----
-
-*当前代码：`server/src/modules/instance/index.ts` 内 `gameCode === '343050'` 分支*
+- 完整注册中心
+- 跨游戏公共能力抽象沉淀

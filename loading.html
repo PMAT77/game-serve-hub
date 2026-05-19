@@ -214,28 +214,51 @@
         this.numberOfStars = 5000
         this.trailLength = 80
 
+        this._starBatchCancelled = false
         this.setupRandomGenerator()
         this.setupTimeline()
       }
 
       setupRandomGenerator() {
-        const originalRandom = Math.random
-        const customRandom = () => {
-          let seed = 1234
-          return () => {
-            seed = (seed * 9301 + 49297) % 233280
-            return seed / 233280
-          }
-        }
-
-        Math.random = customRandom()
-        this.createStars()
-        Math.random = originalRandom
+        this._seededRandomState = { seed: 1234 }
+        this._originalRandom = Math.random
+        Math.random = () => this._seededRandom()
+        this.startBatchStarCreation()
       }
 
-      createStars() {
-        for (let i = 0; i < this.numberOfStars; i++) {
+      _seededRandom() {
+        const state = this._seededRandomState
+        state.seed = (state.seed * 9301 + 49297) % 233280
+        return state.seed / 233280
+      }
+
+      startBatchStarCreation() {
+        const FIRST_BATCH = 200
+        const BATCH_SIZE = 500
+        while (this.stars.length < FIRST_BATCH && this.stars.length < this.numberOfStars) {
           this.stars.push(new Star(this.cameraZ, this.cameraTravelDistance))
+        }
+        const addBatch = () => {
+          if (this._starBatchCancelled) {
+            Math.random = this._originalRandom
+            return
+          }
+          const target = Math.min(this.stars.length + BATCH_SIZE, this.numberOfStars)
+          while (this.stars.length < target) {
+            this.stars.push(new Star(this.cameraZ, this.cameraTravelDistance))
+          }
+          if (this.stars.length < this.numberOfStars) {
+            requestAnimationFrame(addBatch)
+          }
+          else {
+            Math.random = this._originalRandom
+          }
+        }
+        if (this.stars.length < this.numberOfStars) {
+          requestAnimationFrame(addBatch)
+        }
+        else {
+          Math.random = this._originalRandom
         }
       }
 
@@ -399,6 +422,10 @@
       }
 
       destroy() {
+        this._starBatchCancelled = true
+        if (this._originalRandom) {
+          Math.random = this._originalRandom
+        }
         if (this._rafId != null) {
           cancelAnimationFrame(this._rafId)
           this._rafId = null
@@ -446,12 +473,7 @@
       initAnimation()
     }
 
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', boot, { once: true })
-    }
-    else {
-      boot()
-    }
+    boot()
 
     window.addEventListener('resize', initAnimation)
   })()

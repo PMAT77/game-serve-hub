@@ -6,6 +6,7 @@ import type {
   SystemInfoData,
 } from './components/types'
 import dayjs from 'dayjs'
+import { NAlert, NButton, NInputNumber, NSpace } from 'naive-ui'
 import apiSystem from '@/api/modules/system'
 import MonitorNetwork from './components/MonitorNetwork.vue'
 import MonitorStatus from './components/MonitorStatus.vue'
@@ -15,11 +16,88 @@ defineOptions({
   name: 'ConsoleMonitor',
 })
 
+const MONITOR_POLL_STORAGE_KEY = 'gsh-monitor-poll-settings'
+const DEFAULT_SYSTEM_POLL_MS = 10_000
+const DEFAULT_NETWORK_POLL_MS = 5_000
+const MIN_POLL_MS = 2_000
+const MAX_POLL_MS = 120_000
+const MAX_NETWORK_POINTS = 60
+const ALL_INTERFACE_VALUE = '__all__'
+
+interface MonitorPollSettings {
+  systemPollMs: number
+  networkPollMs: number
+}
+
+function loadPollSettings(): MonitorPollSettings {
+  try {
+    const raw = localStorage.getItem(MONITOR_POLL_STORAGE_KEY)
+    if (!raw) {
+      return { systemPollMs: DEFAULT_SYSTEM_POLL_MS, networkPollMs: DEFAULT_NETWORK_POLL_MS }
+    }
+    const parsed = JSON.parse(raw) as Partial<MonitorPollSettings>
+    const systemPollMs = Number(parsed.systemPollMs)
+    const networkPollMs = Number(parsed.networkPollMs)
+    return {
+      systemPollMs: Number.isFinite(systemPollMs) && systemPollMs >= MIN_POLL_MS
+        ? Math.min(systemPollMs, MAX_POLL_MS)
+        : DEFAULT_SYSTEM_POLL_MS,
+      networkPollMs: Number.isFinite(networkPollMs) && networkPollMs >= MIN_POLL_MS
+        ? Math.min(networkPollMs, MAX_POLL_MS)
+        : DEFAULT_NETWORK_POLL_MS,
+    }
+  }
+  catch {
+    return { systemPollMs: DEFAULT_SYSTEM_POLL_MS, networkPollMs: DEFAULT_NETWORK_POLL_MS }
+  }
+}
+
+function savePollSettings(settings: MonitorPollSettings) {
+  localStorage.setItem(MONITOR_POLL_STORAGE_KEY, JSON.stringify(settings))
+}
+
+const pollSettings = ref(loadPollSettings())
+const systemPollMs = computed({
+  get: () => pollSettings.value.systemPollMs,
+  set: (value: number | null) => {
+    if (value === null || !Number.isFinite(value)) {
+      return
+    }
+    pollSettings.value = {
+      ...pollSettings.value,
+      systemPollMs: Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, value)),
+    }
+    savePollSettings(pollSettings.value)
+    restartSystemPolling()
+  },
+})
+const networkPollMs = computed({
+  get: () => pollSettings.value.networkPollMs,
+  set: (value: number | null) => {
+    if (value === null || !Number.isFinite(value)) {
+      return
+    }
+    pollSettings.value = {
+      ...pollSettings.value,
+      networkPollMs: Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, value)),
+    }
+    savePollSettings(pollSettings.value)
+    restartNetworkPolling()
+  },
+})
+
 const loading = ref(false)
 const isSystemRequesting = ref(false)
+const systemError = ref<string | null>(null)
 let systemPollingTimer: ReturnType<typeof setInterval> | null = null
-const SYSTEM_POLLING_INTERVAL_MS = 10_000
 const systemInfo = ref<SystemInfoData | null>(null)
+
+function resolveErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  return fallback
+}
 
 async function loadSystemInfo() {
   if (isSystemRequesting.value) {
@@ -32,24 +110,15 @@ async function loadSystemInfo() {
   try {
     const res = await apiSystem.getSystemInfo()
     systemInfo.value = res.data
+    systemError.value = null
   }
-  catch {
-    // 轮询场景下忽略本地异常抛出，避免中断定时任务。
+  catch (error) {
+    systemError.value = resolveErrorMessage(error, '系统信息加载失败，请稍后重试')
   }
   finally {
     isSystemRequesting.value = false
     loading.value = false
   }
-}
-
-function startSystemPolling() {
-  loadSystemInfo()
-  if (systemPollingTimer) {
-    return
-  }
-  systemPollingTimer = setInterval(() => {
-    loadSystemInfo()
-  }, SYSTEM_POLLING_INTERVAL_MS)
 }
 
 function stopSystemPolling() {
@@ -60,22 +129,35 @@ function stopSystemPolling() {
   systemPollingTimer = null
 }
 
+function startSystemPolling() {
+  loadSystemInfo()
+  stopSystemPolling()
+  systemPollingTimer = setInterval(() => {
+    loadSystemInfo()
+  }, pollSettings.value.systemPollMs)
+}
+
+function restartSystemPolling() {
+  if (!systemPollingTimer) {
+    return
+  }
+  startSystemPolling()
+}
+
 const networkLoading = ref(false)
 const isNetworkRequesting = ref(false)
-const ALL_INTERFACE_VALUE = '__all__'
+const networkError = ref<string | null>(null)
+const networkStale = ref(false)
 const selectedInterface = ref<string | null>(ALL_INTERFACE_VALUE)
 const networkChartDataMap = ref<Record<string, NetworkChartPoint[]>>({})
 let networkPollingTimer: ReturnType<typeof setInterval> | null = null
-const NETWORK_POLLING_INTERVAL_MS = 5_000
-const MAX_NETWORK_POINTS = 60
+let lastNetworkSuccessAt: number | null = null
 
 function formatInterfaceLabel(name: string, index: number) {
   const value = name.trim()
   if (!value) {
     return `网卡 ${index + 1}`
   }
-
-  // 兜底：若系统返回的名称存在乱码/不可见字符，仍保证下拉可读。
   const hasReplacementChar = value.includes('�')
   const hasControlChar = Array.from(value).some(char => char.charCodeAt(0) < 32)
   if (hasReplacementChar || hasControlChar) {
@@ -97,10 +179,7 @@ const interfaceOptions = computed<MonitorNetworkOption[]>(() => {
   }
 
   return [
-    {
-      label: '所有网卡',
-      value: ALL_INTERFACE_VALUE,
-    },
+    { label: '所有网卡', value: ALL_INTERFACE_VALUE },
     ...options,
   ]
 })
@@ -163,24 +242,18 @@ async function loadRealtimeNetworkStats() {
   try {
     const response = await apiSystem.getNetworkRealtime()
     syncNetworkChartData(response.data.interfaces, response.data.timestamp)
+    lastNetworkSuccessAt = Date.now()
+    networkError.value = null
+    networkStale.value = false
   }
-  catch {
-    // 轮询场景下忽略异常，避免中断定时采集。
+  catch (error) {
+    networkError.value = resolveErrorMessage(error, '网络数据加载失败，请稍后重试')
+    networkStale.value = lastNetworkSuccessAt !== null
   }
   finally {
     isNetworkRequesting.value = false
     networkLoading.value = false
   }
-}
-
-function startNetworkPolling() {
-  loadRealtimeNetworkStats()
-  if (networkPollingTimer) {
-    return
-  }
-  networkPollingTimer = setInterval(() => {
-    loadRealtimeNetworkStats()
-  }, NETWORK_POLLING_INTERVAL_MS)
 }
 
 function stopNetworkPolling() {
@@ -189,6 +262,21 @@ function stopNetworkPolling() {
   }
   clearInterval(networkPollingTimer)
   networkPollingTimer = null
+}
+
+function startNetworkPolling() {
+  loadRealtimeNetworkStats()
+  stopNetworkPolling()
+  networkPollingTimer = setInterval(() => {
+    loadRealtimeNetworkStats()
+  }, pollSettings.value.networkPollMs)
+}
+
+function restartNetworkPolling() {
+  if (!networkPollingTimer) {
+    return
+  }
+  startNetworkPolling()
 }
 
 onMounted(() => {
@@ -213,14 +301,41 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div>
+  <div class="space-y-4">
+    <FaPageMain title="轮询设置">
+      <NSpace align="center" wrap>
+        <span class="text-sm text-muted-foreground">系统信息间隔（毫秒）</span>
+        <NInputNumber v-model:value="systemPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" />
+        <span class="text-sm text-muted-foreground">网络采样间隔（毫秒，建议 ≥ 4000）</span>
+        <NInputNumber v-model:value="networkPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" />
+      </NSpace>
+    </FaPageMain>
+
     <FaPageMain title="实时状态">
+      <div v-if="systemError" class="mb-4 space-y-2">
+        <NAlert type="error" :title="systemError" />
+        <NButton size="small" @click="loadSystemInfo">
+          重试
+        </NButton>
+      </div>
       <MonitorStatus :loading="loading" :info="systemInfo" />
     </FaPageMain>
-    <FaPageMain title="系统信息">
+
+    <FaPageMain title="系统详情">
       <MonitorSystemInfo :loading="loading" :info="systemInfo" />
     </FaPageMain>
+
     <FaPageMain title="网络监控">
+      <div v-if="networkError" class="mb-4 space-y-2">
+        <NAlert type="warning" :title="networkError">
+          <template v-if="networkStale">
+            图表仍显示上次可用数据，可能已过期。
+          </template>
+        </NAlert>
+        <NButton size="small" @click="loadRealtimeNetworkStats">
+          重试
+        </NButton>
+      </div>
       <MonitorNetwork
         v-model:selected-interface="selectedInterface"
         :loading="networkLoading"

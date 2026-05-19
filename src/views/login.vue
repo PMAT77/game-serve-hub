@@ -4,6 +4,8 @@ import Login from '@/components/AppAccountForm/login.vue'
 import Register from '@/components/AppAccountForm/register.vue'
 import ResetPassword from '@/components/AppAccountForm/reset-password.vue'
 import ColorScheme from '@/layouts/components/Topbar/Toolbar/ColorScheme/index.vue'
+import { promptPasswordChangeIfNeeded } from '@/composables/app/password-change-prompt'
+import { ensureDynamicRoutes } from '@/router/ensure-dynamic-routes'
 import settingsDefault from '@/settings'
 
 defineOptions({
@@ -22,17 +24,25 @@ const layoutAlign = ref<'left' | 'center' | 'right'>('right')
 const account = ref<string>()
 const formType = ref<'login' | 'register' | 'resetPassword'>('login')
 
-function handleLogin() {
-  const appAccountStore = useAppAccountStore()
+async function handleLogin() {
   const data = diffTwoObj(settingsDefault, appSettingsStore.settings)
-  const target = appAccountStore.mustChangePassword
-    ? { name: 'forceChangePassword' as const }
-    : redirect.value
-  router.push(target).then(() => {
-    if (Object.keys(data).length > 0) {
-      appSettingsStore.updateSettings(data)
-    }
-  })
+
+  try {
+    await ensureDynamicRoutes(router)
+  }
+  catch {
+    faToast.error('登录失败', {
+      description: '无法加载菜单与路由，请稍后重试',
+    })
+    return
+  }
+
+  await router.push(redirect.value)
+  if (Object.keys(data).length > 0) {
+    appSettingsStore.updateSettings(data)
+  }
+  await nextTick()
+  promptPasswordChangeIfNeeded()
 }
 </script>
 

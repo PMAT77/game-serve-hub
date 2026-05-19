@@ -1,7 +1,7 @@
 import type { Router } from 'vue-router'
 import { useNProgress } from '@vueuse/integrations/useNProgress'
 import { warnKeepAliveComponentNameMissing } from 'virtual:fantastic-admin/turbo-console'
-import { asyncRoutes } from './routes'
+import { ensureDynamicRoutes } from './ensure-dynamic-routes'
 import '@/assets/styles/nprogress.css'
 
 function setupRoutes(router: Router) {
@@ -12,22 +12,12 @@ function setupRoutes(router: Router) {
     const appMenuStore = useAppMenuStore()
     // 是否已登录
     if (appAccountStore.isLogin) {
-      if (appAccountStore.mustChangePassword) {
-        if (to.name !== 'forceChangePassword') {
-          return {
-            name: 'forceChangePassword',
-            replace: true,
-          }
-        }
-        return
-      }
-
       // 是否已根据权限动态生成并注册路由
       if (appRouteStore.isGenerate) {
         // 导航菜单如果不是 single 模式，则需要根据 path 定位主导航菜单的选中状态
         appSettingsStore.settings.menu.mode !== 'single' && appMenuStore.setActived(to.path)
         // 如果已登录状态下，进入登录页会强制跳转到主页
-        if (to.name === 'login' || to.name === 'forceChangePassword') {
+        if (to.name === 'login') {
           return {
             path: appSettingsStore.settings.app.home.fullPath,
             replace: true,
@@ -43,31 +33,19 @@ function setupRoutes(router: Router) {
       }
       else {
         try {
-          // 获取用户权限
-          appSettingsStore.settings.app.account.auth && await appAccountStore.getPermissions()
-          // 生成动态路由
-          switch (appSettingsStore.settings.app.routeBaseOn) {
-            case 'frontend':
-              appRouteStore.generateRoutesAtFront(asyncRoutes)
-              break
-            case 'backend':
-              await appRouteStore.generateRoutesAtBack()
-              break
-          }
-          // 注册并记录路由数据
-          // 记录的数据会在登出时会使用到，不使用 router.removeRoute 是考虑配置的路由可能不一定有设置 name ，则通过调用 router.addRoute() 返回的回调进行删除
-          const removeRoutes: (() => void)[] = []
-          appRouteStore.routes.forEach((route) => {
-            if (!/^(?:https?:|mailto:|tel:)/.test(route.path)) {
-              removeRoutes.push(router.addRoute(route))
-            }
-          })
-          appRouteStore.systemRoutes.forEach((route) => {
-            removeRoutes.push(router.addRoute(route))
-          })
-          appRouteStore.setCurrentRemoveRoutes(removeRoutes)
+          await ensureDynamicRoutes(router)
         }
-        catch {}
+        catch (error) {
+          if (import.meta.env.DEV) {
+            console.error('[router] ensureDynamicRoutes failed:', error)
+          }
+          return {
+            name: 'login',
+            query: {
+              redirect: to.fullPath !== appSettingsStore.settings.app.home.fullPath ? to.fullPath : undefined,
+            },
+          }
+        }
         // 动态路由生成并注册后，重新进入当前路由
         return {
           path: to.path,

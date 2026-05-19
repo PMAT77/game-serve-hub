@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import EditPassword from '@/components/AppAccountForm/edit-password.vue'
+import { ensureDynamicRoutes } from '@/router/ensure-dynamic-routes'
 
 defineOptions({
   name: 'ForceChangePassword',
@@ -7,10 +8,17 @@ defineOptions({
 
 const router = useRouter()
 const appSettingsStore = useAppSettingsStore()
-const appAccountStore = useAppAccountStore()
 
 async function handlePasswordChanged() {
-  await appAccountStore.getPermissions()
+  try {
+    await ensureDynamicRoutes(router)
+  }
+  catch {
+    faToast.error('无法进入系统', {
+      description: '菜单与路由加载失败，请刷新后重试',
+    })
+    return
+  }
   await router.replace(appSettingsStore.settings.app.home.fullPath)
 }
 </script>

@@ -12,12 +12,15 @@ import MainSidebar from './components/MainSidebar/index.vue'
 import SubSidebar from './components/SubSidebar/index.vue'
 import Topbar from './components/Topbar/index.vue'
 import LinkView from './components/views/link.vue'
+import { usePanelUpdateNotifier } from '@/composables/usePanelUpdateNotifier'
 
 defineOptions({
   name: 'Layout',
 })
 
 const routeInfo = useRoute()
+
+usePanelUpdateNotifier()
 
 const appSettingsStore = useAppSettingsStore()
 const appKeepAliveStore = useAppKeepAliveStore()

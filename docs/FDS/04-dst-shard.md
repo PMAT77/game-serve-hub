@@ -1,94 +1,58 @@
-# FDS-04：DST 世界管理（Shard）
+# FDS-04：DST 世界（Shard）
 
-- **里程碑**：M1  
-- **优先级**：P0  
-- **状态**：未实现（仅默认 Master，无 Caves 容器）
+- 里程碑：M1
+- 优先级：P0
+- 状态：规划态
 
 ## 1. 背景与目标
 
-管理 DST **分片**：地表 Master 与洞穴 Caves 的配置、启停编排与 worldgen 预设，匹配全容器化双容器模型。
+提供 Master/Caves 世界配置与运行编排，补齐 DST 多世界管理能力。
 
-## 2. 用户角色与前置条件
+## 2. 角色与前置条件
 
-- 实例已安装；Cluster 已存在（FDS-03）。  
-- M0：Master/Caves 各对应独立容器。
+- 角色：实例管理员
+- 前置：Cluster 可用且实例已安装
 
-## 3. 名词
+## 3. 功能范围
 
-- **Shard**：`Master` | `Caves`  
-- **worldgenoverride.lua**：地图生成脚本
+- 分片配置读写（server.ini、worldgen）
+- Caves 启用/禁用
+- 分片运行状态管理
 
-## 4. 用户故事
+## 4. 功能清单
 
-1. **我希望**启用洞穴，**以便**玩家可下洞。  
-2. **我希望**选择地图预设（如 SURVIVAL_TOGETHER），**以便**快速开服。  
-3. **我希望**单独配置地表与洞穴端口，**以便**避免冲突。
+- 分片状态展示（Community）
+- 分片配置管理（Community）
+- 分片编排自动化（Community）
+- 高级 worldgen 编辑（Pro 规划）
 
-## 5. 页面与信息架构
+## 5. 接口与输入输出（规划）
 
-实例上下文 Tab「世界」：
+- `GET /app/instances/:instanceId/shards`
+- `PUT /app/instances/:instanceId/shards/:shard`
+- 输入：分片配置对象
+- 输出：分片状态与配置生效结果
 
-| 区块 | 内容 |
-|------|------|
-| Master | 状态、端口、worldgen 预设、启动/停止 |
-| Caves | 启用开关、状态、端口、worldgen（可与 Master 联动预设） |
-| 操作 | 「应用并重启」、启停顺序说明 |
+## 6. 业务规则
 
-## 6. 功能点清单
+- 禁止仅启用 Caves 而不启用 Master。
+- 配置变更需提示重启影响。
 
-| 功能 | 版本 |
-|------|------|
-| 展示 Master/Caves 运行状态 | Community |
-| 启用/禁用洞穴（创建 Caves 目录与容器） | Community |
-| 编辑 server.ini 端口段 | Community |
-| worldgen 预设下拉 | Community |
-| 启停编排（先 Master 后 Caves） | Community |
-| 高级 worldgen overrides 表单 | Pro |
-| 自定义 lua 上传 | Pro 或 P2 |
+## 7. 异常与边界
 
-## 7. 数据与 API
+- 端口冲突 -> 禁止启动并给出冲突端口
+- 配置错误 -> 阻止保存
 
-### 7.1 文件
+## 8. 非功能要求
 
-- `Master/server.ini`、`Caves/server.ini`  
-- `Master/worldgenoverride.lua`、`Caves/worldgenoverride.lua`
-
-### 7.2 API（规划）
-
-- `GET /app/instances/:instanceId/shards`  
-- `PUT .../shards/:shard`  
-- `POST .../shards/caves/enable` | `disable`
-
-### 7.3 容器命名（建议）
-
-- `game-{instanceId}-master`  
-- `game-{instanceId}-caves`
-
-## 8. 异常与边界
-
-| 场景 | 行为 |
-|------|------|
-| 仅启 Caves 不启 Master | 禁止 |
-| 禁用洞穴 | 停 Caves 容器，可选保留存档目录 |
-| 端口与宿主机冲突 | 启动失败，明确 shard 名 |
-| 运行中改 worldgen | 需重启并警告可能重置部分生成 |
+- 分片操作需保证顺序与状态一致性
 
 ## 9. 验收标准
 
-- [ ] 启用洞穴后两容器 running，客户端可下洞（[ACCEPTANCE](../ACCEPTANCE.md) D）。  
-- [ ] 停止顺序正确，无损坏存档告警。  
-- [ ] 预设变更后新生成符合预期（新档/重置场景测）。
+- 可完成 Master/Caves 配置管理闭环
+- 分片启停行为可预测且可观测
 
-## 10. 不在本期范围
+## 10. 后续里程碑
 
-- 更多 Shard 类型（非 DST 标准）  
-- 跨实例复制世界
-
-## 11. 依赖
-
-- [FDS-00](00-install-runtime.md)、[FDS-03](03-dst-cluster.md)  
-- [FDS-09](09-console.md) 分片日志/命令（可选 v1 统一入口）
-
----
-
-*启停顺序见 [DST-OPS.md](../DST-OPS.md) §4*
+- 高级生成参数模板
+- 分片级日志与命令分流

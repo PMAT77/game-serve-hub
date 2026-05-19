@@ -75,12 +75,7 @@ export function resolveEffectiveInstallRoot(rawInstallRoot: string | undefined, 
   return installRoot
 }
 
-export function runSteamcmdInstallCommand(): {
-  ok: boolean
-  message: string
-} {
-  return {
-    ok: true,
-    message: 'SteamCMD 由 Docker 镜像提供（GSH_STEAMCMD_IMAGE），无需在面板容器内安装宿主机 SteamCMD',
-  }
+export function buildSteamcmdImageReadyMessage(image: string): string {
+  const name = image.trim() || 'GSH_STEAMCMD_IMAGE 未配置'
+  return `SteamCMD 镜像已就绪（${name}），可以创建游戏实例`
 }

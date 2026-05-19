@@ -1,5 +1,5 @@
 {
-  "name": "@fantastic-admin/game-server-hub",
+  "name": "game-server-hub",
   "type": "module",
   "version": "0.0.0",
   "private": true,
@@ -10,12 +10,13 @@
   "scripts": {
     "postinstall": "pnpm -r --filter './packages/*' run stub --if-present",
     "dev": "pnpm run dev:prepare && run-p dev:web dev:server:watch",
-    "dev:prepare": "tsx ./server/scripts/dev.prepare.ts",
+    "dev:prepare": "pnpm -r --filter './packages/*' run stub --if-present && tsx ./server/scripts/dev.prepare.ts",
     "dev:web": "vite",
     "dev:server": "tsx ./server/src/main.ts",
     "dev:server:watch": "tsx watch ./server/src/main.ts",
     "dev:server:stop": "tsx ./server/scripts/stop.ts",
-    "dev:compose": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build",
+    "dev:compose:prepare": "tsx server/scripts/ensure-steamcmd-image.ts",
+    "dev:compose": "tsx scripts/dev-compose.ts",
     "dev:compose:down": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down",
     "install:linux": "bash ./scripts/install.linux.sh",
     "db:generate": "drizzle-kit generate --config server/drizzle.config.ts",
@@ -27,7 +28,8 @@
     "serve:test": "http-server ./dist-test -o",
     "svgo": "svgo -f src/assets/icons",
     "generate:icons": "tsx ./scripts/generate.icons.ts",
-    "lint": "vue-tsc -b"
+    "lint": "vue-tsc -b",
+    "test:server": "tsx --test server/src/**/*.test.ts"
   },
   "dependencies": {
     "@fantastic-admin/components": "workspace:*",

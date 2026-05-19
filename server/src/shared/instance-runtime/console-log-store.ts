@@ -30,6 +30,11 @@ class InstanceConsoleLogStore {
     this.appendSystem(instanceId, '控制台日志已清空')
   }
 
+  removeInstance(instanceId: string) {
+    this.logs.delete(instanceId)
+    this.listeners.delete(instanceId)
+  }
+
   subscribe(instanceId: string, listener: LogListener): () => void {
     let set = this.listeners.get(instanceId)
     if (!set) {

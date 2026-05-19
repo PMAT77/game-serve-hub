@@ -63,6 +63,10 @@ export interface DbSystemPanelSettings {
   panelPort: number
   theme: 'light' | 'dark' | 'system'
   autoUpdate: boolean
+  /** 启动实例前是否向 Steam 拉取 Build ID 并拦截有更新的启动 */
+  checkUpdateBeforeStart: boolean
+  /** Hub 镜像自动检查间隔（小时） */
+  updateCheckIntervalHours: number
 }
 
 export interface DbSystemSteamcmdConfig {
@@ -568,6 +572,32 @@ export function userMustChangePassword(user: Pick<DbUserRow, 'must_change_passwo
   return user.must_change_password === 1
 }
 
+/** 首次登录改密提示已展示：清除用户标记，并结束安装阶段的 FORCE_PASSWORD_CHANGE 待办 */
+export async function consumeFirstLoginPasswordChangePrompt(userId: string) {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  await drizzleDb
+    .update(users)
+    .set({
+      mustChangePassword: 0,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.mustChangePassword, 1),
+      ),
+    )
+
+  const state = await getAuthForcePasswordChangeState()
+  if (state?.pending) {
+    await saveAuthForcePasswordChangeState({
+      pending: false,
+      completed: true,
+    })
+  }
+}
+
 export async function findUserByAccount(account: string): Promise<DbUserRow | undefined> {
   const { drizzleDb } = ensureDb()
   const result = await drizzleDb
@@ -728,6 +758,8 @@ function normalizePanelSettings(raw: unknown): DbSystemPanelSettings {
       panelPort: 80,
       theme: 'system',
       autoUpdate: true,
+      checkUpdateBeforeStart: false,
+      updateCheckIntervalHours: 1,
     }
   }
   const value = raw as Partial<DbSystemPanelSettings>
@@ -739,6 +771,13 @@ function normalizePanelSettings(raw: unknown): DbSystemPanelSettings {
     panelPort: panelPort > 0 && panelPort <= 65535 ? panelPort : 80,
     theme,
     autoUpdate: typeof value.autoUpdate === 'boolean' ? value.autoUpdate : true,
+    checkUpdateBeforeStart: typeof value.checkUpdateBeforeStart === 'boolean'
+      ? value.checkUpdateBeforeStart
+      : false,
+    updateCheckIntervalHours: Number.isFinite(value.updateCheckIntervalHours)
+      && (value.updateCheckIntervalHours as number) > 0
+      ? Math.min(168, Math.max(1, Math.trunc(value.updateCheckIntervalHours as number)))
+      : 1,
   }
 }
 

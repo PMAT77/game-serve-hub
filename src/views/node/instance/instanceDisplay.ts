@@ -64,6 +64,9 @@ export function resolveInstallPhase(instance: InstanceItem): string {
   if (text.includes('正在准备更新')) {
     return '准备更新'
   }
+  if (text.includes('正在启动 SteamCMD')) {
+    return '启动 SteamCMD'
+  }
   if (text.includes('正在准备')) {
     return '准备安装'
   }
@@ -102,6 +105,10 @@ export function extractInstallProgressPercent(instance: InstanceItem): number | 
     const bracketMatch = text.match(/\[\s*(\d{1,3})%\]/)
     if (bracketMatch) {
       return Math.max(0, Math.min(100, Number(bracketMatch[1])))
+    }
+    const progressMatch = text.match(/progress:\s*(\d+(?:\.\d+)?)/i)
+    if (progressMatch) {
+      return Math.max(0, Math.min(100, Math.round(Number(progressMatch[1]))))
     }
     const genericMatch = text.match(/(\d{1,3})\s*%/)
     if (genericMatch) {

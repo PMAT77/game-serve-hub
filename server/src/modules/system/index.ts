@@ -15,7 +15,15 @@ import {
   normalizeDirectoryPath,
   searchFilesystemEntries,
 } from '../../infra/filesystem-browse'
-import { resolveEffectiveInstallRoot, resolveSteamcmdPath, runSteamcmdInstallCommand } from '../../infra/steamcmd'
+import {
+  ensureSteamcmdImage,
+  isGameDstImagePresent,
+  isSteamcmdImagePresent,
+  pullGameDstImage,
+} from '../../infra/container'
+import { resolveDockerStatus } from '../../infra/docker'
+import { buildSteamcmdImageReadyMessage } from '../../infra/steamcmd'
+import { getServerContainerConfig } from '../../shared/config/container'
 import {
   getSystemNetworkConfig,
   getSystemPanelSettings,
@@ -46,6 +54,12 @@ import {
   getDiskUsage,
   warmSystemMetricsCaches,
 } from './metrics'
+import {
+  applyPanelUpdates,
+  getCachedPanelUpdateStatus,
+  refreshPanelUpdateStatus,
+  schedulePanelUpdateChecks,
+} from './panel-update'
 
 interface DirectoryListQuery {
   path?: string
@@ -60,6 +74,10 @@ interface DirectorySearchQuery {
  */
 export function registerSystemModule(app: FastifyInstance) {
   setImmediate(warmSystemMetricsCaches)
+
+  app.addHook('onReady', async () => {
+    schedulePanelUpdateChecks(app)
+  })
 
   app.get('/app/system/settings', async (request): Promise<ApiSuccessResponse<ReturnType<typeof getDefaultPanelSettings>> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
@@ -81,8 +99,13 @@ export function registerSystemModule(app: FastifyInstance) {
     const panelPort = body.panelPort ?? 80
     const theme = body.theme ?? 'system'
     const autoUpdate = body.autoUpdate ?? true
+    const checkUpdateBeforeStart = body.checkUpdateBeforeStart ?? false
+    const updateCheckIntervalHours = body.updateCheckIntervalHours ?? 1
     if (!Number.isInteger(panelPort) || panelPort <= 0 || panelPort > 65535) {
       return businessError('面板端口不合法', request)
+    }
+    if (!Number.isInteger(updateCheckIntervalHours) || updateCheckIntervalHours < 1 || updateCheckIntervalHours > 168) {
+      return businessError('更新检查间隔应为 1-168 小时', request)
     }
     if (!['light', 'dark', 'system'].includes(theme)) {
       return businessError('主题配置不合法', request)
@@ -91,6 +114,8 @@ export function registerSystemModule(app: FastifyInstance) {
       panelPort,
       theme,
       autoUpdate,
+      checkUpdateBeforeStart,
+      updateCheckIntervalHours,
     })
     return success({
       isSuccess: true,
@@ -143,22 +168,38 @@ export function registerSystemModule(app: FastifyInstance) {
   })
 
   app.get('/app/system/steamcmd/config', async (request): Promise<ApiSuccessResponse<DbSystemSteamcmdConfig & {
+    runtimeMode: 'container'
+    steamcmdImage: string
+    gameDstImage: string
+    isDockerAvailable: boolean
     isSteamcmdInstalled: boolean
+    isGameDstImageInstalled: boolean
     detectedSteamcmdPath: string
   }> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
     if (authError) {
       return authError
     }
+    const containerConfig = getServerContainerConfig()
     const config = await getSystemSteamcmdConfig() ?? getDefaultSteamcmdConfig()
-    const detectedSteamcmdPath = resolveSteamcmdPath(config.steamcmdPath)
-    const steamcmdCommandForRoot = detectedSteamcmdPath || config.steamcmdPath
-    const installRoot = resolveEffectiveInstallRoot(config.installRoot, steamcmdCommandForRoot)
+    const installRoot = containerConfig.instancesRoot
+    const dockerStatus = await resolveDockerStatus()
+    const isDockerAvailable = dockerStatus === 'running'
+    const isSteamcmdInstalled = isDockerAvailable && await isSteamcmdImagePresent()
+    const isGameDstImageInstalled = isDockerAvailable && await isGameDstImagePresent()
+    const steamcmdImage = containerConfig.steamcmdImage
+    const gameDstImage = containerConfig.gameDstImage
     return success({
       ...config,
+      steamcmdPath: steamcmdImage,
       installRoot,
-      isSteamcmdInstalled: Boolean(detectedSteamcmdPath),
-      detectedSteamcmdPath,
+      runtimeMode: 'container' as const,
+      steamcmdImage,
+      gameDstImage,
+      isDockerAvailable,
+      isSteamcmdInstalled,
+      isGameDstImageInstalled,
+      detectedSteamcmdPath: isSteamcmdInstalled ? steamcmdImage : '',
     }, request)
   })
 
@@ -170,7 +211,12 @@ export function registerSystemModule(app: FastifyInstance) {
       return authError
     }
     const body = (request.body ?? {}) as SteamcmdConfigBody
-    const config = normalizeSteamcmdConfigBody(body)
+    const containerConfig = getServerContainerConfig()
+    const config = {
+      ...normalizeSteamcmdConfigBody(body),
+      steamcmdPath: containerConfig.steamcmdImage,
+      installRoot: containerConfig.instancesRoot,
+    }
     const installRootError = validateInstallRootPath(config.installRoot)
     if (installRootError) {
       return businessError(installRootError, request)
@@ -200,20 +246,89 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const result = runSteamcmdInstallCommand()
-    if (!result.ok) {
-      app.log.error({
-        message: result.message,
-      }, 'SteamCMD 自动安装失败')
-      return businessError(result.message, request)
+    if ((await resolveDockerStatus(true)) !== 'running') {
+      return businessError('无法连接 Docker，请确认面板已挂载 docker.sock（或 Windows 下 Docker Desktop 已启动）', request)
     }
-    app.log.info({
-      message: result.message,
-    }, 'SteamCMD 自动安装成功')
+    const pullResult = await ensureSteamcmdImage()
+    if (!pullResult.ok) {
+      app.log.error({ error: pullResult.error }, 'SteamCMD 镜像拉取失败')
+      return businessError(pullResult.error, request)
+    }
+    const { steamcmdImage } = getServerContainerConfig()
+    const message = buildSteamcmdImageReadyMessage(steamcmdImage)
+    app.log.info({ steamcmdImage }, 'SteamCMD 镜像已就绪')
     return success({
       isSuccess: true,
-      message: result.message,
+      message,
     }, request)
+  })
+
+  app.post('/app/system/game-dst/install', async (request): Promise<ApiSuccessResponse<{
+    isSuccess: boolean
+    message: string
+  }> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    if ((await resolveDockerStatus(true)) !== 'running') {
+      return businessError('无法连接 Docker，请确认面板已挂载 docker.sock（或 Windows 下 Docker Desktop 已启动）', request)
+    }
+    const pullResult = await pullGameDstImage()
+    if (!pullResult.ok) {
+      app.log.error({ error: pullResult.error }, 'DST 运行镜像拉取失败')
+      return businessError(pullResult.error, request)
+    }
+    const { gameDstImage } = getServerContainerConfig()
+    const message = `DST 运行镜像已就绪：${gameDstImage}。现在可以启动已安装完成的实例。`
+    app.log.info({ gameDstImage }, 'DST 运行镜像已就绪')
+    return success({
+      isSuccess: true,
+      message,
+    }, request)
+  })
+
+  app.get('/app/system/panel-update/status', async (request): Promise<ApiSuccessResponse<ReturnType<typeof getCachedPanelUpdateStatus>> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    return success(getCachedPanelUpdateStatus(), request)
+  })
+
+  app.post('/app/system/panel-update/check', async (request): Promise<ApiSuccessResponse<ReturnType<typeof getCachedPanelUpdateStatus>> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    if ((await resolveDockerStatus(true)) !== 'running') {
+      return businessError('无法连接 Docker，暂不能检查 Hub 镜像更新', request)
+    }
+    const status = await refreshPanelUpdateStatus()
+    return success(status, request)
+  })
+
+  app.post('/app/system/panel-update/apply', async (request): Promise<ApiSuccessResponse<{
+    status: 'updating' | 'completed'
+    message: string
+    applied: Array<'panel' | 'dst'>
+  }> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    if ((await resolveDockerStatus(true)) !== 'running') {
+      return businessError('无法连接 Docker，暂不能更新 Hub 镜像', request)
+    }
+    const body = (request.body ?? {}) as { targets?: Array<'panel' | 'dst'> }
+    try {
+      const result = await applyPanelUpdates(body.targets)
+      return success(result, request)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return businessError(message, request)
+    }
   })
 
   app.get('/app/system/info', async (request): Promise<ApiSuccessResponse<{
@@ -270,38 +385,38 @@ export function registerSystemModule(app: FastifyInstance) {
 
     const load = process.platform === 'win32'
       ? (() => {
-          const queueMetrics = getCachedWindowsQueueMetrics()
-          const cpuQueueNorm = queueMetrics.cpuQueueLength !== null
-            ? clampPercent((queueMetrics.cpuQueueLength / cpuCores) * 100)
-            : cpuUsageRate
-          const diskQueueNorm = queueMetrics.diskQueueLength !== null
-            ? clampPercent((queueMetrics.diskQueueLength / 2) * 100)
-            : diskUsageRate
-          const pressureRate = Number(clampPercent(
-            (cpuQueueNorm * 0.55)
-            + (diskQueueNorm * 0.30)
-            + (memoryUsageRate * 0.15),
-          ).toFixed(2))
-          const equivalentOneMinute = Number(((pressureRate / 100) * cpuCores).toFixed(2))
-          return {
-            oneMinute: equivalentOneMinute,
-            fiveMinutes: equivalentOneMinute,
-            fifteenMinutes: equivalentOneMinute,
-            usageRate: pressureRate,
-            isSynthetic: true,
-            cpuQueueLength: queueMetrics.cpuQueueLength,
-            diskQueueLength: queueMetrics.diskQueueLength,
-          }
-        })()
-      : {
-          oneMinute: Number(loadAvg[0].toFixed(2)),
-          fiveMinutes: Number(loadAvg[1].toFixed(2)),
-          fifteenMinutes: Number(loadAvg[2].toFixed(2)),
-          usageRate: Number(clampPercent((loadAvg[0] / cpuCores) * 100).toFixed(2)),
-          isSynthetic: false,
-          cpuQueueLength: null,
-          diskQueueLength: null,
+        const queueMetrics = getCachedWindowsQueueMetrics()
+        const cpuQueueNorm = queueMetrics.cpuQueueLength !== null
+          ? clampPercent((queueMetrics.cpuQueueLength / cpuCores) * 100)
+          : cpuUsageRate
+        const diskQueueNorm = queueMetrics.diskQueueLength !== null
+          ? clampPercent((queueMetrics.diskQueueLength / 2) * 100)
+          : diskUsageRate
+        const pressureRate = Number(clampPercent(
+          (cpuQueueNorm * 0.55)
+          + (diskQueueNorm * 0.30)
+          + (memoryUsageRate * 0.15),
+        ).toFixed(2))
+        const equivalentOneMinute = Number(((pressureRate / 100) * cpuCores).toFixed(2))
+        return {
+          oneMinute: equivalentOneMinute,
+          fiveMinutes: equivalentOneMinute,
+          fifteenMinutes: equivalentOneMinute,
+          usageRate: pressureRate,
+          isSynthetic: true,
+          cpuQueueLength: queueMetrics.cpuQueueLength,
+          diskQueueLength: queueMetrics.diskQueueLength,
         }
+      })()
+      : {
+        oneMinute: Number(loadAvg[0].toFixed(2)),
+        fiveMinutes: Number(loadAvg[1].toFixed(2)),
+        fifteenMinutes: Number(loadAvg[2].toFixed(2)),
+        usageRate: Number(clampPercent((loadAvg[0] / cpuCores) * 100).toFixed(2)),
+        isSynthetic: false,
+        cpuQueueLength: null,
+        diskQueueLength: null,
+      }
 
     return success({
       cpu: {

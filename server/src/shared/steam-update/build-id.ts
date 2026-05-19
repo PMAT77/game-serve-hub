@@ -1,10 +1,9 @@
-import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import process from 'node:process'
+import { runSteamcmdAppInfoInContainer } from '../../infra/container'
+import { resolveDockerStatus } from '../../infra/docker'
 
 const REMOTE_BUILD_CACHE_MS = 30 * 60 * 1000
-const APP_INFO_TIMEOUT_MS = 90_000
 
 interface RemoteBuildCacheEntry {
   buildId: string
@@ -91,76 +90,8 @@ function parsePublicBuildIdFromAppInfo(output: string): string | null {
   return matches.length > 0 ? matches[matches.length - 1][1] : null
 }
 
-function runSteamcmdAppInfoAsync(steamcmdCommand: string, appId: string): Promise<{
-  ok: boolean
-  output: string
-}> {
-  const normalizedSteamcmdCommand = steamcmdCommand.trim()
-  const normalizedAppId = appId.trim()
-  if (!normalizedSteamcmdCommand || !normalizedAppId) {
-    return Promise.resolve({ ok: false, output: '' })
-  }
-  const steamcmdArgs = [
-    '+@ShutdownOnFailedCommand',
-    '1',
-    '+@NoPromptForPassword',
-    '1',
-    '+login',
-    'anonymous',
-    '+app_info_update',
-    '1',
-    '+app_info_print',
-    normalizedAppId,
-    '+quit',
-  ]
-  const isShellScript = process.platform !== 'win32' && normalizedSteamcmdCommand.endsWith('.sh')
-  const command = isShellScript ? 'sh' : normalizedSteamcmdCommand
-  const args = isShellScript ? [normalizedSteamcmdCommand, ...steamcmdArgs] : steamcmdArgs
-
-  return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-
-    const finish = (result: { ok: boolean, output: string }) => {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timer)
-      resolve(result)
-    }
-
-    const timer = setTimeout(() => {
-      child.kill()
-      finish({ ok: false, output: '' })
-    }, APP_INFO_TIMEOUT_MS)
-
-    child.stdout?.on('data', (chunk: Buffer | string) => {
-      stdout += chunk.toString()
-    })
-    child.stderr?.on('data', (chunk: Buffer | string) => {
-      stderr += chunk.toString()
-    })
-    child.on('error', () => {
-      finish({ ok: false, output: '' })
-    })
-    child.on('close', (code) => {
-      const output = [stdout, stderr].filter(Boolean).join('\n').trim()
-      finish({
-        ok: code === 0 || /"appid"\s+"/i.test(output),
-        output,
-      })
-    })
-  })
-}
-
 export async function fetchRemoteBuildId(
-  steamcmdCommand: string,
+  _steamcmdCommand: string,
   appId: string,
   options?: { force?: boolean },
 ): Promise<string | null> {
@@ -174,14 +105,17 @@ export async function fetchRemoteBuildId(
     return cached.buildId
   }
 
-  const inflightKey = `${normalizedAppId}::${steamcmdCommand.trim()}`
+  const inflightKey = normalizedAppId
   const inflight = inflightRemoteBuildFetches.get(inflightKey)
   if (inflight) {
     return inflight
   }
 
   const task = (async () => {
-    const result = await runSteamcmdAppInfoAsync(steamcmdCommand, normalizedAppId)
+    if ((await resolveDockerStatus()) !== 'running') {
+      return cached?.buildId ?? null
+    }
+    const result = await runSteamcmdAppInfoInContainer(normalizedAppId)
     if (!result.ok && !result.output) {
       return cached?.buildId ?? null
     }

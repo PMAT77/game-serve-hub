@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -59,3 +59,21 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GSH_RELEASE_VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('main-{0}', github.sha) }}
+            GSH_BUILD_SHA=${{ github.sha }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            面板镜像：`ghcr.io/pmat77/game-server-hub:${{ github.ref_name }}`
+            DST 运行镜像：`ghcr.io/pmat77/game-server-hub-dst:${{ github.ref_name }}`
+
+            升级：在 Hub「系统设置 → Hub 版本」检查更新，或执行 `docker compose pull && docker compose up -d`。

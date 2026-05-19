@@ -27,6 +27,11 @@ interface ImportMetaEnv {
    */
   readonly VITE_APP_TITLE: string
   /**
+   * 开发环境登录页预填（仅 DEV 构建生效；与 docker-compose.dev 默认管理员一致，可按需改本地值）
+   */
+  readonly VITE_DEV_LOGIN_ACCOUNT: string
+  readonly VITE_DEV_LOGIN_PASSWORD: string
+  /**
    * 启用代理
    * Enable proxy
    */

@@ -1,117 +1,96 @@
-# FDS-00：安装与容器运行时
+# FDS-00：平台安装与运行时
 
-- **里程碑**：M0  
-- **优先级**：P0（阻塞）  
-- **状态**：部分实现（2026-05-18；**仅验收场景 A**——面板一键安装与 Compose 部署）  
-- **依赖**：[ADR-001](../adr/001-full-containerization.md)、[ARCHITECTURE.md](../ARCHITECTURE.md)
-
-**实现说明（与 FDS 偏差）**：
-
-- **场景 C 未验收**：节点资源、实例生命周期、SteamCMD 装服、Master 启停须在 panel 容器 + Compose 栈下回归（见 [FDS-02](02-node-instance.md)、模块 2、[ACCEPTANCE](../ACCEPTANCE.md) 场景 C）。  
-- Caves Shard 独立容器未在本模块交付，见 [FDS-04](04-dst-shard.md) / 模块 4。  
-- Compose 中 `steamcmd` 服务为 `tools` profile，生产安装以**按需拉取镜像执行任务**为主，非常驻 sidecar。  
-- 实例控制台日志/命令部分仍为过渡态，见 [FDS-09](09-console.md)。
+- 里程碑：M0
+- 优先级：P0
+- 状态：已实现（M0 已完成，2026-05-19）
 
 ## 1. 背景与目标
 
-实现 v1 **全容器化**交付：用户通过一键脚本获得完整 Compose 栈，面板通过 Docker 管理 SteamCMD 与 DST 实例，消除「面板在容器、游戏在宿主机」的分裂。
+提供可复制的安装与运行时底座，确保面板可控地管理 DST 实例生命周期；并支持 Hub 面板镜像与 DST 运行镜像的版本检测与一键更新。
 
-**目标**：
+## 2. 角色与前置条件
 
-- 10 分钟内完成安装（[ACCEPTANCE](../ACCEPTANCE.md) 场景 A）。  
-- 开发/生产使用同一套镜像与编排原则。
+- 角色：服务器管理员
+- 前置：Docker 可用，主机具备基础网络与磁盘资源；生产部署需配置 `GSH_STACK_DIR` 与 compose 文件目录
 
-## 2. 用户角色与前置条件
+## 3. 功能范围
 
-| 角色 | 说明 |
-|------|------|
-| 服务器管理员 | 有 Linux 主机 root/sudo，出站网络可用 |
+- 安装脚本与 Compose 启动
+- 运行时连接与健康检查
+- Docker 镜像拉取与容器操作封装
+- Hub 面板 / DST 运行镜像更新检测与一键更新（Community）
 
-**前置**：Ubuntu 22.04+ / Debian 12+，x86_64 或 aarch64，磁盘 ≥ 4GB。
+## 4. 功能清单
 
-## 3. 名词
+- Linux 安装脚本（Community）
+- Compose 开发与部署模式（Community）
+- 运行时探活与错误反馈（Community）
+- Hub 镜像版本检测（GHCR digest + GitHub Release 展示）（Community）
+- Hub 镜像一键更新（compose updater 容器）（Community）
+- 运行时安全加固（Pro 规划）
 
-见 [DOMAIN.md](../DOMAIN.md)。本文涉及：**面板容器**、**SteamCMD 任务**、**Shard 容器**、**数据卷**。
+## 5. 接口与输入输出
 
-## 4. 用户故事
+- 输入：环境变量、安装路径、镜像参数、面板设置（`autoUpdate`、`updateCheckIntervalHours`）
+- 输出：服务可访问、运行时状态可查询、更新状态缓存
+- 相关接口：
+  - `/health`、`/api/meta/runtime`
+  - `GET /app/system/panel-update/status` — 返回 panel/dst 当前与远端 digest、Release 信息、`lastCheckedAt`、`checking`、`applySupported`
+  - `POST /app/system/panel-update/check` — 手动触发检查
+  - `POST /app/system/panel-update/apply` — body `{ targets?: ['panel','dst'] }`，默认更新所有有新版的目标
 
-1. **作为**管理员，**我希望**执行一条安装命令后得到可访问的面板 URL 和初始账号，**以便**无需手动装 Node/Docker。  
-2. **作为**管理员，**我希望**创建游戏实例时自动在卷上安装 DST 并启动容器，**以便**不 SSH 手敲 SteamCMD。
-
-## 5. 页面与信息架构
-
-- 安装阶段：CLI 输出为主；可选未来「安装向导」页（v1 不做）。  
-- 安装后：跳转登录页（现有）。  
-- 系统设置中展示：面板版本、Compose 栈版本、Docker 状态（已有 Docker 卡片可扩展）。
-
-## 6. 功能点清单
-
-| 功能 | 版本 | 状态 | 说明 |
-|------|------|------|------|
-| Linux 一键脚本 | Community | [x] | `scripts/install.linux.sh`：仅 Docker + Compose |
-| Compose 栈 | Community | [x] | `panel` + 卷 + socket；`steamcmd` 为 tools profile |
-| 面板镜像构建 | Community | [x] | 根目录 `Dockerfile`，`.github/workflows/docker-publish.yml` |
-| DST 游戏镜像 | Community | [x] | `docker/game-dst` 基底 |
-| ContainerRuntime | Community | [~] | 代码已落地；Compose 下实例链路待回归 |
-| 安装失败回滚 | Community | [~] | 脚本 `rollback_install` + `install.status`；无 UI |
-| 开发 Compose | Community | [x] | `pnpm run dev:compose` + `docker-compose.dev.yml` |
-| 加固镜像通道 | Pro | [ ] | 可选官方签名镜像 tag |
-
-## 7. 数据与 API
-
-### 7.1 卷布局（目标）
-
-```text
-/var/lib/game-server-hub/
-├── data/              # SQLite 等（可合并到 panel 挂载）
-├── instances/
-│   └── {instanceId}/  # installPath
-└── backups/           # 见 FDS-06
-```
-
-### 7.2 环境变量（panel.env）
+### 5.1 环境变量（生产）
 
 | 变量 | 说明 |
 |------|------|
-| `PANEL_PORT` | 对外端口 |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 初始账号 |
-| `FORCE_PASSWORD_CHANGE` | 默认 1 |
-| `GSH_EDITION` | community / pro（规划） |
-| `DOCKER_HOST` | 默认挂载 socket |
+| `PANEL_IMAGE` | 面板容器镜像引用 |
+| `GSH_GAME_DST_IMAGE` | DST 运行镜像引用 |
+| `GSH_STACK_DIR` | compose 与 `panel.env` 所在宿主机目录（如 `/opt/game-server-hub`） |
+| `GSH_COMPOSE_FILES` | 冒号分隔的 compose 文件名（如 `docker-compose.yml:docker-compose.bind.yml`） |
+| `GSH_PANEL_CONTAINER_NAME` | 面板容器名 |
+| `GSH_GITHUB_REPO` | GitHub 仓库（默认 `PMAT77/game-server-hub`），用于 Release 展示 |
+| `GSH_RELEASE_VERSION` | 构建时注入的面板版本号 |
 
-### 7.3 API
+## 6. 业务规则
 
-安装本身无 REST；实例创建/启动走 [API](../API.md) §5，内部调 ContainerRuntime。
+- 运行时不可用时，实例操作必须拒绝并提示原因。
+- 安装流程失败时保留可排障信息。
+- 运行时统一走容器模型，不允许隐式宿主机直启分叉。
+- **更新检测**：服务端定时轮询（默认 1 小时，`autoUpdate=true` 时启用）；比较本地镜像 digest 与 GHCR 远端 manifest digest。
+- **展示版本**：优先 `GSH_RELEASE_VERSION` / OCI label；辅以 GitHub Release tag 与 body 摘要。
+- **Apply 面板**：通过一次性 `docker:cli` updater 容器执行 `compose pull panel && compose up -d panel`；面板进程会短暂中断。
+- **Apply DST**：`force pull` DST 镜像；不重启已运行实例，下次启动实例时使用新运行环境。
+- **Apply 限制**：未配置 `GSH_STACK_DIR` 或 compose 文件缺失时禁止 panel apply，返回手动命令；更新进行中禁止重复 apply。
+- **开发模式**（`dev:compose` / 无 stack dir）：允许检查版本，禁止 panel apply。
 
-## 8. 异常与边界
+## 7. 异常与边界
 
-| 场景 | 行为 |
-|------|------|
-| Docker 未安装 | 脚本尝试安装；失败则退出并提示 |
-| 磁盘不足 | 预检失败，exit 1 |
-| 镜像拉取失败 | 重试 3 次；失败回滚栈 |
-| Socket 权限不足 | 面板容器用户需在 docker 组或 rootless 配置 |
-| 安装中断 | 实例状态 `error`，可重试安装或删除 |
+- Docker 未启动 -> 返回业务错误并中断实例关键操作
+- 镜像拉取失败 -> 支持重试并记录日志
+- 目录不可写 -> 安装中断并回传明确错误
+- DST 运行镜像缺少 `libcurl-gnutls.so.4` -> 实例启动失败；`docker/game-dst` 须安装 `libcurl3-gnutls`，发版前 rebuild 并 push `GSH_GAME_DST_IMAGE`
+- GHCR / GitHub 不可达 -> 检查失败但不影响运行；status 标记 `checkError`
+- 私有 GHCR -> 需宿主机 `docker login`；digest 检查可能失败并提示
+
+## 8. 非功能要求
+
+- 安装流程可观测（日志可追踪）
+- 运行时错误可定位（错误码 + requestId）
+- 更新检查不得在实例列表等高频轮询中触发 pull
 
 ## 9. 验收标准
 
-- [x] 干净 Ubuntu 上脚本一次成功，浏览器可登录（[ACCEPTANCE](../ACCEPTANCE.md) 场景 A，2026-05-18）。  
-- [x] `docker compose ps` 显示 `panel` 为 running（SteamCMD 按需任务，非必须常驻）。  
-- [ ] 创建 DST 实例后存在 Master 容器且可进服（场景 C；待模块 2 等在 Compose 栈回归）。  
-- [ ] 停止/删除实例后容器被移除，无孤儿（建议场景 G 补测）。  
-- [x] 开发文档说明 Compose 本地调试（[CONTRIBUTING](../CONTRIBUTING.md)、[RUNBOOK](../RUNBOOK.md)）。
+- 安装脚本可完成基础部署
+- 后端可探测运行时状态
+- 实例生命周期链路可依赖该运行时执行
+- digest 不一致时 status 标记 `updateAvailable`
+- 仅 DST 有更新时 apply 只 pull DST，不重启面板
+- 仅 panel 有更新时 apply 触发 compose updater
+- GHCR 不可达时返回明确 `checkError` 且服务仍可用
+- 设置页可手动检查更新并展示 Release 摘要
 
-## 10. 不在本期范围
+## 10. 后续里程碑
 
-- Windows 安装包  
-- K8s Helm Chart  
-- 无 Docker 的裸机 Node 安装（过渡态可在 RUNBOOK 注明开发专用）
-
-## 11. 依赖
-
-- 阻塞 M1 所有「需 M0 回归」项。  
-- [FDS-02](02-node-instance.md) 生命周期实现依赖本 FDS。
-
----
-
-*实现文件：`scripts/install.linux.sh`、`docker-compose.yml`、`Dockerfile`、`server/src/infra/container/*`*
+- 增强运行时诊断与自恢复
+- 增强镜像渠道与安全校验
+- CI 自动创建 GitHub Release

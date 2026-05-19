@@ -169,7 +169,7 @@ export default defineFakeRoute([
         status: 1,
         data: {
           permissions,
-          mustChangePassword: headers.token?.startsWith('superman:') ?? false,
+          mustChangePassword: false,
         },
       }
     },

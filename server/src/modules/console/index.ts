@@ -3,7 +3,7 @@ import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/co
 import type { DbGameInstance } from '../../shared/db/index'
 import { findUserByToken, getGameInstanceById } from '../../shared/db/index'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
-import { isInstanceContainerRunning, sendInstanceContainerCommand } from '../instance/container-lifecycle'
+import { ensureContainerRuntimeReady, isInstanceContainerRunning, sendInstanceContainerCommand } from '../instance/container-lifecycle'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 
 const LOCAL_NODE_ID = 'local-node'
@@ -140,6 +140,10 @@ export function registerConsoleModule(app: FastifyInstance) {
     }
     if (resolved.instance.status !== 'running') {
       return businessError('实例未运行，无法发送控制台命令', request)
+    }
+    const runtimeReady = await ensureContainerRuntimeReady()
+    if (!runtimeReady.ok) {
+      return businessError(runtimeReady.message ?? '容器运行时未就绪', request)
     }
     const result = await sendInstanceContainerCommand(instanceId, command)
     if (!result.ok) {

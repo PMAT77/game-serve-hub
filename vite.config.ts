@@ -23,6 +23,9 @@ export default defineConfig(({ mode, command }) => {
       open: false,
       host: true,
       port: 9000,
+      strictPort: true,
+      clearScreen: false,
+      ...(process.env.GSH_DEV_COMPOSE_QUIET === '1' ? { logLevel: 'warn' as const } : {}),
       proxy: {
         '/proxy': {
           target: env.VITE_APP_API_BASEURL,

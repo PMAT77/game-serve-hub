@@ -10,6 +10,8 @@ import { registerConsoleModule } from './modules/console'
 import { registerInstanceModule } from './modules/instance'
 import { registerNodeModule } from './modules/node'
 import { registerSystemModule } from './modules/system'
+import { isSteamcmdImagePresent } from './infra/container'
+import { getCachedDockerStatus } from './infra/docker'
 import { success } from './shared/http/response'
 
 /**
@@ -17,6 +19,8 @@ import { success } from './shared/http/response'
  * 当前只提供最小可运行能力，后续在此处扩展模块注册与插件。
  */
 export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLevel' | 'port'>): Promise<FastifyInstance> {
+  const logHttpRequests = config.logLevel === 'debug' || config.logLevel === 'trace'
+
   const app = Fastify({
     logger: {
       level: config.logLevel,
@@ -25,6 +29,8 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
         env: config.mode,
       },
     },
+    // dev:compose 默认 info，避免终端被每条 API 请求刷屏；需排查时设 LOG_LEVEL=debug
+    disableRequestLogging: config.mode === 'development' && !logHttpRequests,
   })
 
   await app.register(cors, {
@@ -36,9 +42,11 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
 
   // 最小健康检查接口，用于联调与部署探活。
   app.get('/health', async () => {
+    const dockerStatus = getCachedDockerStatus()
     return {
       status: 'ok',
       service: 'game-server-hub-backend',
+      docker: dockerStatus,
       timestamp: new Date().toISOString(),
     }
   })
@@ -61,23 +69,30 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
     })
   })
 
-  app.addHook('onResponse', (request, reply, done) => {
-    request.log.info({
-      requestId: request.id,
-      statusCode: reply.statusCode,
-      method: request.method,
-      url: request.url,
-      durationMs: reply.elapsedTime,
-    }, 'request completed')
-    done()
-  })
+  if (config.mode !== 'development' || logHttpRequests) {
+    app.addHook('onResponse', (request, reply, done) => {
+      request.log.info({
+        requestId: request.id,
+        statusCode: reply.statusCode,
+        method: request.method,
+        url: request.url,
+        durationMs: reply.elapsedTime,
+      }, 'request completed')
+      done()
+    })
+  }
 
   app.get('/api/meta/runtime', async () => {
+    const dockerStatus = getCachedDockerStatus()
+    const steamcmdImageReady = dockerStatus === 'running' ? await isSteamcmdImagePresent() : false
     return success({
       server: {
         env: config.mode,
         logLevel: config.logLevel,
       },
+      runtimeMode: 'container',
+      dockerStatus,
+      steamcmdImageReady,
     })
   })
 

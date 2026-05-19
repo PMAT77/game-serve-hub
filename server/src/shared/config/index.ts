@@ -20,6 +20,13 @@ const envSchema = z.object({
   GSH_GAME_DST_IMAGE: z.string().trim().optional(),
   GSH_STEAMCMD_IMAGE: z.string().trim().optional(),
   GSH_EDITION: z.string().trim().optional(),
+  PANEL_IMAGE: z.string().trim().optional(),
+  GSH_STACK_DIR: z.string().trim().optional(),
+  GSH_COMPOSE_FILES: z.string().trim().optional(),
+  GSH_PANEL_CONTAINER_NAME: z.string().trim().optional(),
+  GSH_GITHUB_REPO: z.string().trim().optional(),
+  GSH_RELEASE_VERSION: z.string().trim().optional(),
+  GSH_BUILD_SHA: z.string().trim().optional(),
 })
 
 function resolveMode() {
@@ -51,6 +58,13 @@ export interface ServerConfig {
   gameDstImage: string
   steamcmdImage: string
   edition: string
+  panelImage: string
+  stackDir: string
+  composeFiles: string[]
+  panelContainerName: string
+  githubRepo: string
+  releaseVersion: string
+  buildSha: string
 }
 
 export function loadServerConfig(): ServerConfig {
@@ -72,6 +86,13 @@ export function loadServerConfig(): ServerConfig {
     GSH_GAME_DST_IMAGE: process.env.GSH_GAME_DST_IMAGE ?? env.GSH_GAME_DST_IMAGE,
     GSH_STEAMCMD_IMAGE: process.env.GSH_STEAMCMD_IMAGE ?? env.GSH_STEAMCMD_IMAGE,
     GSH_EDITION: process.env.GSH_EDITION ?? env.GSH_EDITION,
+    PANEL_IMAGE: process.env.PANEL_IMAGE ?? env.PANEL_IMAGE,
+    GSH_STACK_DIR: process.env.GSH_STACK_DIR ?? env.GSH_STACK_DIR,
+    GSH_COMPOSE_FILES: process.env.GSH_COMPOSE_FILES ?? env.GSH_COMPOSE_FILES,
+    GSH_PANEL_CONTAINER_NAME: process.env.GSH_PANEL_CONTAINER_NAME ?? env.GSH_PANEL_CONTAINER_NAME,
+    GSH_GITHUB_REPO: process.env.GSH_GITHUB_REPO ?? env.GSH_GITHUB_REPO,
+    GSH_RELEASE_VERSION: process.env.GSH_RELEASE_VERSION ?? env.GSH_RELEASE_VERSION,
+    GSH_BUILD_SHA: process.env.GSH_BUILD_SHA ?? env.GSH_BUILD_SHA,
   }
   const parsed = envSchema.parse(merged)
   const defaultInstancesRoot = process.platform === 'win32'
@@ -91,12 +112,24 @@ export function loadServerConfig(): ServerConfig {
     forcePasswordChange: isTruthyEnv(parsed.FORCE_PASSWORD_CHANGE),
     adminUsername: parsed.ADMIN_USERNAME || 'admin',
     adminPassword: parsed.ADMIN_PASSWORD ?? '',
-    dockerHost: parsed.DOCKER_HOST || 'unix:///var/run/docker.sock',
+    dockerHost: parsed.DOCKER_HOST || (process.platform === 'win32'
+      ? 'npipe:////./pipe/docker_engine'
+      : 'unix:///var/run/docker.sock'),
     instancesRoot: path.resolve(parsed.GSH_INSTANCES_ROOT || defaultInstancesRoot),
     backupsRoot: path.resolve(parsed.GSH_BACKUPS_ROOT || defaultBackupsRoot),
     gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/pmat77/game-server-hub-dst:latest',
-    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'cm2network/steamcmd:root',
+    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'cm2network/steamcmd:root-bookworm',
     edition: parsed.GSH_EDITION || 'community',
+    panelImage: parsed.PANEL_IMAGE || 'ghcr.io/pmat77/game-server-hub:latest',
+    stackDir: parsed.GSH_STACK_DIR?.trim() || '',
+    composeFiles: (parsed.GSH_COMPOSE_FILES?.trim() || 'docker-compose.yml:docker-compose.bind.yml')
+      .split(':')
+      .map(item => item.trim())
+      .filter(Boolean),
+    panelContainerName: parsed.GSH_PANEL_CONTAINER_NAME?.trim() || 'game-server-hub-panel',
+    githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'PMAT77/game-server-hub',
+    releaseVersion: parsed.GSH_RELEASE_VERSION?.trim() || '',
+    buildSha: parsed.GSH_BUILD_SHA?.trim() || '',
   }
 }
 

@@ -1,6 +1,7 @@
 import type { ContainerCreateOptions } from 'dockerode'
-import process from 'node:process'
 import Docker from 'dockerode'
+import { decodeDockerMultiplexLogChunk } from './docker-log'
+import { isDockerUnavailableError, resolveDockerConnectOptions } from '../docker-connect'
 import type {
   ContainerInspect,
   ContainerRef,
@@ -24,22 +25,11 @@ function mapPortBindings(ports: ShardContainerSpec['ports']) {
   return bindings
 }
 
-function resolveDockerOptions(dockerHost?: string) {
-  const raw = dockerHost?.trim() || process.env.DOCKER_HOST?.trim() || 'unix:///var/run/docker.sock'
-  if (raw.startsWith('unix://')) {
-    return { socketPath: raw.replace(/^unix:\/\//, '') }
-  }
-  if (raw.startsWith('npipe://')) {
-    return { socketPath: raw.replace(/^npipe:\/\//, '') }
-  }
-  return { host: raw }
-}
-
 export class DockerContainerRuntime implements ContainerRuntime {
   private readonly docker: Docker
 
   constructor(dockerHost?: string) {
-    this.docker = new Docker(resolveDockerOptions(dockerHost))
+    this.docker = new Docker(resolveDockerConnectOptions(dockerHost))
   }
 
   async createShardContainer(spec: ShardContainerSpec): Promise<ContainerRef> {
@@ -48,6 +38,9 @@ export class DockerContainerRuntime implements ContainerRuntime {
       await this.remove(existing)
     }
     const containerGameRoot = spec.containerGameRoot ?? '/game'
+    const binds = spec.hostBinds?.length
+      ? spec.hostBinds
+      : [`${spec.hostInstallPath}:${containerGameRoot}`]
     const container = await this.docker.createContainer({
       name: spec.name,
       Image: spec.image,
@@ -57,7 +50,7 @@ export class DockerContainerRuntime implements ContainerRuntime {
         ? Object.entries(spec.env).map(([key, value]) => `${key}=${value}`)
         : undefined,
       HostConfig: {
-        Binds: [`${spec.hostInstallPath}:${containerGameRoot}`],
+        Binds: binds,
         PortBindings: mapPortBindings(spec.ports),
         RestartPolicy: { Name: 'no' },
       },
@@ -119,7 +112,7 @@ export class DockerContainerRuntime implements ContainerRuntime {
         ...baseOptions,
         follow: false,
       })
-      const text = buffer.toString('utf8')
+      const { text } = decodeDockerMultiplexLogChunk(Buffer.alloc(0), buffer)
       for (const line of text.split(/\r?\n/)) {
         if (line.trim()) {
           yield { stream: 'stdout', text: line }
@@ -132,6 +125,7 @@ export class DockerContainerRuntime implements ContainerRuntime {
       follow: true,
     })
     const queue: LogLine[] = []
+    let frameCarry: Buffer = Buffer.alloc(0)
     let done = false
     let error: Error | undefined
     let notify: (() => void) | undefined
@@ -140,7 +134,9 @@ export class DockerContainerRuntime implements ContainerRuntime {
       notify = undefined
     }
     stream.on('data', (chunk: Buffer) => {
-      const text = stripDockerLogFrame(chunk)
+      const decoded = decodeDockerMultiplexLogChunk(frameCarry, chunk)
+      frameCarry = decoded.carry
+      const text = decoded.text
       for (const line of text.split(/\r?\n/)) {
         if (line.trim()) {
           queue.push({ stream: 'stdout', text: line })
@@ -208,14 +204,27 @@ export class DockerContainerRuntime implements ContainerRuntime {
   }
 
   async inspect(ref: ContainerRef): Promise<ContainerInspect> {
-    const container = this.docker.getContainer(ref.id)
-    const data = await container.inspect()
-    const running = Boolean(data.State?.Running)
-    return {
-      id: data.Id,
-      name: data.Name?.replace(/^\//, '') ?? ref.name,
-      running,
-      startedAt: data.State?.StartedAt,
+    try {
+      const container = this.docker.getContainer(ref.id)
+      const data = await container.inspect()
+      const running = Boolean(data.State?.Running)
+      return {
+        id: data.Id,
+        name: data.Name?.replace(/^\//, '') ?? ref.name,
+        running,
+        startedAt: data.State?.StartedAt,
+      }
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (isDockerUnavailableError(error) || message.toLowerCase().includes('no such container')) {
+        return {
+          id: ref.id,
+          name: ref.name,
+          running: false,
+        }
+      }
+      throw error
     }
   }
 
@@ -241,20 +250,21 @@ export class DockerContainerRuntime implements ContainerRuntime {
   }
 
   async findByName(name: string): Promise<ContainerRef | undefined> {
-    const containers = await this.docker.listContainers({ all: true, filters: { name: [name] } })
-    const match = containers.find(item => item.Names?.some(n => n === `/${name}` || n.endsWith(`/${name}`)))
-    if (!match?.Id) {
-      return undefined
+    try {
+      const containers = await this.docker.listContainers({ all: true, filters: { name: [name] } })
+      const match = containers.find(item => item.Names?.some(n => n === `/${name}` || n.endsWith(`/${name}`)))
+      if (!match?.Id) {
+        return undefined
+      }
+      return { id: match.Id, name }
     }
-    return { id: match.Id, name }
+    catch (error) {
+      if (isDockerUnavailableError(error)) {
+        return undefined
+      }
+      throw error
+    }
   }
-}
-
-function stripDockerLogFrame(chunk: Buffer): string {
-  if (chunk.length <= 8) {
-    return chunk.toString('utf8')
-  }
-  return chunk.subarray(8).toString('utf8')
 }
 
 async function readDockerStream(stream: NodeJS.ReadableStream): Promise<string> {

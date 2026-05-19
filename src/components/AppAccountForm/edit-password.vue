@@ -8,14 +8,6 @@ defineOptions({
   name: 'EditPasswordForm',
 })
 
-const props = defineProps<{
-  forceMode?: boolean
-}>()
-
-const emits = defineEmits<{
-  onSuccess: []
-}>()
-
 const appAccountStore = useAppAccountStore()
 
 const loading = ref(false)
@@ -40,11 +32,6 @@ const form = useForm({
 const onSubmit = form.handleSubmit((values) => {
   loading.value = true
   appAccountStore.editPassword(values).then(async () => {
-    if (props.forceMode) {
-      faToast.success('密码已更新，正在进入面板')
-      emits('onSuccess')
-      return
-    }
     faToast.success('修改成功，请重新登录')
     appAccountStore.logout()
   }).finally(() => {
@@ -57,12 +44,10 @@ const onSubmit = form.handleSubmit((values) => {
   <div class="flex-col-stretch-center w-full">
     <div class="mb-6 space-y-2">
       <h3 class="text-4xl font-bold">
-        {{ props.forceMode ? '设置新密码' : '修改密码' }}
+        修改密码
       </h3>
       <p class="text-sm text-muted-foreground lg:text-base">
-        {{ props.forceMode
-          ? '请使用安装时提供的初始密码作为「原密码」，并设置新的登录密码（需包含大小写字母、数字和特殊字符）'
-          : '请输入原密码、新密码和确认密码（新密码需包含大小写字母、数字和特殊字符）' }}
+        请输入原密码、新密码和确认密码（新密码需包含大小写字母、数字和特殊字符）
       </p>
     </div>
     <form @submit="onSubmit">

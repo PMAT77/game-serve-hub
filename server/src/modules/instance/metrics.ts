@@ -6,8 +6,8 @@ import {
   listGameInstances,
 } from '../../shared/db/index'
 import { getContainerRuntime } from '../../infra/container'
-import { success, unauthorized } from '../../shared/http/response'
-import { isInstanceContainerRunning, resolveInstanceContainerRef } from './container-lifecycle'
+import { businessError, success, unauthorized } from '../../shared/http/response'
+import { ensureContainerRuntimeReady, isInstanceContainerRunning, resolveInstanceContainerRef } from './container-lifecycle'
 
 const LOCAL_NODE_ID = 'local-node'
 
@@ -91,6 +91,11 @@ export async function handleInstanceMetrics(
   const authError = await verifyAuthorized(request)
   if (authError) {
     return authError
+  }
+
+  const runtimeReady = await ensureContainerRuntimeReady()
+  if (!runtimeReady.ok) {
+    return businessError(runtimeReady.message ?? '容器运行时未就绪', request)
   }
 
   const idFilter = new Set(

@@ -14,7 +14,13 @@ COPY . .
 RUN pnpm run build
 
 FROM deps AS production
+ARG GSH_RELEASE_VERSION=dev
+ARG GSH_BUILD_SHA=unknown
 ENV NODE_ENV=production
+ENV GSH_RELEASE_VERSION=${GSH_RELEASE_VERSION}
+ENV GSH_BUILD_SHA=${GSH_BUILD_SHA}
+LABEL org.opencontainers.image.version="${GSH_RELEASE_VERSION}"
+LABEL org.opencontainers.image.revision="${GSH_BUILD_SHA}"
 WORKDIR /app
 COPY --from=build /app/dist ./dist
 COPY server ./server

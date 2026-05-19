@@ -69,6 +69,10 @@ Get-NetAdapterStatistics | Select-Object Name,ReceivedBytes,SentBytes | ConvertT
 `.trim()
 
 function getPanelVersion() {
+  const envVersion = process.env.GSH_RELEASE_VERSION?.trim()
+  if (envVersion) {
+    return envVersion
+  }
   try {
     const packageJsonPath = path.resolve(process.cwd(), 'package.json')
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {

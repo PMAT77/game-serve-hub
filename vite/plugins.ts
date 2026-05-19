@@ -137,7 +137,9 @@ export function warnKeepAliveComponentNameMissing() {}
       } satisfies PluginOption
     })(),
 
-    createFantasticAdminCopyrightPlugins(),
+    ...(process.env.GSH_DEV_COMPOSE_QUIET === '1'
+      ? []
+      : createFantasticAdminCopyrightPlugins()),
 
     {
       name: 'vite-plugin-debug-plugin',

@@ -7,3 +7,4 @@ services:
       - ${PANEL_INSTANCES_DIR:-${PANEL_DATA_DIR}/instances}:/var/lib/game-server-hub/instances
       - ${PANEL_BACKUPS_DIR:-${PANEL_DATA_DIR}/backups}:/var/lib/game-server-hub/backups
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${GSH_STACK_DIR:-/opt/game-server-hub}:/stack:ro

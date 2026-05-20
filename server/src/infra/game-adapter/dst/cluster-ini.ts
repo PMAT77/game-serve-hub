@@ -29,7 +29,7 @@ export interface ClusterIniFields {
   steamGroupAdmins: boolean
 }
 
-const VALID_GAME_MODES: ClusterGameMode[] = ['survival', 'endless', 'wilderness']
+const VALID_GAME_MODES: ClusterGameMode[] = ['survival', 'endless', 'wilderness', 'easy', 'darkandwildernes']
 const VALID_CLUSTER_INTENTIONS: ClusterIntention[] = ['cooperative', 'competitive', 'social', 'madness']
 
 function parseBool(value: string | undefined, fallback: boolean): boolean {

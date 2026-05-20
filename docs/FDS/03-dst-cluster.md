@@ -2,7 +2,7 @@
 
 - 里程碑：M1
 - 优先级：P0
-- 状态：规划态
+- 状态：已实现（M1 Community；2026-05-20 验收确认）
 
 ## 1. 背景与目标
 
@@ -19,7 +19,7 @@
 - 读取与编辑 `cluster.ini`（结构化表单，非全文裸编辑）
 - 房间基础信息、玩法设置
 - **联网模式**三选一及与 `offline_cluster` / `lan_only_cluster` 的联动
-- **公网模式**下 `cluster_token.txt` 的粘贴/上传与校验
+- **公网模式**下 `cluster_token.txt` 的粘贴与校验（v1 不做文件上传）
 - 与 FDS-04 联动：`[SHARD]` 中 `shard_enabled` 等由房间页开关，洞穴细节在 Shard 模块
 
 ## 4. 功能清单
@@ -30,12 +30,16 @@
 - 保存后「需重启实例」提示与可选「保存并重启」（Community）
 - 配置模板库（Pro 规划）
 
-## 5. 接口与输入输出（规划）
+## 5. 接口与输入输出
 
-### 5.1 REST
+### 5.1 REST（与实例模块命名一致）
 
-- `GET /app/instances/:instanceId/cluster`
-- `PUT /app/instances/:instanceId/cluster`
+与已实现接口对齐：资源段使用单数 `instance`（同 `/app/instance/console/logs`、`/app/instance/install-log`），**不用**路径参数 `:instanceId`，实例 ID 通过查询参数或请求体传递。
+
+- `GET /app/instance/cluster?instanceId={instanceId}` — 读取房间配置
+- `PUT /app/instance/cluster` — 保存；请求体为 `ClusterSavePayload`，含 `instanceId` 及表单字段（可选 `restart: true` 保存后重启）
+
+> 说明：部分其他 FDS 草案仍写 `/app/instances/:instanceId/...`；v1 已落地模块以 **`/app/instance/*` + query/body** 为准，新实现与之保持一致，不在本模块单独引入复数路径段。
 
 ### 5.2 结构化对象（摘要）
 
@@ -82,7 +86,7 @@
 ### 6.2 Klei 集群令牌（`cluster_token.txt`）
 
 - 仅当 `networkMode = public` 时：
-  - 用户通过**粘贴**或**上传文本文件**提供令牌（一行，`pds-` 前缀等，以 Klei 生成为准）。
+  - 用户通过面板**粘贴**提供令牌（一行，`pds-` 前缀等，以 Klei 生成为准）；v1 **不提供**令牌文件上传。
   - 服务端校验：非空、去除首尾空白、长度与字符集合理（具体规则实现时定义，避免误粘贴说明文字）。
   - 原子写入 `cluster_token.txt`（与 `cluster.ini` 同目录）。
 - 当 `networkMode` 为 `offline` 或 `lan_only` 时：
@@ -120,14 +124,25 @@
 ## 9. 验收标准
 
 - 三种联网模式可保存，且 `cluster.ini` 中 `offline_cluster` / `lan_only_cluster` 与所选模式一致。
-- 公网模式：粘贴/上传令牌后生成 `cluster_token.txt`，重启实例后可被 Klei 注册（人工在游戏浏览列表或 Klei 侧验证）。
+- 公网模式：粘贴令牌后生成 `cluster_token.txt`，重启实例后可被 Klei 注册（人工在游戏浏览列表或 Klei 侧验证）。
 - 离线/仅局域网模式：无令牌亦可保存与启动；不误报缺少令牌。
 - `GET` 不泄露令牌明文；日志中无可检索的完整 `pds-` 串。
 - 运行中修改后有明确重启提示；与实例启停（模块 02）无状态冲突。
 - 与 FDS-04：`shard_enabled` 开关保存后，洞穴编排行为符合 FDS-04 规则。
 
-## 10. 后续里程碑
+## 10. 实现落点（Community v1）
+
+| 层级 | 路径 |
+|------|------|
+| 契约 | `shared/contracts/cluster.ts` |
+| 后端模块 | `server/src/modules/cluster/index.ts` |
+| 适配层 | `server/src/infra/game-adapter/dst/cluster-service.ts`、`cluster-ini.ts`、`cluster-token.ts` |
+| 前端 API | `src/api/modules/cluster.ts`（`cluster.fake.ts`） |
+| 前端页面 | `src/views/cluster/index.vue`、`settings.vue` |
+
+## 11. 后续里程碑（Pro / 增强）
 
 - 多 Cluster 管理（Pro）
 - 房间配置模板库（Pro）
 - Klei 令牌过期/轮换引导（若官方行为变更再评估）
+- 令牌文件上传（v1 已明确不做，若 Pro 需要再评估）

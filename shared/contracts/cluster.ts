@@ -1,6 +1,7 @@
 export type ClusterNetworkMode = 'offline' | 'lan_only' | 'public'
 
-export type ClusterGameMode = 'survival' | 'endless' | 'wilderness'
+/** Klei cluster.ini game_mode；暗无天日为官方拼写 darkandwildernes */
+export type ClusterGameMode = 'survival' | 'endless' | 'wilderness' | 'easy' | 'darkandwildernes'
 
 export type ClusterIntention = 'cooperative' | 'competitive' | 'social' | 'madness'
 

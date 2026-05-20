@@ -69,6 +69,8 @@ const gameModeOptions = [
   { label: '生存', value: 'survival' },
   { label: '无尽', value: 'endless' },
   { label: '荒野', value: 'wilderness' },
+  { label: '轻松', value: 'easy' },
+  { label: '暗无天日', value: 'darkandwildernes' },
 ]
 
 const pageTitle = computed(() => serverConfig.value

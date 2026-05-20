@@ -14,7 +14,7 @@
 | 00 | [00-install-runtime.md](00-install-runtime.md) | 平台安装与运行时 | 已实现（M0 已完成） |
 | 01 | [01-monitor.md](01-monitor.md) | 监控台 | 部分实现（M1） |
 | 02 | [02-node-instance.md](02-node-instance.md) | 节点与实例 | 已实现（单节点，M0 已完成） |
-| 03 | [03-dst-cluster.md](03-dst-cluster.md) | DST 房间（Cluster） | 规划态 |
+| 03 | [03-dst-cluster.md](03-dst-cluster.md) | DST 房间（Cluster） | 已实现（M1 Community，2026-05-20 验收） |
 | 04 | [04-dst-shard.md](04-dst-shard.md) | DST 世界（Shard） | 规划态 |
 | 05 | [05-mod.md](05-mod.md) | Mod 管理 | 规划态 |
 | 06 | [06-backup.md](06-backup.md) | 备份恢复 | 规划态 |

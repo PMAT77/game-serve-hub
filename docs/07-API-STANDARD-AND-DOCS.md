@@ -78,7 +78,12 @@
 - `POST /app/instance/console/command`
 - `GET /app/instance/console/stream`（SSE）
 
-### 2.6 基础能力
+### 2.6 房间配置（Cluster，模块 03）
+
+- `GET /app/instance/cluster?instanceId={instanceId}`：读取 DST 房间配置（`ClusterConfigDto`；令牌仅掩码）
+- `PUT /app/instance/cluster`：保存房间配置（`ClusterSavePayload`；可选 `restart: true` 保存后重启）
+
+### 2.7 基础能力
 
 - `GET /health`
 - `GET /api/ping`
@@ -113,6 +118,13 @@
 - **输出**：安装文本、状态摘要、进度信息
 - **异常**：实例不存在、日志不可读
 
+### 3.5 读取 / 保存房间配置
+
+- **读取**：`GET /app/instance/cluster?instanceId=...`
+- **保存**：`PUT /app/instance/cluster`，body 含 `instanceId` 与表单字段；公网模式可带 `clusterToken`（仅提交时传入，响应不回显明文）
+- **输出**：读取为 `ClusterConfigDto`（含 `warnings`、`effectiveHints`、`configDirty`）；保存为 `{ saved: true, restarted?: boolean }`
+- **异常**：实例不存在、非 DST、安装目录缺失、公网无令牌、字段校验失败、启用分片但洞穴未配置（见 FDS-04）
+
 ## 4. 接口鉴权与安全要求
 
 - 登录外的大多数 `/app/*` 接口必须鉴权。
@@ -137,5 +149,6 @@
 
 ## 6. 规划态接口域
 
-- 模块 03/04/05/06/07/08/10/11/12 当前为规划态，接口定义详见对应 FDS。
+- 模块 **03** 房间配置接口已上线（见 §2.6、§3.5；FDS-03）。
+- 模块 04/05/06/07/08/10/11/12 当前为规划态，接口定义详见对应 FDS。
 - 规划态接口不得在外部文档中标记为“已可用”。

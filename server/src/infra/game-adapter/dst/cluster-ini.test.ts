@@ -178,6 +178,35 @@ describe('cluster-ini', () => {
     assert.equal(parsed.fields.networkMode, 'offline')
     assert.ok(parsed.warnings.length > 0)
   })
+
+  it('parses and serializes easy and darkandwildernes game modes', () => {
+    for (const gameMode of ['easy', 'darkandwildernes'] as const) {
+      const content = buildClusterIni({
+        networkMode: 'offline',
+        clusterName: 'Room',
+        clusterDescription: '',
+        clusterPassword: '',
+        gameMode,
+        maxPlayers: 6,
+        pvp: false,
+        pauseWhenEmpty: true,
+        voteEnabled: true,
+        clusterIntention: 'cooperative',
+        tickRate: 15,
+        maxSnapshots: 6,
+        shardEnabled: false,
+        bindIp: '127.0.0.1',
+        masterIp: '127.0.0.1',
+        masterPort: 10888,
+        clusterKey: 'key',
+        steamGroupOnly: false,
+        steamGroupId: '0',
+        steamGroupAdmins: false,
+      })
+      assert.ok(content.includes(`game_mode = ${gameMode}`))
+      assert.equal(parseClusterIni(content).fields.gameMode, gameMode)
+    }
+  })
 })
 
 describe('cluster-token', () => {

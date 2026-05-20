@@ -305,10 +305,19 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '操作',
       key: 'actions',
-      width: 360,
+      width: 420,
       fixed: 'right',
       render: row =>
         h('div', { class: 'flex flex-wrap gap-4' }, [
+          createTextActionButton({
+            label: '房间设置',
+            disabled: row.status === 'pending_install' || row.gameCode !== '343050',
+            title: row.gameCode !== '343050' ? '当前仅 DST 实例支持房间配置' : undefined,
+            onClick: () => router.push({
+              name: 'clusterSettings',
+              params: { instanceId: row.id },
+            }),
+          }),
           createTextActionButton({
             label: '控制台',
             disabled: row.status === 'pending_install' || row.status === 'installing',

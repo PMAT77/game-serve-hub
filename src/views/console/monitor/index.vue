@@ -6,7 +6,7 @@ import type {
   SystemInfoData,
 } from './components/types'
 import dayjs from 'dayjs'
-import { NAlert, NButton, NInputNumber, NSpace } from 'naive-ui'
+import { NAlert, NButton, NGrid, NGridItem, NInputNumber, NSpace } from 'naive-ui'
 import apiSystem from '@/api/modules/system'
 import MonitorNetwork from './components/MonitorNetwork.vue'
 import MonitorStatus from './components/MonitorStatus.vue'
@@ -301,8 +301,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <FaPageMain title="轮询设置">
+  <div>
+    <FaPageMain title="轮询设置" >
       <NSpace align="center" wrap>
         <span class="text-sm text-muted-foreground">系统信息间隔（毫秒）</span>
         <NInputNumber v-model:value="systemPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" />
@@ -312,21 +312,19 @@ onUnmounted(() => {
     </FaPageMain>
 
     <FaPageMain title="实时状态">
-      <div v-if="systemError" class="mb-4 space-y-2">
-        <NAlert type="error" :title="systemError" />
+      <div v-if="systemError" class="space-y-2">
         <NButton size="small" @click="loadSystemInfo">
           重试
         </NButton>
       </div>
       <MonitorStatus :loading="loading" :info="systemInfo" />
     </FaPageMain>
-
-    <FaPageMain title="系统详情">
+    <FaPageMain title="系统详情" class="min-w-0">
       <MonitorSystemInfo :loading="loading" :info="systemInfo" />
     </FaPageMain>
-
-    <FaPageMain title="网络监控">
-      <div v-if="networkError" class="mb-4 space-y-2">
+    
+    <FaPageMain title="网络监控" class="min-w-0">
+      <div v-if="networkError" class="space-y-2">
         <NAlert type="warning" :title="networkError">
           <template v-if="networkStale">
             图表仍显示上次可用数据，可能已过期。
@@ -343,5 +341,5 @@ onUnmounted(() => {
         :chart-data-map="networkChartDataMap"
       />
     </FaPageMain>
-  </div>
+  </div> 
 </template>

@@ -1,0 +1,162 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, it } from 'node:test'
+import type { DbGameInstance } from '../../../shared/db/index'
+import { getClusterConfig, resolveInstanceInstallPath, saveClusterConfig } from './cluster-service'
+import { resolveCavesServerIniPath } from './shard-layout'
+
+const tempDirs: string[] = []
+
+function createTempInstallDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-cluster-'))
+  tempDirs.push(dir)
+  return dir
+}
+
+function buildInstance(installPath: string | null, id = 'test-instance'): DbGameInstance {
+  return {
+    id,
+    nodeId: 'local-node',
+    name: 'Test DST',
+    gameCode: '343050',
+    status: 'stopped',
+    installPath,
+    configPath: null,
+    queryPort: null,
+    gamePort: 10999,
+    rconPort: null,
+    containerId: null,
+    pid: null,
+    lastCommand: null,
+    lastError: null,
+    lastExitCode: null,
+    installPercent: null,
+    installLogStatus: null,
+    installLogUpdatedAt: null,
+    updateAvailable: false,
+    updateCheckedAt: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+describe('cluster-service', () => {
+  it('resolves install path from db value', () => {
+    const installPath = createTempInstallDir()
+    assert.equal(resolveInstanceInstallPath(buildInstance(installPath)), installPath)
+  })
+
+  it('persists cluster.ini and reads it back after save', () => {
+    const installPath = createTempInstallDir()
+    const cavesIni = resolveCavesServerIniPath(installPath)
+    fs.mkdirSync(path.dirname(cavesIni), { recursive: true })
+    fs.writeFileSync(cavesIni, '[NETWORK]\n', 'utf8')
+    const instance = buildInstance(installPath)
+    saveClusterConfig(instance, {
+      instanceId: instance.id,
+      networkMode: 'offline',
+      clusterName: 'My Saved Room',
+      clusterDescription: 'desc',
+      clusterPassword: 'pwd',
+      gameMode: 'survival',
+      maxPlayers: 10,
+      pvp: true,
+      pauseWhenEmpty: false,
+      voteEnabled: true,
+      clusterIntention: 'cooperative',
+      tickRate: 20,
+      maxSnapshots: 8,
+      shardEnabled: true,
+      bindIp: '127.0.0.1',
+      masterIp: '127.0.0.1',
+      masterPort: 10999,
+      clusterKey: 'secret-key',
+      steamGroupOnly: false,
+      steamGroupId: '12345',
+      steamGroupAdmins: false,
+    })
+
+    const loaded = getClusterConfig(instance)
+    assert.equal(loaded.clusterName, 'My Saved Room')
+    assert.equal(loaded.clusterTokenMasked, null)
+    assert.equal(loaded.maxPlayers, 10)
+    assert.equal(loaded.pvp, true)
+    assert.equal(loaded.shardEnabled, true)
+    assert.equal(loaded.steamGroupId, '12345')
+  })
+
+  it('does not return plaintext cluster token on read', () => {
+    const installPath = createTempInstallDir()
+    const instance = buildInstance(installPath)
+    const token = 'pds-g^KU_testtoken123='
+    saveClusterConfig(instance, {
+      instanceId: instance.id,
+      networkMode: 'public',
+      clusterName: 'Public Room',
+      clusterDescription: '',
+      clusterPassword: 'room-secret',
+      gameMode: 'survival',
+      maxPlayers: 6,
+      pvp: false,
+      pauseWhenEmpty: true,
+      voteEnabled: true,
+      clusterIntention: 'cooperative',
+      tickRate: 15,
+      maxSnapshots: 6,
+      shardEnabled: false,
+      bindIp: '127.0.0.1',
+      masterIp: '127.0.0.1',
+      masterPort: 10888,
+      clusterKey: 'supersecretkey',
+      steamGroupOnly: false,
+      steamGroupId: '0',
+      steamGroupAdmins: false,
+      clusterToken: token,
+    })
+
+    const loaded = getClusterConfig(instance)
+    assert.equal(loaded.clusterPassword, 'room-secret')
+    assert.equal(loaded.clusterTokenConfigured, true)
+    assert.match(loaded.clusterTokenMasked ?? '', /^pds-\*\*\*\*/)
+    assert.ok(!('clusterToken' in loaded))
+  })
+
+  it('blocks enabling shard when caves world is not configured', () => {
+    const installPath = createTempInstallDir()
+    const instance = buildInstance(installPath)
+    assert.throws(
+      () => saveClusterConfig(instance, {
+        instanceId: instance.id,
+        networkMode: 'offline',
+        clusterName: 'Shard Room',
+        clusterDescription: '',
+        clusterPassword: '',
+        gameMode: 'survival',
+        maxPlayers: 6,
+        pvp: false,
+        pauseWhenEmpty: true,
+        voteEnabled: true,
+        clusterIntention: 'cooperative',
+        tickRate: 15,
+        maxSnapshots: 6,
+        shardEnabled: true,
+        bindIp: '127.0.0.1',
+        masterIp: '127.0.0.1',
+        masterPort: 10888,
+        clusterKey: 'secret-key',
+        steamGroupOnly: false,
+        steamGroupId: '0',
+        steamGroupAdmins: false,
+      }),
+      /无法开启洞穴分片/,
+    )
+  })
+})

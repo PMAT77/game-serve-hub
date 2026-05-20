@@ -13,11 +13,34 @@
 
 ## 2. 目录与配置（摘要）
 
-见 [DOMAIN.md](DOMAIN.md)。核心文件：
+见 [DOMAIN.md](DOMAIN.md)。
+
+### 2.1 Cluster 根路径（面板读写）
+
+每个 DST 实例对应一个 **installPath**（安装根目录）：
+
+1. **优先**数据库 `game_instances.install_path`（安装完成后写入）；
+2. **否则**环境变量 `GSH_INSTANCES_ROOT` 下的 `{instanceId}/`（见服务端 `server/src/shared/config/index.ts`，Windows 默认在数据目录 `instances/`）。
+
+在该根目录下，Klei 持久化与房间配置路径为（v1 固定集群名 `Cluster_1`）：
+
+```text
+{installPath}/klei-storage/DoNotStarveTogether/Cluster_1/cluster.ini
+{installPath}/klei-storage/DoNotStarveTogether/Cluster_1/cluster_token.txt
+{installPath}/klei-storage/DoNotStarveTogether/Cluster_1/Master/server.ini
+{installPath}/klei-storage/DoNotStarveTogether/Cluster_1/Caves/server.ini   # 启用洞穴分片时
+```
+
+DST 进程启动参数 `-persistent_storage_root` 指向 `{installPath}/klei-storage`，`-conf_dir DoNotStarveTogether`，`-cluster Cluster_1`，与上述路径一致。
+
+**运维注意**：房间设置页通过 API 以结构化字段读写 `cluster.ini`（整文件替换固定模板）。请勿在磁盘上手写面板未覆盖的键，保存后会被覆盖。`docs/others/cluster.ini` 仅为字段说明样例，不是运行时路径。
+
+### 2.2 核心文件
 
 | 文件 | 作用 |
 |------|------|
-| `cluster.ini` | 房间名、密码、人数、游戏模式、是否离线房等 |
+| `cluster.ini` | 房间名、密码、人数、游戏模式、联网模式（`offline_cluster` / `lan_only_cluster`）等 |
+| `cluster_token.txt` | Klei 集群令牌（`pds-...`）；**公网 / 浏览列表**模式必填，与 `cluster.ini` 同级；见 [FDS-03](FDS/03-dst-cluster.md) §6 |
 | `Master/server.ini` | 地表端口、Steam 注册端口 |
 | `Caves/server.ini` | 洞穴端口（启用洞穴时） |
 | `worldgenoverride.lua` | 地图生成预设与 overrides |
@@ -52,7 +75,15 @@
 
 防火墙需放行 **游戏端口 + Steam 端口段**（宿主机映射到容器）。
 
-离线房：`offline_cluster = true`；仅局域网：`lan_only_cluster = true`。
+联网模式（面板 M1 三选一，须与 ini 一致）：
+
+| 模式 | `offline_cluster` | `lan_only_cluster` | `cluster_token.txt` |
+|------|-------------------|--------------------|---------------------|
+| 离线 | `true` | `false` | 不需要 |
+| 仅局域网 | `false` | `true` | 不需要 |
+| 公网（Klei 列表） | `false` | `false` | **需要** |
+
+令牌生成：游戏内 `TheNet:GenerateClusterToken()` 或 Klei 账号「游戏服务器」。
 
 ## 6. Mod 与创意工坊
 

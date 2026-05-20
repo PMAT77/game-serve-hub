@@ -74,6 +74,48 @@ const routeList = [
   },
   {
     meta: {
+      title: '房间',
+      icon: 'ri:home-wifi-line',
+    },
+    children: [
+      {
+        path: '/cluster',
+        component: 'Layout',
+        name: 'cluster',
+        meta: {
+          title: '房间管理',
+          icon: 'ri:community-line',
+          auth: 'pages.node.instance:manage',
+        },
+        children: [
+          {
+            path: 'list',
+            name: 'clusterList',
+            component: 'cluster/index.vue',
+            meta: {
+              title: '房间列表',
+              icon: 'ri:list-check',
+              auth: 'pages.node.instance:manage',
+            },
+          },
+          {
+            path: 'settings/:instanceId',
+            name: 'clusterSettings',
+            component: 'cluster/settings.vue',
+            meta: {
+              title: '房间设置',
+              icon: 'ri:settings-3-line',
+              auth: 'pages.node.instance:manage',
+              activeMenu: '/cluster/list',
+              menu: false,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    meta: {
       title: '系统',
       icon: 'ri:settings-3-line',
     },

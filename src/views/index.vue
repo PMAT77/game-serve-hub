@@ -1,53 +1,60 @@
 <script setup lang="ts">
 import logo from '@/assets/images/logo.svg'
+import placeholdPreview from '@/assets/images/placehold.png'
 
-const versionType = ref('basic')
-watch(versionType, (val) => {
-  if (val === 'pro') {
-    location.href = `${location.origin}${location.pathname}`.replace('basic-example', 'pro-example')
-  }
-})
+/** 待补充：文档站、镜像站、Pro 购买页等外链 */
+const LINKS = {
+  docs: '#',
+  github: 'https://github.com/PMAT77/game-server-hub',
+  gitee: '#',
+  gitcode: '#',
+  pro: '#',
+} as const
+
+const versionType = ref('community')
 
 const products = ref([
   {
-    name: 'Fantastic-startkit',
-    tagline: '简单好用的 Vue3 项目启动套件',
-    logo: 'https://cn.vuejs.org/logo.svg',
-    url: 'https://hooray.github.io/fantastic-startkit',
+    name: '实例管理',
+    tagline: '创建、安装、启停与日志，掌控 DST 专用服生命周期',
+    logo,
+    url: LINKS.docs,
     features: [
-      '支持 TypeScript',
-      '默认集成 vue-router 和 pinia',
-      '支持基于文件系统的路由',
-      '全局组件自动引入',
-      '支持 Unocss 和 SVG 图标',
-      '结合 IDE 插件、ESlint 、stylelint 、Git 钩子，轻松实现团队代码规范',
+      '通过 SteamCMD 安装与更新游戏服务端',
+      '实例创建、启动、停止与运行状态查看',
+      '安装过程日志与资源占用快照',
+      'Docker Compose 对齐的生产部署路径',
+      'v1 聚焦饥荒联机版（Don\'t Starve Together）',
     ],
   },
   {
-    name: 'Fantastic-mobile',
-    tagline: '让你的 H5 项目拥有稳固的工程底座',
-    logo: 'https://fantastic-mobile.hurui.me/logo.png',
-    url: 'https://fantastic-mobile.hurui.me',
-    images: [
-      'https://fantastic-mobile.hurui.me/hero_preview.png',
+    name: '监控台',
+    tagline: '主机与容器资源一目了然，辅助日常运维决策',
+    logo,
+    url: LINKS.docs,
+    features: [
+      'CPU、内存、磁盘等主机指标',
+      'Docker 运行概况',
+      '网卡实时流量',
+      '与实例状态联动查看',
     ],
   },
   {
-    name: 'One-step-admin',
-    tagline: '干啥都快人一步的 Vue 中后台系统框架',
-    logo: 'https://one-step-admin.hurui.me/logo.png',
-    url: 'https://one-step-admin.hurui.me',
+    name: '游戏控制台',
+    tagline: '贴近游戏内的运维体验，少登录、少切终端',
+    logo,
+    url: LINKS.docs,
     images: [
-      'https://one-step-admin.hurui.me/preview1.png',
+      placeholdPreview,
     ],
   },
 ])
 
 const useCases = ref([
-  { title: '小型公司', description: '让后端开发人员能在短时间内转型成为全栈开发' },
-  { title: '中小型公司', description: '提高项目开发效率，减轻前端开发人员工作压力' },
-  { title: '项目型公司', description: '应对绝大部分甲方需求，实现高度定制化' },
-  { title: '产品型公司', description: '完善的开发文档和代码注释，为产品保驾护航' },
+  { title: '个人开服', description: '在家或 VPS 上一键部署，快速拉起饥荒私服' },
+  { title: '小圈子联机', description: '稳定托管、日志与控制台，减轻日常维护成本' },
+  { title: '社区服运营', description: '多实例与资源监控，便于掌握节点负载与状态' },
+  { title: '进阶运维', description: '房间/世界、Mod、备份等能力按路线图持续补齐' },
 ])
 
 function open(url: string) {
@@ -62,13 +69,13 @@ function open(url: string) {
       <div class="mb-6 flex items-center justify-between">
         <div class="flex gap-3 items-center">
           <FaIcon :name="logo" class="p-1 border rounded-lg size-10" />
-          <span class="tracking-tight font-semibold">Fantastic-admin</span>
+          <span class="tracking-tight font-semibold">GameServerHub</span>
         </div>
         <FaTabs
           v-model="versionType"
           :list="[
-            { label: '基础版', value: 'basic' },
-            { label: '专业版', value: 'pro' },
+            { label: 'Community', value: 'community' },
+            { label: 'Pro', value: 'pro' },
           ]"
         />
       </div>
@@ -78,37 +85,37 @@ function open(url: string) {
         <!-- Left: Title & CTA -->
         <div class="hero-enter p-6 border rounded-xl relative overflow-hidden md-p-8">
           <div class="text-xs text-muted-foreground tracking-widest font-medium mb-3 uppercase">
-            TypeScript · Vue 3.6 · Vite 8 · UnoCSS
+            Node.js · Vue 3 · Vite · Docker · SQLite
           </div>
           <h1 class="text-2xl leading-tight tracking-tight font-semibold mb-3 md-text-3xl">
             欢迎使用
             <div class="text-4xl tracking-tight font-semibold md-text-6xl">
-              Fantastic-admin
+              GameServerHub
             </div>
           </h1>
           <p class="text-sm text-muted-foreground leading-relaxed mb-6 max-w-prose md-text-base">
-            这是一款<span class="text-foreground font-medium">开箱即用</span>的 Vue3 管理系统框架，为中后台项目开发提供完整解决方案。
+            开源 <span class="text-foreground font-medium">Steam 游戏专用服务器面板</span>：装得上、开得起来、管得住。v1 聚焦饥荒联机版一键开服，Community 版提供完整自托管能力。
           </p>
           <div class="flex flex-wrap gap-3">
-            <FaButton size="lg" @click="open('https://fantastic-admin.hurui.me')">
-              开发文档
+            <FaButton size="lg" @click="open(LINKS.docs)">
+              项目文档
             </FaButton>
             <FaDropdown
               :items="[
                 [
-                  { label: 'Github', icon: 'i-simple-icons:github', handle: () => open('https://github.com/fantastic-admin/basic') },
-                  { label: 'Gitee', icon: 'i-simple-icons:gitee', handle: () => open('https://gitee.com/fantastic-admin/basic') },
-                  { label: 'GitCode', icon: 'i-simple-icons:gitcode', handle: () => open('https://atomgit.com/fantastic-admin/basic') },
+                  { label: 'Github', icon: 'i-simple-icons:github', handle: () => open(LINKS.github) },
+                  { label: 'Gitee', icon: 'i-simple-icons:gitee', handle: () => open(LINKS.gitee) },
+                  { label: 'GitCode', icon: 'i-simple-icons:gitcode', handle: () => open(LINKS.gitcode) },
                 ],
               ]"
             >
               <FaButton variant="outline" size="lg">
-                代码仓库 (基础版)
+                代码仓库
                 <FaIcon name="i-ep:arrow-down" class="ml-1" />
               </FaButton>
             </FaDropdown>
-            <FaButton variant="outline" size="lg" @click="open('https://fantastic-admin.hurui.me/buy.html')">
-              购买 (专业版)
+            <FaButton variant="outline" size="lg" @click="open(LINKS.pro)">
+              Pro 商业版
             </FaButton>
           </div>
         </div>
@@ -118,14 +125,14 @@ function open(url: string) {
           <div class="stat-enter border rounded-xl bg-neutral-950/[.012] dark:bg-white/5" :style="{ animationDelay: '100ms' }">
             <div class="p-5 flex flex-col h-full justify-between">
               <div class="text-xs text-muted-foreground tracking-widest font-medium uppercase">
-                稳定运行
+                一键部署
               </div>
               <div>
                 <div class="text-3xl tracking-tight font-semibold mb-1 md-text-4xl">
-                  1000+
+                  Linux
                 </div>
                 <div class="text-sm text-muted-foreground">
-                  个项目稳定运行
+                  安装脚本 + Docker Compose 生产路径
                 </div>
               </div>
             </div>
@@ -133,16 +140,16 @@ function open(url: string) {
           <div class="stat-enter border rounded-xl bg-neutral-950/[.012] dark:bg-white/5" :style="{ animationDelay: '200ms' }">
             <div class="p-5 flex flex-col h-full justify-between">
               <div class="text-xs text-muted-foreground tracking-widest font-medium uppercase">
-                持续维护
+                开源许可
               </div>
               <div>
                 <div class="text-3xl tracking-tight font-semibold mb-1 md-text-4xl">
-                  5年
+                  MIT
                 </div>
                 <div class="text-sm text-muted-foreground flex flex-wrap gap-1 items-center">
-                  <span>已在</span>
-                  <span class="text-foreground font-semibold">电商、直播、OA、CRM、ERP</span>
-                  <span>等多个领域提供技术支持</span>
+                  <span>Community 版覆盖</span>
+                  <span class="text-foreground font-semibold">装服、启停、监控、控制台</span>
+                  <span>等自托管核心能力</span>
                 </div>
               </div>
             </div>
@@ -182,9 +189,9 @@ function open(url: string) {
         <div class="mb-4 flex gap-3 items-center">
           <div class="rounded-full bg-primary h-4 w-0.5" />
           <h2 class="text-xs text-muted-foreground tracking-widest font-semibold uppercase">
-            生态
+            核心能力
           </h2>
-          <span class="text-xs text-muted-foreground hidden md-block">为不同场景提供完整解决方案</span>
+          <span class="text-xs text-muted-foreground hidden md-block">面板核心模块与路线图能力一览</span>
         </div>
         <div class="gap-4 grid md-grid-cols-3">
           <div

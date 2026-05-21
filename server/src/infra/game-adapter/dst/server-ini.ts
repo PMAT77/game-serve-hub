@@ -124,12 +124,13 @@ export function buildServerIni(fields: ServerIniFields): string {
 
 export function defaultMasterServerIniFields(gamePort?: number): ServerIniFields {
   const serverPort = gamePort ?? DST_DEFAULT_GAME_PORT
+  const offset = serverPort - DST_DEFAULT_GAME_PORT
   return {
     isMaster: true,
     shardName: 'Master',
     serverPort,
-    steamAuthPort: DEFAULT_MASTER_STEAM_AUTH,
-    steamMasterPort: DEFAULT_MASTER_STEAM_MASTER,
+    steamAuthPort: DEFAULT_MASTER_STEAM_AUTH + offset,
+    steamMasterPort: DEFAULT_MASTER_STEAM_MASTER + offset,
   }
 }
 

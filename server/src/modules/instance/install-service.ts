@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import process from 'node:process'
 import type { DbInstallLogStatus } from '../../shared/db/index'
 import {
+  getGameInstanceById,
   listGameInstances,
   updateGameInstanceRuntime,
 } from '../../shared/db/index'
@@ -13,7 +14,9 @@ import {
 import { parseSteamcmdProgressPercent } from '../../shared/instance-install/log-format'
 import { resolveSteamcmdLoginMode } from '../../shared/instance-install/steamcmd-login-mode'
 import {
+  assessHostMemoryForHeavyOperation,
   cancelSteamcmdInstallContainer,
+  cleanupAllRunningSteamcmdInstallContainers,
   cleanupOrphanedSteamcmdInstallContainers,
   isSteamcmdJobRunning,
   runSteamcmdAppUpdateInContainer,
@@ -34,7 +37,8 @@ import { diagnoseDstInstallReadiness } from '../../infra/game-adapter/dst/instal
 import { ensureDstLayout } from '../../infra/game-adapter/dst/cluster-config'
 import { cleanupIncompleteSteamcmdInstallDir, prepareInstallPathForSteamcmd } from './install-path'
 import { ensureGameRuntimeImageReady } from '../../infra/game-adapter/runtime-image'
-import { refreshInstanceUpdateStatusAfterInstall, refreshInstanceUpdateStatusAfterSeed } from './update-check'
+import { refreshInstanceUpdateStatusAfterInstall, refreshInstanceUpdateStatusAfterSeed, resolveSteamcmdCommandForUpdateCheck } from './update-check'
+import { readLocalBuildId } from '../../shared/steam-update/build-id'
 import { tryInstallGameDepotFromSeed, type InstallSeedDonor } from './install-seed'
 
 export interface InstanceInstallJobInput {
@@ -58,6 +62,15 @@ const cancelledInstallInstanceIds = new Set<string>()
 
 export function isInstallJobActive(instanceId: string): boolean {
   return installingInstanceIds.has(instanceId)
+}
+
+export function isAnyInstallJobActive(): boolean {
+  return installingInstanceIds.size > 0
+}
+
+export function assertHostMemoryForInstall(): string | undefined {
+  const pressure = assessHostMemoryForHeavyOperation('steamcmd-install')
+  return pressure.ok ? undefined : pressure.message
 }
 
 function hasOtherActiveInstallJobs(instanceId: string): boolean {
@@ -149,6 +162,24 @@ export function shouldAllowInstallDespiteUpToDate(input: {
     }
   }
   return false
+}
+
+/** 游戏文件已在磁盘就绪时，是否可跳过 SteamCMD 下载/更新 */
+export function shouldSkipSteamcmdForReadyInstall(input: {
+  updateAvailable?: boolean | null
+  remoteBuildId?: string | null
+  localBuildId?: string | null
+}): boolean {
+  if (input.updateAvailable) {
+    return false
+  }
+  if (!input.localBuildId) {
+    return false
+  }
+  if (input.remoteBuildId && input.localBuildId !== input.remoteBuildId) {
+    return false
+  }
+  return true
 }
 
 function sleep(ms: number): Promise<void> {
@@ -290,6 +321,18 @@ async function runInstallPipeline(
     return
   }
 
+  const memoryError = assertHostMemoryForInstall()
+  if (memoryError) {
+    logWriter.appendLine(memoryError)
+    await writeInstallLogMeta(input.instanceId, 'failed', null)
+    await updateGameInstanceRuntime(input.instanceId, {
+      status: 'error',
+      lastCommand: null,
+      lastError: memoryError,
+    })
+    return
+  }
+
   const pathError = prepareInstallPathForSteamcmd(input.installPath)
   if (pathError) {
     logWriter.appendLine(pathError)
@@ -318,13 +361,35 @@ async function runInstallPipeline(
     installPercent: null,
   })
 
-  const recipientAlreadyReady = diagnoseDstInstallReadiness(input.installPath).ready
-  if (!recipientAlreadyReady && input.appId.trim() === DST_APP_ID) {
-    const seedResult = await tryInstallGameDepotFromSeed({
-      recipientId: input.instanceId,
-      recipientPath: input.installPath,
-      appId: input.appId,
+  const recipientReadiness = diagnoseDstInstallReadiness(input.installPath)
+  const recipientAlreadyReady = recipientReadiness.ready
+  if (recipientAlreadyReady && input.appId.trim() === DST_APP_ID) {
+    const instance = await getGameInstanceById(input.instanceId)
+    const localBuildId = readLocalBuildId(input.installPath, input.appId)
+    const skipSteam = shouldSkipSteamcmdForReadyInstall({
+      updateAvailable: instance?.updateAvailable,
+      remoteBuildId: instance?.remoteBuildId,
+      localBuildId,
     })
+    if (skipSteam) {
+      logWriter.appendLine('检测到游戏文件已完整且版本一致，跳过 Steam 下载')
+      await finalizeSuccessfulInstall(input, logWriter, 'anonymous')
+      return
+    }
+    logWriter.appendLine('游戏文件已存在，将通过 SteamCMD 更新至最新版本...')
+  }
+  if (!recipientAlreadyReady && input.appId.trim() === DST_APP_ID) {
+    const seedMemory = assessHostMemoryForHeavyOperation('install-seed-copy')
+    if (!seedMemory.ok) {
+      logWriter.appendLine(seedMemory.message)
+    }
+    const seedResult = !seedMemory.ok
+      ? { ok: false as const, reason: seedMemory.message }
+      : await tryInstallGameDepotFromSeed({
+          recipientId: input.instanceId,
+          recipientPath: input.installPath,
+          appId: input.appId,
+        })
     if (seedResult.ok) {
       logWriter.appendLine(
         `已从实例「${seedResult.donor.instanceName}」(${seedResult.donor.instanceId.slice(0, 8)}…) 复制游戏文件，跳过 Steam 下载`,
@@ -528,9 +593,14 @@ async function runInstallJobInBackground(
 export function startInstallJob(
   app: FastifyInstance,
   input: InstanceInstallJobInput,
-): 'started' | 'busy' {
+): 'started' | 'busy' | 'blocked' {
   if (installingInstanceIds.has(input.instanceId)) {
     return 'busy'
+  }
+  const memoryError = assertHostMemoryForInstall()
+  if (memoryError) {
+    app.log.warn({ instanceId: input.instanceId, memoryError }, '宿主机内存不足，拒绝启动安装任务')
+    return 'blocked'
   }
   cancelledInstallInstanceIds.delete(input.instanceId)
   installingInstanceIds.add(input.instanceId)
@@ -570,6 +640,29 @@ export async function reconcileStaleInstallingInstances(app: FastifyInstance): P
       continue
     }
     if (await isSteamcmdJobRunning(instance.id)) {
+      await cancelSteamcmdInstallContainer(instance.id)
+    }
+    const installPath = instance.installPath?.trim() ?? ''
+    const installCompletedOnDisk = Boolean(
+      installPath && diagnoseDstInstallReadiness(installPath).ready,
+    )
+    if (installCompletedOnDisk) {
+      const steamcmdCommand = await resolveSteamcmdCommandForUpdateCheck()
+      await refreshInstanceUpdateStatusAfterInstall(
+        instance.id,
+        installPath,
+        instance.gameCode,
+        steamcmdCommand,
+      )
+      await updateGameInstanceRuntime(instance.id, {
+        status: 'stopped',
+        installLogStatus: 'success',
+        lastCommand: '安装已完成（面板重启后已恢复状态）',
+        lastError: null,
+        installPercent: 100,
+      })
+      reconciled++
+      app.log.info({ instanceId: instance.id }, '安装任务已在磁盘完成，面板重启后恢复为已停止')
       continue
     }
     await updateGameInstanceRuntime(instance.id, {
@@ -583,4 +676,12 @@ export async function reconcileStaleInstallingInstances(app: FastifyInstance): P
     app.log.info({ instanceId: instance.id }, '安装任务已中断（服务重启或任务丢失），已同步为异常')
   }
   return reconciled
+}
+
+/** 面板 onReady：清理 tsx watch 热重载后遗留的 SteamCMD 安装容器 */
+export async function reconcileOrphanedSteamcmdOnPanelReady(app: FastifyInstance): Promise<void> {
+  const removed = await cleanupAllRunningSteamcmdInstallContainers()
+  if (removed > 0) {
+    app.log.warn({ removed }, '已终止面板重启后遗留的 SteamCMD 安装容器')
+  }
 }

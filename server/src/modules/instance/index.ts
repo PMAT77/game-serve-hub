@@ -19,6 +19,7 @@ import {
   readInstallLogContent,
 } from '../../shared/instance-install/log-store'
 import { formatInstallLogContent } from '../../shared/instance-install/log-format'
+import { isSteamcmdAppUpdateBusy } from '../../infra/container/steamcmd-app-update-queue'
 import { isSteamcmdImagePresent } from '../../infra/container'
 import {
   buildDstStartBlockedMessage,
@@ -26,6 +27,9 @@ import {
 } from '../../infra/game-adapter/dst/install-readiness'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { ensureDstLayout } from '../../infra/game-adapter/dst/cluster-config'
+import { allocateDstGamePort } from '../../infra/game-adapter/dst/port-allocation'
+import { applyDstPortAutoAllocate, probeDstPortConflictForStart, resolveDstGamePortForStart } from './dst-port-sync'
+import { ErrorCode } from '../../../../shared/constants/error-code'
 import {
   ensureContainerRuntimeReady,
   ensureInstanceContainerLogFollow,
@@ -41,8 +45,11 @@ import {
   clearInstallJobTracking,
   getInstallLogsDirPath,
   getSteamcmdLoginCredentials,
+  assertHostMemoryForInstall,
+  isAnyInstallJobActive,
   isInstallJobActive,
   mapDbInstallLogStatusToResponse,
+  reconcileOrphanedSteamcmdOnPanelReady,
   reconcileStaleInstallingInstances,
   shouldAllowInstallDespiteUpToDate,
   startInstallJob,
@@ -82,6 +89,8 @@ interface CreateInstanceBody {
 interface InstanceActionBody {
   id?: string
   force?: boolean
+  /** 为 true 时在同节点端口冲突下自动分配新端口块并写回配置 */
+  autoAllocatePorts?: boolean
 }
 
 interface InstallLogQuery {
@@ -428,10 +437,21 @@ export function registerInstanceModule(app: FastifyInstance) {
         installPath,
       }, '创建实例未填写安装目录，已回退到默认实例数据目录')
     }
+    let gamePort = normalizePort(body.gamePort)
+    if (gameCode === DST_APP_ID && gamePort === null) {
+      try {
+        gamePort = await allocateDstGamePort(nodeId)
+      }
+      catch (error) {
+        const message = error instanceof Error ? error.message : '无法分配游戏端口'
+        return businessError(message, request)
+      }
+    }
     app.log.info({
       instanceId,
       gameCode,
       installPath,
+      gamePort,
       steamcmdCommand,
     }, '实例已创建，后台开始执行 SteamCMD 安装')
     const instance = await createGameInstance({
@@ -443,23 +463,30 @@ export function registerInstanceModule(app: FastifyInstance) {
       installPath,
       configPath: body.configPath?.trim() || null,
       queryPort: normalizePort(body.queryPort),
-      gamePort: normalizePort(body.gamePort),
+      gamePort,
       rconPort: normalizePort(body.rconPort),
       lastExitCode: null,
       lastCommand: '等待安装任务启动',
       lastError: null,
     })
+    const memoryError = assertHostMemoryForInstall()
+    if (memoryError) {
+      return businessError(memoryError, request)
+    }
     const started = startInstallJob(app, {
       instanceId,
       appId: gameCode,
       instanceName: name,
-      gamePort: normalizePort(body.gamePort),
+      gamePort,
       installPath,
       steamcmdCommand,
       steamcmdCredentials,
     })
     if (started === 'busy') {
       return businessError('该实例已有安装任务进行中', request)
+    }
+    if (started === 'blocked') {
+      return businessError(assertHostMemoryForInstall() ?? '宿主机内存不足，无法启动安装', request)
     }
     return success(instance, request)
   })
@@ -563,6 +590,19 @@ export function registerInstanceModule(app: FastifyInstance) {
         )
       }
     }
+    const memoryError = assertHostMemoryForInstall()
+    if (memoryError) {
+      return businessError(memoryError, request)
+    }
+    // 须在 startInstallJob 之前写入 installing：本地复制可在数百毫秒内完成，
+    // 若后置写入会覆盖 finalize 已设置的 stopped，重启后面板会误判为安装中断。
+    await updateGameInstanceRuntime(id, {
+      status: 'installing',
+      lastCommand: '正在准备更新服务端...',
+      lastError: null,
+      installPercent: null,
+      installLogStatus: 'running',
+    })
     const started = startInstallJob(app, {
       instanceId: id,
       appId: current.gameCode,
@@ -575,13 +615,9 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (started === 'busy') {
       return businessError('该实例已有安装任务进行中', request)
     }
-    await updateGameInstanceRuntime(id, {
-      status: 'installing',
-      lastCommand: '正在准备更新服务端...',
-      lastError: null,
-      installPercent: null,
-      installLogStatus: 'running',
-    })
+    if (started === 'blocked') {
+      return businessError(assertHostMemoryForInstall() ?? '宿主机内存不足，无法启动安装', request)
+    }
     app.log.info({
       instanceId: id,
       gameCode: current.gameCode,
@@ -589,6 +625,51 @@ export function registerInstanceModule(app: FastifyInstance) {
       forceReinstall,
     }, '实例开始执行 SteamCMD 手动更新')
     return success({ isSuccess: true }, request)
+  })
+
+  app.post('/app/instance/allocate-ports', async (request): Promise<ApiSuccessResponse<{ gamePort: number }> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    const body = (request.body ?? {}) as InstanceActionBody
+    const id = normalizeInstanceId(body.id)
+    if (!id) {
+      return businessError('实例 ID 不能为空', request)
+    }
+    const current = await getGameInstanceById(id)
+    if (!current) {
+      return businessError('实例不存在', request)
+    }
+    if (current.nodeId !== LOCAL_NODE_ID) {
+      return businessError('当前仅支持本地节点执行实例命令', request)
+    }
+    if (current.gameCode.trim() !== DST_APP_ID) {
+      return businessError('当前仅支持饥荒（343050）实例自动分配端口', request)
+    }
+    const installPath = normalizeInstallPath(current.installPath ?? undefined) || await getDefaultSteamInstallPath(current.gameCode, current.id)
+    const installPathError = validateInstallPath(installPath)
+    if (installPathError) {
+      return businessError(installPathError, request)
+    }
+    const probe = await probeDstPortConflictForStart({
+      instanceId: id,
+      nodeId: current.nodeId,
+      gameCode: current.gameCode,
+      installPath,
+      gamePort: current.gamePort,
+    })
+    const applied = await applyDstPortAutoAllocate({
+      instanceId: id,
+      nodeId: current.nodeId,
+      installPath,
+      gamePort: current.gamePort,
+      suggestedGamePort: probe.suggestedGamePort,
+    })
+    if (!applied.ok) {
+      return businessError(applied.message, request)
+    }
+    return success({ gamePort: applied.gamePort }, request)
   })
 
   app.post('/app/instance/start', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {
@@ -625,6 +706,9 @@ export function registerInstanceModule(app: FastifyInstance) {
     }
     if (current.status === 'pending_install' || current.status === 'installing') {
       return businessError('实例正在安装中，请稍后重试启动', request)
+    }
+    if (isInstallJobActive(id) || isAnyInstallJobActive() || isSteamcmdAppUpdateBusy()) {
+      return businessError('当前有实例正在安装或更新游戏文件（SteamCMD），请等待完成后再启动', request)
     }
     const installPath = normalizeInstallPath(current.installPath ?? undefined) || await getDefaultSteamInstallPath(current.gameCode, current.id)
     const installPathError = validateInstallPath(installPath)
@@ -692,10 +776,41 @@ export function registerInstanceModule(app: FastifyInstance) {
       })
       return businessError(errorMessage, request)
     }
+    let gamePort = current.gamePort
+    if (current.gameCode.trim() === DST_APP_ID) {
+      const portResult = await resolveDstGamePortForStart({
+        instanceId: id,
+        nodeId: current.nodeId,
+        gameCode: current.gameCode,
+        installPath,
+        gamePort: current.gamePort,
+        autoAllocatePorts: body.autoAllocatePorts === true,
+      })
+      if (!portResult.ok) {
+        if (portResult.kind === 'port_conflict') {
+          return businessError(
+            portResult.probe.userMessage,
+            request,
+            ErrorCode.INSTANCE_PORT_CONFLICT,
+            {
+              conflictingPorts: portResult.probe.conflictingPorts,
+              suggestedGamePort: portResult.probe.suggestedGamePort,
+              currentGamePort: portResult.probe.currentGamePort,
+            },
+          )
+        }
+        await updateGameInstanceRuntime(id, {
+          status: 'error',
+          lastError: portResult.message,
+        })
+        return businessError(portResult.message, request)
+      }
+      gamePort = portResult.gamePort
+    }
     const layoutResult = current.gameCode.trim() === DST_APP_ID
       ? ensureDstLayout(installPath, {
         instanceName: current.name,
-        gamePort: current.gamePort,
+        gamePort,
       })
       : { ok: false, message: '当前仅支持饥荒（343050）容器化启动' }
     if (!layoutResult.ok) {
@@ -748,7 +863,7 @@ export function registerInstanceModule(app: FastifyInstance) {
       gameCode: current.gameCode,
       installPath,
       instanceName: current.name,
-      gamePort: current.gamePort,
+      gamePort,
     })
     if (!started.ok) {
       await updateGameInstanceRuntime(id, {
@@ -862,6 +977,7 @@ export function registerInstanceModule(app: FastifyInstance) {
       },
       payload: {
         id,
+        autoAllocatePorts: body.autoAllocatePorts === true,
       },
     }).then((response) => {
       if (response.statusCode >= 400) {
@@ -869,7 +985,12 @@ export function registerInstanceModule(app: FastifyInstance) {
       }
       const payload = JSON.parse(response.body) as ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse
       if ('error' in payload && payload.error) {
-        return businessError(payload.error, request)
+        return businessError(
+          payload.error,
+          request,
+          payload.code ?? ErrorCode.BUSINESS_RULE_VIOLATION,
+          payload.data ?? {},
+        )
       }
       return success({ isSuccess: true }, request)
     })
@@ -945,6 +1066,7 @@ export function registerInstanceModule(app: FastifyInstance) {
 
   app.addHook('onReady', async () => {
     try {
+      await reconcileOrphanedSteamcmdOnPanelReady(app)
       await reconcileInstanceRuntimeState(app)
     }
     catch (error) {

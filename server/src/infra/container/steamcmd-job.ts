@@ -67,6 +67,35 @@ function buildSteamcmdInstallContainerName(jobId?: string): string | undefined {
   return `gsh-steamcmd-${safeId || 'job'}-${suffix}`
 }
 
+/** 面板启动或热重载后：终止所有仍在运行的 SteamCMD 安装容器（内存任务已丢失） */
+export async function cleanupAllRunningSteamcmdInstallContainers(): Promise<number> {
+  try {
+    const docker = resolveDocker()
+    const running = await docker.listContainers({
+      filters: {
+        label: [`${STEAMCMD_LABEL_MANAGED}=${STEAMCMD_LABEL_MANAGED_VALUE}`],
+      },
+    })
+    let removed = 0
+    for (const item of running) {
+      if (item.State !== 'running') {
+        continue
+      }
+      try {
+        await forceRemoveSteamcmdContainer(docker.getContainer(item.Id))
+        removed += 1
+      }
+      catch {
+        // best-effort
+      }
+    }
+    return removed
+  }
+  catch {
+    return 0
+  }
+}
+
 /** 仅清理指定 job 的已停止 SteamCMD 任务容器（不扫全局镜像） */
 export async function cleanupOrphanedSteamcmdInstallContainers(jobId?: string): Promise<number> {
   if (!jobId?.trim()) {

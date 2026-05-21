@@ -75,9 +75,11 @@ api.interceptors.response.use(
     if (typeof response.data === 'object') {
       if (response.data.status === 1) {
         if (response.data.error) {
-          faToast.warning('Warning', {
-            description: response.data.error,
-          })
+          if (response.data.code !== 'INSTANCE_PORT_CONFLICT') {
+            faToast.warning('Warning', {
+              description: response.data.error,
+            })
+          }
           return Promise.reject(response.data)
         }
       }

@@ -108,6 +108,16 @@ export interface InstanceConsoleShardStatus {
 
 export type InstanceConsoleCommandShard = 'master' | 'caves'
 
+export interface InstancePortConflictData {
+  conflictingPorts?: number[]
+  suggestedGamePort?: number | null
+  currentGamePort?: number
+}
+
+export interface InstanceAllocatePortsPayload {
+  gamePort: number
+}
+
 export interface InstanceConnectInfo {
   running: boolean
   command: string
@@ -136,9 +146,16 @@ export default {
   createInstance: (data: CreateInstancePayload) => api.post('app/instance/create', data),
   updateInstance: (id: string, options?: { force?: boolean }) => api.post('app/instance/update', { id, force: options?.force }),
   checkInstanceUpdates: (ids?: string[]) => api.post('app/instance/check-updates', ids?.length ? { ids } : {}) as Promise<{ data: InstanceCheckUpdatesPayload }>,
-  startInstance: (id: string) => api.post('app/instance/start', { id }),
+  allocateInstancePorts: (id: string) => api.post('app/instance/allocate-ports', { id }) as Promise<{ data: InstanceAllocatePortsPayload }>,
+  startInstance: (id: string, options?: { autoAllocatePorts?: boolean }) => api.post('app/instance/start', {
+    id,
+    ...(options?.autoAllocatePorts ? { autoAllocatePorts: true } : {}),
+  }),
   stopInstance: (id: string) => api.post('app/instance/stop', { id }),
-  restartInstance: (id: string) => api.post('app/instance/restart', { id }),
+  restartInstance: (id: string, options?: { autoAllocatePorts?: boolean }) => api.post('app/instance/restart', {
+    id,
+    ...(options?.autoAllocatePorts ? { autoAllocatePorts: true } : {}),
+  }),
   deleteInstance: (id: string) => api.post('app/instance/delete', { id }),
   getInstanceConnectInfo: (instanceId: string) => api.get('app/instance/connect-info', {
     params: { instanceId },

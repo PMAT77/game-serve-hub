@@ -1,8 +1,15 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { ShardId } from '../../../../../shared/contracts/shard'
+import { isCavesShardConfigured, resolveShardLeveldataPath } from './shard-layout'
+import { writeFileAtomic } from './atomic-write'
 
 const OVERRIDE_ENTRY_RE = /^\s*([a-zA-Z0-9_]+)\s*=\s*["']([^"']*)["']\s*,?\s*$/
 const OVERRIDE_KEY_RE = /^[a-z][a-z0-9_]*$/
 const OVERRIDE_VALUE_RE = /^[a-zA-Z0-9_.+-]+$/
+
+const templateCache = new Map<ShardId, string>()
 
 export function isValidOverrideKey(key: string): boolean {
   return OVERRIDE_KEY_RE.test(key) && key.length <= 64
@@ -22,6 +29,30 @@ export function validateWorldRuleOverrides(overrides: Record<string, string>): s
     }
   }
   return null
+}
+
+/** Klei 官方 leveldata 须含 id/settings_id；面板旧版极简文件会导致启动崩溃 */
+export function isValidLeveldataStructure(content: string): boolean {
+  const text = content.trim()
+  if (!text) {
+    return false
+  }
+  return /\bid\s*=\s*["']/.test(text) && /\bsettings_id\s*=\s*["']/.test(text)
+}
+
+function resolveLeveldataTemplatePath(shardId: ShardId): string {
+  const fileName = shardId === 'master' ? 'master-leveldataoverride.lua' : 'caves-leveldataoverride.lua'
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'templates', fileName)
+}
+
+export function loadLeveldataTemplate(shardId: ShardId): string {
+  const cached = templateCache.get(shardId)
+  if (cached) {
+    return cached
+  }
+  const content = fs.readFileSync(resolveLeveldataTemplatePath(shardId), 'utf8')
+  templateCache.set(shardId, content)
+  return content
 }
 
 function findOverridesBlockBounds(content: string): { start: number, end: number } | null {
@@ -65,38 +96,31 @@ export function parseLeveldataOverrides(content: string): Record<string, string>
   return overrides
 }
 
-function formatOverridesBlock(overrides: Record<string, string>): string {
-  const lines = Object.keys(overrides)
-    .sort((a, b) => a.localeCompare(b))
-    .map(key => `    ${key}="${overrides[key]}",`)
-  return [
-    '  overrides={',
-    ...lines,
-    '  },',
-  ].join('\n')
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function buildMinimalLeveldataContent(shardId: ShardId, overrides: Record<string, string>): string {
-  const overridesBlock = formatOverridesBlock(overrides)
-  if (shardId === 'master') {
-    return [
-      'return {',
-      overridesBlock,
-      '  location="forest",',
-      '  version=4,',
-      '}',
-      '',
-    ].join('\n')
+function patchOverrideKeyInLeveldata(content: string, key: string, value: string): string {
+  const bounds = findOverridesBlockBounds(content)
+  if (!bounds) {
+    return content
   }
-  return [
-    'return {',
-    overridesBlock,
-    '  location="cave",',
-    '  id="DST_CAVE",',
-    '  version=4,',
-    '}',
-    '',
-  ].join('\n')
+  const before = content.slice(0, bounds.start)
+  const block = content.slice(bounds.start, bounds.end)
+  const after = content.slice(bounds.end)
+  const keyRe = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`, 'm')
+  let found = false
+  const newLines = block.split('\n').map((line) => {
+    if (keyRe.test(line)) {
+      found = true
+      return `    ${key}="${value}",`
+    }
+    return line
+  })
+  if (!found) {
+    newLines.push(`    ${key}="${value}",`)
+  }
+  return `${before}${newLines.join('\n')}${after}`
 }
 
 export function mergeLeveldataOverrides(
@@ -104,26 +128,48 @@ export function mergeLeveldataOverrides(
   patch: Record<string, string>,
   shardId: ShardId,
 ): string {
-  if (!existingContent?.trim()) {
-    return buildMinimalLeveldataContent(shardId, patch)
+  const template = loadLeveldataTemplate(shardId)
+  let base = template
+  if (existingContent?.trim() && isValidLeveldataStructure(existingContent)) {
+    base = existingContent
   }
-  const current = parseLeveldataOverrides(existingContent)
-  const merged = { ...current, ...patch }
-  const bounds = findOverridesBlockBounds(existingContent)
-  if (!bounds) {
-    const trimmed = existingContent.trimEnd()
-    const withoutClosing = trimmed.endsWith('}')
-      ? trimmed.slice(0, -1).trimEnd()
-      : trimmed
-    const separator = withoutClosing.endsWith(',') || withoutClosing.endsWith('{') ? '\n' : ',\n'
-    return `${withoutClosing}${separator}${formatOverridesBlock(merged)}\n}\n`
+  const carryOver = existingContent?.trim() && !isValidLeveldataStructure(existingContent)
+    ? parseLeveldataOverrides(existingContent)
+    : {}
+  const allPatches = { ...carryOver, ...patch }
+  let result = base
+  for (const [key, value] of Object.entries(allPatches)) {
+    result = patchOverrideKeyInLeveldata(result, key, value)
   }
-  const before = existingContent.slice(0, bounds.start)
-  const after = existingContent.slice(bounds.end)
-  const inner = Object.keys(merged)
-    .sort((a, b) => a.localeCompare(b))
-    .map(key => `    ${key}="${merged[key]}",`)
-    .join('\n')
-  const innerBlock = inner ? `\n${inner}\n  ` : '\n  '
-  return `${before}${innerBlock}${after}`
+  return result
+}
+
+/** 启动/安装前修复旧版极简 leveldataoverride.lua，避免 DST 反复崩溃重启 */
+export function repairInvalidLeveldataOverrideFile(installPath: string, shardId: ShardId): boolean {
+  const luaPath = resolveShardLeveldataPath(installPath, shardId)
+  if (!fs.existsSync(luaPath)) {
+    return false
+  }
+  const content = fs.readFileSync(luaPath, 'utf8')
+  if (isValidLeveldataStructure(content)) {
+    return false
+  }
+  const preserved = parseLeveldataOverrides(content)
+  if (Object.keys(preserved).length === 0) {
+    fs.rmSync(luaPath, { force: true })
+    return true
+  }
+  writeFileAtomic(luaPath, mergeLeveldataOverrides(null, preserved, shardId))
+  return true
+}
+
+export function repairInvalidLeveldataOverrides(installPath: string): number {
+  let repaired = 0
+  if (repairInvalidLeveldataOverrideFile(installPath, 'master')) {
+    repaired++
+  }
+  if (isCavesShardConfigured(installPath) && repairInvalidLeveldataOverrideFile(installPath, 'caves')) {
+    repaired++
+  }
+  return repaired
 }

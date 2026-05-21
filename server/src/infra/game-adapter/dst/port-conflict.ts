@@ -1,4 +1,8 @@
 import dgram from 'node:dgram'
+import {
+  collectReservedDstPortsOnNode,
+  findPortOverlapWithReserved,
+} from './port-allocation'
 import type { ServerIniFields } from './server-ini'
 import { collectPortSet } from './server-ini'
 
@@ -47,10 +51,30 @@ export function formatPortConflictMessage(conflicts: number[]): string {
   return `端口 ${conflicts.join('、')} 已被占用，请修改分片配置或释放这些端口后重试`
 }
 
+export function formatCrossInstancePortConflictMessage(conflicts: number[]): string {
+  if (conflicts.length === 0) {
+    return '端口冲突'
+  }
+  if (conflicts.length === 1) {
+    return `端口 ${conflicts[0]} 已被同节点上运行中的其它实例占用。多实例同机时每个实例需不同游戏端口（创建时会自动分配）；可在房间/分片设置中修改端口，或停止占用该端口的实例。`
+  }
+  return `端口 ${conflicts.join('、')} 已被同节点上运行中的其它实例占用。多实例同机时请为每个实例使用不同端口块，或停止冲突实例后重试。`
+}
+
 export async function validateShardPortsForStart(
   master: ServerIniFields,
   caves: ServerIniFields | null,
+  options?: { excludeInstanceId?: string, nodeId?: string },
 ): Promise<string | undefined> {
+  if (options?.nodeId) {
+    const reserved = await collectReservedDstPortsOnNode(options.nodeId, options.excludeInstanceId, {
+      onlyRunning: true,
+    })
+    const overlap = findPortOverlapWithReserved(master, caves, reserved)
+    if (overlap.length > 0) {
+      return formatCrossInstancePortConflictMessage(overlap)
+    }
+  }
   const ports = collectPortSet(master)
   if (caves) {
     ports.push(...collectPortSet(caves))

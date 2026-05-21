@@ -6,16 +6,22 @@ import {
 } from './steamcmd-container-resources.ts'
 
 describe('resolveSteamcmdContainerMemoryLimits', () => {
-  it('defaults app-update to 8GiB without swap', () => {
+  it('defaults app-update to unlimited when env unset', () => {
     const prev = process.env.GSH_STEAMCMD_CONTAINER_MEMORY_MB
     delete process.env.GSH_STEAMCMD_CONTAINER_MEMORY_MB
     delete process.env.GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB
-    const limits = resolveSteamcmdContainerMemoryLimits('app-update')
+    assert.equal(resolveSteamcmdContainerMemoryLimits('app-update'), undefined)
     if (prev !== undefined) {
       process.env.GSH_STEAMCMD_CONTAINER_MEMORY_MB = prev
     }
+  })
+
+  it('applies explicit app-update cap', () => {
+    process.env.GSH_STEAMCMD_CONTAINER_MEMORY_MB = '4096'
+    const limits = resolveSteamcmdContainerMemoryLimits('app-update')
+    delete process.env.GSH_STEAMCMD_CONTAINER_MEMORY_MB
     assert.ok(limits)
-    assert.equal(limits!.Memory, 8192 * 1024 * 1024)
+    assert.equal(limits!.Memory, 4096 * 1024 * 1024)
     assert.equal(limits!.MemorySwap, limits!.Memory)
   })
 
@@ -32,7 +38,8 @@ describe('formatSteamcmdMemoryLimitForLog', () => {
       Memory: 4 * 1024 * 1024 * 1024,
       MemorySwap: 4 * 1024 * 1024 * 1024,
     })
-    assert.match(text, /4\.00 GiB/)
-    assert.match(text, /禁用 swap/)
+    assert.match(text, /4096 MiB/)
+    assert.match(text, /硬上限/)
+    assert.match(text, /非预留/)
   })
 })

@@ -7,46 +7,62 @@ export interface SteamcmdContainerMemoryLimits {
 
 const MIB = 1024 * 1024
 
-function parsePositiveMb(raw: string | undefined, fallbackMb: number): number {
+function parseExplicitMb(raw: string | undefined): number | undefined {
   const trimmed = raw?.trim()
-  if (!trimmed) {
-    return fallbackMb
+  if (!trimmed || trimmed === '0') {
+    return undefined
   }
   const parsed = Number(trimmed)
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallbackMb
+    return undefined
   }
   return Math.floor(parsed)
 }
 
-/** app_update 默认 8GiB；app_info 默认 512MiB。设 0 表示不限制（不推荐生产/dev 大文件安装） */
+/**
+ * SteamCMD 子容器内存硬上限（非预留）。未设置或设为 0 时不限制，便于高配机跑满；
+ * 小内存/WSL2 宿主机可在 panel.env 显式设置，例如 GSH_STEAMCMD_CONTAINER_MEMORY_MB=2048。
+ */
 export function resolveSteamcmdContainerMemoryLimits(
   kind: 'app-update' | 'app-info',
 ): SteamcmdContainerMemoryLimits | undefined {
   const envKey = kind === 'app-update'
     ? 'GSH_STEAMCMD_CONTAINER_MEMORY_MB'
     : 'GSH_STEAMCMD_APP_INFO_MEMORY_MB'
-  const defaultMb = kind === 'app-update' ? 8192 : 512
-  const raw = process.env[envKey]?.trim()
-  if (raw === '0') {
+  const memoryMb = parseExplicitMb(process.env[envKey])
+  if (memoryMb === undefined) {
     return undefined
   }
-  const memoryMb = parsePositiveMb(raw, defaultMb)
   const swapRaw = process.env.GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB?.trim()
-  const swapMb = swapRaw === '0' || !swapRaw
-    ? memoryMb
-    : parsePositiveMb(swapRaw, memoryMb)
+  let swapMb: number
+  if (kind === 'app-info' || swapRaw === '0') {
+    swapMb = memoryMb
+  }
+  else if (swapRaw) {
+    swapMb = parseExplicitMb(swapRaw) ?? memoryMb
+  }
+  else {
+    swapMb = memoryMb
+  }
   return {
     Memory: memoryMb * MIB,
     MemorySwap: swapMb * MIB,
   }
 }
 
+export function resolveSteamcmdContainerMemoryCapMb(kind: 'app-update' | 'app-info' = 'app-update'): number | undefined {
+  const limits = resolveSteamcmdContainerMemoryLimits(kind)
+  if (!limits) {
+    return undefined
+  }
+  return Math.round(limits.Memory / MIB)
+}
+
 export function formatSteamcmdMemoryLimitForLog(limits: SteamcmdContainerMemoryLimits | undefined): string {
   if (!limits) {
-    return '未设置（使用 Docker 默认，可能导致 WSL2 内存暴涨）'
+    return '未设置硬上限（可按需配置 GSH_STEAMCMD_CONTAINER_MEMORY_MB；小内存机建议 1536–2048）'
   }
-  const memoryGiB = (limits.Memory / 1024 / 1024 / 1024).toFixed(2)
+  const memoryMiB = Math.round(limits.Memory / MIB)
   const swapDisabled = limits.MemorySwap === limits.Memory
-  return `${memoryGiB} GiB${swapDisabled ? '（禁用 swap）' : ''}`
+  return `${memoryMiB} MiB 硬上限${swapDisabled ? '（禁用 swap）' : ''}，非预留内存`
 }

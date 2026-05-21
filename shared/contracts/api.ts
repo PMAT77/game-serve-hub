@@ -12,7 +12,7 @@ export interface ApiErrorResponse {
   status: 1 | 0
   error: string
   code: ErrorCodeValue
-  data: Record<string, never>
+  data: Record<string, unknown>
   requestId?: string
 }
 

@@ -19,6 +19,12 @@ describe('server-ini', () => {
     assert.equal(parsed.fields.steamAuthPort, 8766)
   })
 
+  it('offsets steam ports with game port block', () => {
+    const master = defaultMasterServerIniFields(11004)
+    assert.equal(master.steamAuthPort, 8771)
+    assert.equal(master.steamMasterPort, 12351)
+  })
+
   it('defaults caves ports offset from master', () => {
     const master = defaultMasterServerIniFields(10999)
     const caves = defaultCavesServerIniFields(master)

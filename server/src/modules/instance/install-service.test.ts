@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   mapDbInstallLogStatusToResponse,
   shouldAllowInstallDespiteUpToDate,
+  shouldSkipSteamcmdForReadyInstall,
 } from './install-service.ts'
 
 describe('mapDbInstallLogStatusToResponse', () => {
@@ -35,5 +36,31 @@ describe('shouldAllowInstallDespiteUpToDate', () => {
       status: 'stopped',
       gameCode: '343050',
     }, '/nonexistent/path/for-gsh-test'), true)
+  })
+})
+
+describe('shouldSkipSteamcmdForReadyInstall', () => {
+  it('skips when build ids match and no update flag', () => {
+    assert.equal(shouldSkipSteamcmdForReadyInstall({
+      updateAvailable: false,
+      remoteBuildId: '23001980',
+      localBuildId: '23001980',
+    }), true)
+  })
+
+  it('runs steam when updateAvailable is true', () => {
+    assert.equal(shouldSkipSteamcmdForReadyInstall({
+      updateAvailable: true,
+      remoteBuildId: '23001981',
+      localBuildId: '23001980',
+    }), false)
+  })
+
+  it('runs steam when local build differs from remote', () => {
+    assert.equal(shouldSkipSteamcmdForReadyInstall({
+      updateAvailable: false,
+      remoteBuildId: '23001981',
+      localBuildId: '23001980',
+    }), false)
   })
 })

@@ -15,6 +15,7 @@ import {
   parseServerIni,
 } from './server-ini'
 import { buildWorldgenOverride, defaultWorldgenPreset } from './worldgen-override'
+import { repairInvalidLeveldataOverrides } from './leveldata-override'
 import { resolveMasterServerIniPath } from './shard-layout'
 
 export interface DstServerBinary {
@@ -159,6 +160,7 @@ export function ensureDstLayout(installPath: string, input: EnsureDstClusterInpu
   }
   ensureDstSteamAppId(installPath, binary)
   ensureDstClusterConfig(installPath, input)
+  repairInvalidLeveldataOverrides(installPath)
   ensureDstServerBinaryExecutable(installPath)
   return { ok: true }
 }

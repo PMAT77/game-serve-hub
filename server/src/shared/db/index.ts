@@ -154,6 +154,7 @@ export interface UpdateGameInstanceRuntimeInput {
   containerId?: string | null
   runtimePid?: number | null
   runtimeStartedAt?: string | null
+  gamePort?: number | null
   lastCommand?: string | null
   lastExitCode?: number | null
   lastError?: string | null
@@ -1171,6 +1172,7 @@ export async function updateGameInstanceRuntime(
     containerId?: string | null
     runtimePid?: number | null
     runtimeStartedAt?: string | null
+    gamePort?: number | null
     lastCommand?: string | null
     lastExitCode?: number | null
     lastError?: string | null
@@ -1196,6 +1198,9 @@ export async function updateGameInstanceRuntime(
   }
   if (typeof input.runtimeStartedAt !== 'undefined') {
     setPayload.runtimeStartedAt = input.runtimeStartedAt?.trim() || null
+  }
+  if (typeof input.gamePort !== 'undefined') {
+    setPayload.gamePort = normalizeOptionalPort(input.gamePort)
   }
   if (typeof input.lastCommand !== 'undefined') {
     setPayload.lastCommand = input.lastCommand?.trim() || null

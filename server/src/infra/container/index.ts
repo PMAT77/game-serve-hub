@@ -19,10 +19,18 @@ export {
   runSteamcmdAppInfoInContainer,
   cancelSteamcmdInstallContainer,
   cleanupOrphanedSteamcmdInstallContainers,
+  cleanupAllRunningSteamcmdInstallContainers,
   isSteamcmdJobRunning,
   isSteamcmdImagePresent,
   pullSteamcmdImage,
 } from './steamcmd-runner'
+export {
+  assessHostMemoryForHeavyOperation,
+  readHostMemoryAvailableMb,
+  resolveMinHostAvailableMbForOperation,
+  resolveSteamcmdPlanningMb,
+} from './host-resource-guard'
+export type { HeavyHostOperation, HostMemoryPressureResult } from './host-resource-guard'
 export {
   formatGameDstImageError,
   isGameDstImagePresent,

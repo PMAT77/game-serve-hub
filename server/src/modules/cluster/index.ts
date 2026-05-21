@@ -17,11 +17,7 @@ import {
 } from '../../infra/game-adapter/dst/cluster-service'
 import { queryDstOnlinePlayerCount } from '../../infra/game-adapter/dst/online-players'
 import { isInstanceContainerRunning } from '../instance/container-lifecycle'
-import {
-  ensureContainerRuntimeReady,
-  stopInstanceContainer,
-} from '../instance/container-lifecycle'
-import { isInstallJobActive } from '../instance/install-service'
+import { injectRestartInstance } from '../instance/inject-restart'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 
 const LOCAL_NODE_ID = 'local-node'
@@ -90,46 +86,13 @@ async function resolveDstInstance(instanceId: string, request: FastifyRequest) {
   }
 }
 
-async function restartInstance(app: FastifyInstance, request: FastifyRequest, instanceId: string): Promise<ApiErrorResponse | undefined> {
-  const current = await getGameInstanceById(instanceId)
-  if (!current) {
-    return businessError('实例不存在', request)
-  }
-  if (current.status === 'pending_install' || current.status === 'installing' || isInstallJobActive(instanceId)) {
-    return businessError('实例正在安装中，请稍后再试', request)
-  }
-  const runtimeReady = await ensureContainerRuntimeReady()
-  if (!runtimeReady.ok) {
-    return businessError(runtimeReady.message ?? '容器运行时未就绪', request)
-  }
-  if (current.status === 'running' || current.containerId) {
-    try {
-      await stopInstanceContainer(instanceId)
-    }
-    catch (error) {
-      const message = error instanceof Error ? error.message : '重启时停止实例失败'
-      await updateGameInstanceRuntime(instanceId, {
-        status: 'error',
-        lastError: message,
-      })
-      return businessError(message, request)
-    }
-  }
-  const response = await app.inject({
-    method: 'POST',
-    url: '/app/instance/start',
-    headers: {
-      token: normalizeToken(request.headers.token),
-    },
-    payload: { id: instanceId },
-  })
-  if (response.statusCode >= 400) {
-    return businessError('实例重启失败', request)
-  }
-  const payload = JSON.parse(response.body) as ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse
-  if ('error' in payload && payload.error) {
-    return businessError(payload.error, request)
-  }
+async function restartInstance(
+  app: FastifyInstance,
+  request: FastifyRequest,
+  instanceId: string,
+  options?: { autoAllocatePorts?: boolean },
+): Promise<ApiErrorResponse | undefined> {
+  return injectRestartInstance(app, request, instanceId, options)
 }
 
 /**

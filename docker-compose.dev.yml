@@ -1,4 +1,5 @@
 # Development overlay: bind-mount 源码，容器内 pnpm install，避免 Windows 下 Docker build context 扫 node_modules。
+# 内存：panel(tsx watch)+web(Vite) 双容器，宿主机看到 ~1GiB+ 为开发常态；生产见 PANEL_IMAGE 单容器。
 services:
   panel:
     build: !reset null

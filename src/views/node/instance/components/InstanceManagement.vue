@@ -10,6 +10,12 @@ import apiInstance from '@/api/modules/instance'
 import apiShard from '@/api/modules/shard'
 import { blurFocusedElement } from '@/utils'
 import {
+  formatPortConflictDetail,
+  getPortConflictDialogLabels,
+  isInstancePortConflictError,
+  type InstancePortConflictAction,
+} from '@/utils/instancePortConflict'
+import {
   blocksDefaultStart,
   buildInstanceStartGuideContext,
   buildStartGuideParagraphs,
@@ -1195,6 +1201,71 @@ async function confirmStartInstance(row: InstanceItem) {
   })
 }
 
+function showInstancePortConflictDialog(
+  instanceId: string,
+  action: InstancePortConflictAction,
+  payload: { error: string, data?: { conflictingPorts?: number[], suggestedGamePort?: number | null } },
+  onAutoResolve?: () => void | Promise<void>,
+) {
+  const labels = getPortConflictDialogLabels(action)
+  const detail = formatPortConflictDetail(payload.data ?? {})
+  dialog.warning({
+    title: labels.title,
+    content: () => h('div', { class: 'space-y-2 max-w-prose text-sm' }, [
+      h('p', payload.error),
+      h('p', { class: 'text-muted-foreground' }, detail),
+    ]),
+    positiveText: labels.positiveText,
+    negativeText: '自行配置',
+    onPositiveClick: () => onAutoResolve?.(),
+    onNegativeClick: () => {
+      router.push({
+        name: 'shardSettings',
+        params: { instanceId },
+        query: { tab: 'network' },
+      })
+    },
+  })
+}
+
+function describeInstanceActionError(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    return error.message
+  }
+  if (typeof error === 'object' && error && 'error' in error) {
+    return String((error as { error?: string }).error)
+  }
+  return fallback
+}
+
+async function runInstanceLifecycleWithPortHandling(
+  instanceId: string,
+  action: InstancePortConflictAction,
+  options?: { autoAllocatePorts?: boolean },
+) {
+  const labels = getPortConflictDialogLabels(action)
+  const apiCall = action === 'restart'
+    ? () => apiInstance.restartInstance(instanceId, { autoAllocatePorts: options?.autoAllocatePorts })
+    : () => apiInstance.startInstance(instanceId, { autoAllocatePorts: options?.autoAllocatePorts })
+
+  try {
+    await apiCall()
+    faToast.success(labels.successToast)
+    await fetchInstances()
+  }
+  catch (error) {
+    if (isInstancePortConflictError(error)) {
+      showInstancePortConflictDialog(instanceId, action, error, () => runInstanceLifecycleWithPortHandling(instanceId, action, {
+        autoAllocatePorts: true,
+      }))
+      return
+    }
+    faToast.error(action === 'restart' ? '重启失败' : '启动失败', {
+      description: describeInstanceActionError(error, '请稍后重试'),
+    })
+  }
+}
+
 async function runInstanceAction(
   instanceId: string,
   action: 'start' | 'stop' | 'restart' | 'delete',
@@ -1206,22 +1277,29 @@ async function runInstanceAction(
   }
   try {
     if (action === 'start') {
-      await apiInstance.startInstance(instanceId)
-      faToast.success('实例已启动')
+      await runInstanceLifecycleWithPortHandling(instanceId, 'start')
+      return
     }
-    else if (action === 'stop') {
+    if (action === 'restart') {
+      await runInstanceLifecycleWithPortHandling(instanceId, 'restart')
+      return
+    }
+    if (action === 'stop') {
       await apiInstance.stopInstance(instanceId)
       faToast.success('实例已停止')
-    }
-    else if (action === 'restart') {
-      await apiInstance.restartInstance(instanceId)
-      faToast.success('实例已重启')
     }
     else {
       await apiInstance.deleteInstance(instanceId)
       faToast.success('实例已删除')
     }
     await fetchInstances()
+  }
+  catch (error) {
+    if (action !== 'start' && action !== 'restart') {
+      faToast.error('操作失败', {
+        description: describeInstanceActionError(error, '请稍后重试'),
+      })
+    }
   }
   finally {
     if (useTableLoading) {

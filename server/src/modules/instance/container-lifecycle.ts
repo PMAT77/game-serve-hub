@@ -4,6 +4,7 @@ import DockerClient from 'dockerode'
 import { resolveDockerStatus } from '../../infra/docker'
 import { resolveDockerConnectOptions } from '../../infra/docker-connect'
 import {
+  assessHostMemoryForHeavyOperation,
   ensureSteamcmdImage,
   formatGameDstImageError,
   getContainerRuntime,
@@ -191,24 +192,6 @@ async function startSingleShardContainer(
   return { ok: true, ref }
 }
 
-async function stopShardContainer(
-  runtime: ContainerRuntime,
-  ref: ContainerRef | undefined,
-  label: string,
-  instanceId: string,
-) {
-  if (!ref) {
-    return
-  }
-  try {
-    await runtime.stop(ref, 15)
-    instanceConsoleLogStore.appendSystem(instanceId, `${label}容器已停止`)
-  }
-  catch {
-    // container may already be stopped
-  }
-}
-
 async function stopAndRemoveShard(runtime: ContainerRuntime, ref: ContainerRef | undefined) {
   if (!ref) {
     return
@@ -239,6 +222,10 @@ export async function startInstanceContainer(
 ): Promise<{ ok: true, ref: ContainerRef, displayCommand: string } | { ok: false, message: string }> {
   if (input.gameCode.trim() !== DST_APP_ID) {
     return { ok: false, message: '当前仅支持饥荒（343050）容器化启动' }
+  }
+  const memoryPressure = assessHostMemoryForHeavyOperation('dst-container-start')
+  if (!memoryPressure.ok) {
+    return { ok: false, message: memoryPressure.message }
   }
   const { gameDstImage, instancesRoot, dockerHost } = getServerContainerConfig()
   const docker = new DockerClient(resolveDockerConnectOptions(dockerHost))
@@ -279,7 +266,10 @@ export async function startInstanceContainer(
   const cavesFields = shardEnabled && cavesConfigured
     ? readCavesServerIniFields(input.installPath)
     : null
-  const portError = await validateShardPortsForStart(masterFields, cavesFields)
+  const portError = await validateShardPortsForStart(masterFields, cavesFields, {
+    excludeInstanceId: input.instanceId,
+    nodeId: 'local-node',
+  })
   if (portError) {
     return { ok: false, message: portError }
   }
@@ -361,9 +351,19 @@ export async function stopInstanceContainer(instanceId: string): Promise<void> {
   const instance = await getGameInstanceById(instanceId)
   const runtime = getContainerRuntime()
   const cavesRef = await resolveCavesContainerRef(instanceId)
-  await stopShardContainer(runtime, cavesRef, '洞穴', instanceId)
   const masterRef = await resolveInstanceContainerRef(instanceId)
-  await stopShardContainer(runtime, masterRef, '主世界', instanceId)
+  if (cavesRef) {
+    instanceConsoleLogStore.appendSystem(instanceId, '正在停止并移除洞穴容器以释放内存')
+  }
+  await stopAndRemoveShard(runtime, cavesRef)
+  if (masterRef) {
+    instanceConsoleLogStore.appendSystem(instanceId, '正在停止并移除主世界容器以释放内存')
+  }
+  await stopAndRemoveShard(runtime, masterRef)
+  if (masterRef) {
+    instanceConsoleLogStore.appendSystem(instanceId, '实例容器已删除')
+  }
+  await runtime.removeShardNetwork(instanceId)
   if (!masterRef && !cavesRef) {
     if (instance?.status === 'running') {
       await updateGameInstanceRuntime(instanceId, {

@@ -20,12 +20,13 @@ export function businessError(
   message: string,
   request?: FastifyRequest,
   code: ApiErrorResponse['code'] = ErrorCode.BUSINESS_RULE_VIOLATION,
+  data: ApiErrorResponse['data'] = {},
 ): ApiErrorResponse {
   return {
     status: 1,
     error: message,
     code,
-    data: {},
+    data,
     requestId: getRequestId(request),
   }
 }

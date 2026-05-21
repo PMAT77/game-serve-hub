@@ -1,12 +1,7 @@
 import DockerClient from 'dockerode'
 import { resolveDockerConnectOptions } from '../docker-connect'
 import { getServerContainerConfig } from '../../shared/config/container'
-import {
-  cancelSteamcmdInstallContainer,
-  cleanupOrphanedSteamcmdInstallContainers,
-  isSteamcmdJobRunning,
-  runSteamcmdJob,
-} from './steamcmd-job'
+import { runSteamcmdJob } from './steamcmd-job'
 import { buildSteamcmdAppUpdateArgs } from './steamcmd-args'
 import { resolveSteamcmdInstallBind } from './steamcmd-install-bind'
 import { appendSteamcmdBindMountOptions, resolveSteamcmdContainerUser } from './steamcmd-container-user'
@@ -40,7 +35,12 @@ function buildSteamcmdAppInfoArgs(appId: string) {
   ]
 }
 
-export { cancelSteamcmdInstallContainer, cleanupOrphanedSteamcmdInstallContainers, isSteamcmdJobRunning }
+export {
+  cancelSteamcmdInstallContainer,
+  cleanupAllRunningSteamcmdInstallContainers,
+  cleanupOrphanedSteamcmdInstallContainers,
+  isSteamcmdJobRunning,
+} from './steamcmd-job'
 
 export async function runSteamcmdAppUpdateInContainer(input: {
   hostInstallPath: string
@@ -166,7 +166,7 @@ async function runSteamcmdAppUpdateInContainerUnlocked(input: {
         pushLine(line)
       }
       if (result.exitCode === 137) {
-        pushLine('SteamCMD 容器可能因内存上限（OOM）被终止，可在 panel.env 提高 GSH_STEAMCMD_CONTAINER_MEMORY_MB 或减小 WSL 并发压力')
+        pushLine('SteamCMD 容器可能因硬上限 OOM 被终止（exit 137）；可在 panel.env 酌情调高 GSH_STEAMCMD_CONTAINER_MEMORY_MB，并避免与运行中实例同时安装')
       }
     }
     catch {

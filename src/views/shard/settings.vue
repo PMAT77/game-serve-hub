@@ -20,8 +20,14 @@ import {
   useDialog,
   useMessage,
 } from 'naive-ui'
-import { computed, onActivated, reactive, ref, watch } from 'vue'
+import { computed, h, onActivated, onMounted, reactive, ref, watch } from 'vue'
+import apiInstance from '@/api/modules/instance'
 import apiShard from '@/api/modules/shard'
+import {
+  formatPortConflictDetail,
+  getPortConflictDialogLabels,
+  isInstancePortConflictError,
+} from '@/utils/instancePortConflict'
 import ShardNetworkSection from './components/ShardNetworkSection.vue'
 import ShardWorldRulesSection from './components/ShardWorldRulesSection.vue'
 import ShardWorldgenSection from './components/ShardWorldgenSection.vue'
@@ -49,6 +55,7 @@ const shardList = ref<ShardListDto | null>(null)
 const mainTab = ref<'surface' | 'caves' | 'mods'>('surface')
 const surfaceSubTab = ref<ShardSubTab>('rules')
 const cavesSubTab = ref<ShardSubTab>('rules')
+const allocatingPorts = ref(false)
 
 const masterWorldRules = reactive<Record<string, string>>({})
 const cavesWorldRules = reactive<Record<string, string>>({})
@@ -223,7 +230,42 @@ async function saveShard(shard: ShardId, restart: boolean) {
     await loadConfig()
   }
   catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : '保存失败'
+    if (restart && isInstancePortConflictError(error)) {
+      const labels = getPortConflictDialogLabels('restart')
+      dialog.warning({
+        title: labels.title,
+        content: () => h('div', { class: 'space-y-2 text-sm' }, [
+          h('p', '世界配置已保存，但因端口冲突未能重启实例。'),
+          h('p', error.error),
+          h('p', { class: 'text-muted-foreground' }, formatPortConflictDetail(error.data ?? {})),
+        ]),
+        positiveText: labels.positiveText,
+        negativeText: '留在本页修改端口',
+        onPositiveClick: async () => {
+          try {
+            await apiInstance.restartInstance(instanceId.value, { autoAllocatePorts: true })
+            message.success('已自动分配端口并完成重启')
+            await loadConfig()
+          }
+          catch (retryError: unknown) {
+            const description = retryError instanceof Error
+              ? retryError.message
+              : (typeof retryError === 'object' && retryError && 'error' in retryError
+                ? String((retryError as { error?: string }).error)
+                : '请稍后重试')
+            message.error(description || '重启失败')
+          }
+        },
+        onNegativeClick: () => {
+          mainTab.value = 'surface'
+          surfaceSubTab.value = 'network'
+        },
+      })
+      return
+    }
+    const msg = error instanceof Error
+      ? error.message
+      : (typeof error === 'object' && error && 'error' in error ? String((error as { error?: string }).error) : '保存失败')
     message.error(msg)
   }
   finally {
@@ -252,13 +294,50 @@ function goBack() {
   router.push({ name: 'shardList' })
 }
 
+function applyRouteTabFromQuery() {
+  if (route.query.tab === 'network') {
+    mainTab.value = 'surface'
+    surfaceSubTab.value = 'network'
+  }
+}
+
+async function autoAllocatePorts() {
+  if (!instanceId.value) {
+    return
+  }
+  allocatingPorts.value = true
+  try {
+    const { data } = await apiInstance.allocateInstancePorts(instanceId.value)
+    message.success(`已自动分配端口，主世界游戏端口为 ${data.gamePort}`)
+    await loadConfig()
+  }
+  catch (error) {
+    const description = error instanceof Error
+      ? error.message
+      : (typeof error === 'object' && error && 'error' in error ? String((error as { error?: string }).error) : '请稍后重试')
+    message.error(description || '自动分配端口失败')
+  }
+  finally {
+    allocatingPorts.value = false
+  }
+}
+
 watch(instanceId, (id) => {
   if (id) {
     void loadConfig()
   }
 }, { immediate: true })
 
+watch(() => route.query.tab, () => {
+  applyRouteTabFromQuery()
+}, { immediate: true })
+
+onMounted(() => {
+  applyRouteTabFromQuery()
+})
+
 onActivated(() => {
+  applyRouteTabFromQuery()
   if (instanceId.value) {
     void loadConfig()
   }
@@ -375,6 +454,18 @@ onActivated(() => {
                 </NTabPane>
 
                 <NTabPane name="network" tab="网络">
+                  <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <NButton
+                      size="small"
+                      :loading="allocatingPorts"
+                      @click="autoAllocatePorts"
+                    >
+                      自动分配未占用端口
+                    </NButton>
+                    <span class="text-xs text-muted-foreground">
+                      与同节点其它实例冲突时可一键换用新端口块；保存后生效，运行中需重启。
+                    </span>
+                  </div>
                   <ShardNetworkSection
                     v-model:server-port="masterForm.serverPort"
                     v-model:steam-auth-port="masterForm.steamAuthPort"

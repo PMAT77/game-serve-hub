@@ -6,6 +6,8 @@ export const ErrorCode = {
   FORCE_PASSWORD_CHANGE: 'AUTH_FORCE_PASSWORD_CHANGE',
   NOT_FOUND: 'COMMON_NOT_FOUND',
   INTERNAL_ERROR: 'COMMON_INTERNAL_ERROR',
+  /** 同节点 DST 实例端口与已有实例冲突，需用户选择手动改端口或自动分配 */
+  INSTANCE_PORT_CONFLICT: 'INSTANCE_PORT_CONFLICT',
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

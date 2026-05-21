@@ -1,14 +1,44 @@
 /**
- * dev:compose 前置：若本地无 SteamCMD 镜像则 pull（幂等）
+ * dev:compose 前置：若本地无 SteamCMD 镜像则 pull（幂等）。
+ * 拉取失败时不阻塞 compose 启动（实例安装前仍会检测镜像）。
  */
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const image = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'cm2network/steamcmd:root-bookworm'
-const MAX_ATTEMPTS = 3
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
-function imageExists(): boolean {
+function loadPanelEnvFile() {
+  const panelEnvPath = path.join(repoRoot, 'panel.env')
+  if (!fs.existsSync(panelEnvPath)) {
+    return
+  }
+  for (const line of fs.readFileSync(panelEnvPath, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue
+    }
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) {
+      continue
+    }
+    const key = trimmed.slice(0, eq).trim()
+    const value = trimmed.slice(eq + 1).trim()
+    if (!process.env[key]) {
+      process.env[key] = value
+    }
+  }
+}
+
+loadPanelEnvFile()
+
+const image = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'cm2network/steamcmd:steam-bookworm'
+const FALLBACK_IMAGE = 'cm2network/steamcmd:root-bookworm'
+
+function imageExists(target: string): boolean {
   try {
-    execFileSync('docker', ['image', 'inspect', image], { stdio: 'ignore' })
+    execFileSync('docker', ['image', 'inspect', target], { stdio: 'ignore' })
     return true
   }
   catch {
@@ -16,32 +46,34 @@ function imageExists(): boolean {
   }
 }
 
-function pullOnce() {
-  execFileSync('docker', ['pull', image], { stdio: 'inherit' })
+function pullOnce(target: string) {
+  execFileSync('docker', ['pull', target], { stdio: 'inherit' })
 }
 
 function main() {
-  if (imageExists()) {
+  if (imageExists(image)) {
     console.log(`[ensure-steamcmd-image] 已存在: ${image}`)
     return
   }
+
   console.log(`[ensure-steamcmd-image] 拉取: ${image}`)
-  let lastError: unknown
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      pullOnce()
-      console.log(`[ensure-steamcmd-image] 完成: ${image}`)
-      return
-    }
-    catch (error) {
-      lastError = error
-      if (attempt < MAX_ATTEMPTS) {
-        console.warn(`[ensure-steamcmd-image] 第 ${attempt} 次失败，重试…`)
-      }
-    }
+  try {
+    pullOnce(image)
+    console.log(`[ensure-steamcmd-image] 完成: ${image}`)
+    return
   }
-  console.error(`[ensure-steamcmd-image] 拉取失败: ${image}`)
-  throw lastError
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[ensure-steamcmd-image] 拉取失败: ${image}`)
+    console.warn(`[ensure-steamcmd-image] ${message}`)
+  }
+
+  if (image !== FALLBACK_IMAGE && imageExists(FALLBACK_IMAGE)) {
+    console.warn(`[ensure-steamcmd-image] 将使用本地已有镜像 ${FALLBACK_IMAGE}（可在 panel.env 设置 GSH_STEAMCMD_IMAGE）`)
+    return
+  }
+
+  console.warn('[ensure-steamcmd-image] SteamCMD 镜像未就绪，compose 仍会继续启动；请在实例页拉取镜像或配置 GSH_STEAMCMD_IMAGE')
 }
 
 main()

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'node:fs'
 import process from 'node:process'
+import type { InstallSeedDonor } from './install-seed'
 import type { DbGameInstance } from '../../shared/db/index'
 import {
   getGameInstanceById,
@@ -240,6 +241,23 @@ export function scheduleInstanceUpdateChecks(app: FastifyInstance) {
   }
   setTimeout(() => void run(), 30_000)
   setInterval(() => void run(), PERIODIC_UPDATE_CHECK_MS)
+}
+
+export async function refreshInstanceUpdateStatusAfterSeed(
+  instanceId: string,
+  installPath: string,
+  appId: string,
+  donor: InstallSeedDonor,
+) {
+  const checkedAt = new Date().toISOString()
+  const localBuildId = readLocalBuildId(installPath, appId) ?? donor.localBuildId
+  const remoteBuildId = donor.remoteBuildId ?? donor.localBuildId
+  await updateGameInstanceRuntime(instanceId, {
+    updateAvailable: false,
+    localBuildId,
+    remoteBuildId,
+    updateCheckedAt: checkedAt,
+  })
 }
 
 export async function refreshInstanceUpdateStatusAfterInstall(

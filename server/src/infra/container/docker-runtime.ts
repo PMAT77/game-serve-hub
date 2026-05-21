@@ -1,7 +1,9 @@
+import { resolveDstContainerResourceLimits } from './dst-container-resources'
 import type { ContainerCreateOptions } from 'dockerode'
 import Docker from 'dockerode'
 import { decodeDockerMultiplexLogChunk } from './docker-log'
 import { isDockerUnavailableError, resolveDockerConnectOptions } from '../docker-connect'
+import { buildInstanceShardNetworkName } from './instance-network'
 import type {
   ContainerInspect,
   ContainerRef,
@@ -32,6 +34,44 @@ export class DockerContainerRuntime implements ContainerRuntime {
     this.docker = new Docker(resolveDockerConnectOptions(dockerHost))
   }
 
+  async ensureShardNetwork(instanceId: string): Promise<string> {
+    const networkName = buildInstanceShardNetworkName(instanceId)
+    const existing = await this.docker.listNetworks({
+      filters: { name: [networkName] },
+    })
+    const exact = existing.find(item => item.Name === networkName)
+    if (exact?.Id) {
+      return networkName
+    }
+    await this.docker.createNetwork({
+      Name: networkName,
+      Driver: 'bridge',
+      CheckDuplicate: true,
+    })
+    return networkName
+  }
+
+  async removeShardNetwork(instanceId: string): Promise<void> {
+    const networkName = buildInstanceShardNetworkName(instanceId)
+    const existing = await this.docker.listNetworks({
+      filters: { name: [networkName] },
+    })
+    const match = existing.find(item => item.Name === networkName)
+    if (!match?.Id) {
+      return
+    }
+    try {
+      const network = this.docker.getNetwork(match.Id)
+      await network.remove()
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!message.toLowerCase().includes('active endpoints')) {
+        throw error
+      }
+    }
+  }
+
   async createShardContainer(spec: ShardContainerSpec): Promise<ContainerRef> {
     const existing = await this.findByName(spec.name)
     if (existing) {
@@ -41,6 +81,7 @@ export class DockerContainerRuntime implements ContainerRuntime {
     const binds = spec.hostBinds?.length
       ? spec.hostBinds
       : [`${spec.hostInstallPath}:${containerGameRoot}`]
+    const resourceLimits = resolveDstContainerResourceLimits()
     const container = await this.docker.createContainer({
       name: spec.name,
       Image: spec.image,
@@ -52,7 +93,10 @@ export class DockerContainerRuntime implements ContainerRuntime {
       HostConfig: {
         Binds: binds,
         PortBindings: mapPortBindings(spec.ports),
-        RestartPolicy: { Name: 'no' },
+        RestartPolicy: { Name: 'on-failure', MaximumRetryCount: 5 },
+        ...(spec.networkName ? { NetworkMode: spec.networkName } : {}),
+        ...(resourceLimits?.memory ? { Memory: resourceLimits.memory } : {}),
+        ...(resourceLimits?.nanoCpus ? { NanoCpus: resourceLimits.nanoCpus } : {}),
       },
       Tty: false,
       OpenStdin: true,

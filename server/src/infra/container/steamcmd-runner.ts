@@ -10,6 +10,11 @@ import {
 import { buildSteamcmdAppUpdateArgs } from './steamcmd-args'
 import { resolveSteamcmdInstallBind } from './steamcmd-install-bind'
 import { appendSteamcmdBindMountOptions, resolveSteamcmdContainerUser } from './steamcmd-container-user'
+import { withSteamcmdAppUpdateLock } from './steamcmd-app-update-queue'
+import { loadServerConfig, resolveInstallLogsDir } from '../../shared/config'
+import { loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
+import { appendInstallResourceSnapshot } from './install-resource-monitor'
+import { formatSteamcmdMemoryLimitForLog, resolveSteamcmdContainerMemoryLimits } from './steamcmd-container-resources'
 
 const STEAMCMD_APP_UPDATE_TIMEOUT_MS = 30 * 60 * 1000
 const STEAMCMD_APP_INFO_TIMEOUT_MS = 90_000
@@ -43,6 +48,22 @@ export async function runSteamcmdAppUpdateInContainer(input: {
   loginArgs: string[]
   cancelKey?: string
   onLogLine?: (line: string) => void
+  onAwaitingSteamcmdLock?: () => void | Promise<void>
+}): Promise<{ ok: boolean, output: string, cancelled?: boolean }> {
+  const jobId = input.cancelKey?.trim() || 'anonymous'
+  return withSteamcmdAppUpdateLock(
+    jobId,
+    () => runSteamcmdAppUpdateInContainerUnlocked(input),
+    { onQueued: input.onAwaitingSteamcmdLock },
+  )
+}
+
+async function runSteamcmdAppUpdateInContainerUnlocked(input: {
+  hostInstallPath: string
+  appId: string
+  loginArgs: string[]
+  cancelKey?: string
+  onLogLine?: (line: string) => void
 }): Promise<{ ok: boolean, output: string, cancelled?: boolean }> {
   const { steamcmdImage, instancesRoot } = getServerContainerConfig()
   const docker = resolveDocker()
@@ -54,13 +75,60 @@ export async function runSteamcmdAppUpdateInContainer(input: {
   }
 
   pushLine(`准备启动 SteamCMD 容器（镜像 ${steamcmdImage}）`)
-  pushLine(`安装目录（宿主机）: ${input.hostInstallPath}`)
+  pushLine(`安装目录（面板侧）: ${input.hostInstallPath}`)
   pushLine(`AppID: ${input.appId}`)
-  if (bindPlan.mode !== 'direct') {
+  pushLine(`SteamCMD bind 模式: ${bindPlan.mode}`)
+  if (bindPlan.error) {
+    pushLine(bindPlan.error)
+    return {
+      ok: false,
+      output: logLines.slice(-20).join('\n') || bindPlan.error,
+    }
+  }
+  if (bindPlan.mode === 'direct') {
+    pushLine(`SteamCMD 直 bind: ${bindPlan.hostBinds[0]} → force_install_dir ${bindPlan.containerInstallPath}`)
+  }
+  else {
     pushLine(`SteamCMD 卷挂载: ${bindPlan.hostBinds[0]} → force_install_dir ${bindPlan.containerInstallPath}`)
   }
 
-  const steamcmdArgs = buildSteamcmdAppUpdateArgs(bindPlan.containerInstallPath, input.appId, input.loginArgs)
+  const steamcmdConfig = loadSteamcmdRuntimeConfig()
+  if (steamcmdConfig.downloadRegion) {
+    pushLine(`Steam 下载区域：${steamcmdConfig.downloadRegion}`)
+  }
+  if (steamcmdConfig.httpProxy || steamcmdConfig.httpsProxy) {
+    pushLine('SteamCMD 代理：已配置（HTTP/HTTPS）')
+  }
+  if (steamcmdConfig.networkMode === 'host') {
+    pushLine('SteamCMD 网络模式：host')
+  }
+
+  const steamcmdArgs = buildSteamcmdAppUpdateArgs(
+    bindPlan.containerInstallPath,
+    input.appId,
+    input.loginArgs,
+    { downloadRegion: steamcmdConfig.downloadRegion || undefined },
+  )
+
+  const memoryLimits = resolveSteamcmdContainerMemoryLimits('app-update')
+  pushLine(`SteamCMD 容器内存上限: ${formatSteamcmdMemoryLimitForLog(memoryLimits)}`)
+
+  const instanceId = input.cancelKey?.trim()
+  if (instanceId) {
+    try {
+      const installLogsDir = resolveInstallLogsDir(loadServerConfig().dbPath)
+      const resourceLines = await appendInstallResourceSnapshot(installLogsDir, docker, {
+        instanceId,
+        phase: 'steamcmd_before',
+      })
+      for (const line of resourceLines) {
+        pushLine(line)
+      }
+    }
+    catch {
+      pushLine('[资源快照] 写入失败（不影响安装继续）')
+    }
+  }
 
   const result = await runSteamcmdJob({
     image: steamcmdImage,
@@ -78,6 +146,32 @@ export async function runSteamcmdAppUpdateInContainer(input: {
 
   if (result.ok) {
     pushLine('SteamCMD app_update 已完成')
+  }
+
+  if (instanceId) {
+    try {
+      const installLogsDir = resolveInstallLogsDir(loadServerConfig().dbPath)
+      const resourceLines = await appendInstallResourceSnapshot(installLogsDir, docker, {
+        instanceId,
+        phase: 'steamcmd_after',
+        extra: {
+          ok: result.ok,
+          exitCode: result.exitCode,
+          cancelled: result.cancelled ?? false,
+          timedOut: result.timedOut ?? false,
+          oomKilled: result.exitCode === 137,
+        },
+      })
+      for (const line of resourceLines) {
+        pushLine(line)
+      }
+      if (result.exitCode === 137) {
+        pushLine('SteamCMD 容器可能因内存上限（OOM）被终止，可在 panel.env 提高 GSH_STEAMCMD_CONTAINER_MEMORY_MB 或减小 WSL 并发压力')
+      }
+    }
+    catch {
+      // ignore snapshot errors
+    }
   }
 
   return {

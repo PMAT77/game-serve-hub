@@ -38,6 +38,24 @@
 - 安装中实例不可执行互斥操作。
 - 删除实例前需完成停服与资源清理。
 
+### 6.1 同机安装加速（depot seed）
+
+创建或更新实例时，若目标目录尚无完整游戏文件，面板可 **从本机其他已停止实例复制游戏 depot**（除 `klei-storage` 外完整安装根：`data/`、`bin/`、`bin64/`、`mods/`、`linux64/`、`steamapps/` 等），跳过 Steam 全量下载；**不复制** `klei-storage/`（各实例存档与房间配置独立）。
+
+供体（donor）须同时满足：
+
+- 状态为 **stopped**（运行中实例不作为供体）
+- 游戏文件完整（存在 DST 可执行文件、非空 `data/` 与 `appmanifest_343050.acf`）
+- `updateAvailable === false`（本地 buildid 与远端一致）
+- 非 installing / 无进行中的 SteamCMD 任务
+
+复制失败或无可用供体时 **自动回退** SteamCMD `app_update 343050`。
+
+环境变量（见 FDS-00、`panel.env.example`）：
+
+- `GSH_INSTALL_SEED_ENABLED`：默认 `1`（开启）
+- `GSH_INSTALL_DEFER_DST_IMAGE_PULL`：默认 `1`（安装结束不 pull DST 运行镜像，首次启动时拉取）
+
 ## 7. 异常与边界
 
 - 路径非法或参数错误 -> 拒绝创建

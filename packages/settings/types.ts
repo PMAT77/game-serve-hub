@@ -221,6 +221,12 @@ export interface TabbarSettings {
    * @default false
    */
   hotkeys?: boolean
+  /**
+   * 记忆功能
+   * @description 将标签栏状态记录到浏览器会话缓存，刷新页面或重新登录后自动恢复
+   * @default false
+   */
+  memory?: boolean
 }
 
 export interface ToolbarMenuSearchSettings {

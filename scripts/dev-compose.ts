@@ -8,12 +8,13 @@ import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const panelEnvPath = path.join(repoRoot, 'panel.env')
 
 const panelPort = process.env.PANEL_PORT?.trim() || '3000'
 const webPort = process.env.VITE_DEV_WEB_PORT?.trim() || '9000'
 const panelUrl = `http://127.0.0.1:${panelPort}`
 const webUrl = `http://127.0.0.1:${webPort}`
-const steamcmdImage = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'cm2network/steamcmd:root-bookworm'
+const steamcmdImage = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'cm2network/steamcmd:steam-bookworm'
 const account = process.env.ADMIN_USERNAME?.trim() || 'admin'
 const password = process.env.ADMIN_PASSWORD ?? 'admin'
 
@@ -31,20 +32,26 @@ interface BannerConfig {
 }
 
 function runPrepare() {
-  const output = execFileSync('pnpm', ['run', 'dev:compose:prepare'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
-  })
-  if (verboseComposeLogs) {
-    process.stdout.write(output)
-    return
-  }
-  for (const line of output.split(/\r?\n/)) {
-    const filtered = filterDevComposeLogLine(line)
-    if (filtered) {
-      console.log(filtered)
+  try {
+    const output = execFileSync('pnpm', ['run', 'dev:compose:prepare'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+    })
+    if (verboseComposeLogs) {
+      process.stdout.write(output)
+      return
     }
+    for (const line of output.split(/\r?\n/)) {
+      const filtered = filterDevComposeLogLine(line)
+      if (filtered) {
+        console.log(filtered)
+      }
+    }
+  }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[dev:compose] SteamCMD 镜像准备未完成，将继续启动 compose：${message}`)
   }
 }
 
@@ -169,6 +176,7 @@ function startCompose(): Promise<number> {
     const isWin = process.platform === 'win32'
     const composeArgs = [
       'compose',
+      ...(fs.existsSync(panelEnvPath) ? ['--env-file', 'panel.env'] : []),
       '-f', 'docker-compose.yml',
       '-f', 'docker-compose.dev.yml',
       'up',

@@ -316,6 +316,40 @@ export default defineFakeRoute([
     },
   },
   {
+    url: '/fake/app/instance/connect-info',
+    method: 'get',
+    response: ({ query }) => {
+      const instanceId = typeof query.instanceId === 'string' ? query.instanceId : ''
+      const target = instanceList.find(item => item.id === instanceId)
+      const running = target?.status === 'running'
+      return {
+        error: '',
+        status: 1,
+        data: {
+          running,
+          command: running ? 'c_connect("203.0.113.1", 10999)' : 'c_connect("<宿主机 IP>", 10999)',
+          localCommand: running ? 'c_connect("127.0.0.1", 10999)' : 'c_connect("127.0.0.1", 10999)',
+          lanCommand: running ? 'c_connect("192.168.1.100", 10999)' : null,
+          host: running ? '127.0.0.1' : '<宿主机 IP>',
+          port: target?.gamePort ?? 10999,
+          udpPorts: [10999, 8766, 12346],
+          roomName: target?.name ?? 'Game Server Hub',
+          networkMode: 'offline',
+          networkModeLabel: '离线',
+          hasPassword: false,
+          hostSourceLabel: '未探测到',
+          isPlaceholder: !running,
+          hints: [],
+          consoleShards: {
+            masterRunning: running,
+            cavesConfigured: true,
+            cavesRunning: running,
+          },
+        },
+      }
+    },
+  },
+  {
     url: '/fake/app/instance/console/logs',
     method: 'get',
     response: ({ query }) => {

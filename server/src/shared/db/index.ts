@@ -759,7 +759,7 @@ function normalizePanelSettings(raw: unknown): DbSystemPanelSettings {
       theme: 'system',
       autoUpdate: true,
       checkUpdateBeforeStart: false,
-      updateCheckIntervalHours: 1,
+      updateCheckIntervalHours: 3,
     }
   }
   const value = raw as Partial<DbSystemPanelSettings>

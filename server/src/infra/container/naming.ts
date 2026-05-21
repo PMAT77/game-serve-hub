@@ -8,3 +8,7 @@ export function buildShardContainerName(instanceId: string, shard: ShardRole): s
 export function buildMasterContainerName(instanceId: string): string {
   return buildShardContainerName(instanceId, 'master')
 }
+
+export function buildCavesContainerName(instanceId: string): string {
+  return buildShardContainerName(instanceId, 'caves')
+}

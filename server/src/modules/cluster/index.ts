@@ -1,7 +1,12 @@
 import fs from 'node:fs'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
-import type { ClusterConfigDto, ClusterSavePayload, ClusterSaveResult } from '../../../../shared/contracts/cluster'
+import type {
+  ClusterConfigDto,
+  ClusterOnlinePlayersDto,
+  ClusterSavePayload,
+  ClusterSaveResult,
+} from '../../../../shared/contracts/cluster'
 import { findUserByToken, getGameInstanceById, updateGameInstanceRuntime } from '../../shared/db/index'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import {
@@ -10,6 +15,8 @@ import {
   resolveInstanceInstallPath,
   saveClusterConfig,
 } from '../../infra/game-adapter/dst/cluster-service'
+import { queryDstOnlinePlayerCount } from '../../infra/game-adapter/dst/online-players'
+import { isInstanceContainerRunning } from '../instance/container-lifecycle'
 import {
   ensureContainerRuntimeReady,
   stopInstanceContainer,
@@ -146,6 +153,36 @@ export function registerClusterModule(app: FastifyInstance) {
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '读取房间配置失败'
+      return businessError(message, request)
+    }
+  })
+
+  app.get('/app/instance/cluster/online-players', async (request): Promise<ApiSuccessResponse<ClusterOnlinePlayersDto> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    const query = request.query as ClusterQuery
+    const instanceId = normalizeInstanceId(query.instanceId)
+    const resolved = await resolveDstInstance(instanceId, request)
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    try {
+      const config = getClusterConfig(resolved.instance)
+      const running = await isInstanceContainerRunning(instanceId)
+      const onlinePlayerCount = running
+        ? await queryDstOnlinePlayerCount(instanceId)
+        : null
+      return success({
+        instanceId,
+        running,
+        onlinePlayerCount,
+        maxPlayers: config.maxPlayers,
+      }, request)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '读取在线人数失败'
       return businessError(message, request)
     }
   })

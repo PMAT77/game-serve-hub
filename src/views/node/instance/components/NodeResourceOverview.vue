@@ -49,11 +49,6 @@ onMounted(() => {
   <FaPageMain title="节点资源概览">
     <section class="p-4 border border-border rounded-xl bg-card space-y-4">
       <div class="flex flex-wrap gap-3 items-center justify-between">
-        <div>
-          <p class="text-sm text-muted-foreground">
-            节点用于承载实例部署，实例主链路为：创建实例 -> SteamCMD 安装游戏 -> 生成启动脚本 -> 启停管理
-          </p>
-        </div>
         <div class="flex gap-2">
           <NButton :loading="nodeLoading" @click="fetchNodes">
             刷新节点

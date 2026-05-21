@@ -6,6 +6,27 @@ import { resolveSteamcmdContainerUidGid } from '../../infra/container/steamcmd-c
 
 export { resolveSteamcmdContainerUidGid }
 
+const STEAMCMD_ARTIFACT_DIRS = ['steamapps', 'Steam', 'steamcmd'] as const
+
+/**
+ * 无 DST 可执行文件时清理半成品 Steam 状态，避免 Missing configuration / 0x602 重试失败。
+ */
+export function cleanupIncompleteSteamcmdInstallDir(installPath: string): boolean {
+  if (findDstServerBinary(installPath)) {
+    return false
+  }
+  let removed = false
+  for (const name of STEAMCMD_ARTIFACT_DIRS) {
+    const target = path.join(installPath, name)
+    if (!fs.existsSync(target)) {
+      continue
+    }
+    fs.rmSync(target, { recursive: true, force: true })
+    removed = true
+  }
+  return removed
+}
+
 function resolveEntryMode(entryPath: string, isDirectory: boolean): number {
   const stat = fs.statSync(entryPath)
   const baseMode = isDirectory ? 0o775 : 0o664
@@ -88,6 +109,7 @@ function ensureInstallDirectoryOwnership(installPath: string): string | undefine
  * 若目录内已有游戏文件，仅调整实例目录本身，避免递归 chmod 去掉二进制 +x。
  */
 export function prepareInstallPathForSteamcmd(installPath: string): string | undefined {
+  cleanupIncompleteSteamcmdInstallDir(installPath)
   return ensureInstallDirectoryOwnership(installPath)
 }
 

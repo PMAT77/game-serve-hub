@@ -1,6 +1,6 @@
 # 新模块开发前必读文档指南
 
-> 最后更新：2026-05-19  
+> 最后更新：2026-05-21  
 > 用途：在动手写业务代码之前，明确「读什么、读到哪、对应哪份 FDS」；与 Cursor 规则 `module-kickoff-doc-sync` 配套使用。  
 > 模块清单与状态以 [`TODO.md`](TODO.md) §2 与 [`FDS/README.md`](FDS/README.md) 为准。
 
@@ -32,7 +32,8 @@
 |--------|------|----------|
 | P0 | [`01-PRODUCT-VISION-MISSION.md`](01-PRODUCT-VISION-MISSION.md) | v1 定位、用户痛点、Community/Pro 方向 |
 | P0 | [`03-PRS.md`](03-PRS.md) | 需求总览；本模块在 PRS §2 中的条目 |
-| P0 | [`TODO.md`](TODO.md) | §2 模块状态；§3 所属里程碑；§4 当前迭代待办；§5 Community/Pro 边界 |
+| P0 | [`TODO.md`](TODO.md) | §2 模块状态；§3 所属里程碑；§4 当前迭代待办；§5 Community/Pro 对照表 |
+| P0 | [`13-PRO-OPEN-CORE-ARCHITECTURE.md`](13-PRO-OPEN-CORE-ARCHITECTURE.md) | Open Core 分层、扩展点、Pro 模块开发约束（涉及 Pro 时必读） |
 | P0 | **本模块 FDS** `FDS/xx-*.md` | 范围、接口、规则、异常、验收 |
 | P0 | [`FDS/README.md`](FDS/README.md) | FDS 统一章节结构、状态口径 |
 | P0 | [`09-DEVELOPMENT-STANDARDS.md`](09-DEVELOPMENT-STANDARDS.md) | 前后端、迁移、安全、提交规范 |
@@ -66,14 +67,14 @@
 | 01 | [01-monitor](FDS/01-monitor.md) | 监控台 | 部分实现 | [FDS-00](FDS/00-install-runtime.md) | `05` §2.1 前端层、`system` 模块 | 00 | `server/src/modules/system/`（metrics）、`src/views/console/monitor/` |
 | 02 | [02-node-instance](FDS/02-node-instance.md) | 节点与实例 | 已实现 | [FDS-00](FDS/00-install-runtime.md)、[FDS-14](FDS/14-game-adapter.md)；`06` §2.2 | `04` 实例创建/安装/启停泳道 | 00、14 | `server/src/modules/node/`、`instance/`；`src/views/node/instance/` |
 | 03 | [03-dst-cluster](FDS/03-dst-cluster.md) | DST 房间（Cluster） | 已实现（M1 Community） | [FDS-02](FDS/02-node-instance.md)、[FDS-14](FDS/14-game-adapter.md)；`others/DST.md` | `07` 与 03 边界（§6 易混淆表） | 02、14 | `server/src/modules/cluster/`、`server/src/infra/game-adapter/dst/cluster-*.ts`；`src/views/cluster/` |
-| 04 | [04-dst-shard](FDS/04-dst-shard.md) | DST 世界（Shard） | 规划态 | [FDS-03](FDS/03-dst-cluster.md)、`others/DST.md` | `04` 多世界编排相关状态 | 02、03、14 | `server/src/infra/game-adapter/dst/` |
+| 04 | [04-dst-shard](FDS/04-dst-shard.md) | DST 世界（Shard） | 已实现（M1 Community，2026-05-21 验收） | [FDS-03](FDS/03-dst-cluster.md)、`others/DST.md` | `04` 多世界编排相关状态 | 02、03、14 | `server/src/modules/shard/`、`server/src/infra/game-adapter/dst/`；`src/views/shard/` |
 | 05 | [05-mod](FDS/05-mod.md) | Mod 管理 | 规划态 | [FDS-02](FDS/02-node-instance.md)；`06` §2.4 `instance_mods`；`others/DST.md` modoverrides | [FDS-07](FDS/07-config.md) 配置写入边界 | 02 | `server/src/modules/mod/`（占位） |
 | 06 | [06-backup](FDS/06-backup.md) | 备份恢复 | 规划态 | [FDS-02](FDS/02-node-instance.md)；`06` §2.4 `backups` | [FDS-08](FDS/08-file.md) 路径与权限 | 02 | `server/src/modules/backup/`（占位） |
 | 07 | [07-config](FDS/07-config.md) | 配置中心 | 规划态 | [FDS-02](FDS/02-node-instance.md)、[FDS-03](FDS/03-dst-cluster.md)；`others/DST.md` | `04` 配置变更与重启影响 | 02、03 | `server/src/modules/config/`（占位）；`game-adapter/dst/` |
 | 08 | [08-file](FDS/08-file.md) | 文件管理 | 规划态 | [FDS-02](FDS/02-node-instance.md)；`05` §2.3 filesystem；`09` §7 安全 | [FDS-06](FDS/06-backup.md) 若含导出 | 02 | `server/src/modules/file/`（占位）；`server/src/infra/filesystem-browse.ts` |
 | 09 | [09-console](FDS/09-console.md) | 实例控制台 | 已实现 | [FDS-02](FDS/02-node-instance.md)；`others/DST.md` §3 控制台命令 | `04` 控制台链路；SSE/轮询约定 | 02 | `server/src/modules/console/`；`src/views/node/instance/console.vue` |
 | 10 | [10-player-access](FDS/10-player-access.md) | 玩家与访问 | 规划态 | [FDS-03](FDS/03-dst-cluster.md)；`03-PRS` 访问控制相关 | `TODO` §5 Pro 边界 | 03 | 待建（规划态） |
-| 11 | [11-scheduler](FDS/11-scheduler.md) | 计划任务 | 规划态 | [FDS-02](FDS/02-node-instance.md)；`TODO` §3.4 M3、`§5` Pro | [FDS-09](FDS/09-console.md)、[FDS-06](FDS/06-backup.md) 可编排动作 | 02 | 待建（规划态） |
+| 11 | [11-scheduler](FDS/11-scheduler.md) | 计划任务 | 规划态（**Pro-only**） | [FDS-02](FDS/02-node-instance.md)；`13-PRO-OPEN-CORE` §7；`TODO` §3.5 | [FDS-09](FDS/09-console.md)、[FDS-06](FDS/06-backup.md) 可编排动作 | 02 | Community：`src/views/system/license.vue` 引导；Pro：`@gsh/pro-scheduler` |
 | 12 | [12-notice-audit](FDS/12-notice-audit.md) | 通知与审计 | 规划态 | `TODO` §3.4 M3、`§5` Pro；`03-PRS` 可观测/审计 | 各业务模块事件形态（先读相关 FDS §5） | 02 及被观测模块 | 待建（规划态） |
 | 13 | [13-onboarding](FDS/13-onboarding.md) | 新手引导 | 部分实现 | `03-PRS`；[FDS-02](FDS/02-node-instance.md) 实际入口 | `01` 监控台、`09` 控制台页面路由 | 02（能力对齐） | 前端引导组件/路由 meta；`src/views/` |
 | 14 | [14-game-adapter](FDS/14-game-adapter.md) | 游戏适配器 | 部分实现 | [FDS-02](FDS/02-node-instance.md)；`05` §2.3 adapter | `others/DST.md`；`08` 扩展性 | 02（双向） | `server/src/infra/game-adapter/dst/`；`instance` 安装/运行分流 |
@@ -107,8 +108,8 @@
 #### FDS-04 DST 世界（Shard）
 
 - **目标**：多世界/洞穴分片配置与编排。
-- **必读细节**：`others/DST.md` §4；依赖 Cluster 已可用。
-- **验收**：与 03 联动场景需在 FDS 中写清。
+- **必读细节**：`others/DST.md` §4；依赖 Cluster 已可用；用户流程为「房间开分片保存 → 世界设置 → 启动」。
+- **验收**：FDS §9；2026-05-21 产品验收通过（回归见 `M0-M1-REGRESSION.md` §M1 Shard 验收记录）。
 
 #### FDS-05 Mod 管理
 
@@ -143,8 +144,8 @@
 
 #### FDS-11 计划任务
 
-- **目标**：定时启停、备份、重启等编排（偏 Pro）。
-- **必读细节**：FDS §2 前置「实例与系统可提供可调用动作」；先确认 02/06/09 接口形态。
+- **目标**：定时启停、备份、重启等编排（**Pro-only**；Community 仅升级引导）。
+- **必读细节**：FDS §10 Open Core 落点；`@gsh/pro-scheduler` 私有包；先确认 02/06/09 可编排动作契约。
 
 #### FDS-12 通知与审计
 
@@ -176,6 +177,9 @@
 - [ ] 已通读 FDS/xx-*.md（含 §7 异常、§9 验收）
 - [ ] 已核对 TODO.md §2 状态与 §3 里程碑
 - [ ] 已确认 Community/Pro 边界（TODO §5）
+- [ ] 已确认本模块 edition 类型（community-only / hybrid / pro-only）
+- [ ] FDS 已含 Open Core 落点（包名、扩展点、entitlement）
+- [ ] Pro 实现不在 MIT 公开仓路径内
 - [ ] 已定位主要代码路径并与 FDS §5 接口对照
 - [ ] 规划态：已在 FDS 标明「未实现能力」与前置条件
 - [ ] 无 FDS 或范围不清：已暂停实现并先更新 FDS
@@ -192,7 +196,7 @@
 | M0 可运行闭环 | 00 → 14 → 02 → 09 | **已完成**（2026-05-19）；回归见 `M0-M1-REGRESSION.md` |
 | M1 管理能力 | 01、03、04、07 | **当前迭代**；监控增强；Cluster/Shard/配置 |
 | M2 运维效率 | 05、06、08、10、13 | Mod、备份、文件、玩家、引导 |
-| M3 自动化治理 | 11、12 | 计划任务、通知审计（Pro 为主） |
+| M3 自动化治理 | 11、12 | 计划任务（Pro-only）、通知审计（Hybrid）；Open Core 基础设施见 `TODO` §3.5 |
 
 ---
 
@@ -205,7 +209,7 @@
 | 实例（02） | 房间（03） | v1：一实例对应一 Cluster 目录，不混为多实例多房间 |
 | 配置中心（07） | Cluster 编辑（03） | 07 偏通用配置聚合；03 偏 DST 房间语义 |
 | 文件管理（08） | 系统目录浏览 | 08 限实例目录；系统模块浏览受全局根路径约束 |
-| Community | Pro | 以 `TODO.md` §5 与各 FDS「Community/Pro 规划」标注为准 |
+| Community | Pro | 以 `TODO.md` §5 与 `13-PRO-OPEN-CORE-ARCHITECTURE.md` 为准；Pro 代码不进 MIT 公开仓 |
 
 ---
 

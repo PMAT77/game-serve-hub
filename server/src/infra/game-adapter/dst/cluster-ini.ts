@@ -248,16 +248,16 @@ export function validateClusterFields(fields: ClusterIniFields): string[] {
   }
   if (fields.shardEnabled) {
     if (!sanitizeInlineText(fields.bindIp)) {
-      errors.push('分片 bind_ip 不能为空')
+      errors.push('绑定 IP 不能为空')
     }
     if (!sanitizeInlineText(fields.masterIp)) {
-      errors.push('分片 master_ip 不能为空')
+      errors.push('主机 IP 不能为空')
     }
     if (!Number.isInteger(fields.masterPort) || fields.masterPort < 1 || fields.masterPort > 65535) {
-      errors.push('分片 master_port 须在 1–65535 之间')
+      errors.push('主机端口须在 1–65535 之间')
     }
     if (!sanitizeInlineText(fields.clusterKey)) {
-      errors.push('启用分片时 cluster_key 不能为空')
+      errors.push('启用洞穴时互联密钥不能为空')
     }
   }
   const steamGroupId = normalizeSteamGroupId(fields.steamGroupId)

@@ -7,6 +7,7 @@ export type DstInstallReadinessCode
   = | 'ok'
     | 'missing_install_dir'
     | 'missing_game_files'
+    | 'missing_game_data'
     | 'partial_steam_install'
 
 function resolveAppManifestPath(installPath: string): string | null {
@@ -20,6 +21,14 @@ function resolveAppManifestPath(installPath: string): string | null {
     }
   }
   return null
+}
+
+function hasGameDataDirectory(installPath: string): boolean {
+  const dataDir = path.join(installPath, 'data')
+  if (!fs.existsSync(dataDir) || !fs.statSync(dataDir).isDirectory()) {
+    return false
+  }
+  return fs.readdirSync(dataDir).length > 0
 }
 
 export interface DstInstallReadiness {
@@ -69,6 +78,13 @@ export function diagnoseDstInstallReadiness(installPath: string): DstInstallRead
     }
   }
   if (findDstServerBinary(normalizedPath)) {
+    if (!hasGameDataDirectory(normalizedPath)) {
+      return {
+        ready: false,
+        code: 'missing_game_data',
+        message: '缺少游戏资源目录 data/',
+      }
+    }
     return {
       ready: true,
       code: 'ok',
@@ -112,7 +128,7 @@ export function buildGameFilesBlockedMessage(
       : `${GAME_FILES_PREFIX}：安装目录不存在。`
   }
 
-  if (readiness.code === 'partial_steam_install') {
+  if (readiness.code === 'partial_steam_install' || readiness.code === 'missing_game_data') {
     return `${GAME_FILES_PREFIX}：下载不完整。请点击「更新服务端」重试。`
   }
 

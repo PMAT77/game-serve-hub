@@ -118,7 +118,7 @@ export function loadServerConfig(): ServerConfig {
     instancesRoot: path.resolve(parsed.GSH_INSTANCES_ROOT || defaultInstancesRoot),
     backupsRoot: path.resolve(parsed.GSH_BACKUPS_ROOT || defaultBackupsRoot),
     gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/pmat77/game-server-hub-dst:latest',
-    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'cm2network/steamcmd:root-bookworm',
+    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'cm2network/steamcmd:steam-bookworm',
     edition: parsed.GSH_EDITION || 'community',
     panelImage: parsed.PANEL_IMAGE || 'ghcr.io/pmat77/game-server-hub:latest',
     stackDir: parsed.GSH_STACK_DIR?.trim() || '',

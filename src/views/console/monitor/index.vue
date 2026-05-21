@@ -6,7 +6,7 @@ import type {
   SystemInfoData,
 } from './components/types'
 import dayjs from 'dayjs'
-import { NAlert, NButton, NGrid, NGridItem, NInputNumber, NSpace } from 'naive-ui'
+import { NAlert, NButton, NInputNumber, NSpace } from 'naive-ui'
 import apiSystem from '@/api/modules/system'
 import MonitorNetwork from './components/MonitorNetwork.vue'
 import MonitorStatus from './components/MonitorStatus.vue'

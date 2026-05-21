@@ -44,6 +44,7 @@ const settingsDefault: RequiredDeep<SettingsOptions> = {
   tabbar: {
     icon: false,
     hotkeys: false,
+    memory: false,
   },
   toolbar: {
     breadcrumb: true,

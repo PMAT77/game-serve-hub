@@ -15,7 +15,7 @@
 | 01 | [01-monitor.md](01-monitor.md) | 监控台 | 部分实现（M1） |
 | 02 | [02-node-instance.md](02-node-instance.md) | 节点与实例 | 已实现（单节点，M0 已完成） |
 | 03 | [03-dst-cluster.md](03-dst-cluster.md) | DST 房间（Cluster） | 已实现（M1 Community，2026-05-20 验收） |
-| 04 | [04-dst-shard.md](04-dst-shard.md) | DST 世界（Shard） | 规划态 |
+| 04 | [04-dst-shard.md](04-dst-shard.md) | DST 世界（Shard） | 已实现（M1 Community，2026-05-21 验收） |
 | 05 | [05-mod.md](05-mod.md) | Mod 管理 | 规划态 |
 | 06 | [06-backup.md](06-backup.md) | 备份恢复 | 规划态 |
 | 07 | [07-config.md](07-config.md) | 配置中心 | 规划态 |

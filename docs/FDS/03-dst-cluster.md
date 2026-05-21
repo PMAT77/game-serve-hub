@@ -20,7 +20,7 @@
 - 房间基础信息、玩法设置
 - **联网模式**三选一及与 `offline_cluster` / `lan_only_cluster` 的联动
 - **公网模式**下 `cluster_token.txt` 的粘贴与校验（v1 不做文件上传）
-- 与 FDS-04 联动：`[SHARD]` 中 `shard_enabled` 等由房间页开关，洞穴细节在 Shard 模块
+- 与 FDS-04 联动：`[SHARD]` 中 `shard_enabled` 与互联参数在房间页；开启分片保存时自动生成洞穴默认文件，端口/worldgen 在世界设置页编辑
 
 ## 4. 功能清单
 
@@ -101,7 +101,9 @@
 - v1 保持 **1 实例 : 1 Cluster**（目录名沿用现有 `Cluster_1` 常量）。
 - 实例 **running** 时允许保存配置文件，但必须提示：**需重启实例后生效**；可选提供「保存并重启」。
 - 保存采用：校验 → 备份（`.bak` 时间戳）→ 原子替换 `cluster.ini` / `cluster_token.txt`。
-- `cluster_key`（`[SHARD]` 段）属于 Master/Caves 分片互联密钥，**不是** Klei 令牌；在 FDS-04 或启用洞穴时配置，本模块仅在有 `shard_enabled` 开关时写入默认值或展示只读说明。
+- `cluster_key`（`[SHARD]` 段）属于 Master/Caves 分片互联密钥，**不是** Klei 令牌；本模块在有 `shard_enabled` 开关时写入互联参数。
+- **洞穴默认配置（与 FDS-04 联动）**：保存房间且 `shard_enabled=true` 时，自动幂等生成 `Caves/server.ini` 与 `worldgenoverride.lua`（`writeFileIfMissing`，不覆盖用户已改文件）。用户再到世界设置调整端口与世界生成规则。
+- **关闭分片**：`shard_enabled=false` 时保留 `Caves/` 文件与存档；启动实例时不运行洞穴容器。
 
 ### 6.4 与 Steam 凭据区分
 
@@ -128,7 +130,7 @@
 - 离线/仅局域网模式：无令牌亦可保存与启动；不误报缺少令牌。
 - `GET` 不泄露令牌明文；日志中无可检索的完整 `pds-` 串。
 - 运行中修改后有明确重启提示；与实例启停（模块 02）无状态冲突。
-- 与 FDS-04：`shard_enabled` 开关保存后，洞穴编排行为符合 FDS-04 规则。
+- 与 FDS-04：开启分片保存房间后自动生成洞穴默认配置；洞穴端口/worldgen 在世界设置编辑；启停符合 FDS-04。
 
 ## 10. 实现落点（Community v1）
 

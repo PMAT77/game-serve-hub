@@ -20,7 +20,13 @@ services:
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
       GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub-dst:latest}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:root-bookworm}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:steam-bookworm}
+      GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
+      GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB:-}
+      GSH_STEAMCMD_APP_INFO_MEMORY_MB: ${GSH_STEAMCMD_APP_INFO_MEMORY_MB:-}
+      GSH_STEAMCMD_INTER_JOB_COOLDOWN_MS: ${GSH_STEAMCMD_INTER_JOB_COOLDOWN_MS:-}
+      GSH_STEAMCMD_RUN_USER: ${GSH_STEAMCMD_RUN_USER:-}
+      GSH_STEAMCMD_BIND_OPTS: ${GSH_STEAMCMD_BIND_OPTS:-}
       STEAMCMD_USERNAME: ${STEAMCMD_USERNAME:-}
       STEAMCMD_PASSWORD: ${STEAMCMD_PASSWORD:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
@@ -34,6 +40,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${PANEL_PORT:-3000}:3000"
+    deploy:
+      resources:
+        limits:
+          memory: ${GSH_PANEL_MEMORY_LIMIT:-3G}
 
   web:
     image: node:22-bookworm-slim
@@ -50,6 +60,10 @@ services:
       - "9000:9000"
     depends_on:
       - panel
+    deploy:
+      resources:
+        limits:
+          memory: ${GSH_WEB_MEMORY_LIMIT:-1536M}
 
 volumes:
   panel-node-modules:

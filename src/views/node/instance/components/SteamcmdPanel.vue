@@ -42,7 +42,7 @@ async function ensureSteamcmdImage() {
   steamcmdInstalling.value = true
   try {
     const res = await apiSystem.installSteamcmd()
-    faToast.success(res.data.message || 'SteamCMD 镜像已就绪')
+    faToast.success(res.data.message || '游戏安装镜像已就绪')
     await fetchSteamcmdConfig()
   }
   finally {
@@ -69,13 +69,7 @@ onMounted(() => {
 
 <template>
   <FaPageMain title="容器镜像">
-    <div class="p-4 border border-border/70 rounded-lg bg-muted/20 space-y-4">
-      <p class="text-xs text-muted-foreground leading-relaxed">
-        <code class="text-xs">pnpm dev:compose</code> 会在首次启动时准备 SteamCMD 镜像。
-        各游戏的<strong>运行环境镜像</strong>在对应实例安装成功后自动拉取（不含游戏文件，仅启动环境）。
-        启动实例时若本地仍缺镜像会再次自动拉取。
-      </p>
-
+    <div class="p-4 border border-border/70 rounded-lg bg-muted/20 space-y-4"> 
       <div class="flex flex-wrap gap-3 items-start justify-between">
         <div class="flex flex-wrap gap-2">
           <span
@@ -92,7 +86,7 @@ onMounted(() => {
               ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
               : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'"
           >
-            {{ steamcmdInstalled ? 'SteamCMD 已就绪' : 'SteamCMD 未就绪' }}
+            {{ steamcmdInstalled ? '游戏安装镜像已就绪' : '游戏安装镜像未就绪' }}
           </span>
           <span
             class="text-xs px-2 py-0.5 rounded-full"
@@ -111,7 +105,7 @@ onMounted(() => {
             :disabled="!isDockerAvailable"
             @click="ensureSteamcmdImage"
           >
-            拉取 SteamCMD 镜像
+            拉取游戏安装镜像
           </NButton>
           <NButton
             v-if="!gameDstInstalled"
@@ -129,32 +123,32 @@ onMounted(() => {
       <div class="gap-3 grid md:grid-cols-2">
         <div class="space-y-1">
           <div class="text-xs text-muted-foreground">
-            SteamCMD 镜像
+            游戏安装镜像
           </div>
           <NInput
             :value="steamcmdImage"
             readonly
-            placeholder="未配置 GSH_STEAMCMD_IMAGE"
+            placeholder="未配置"
           />
         </div>
         <div class="space-y-1">
           <div class="text-xs text-muted-foreground">
-            DST 运行镜像（GSH_GAME_DST_IMAGE）
+            游戏运行镜像
           </div>
           <NInput
             :value="gameDstImage"
             readonly
-            placeholder="未配置 GSH_GAME_DST_IMAGE"
+            placeholder="未配置"
           />
         </div>
         <div class="space-y-1 md:col-span-2">
           <div class="text-xs text-muted-foreground">
-            实例数据根目录（GSH_INSTANCES_ROOT）
+            实例数据目录
           </div>
           <NInput
             :value="installRoot"
             readonly
-            placeholder="未配置实例数据目录"
+            placeholder="未配置"
           />
         </div>
       </div>
@@ -163,14 +157,13 @@ onMounted(() => {
         v-if="!steamcmdInstalled && isDockerAvailable"
         class="text-xs text-amber-600 dark:text-amber-400"
       >
-        创建实例前请确保 SteamCMD 镜像已就绪；若使用 dev:compose，首次启动时会自动拉取。
+        创建实例前请确保游戏安装镜像已就绪。
       </p>
       <p
         v-if="!isDockerAvailable"
         class="text-xs text-rose-600 dark:text-rose-400"
       >
-        面板进程无法通过 Docker API 连接引擎。Compose 部署请确认已挂载
-        <code class="text-xs">/var/run/docker.sock</code>；Windows 本机开发请确认 Docker Desktop 已启动。
+        面板进程无法连接 Docker。请确认 Docker 已启动，且 Compose 部署时已挂载 Docker 套接字。
       </p>
     </div>
   </FaPageMain>

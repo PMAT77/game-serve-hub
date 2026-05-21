@@ -15,7 +15,7 @@ function setupRoutes(router: Router) {
       // 是否已根据权限动态生成并注册路由
       if (appRouteStore.isGenerate) {
         // 导航菜单如果不是 single 模式，则需要根据 path 定位主导航菜单的选中状态
-        appSettingsStore.settings.menu.mode !== 'single' && appMenuStore.setActived(to.path)
+        appSettingsStore.settings.menu.mode !== 'single' && appMenuStore.setActived(appMenuStore.resolveActivedPathFromRoute(to))
         // 如果已登录状态下，进入登录页会强制跳转到主页
         if (to.name === 'login') {
           return {

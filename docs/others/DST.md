@@ -62,7 +62,8 @@ DST 进程启动参数 `-persistent_storage_root` 指向 `{installPath}/klei-sto
 ## 4. 分片（Shard）与洞穴
 
 - **Master**：主世界，必须运行。
-- **Caves**：洞穴层；`cluster.ini` 中 `shard_enabled` 与目录 `Caves/` 需一致。
+- **Caves**：洞穴层；`cluster.ini` 中 `shard_enabled` 与是否启动洞穴容器一致（关闭分片时保留 `Caves/` 配置但不启进程）。
+- 推荐流程：**房间设置** 开启分片并保存（自动生成 `Caves/` 默认配置）→ **世界设置** 调整主世界/洞穴端口与世界生成 → **启动实例**。
 - 两进程需 **同时运行** 且配置兼容，客户端才能从洞穴洞口进出。
 - 启停顺序建议：**启动** Master → Caves；**停止** Caves → Master（见 FDS-04）。
 
@@ -73,7 +74,18 @@ DST 进程启动参数 `-persistent_storage_root` 指向 `{installPath}/klei-sto
 - `authentication_port` 默认 8766  
 - `master_server_port` 默认 12346  
 
-防火墙需放行 **游戏端口 + Steam 端口段**（宿主机映射到容器）。
+防火墙需放行 **游戏端口 + Steam 端口段**（宿主机映射到容器）。面板安装脚本可选 `--open-dst-ports` 自动开放上述 UDP 端口（ufw/firewalld）；云厂商安全组须同步放行。
+
+| 用途 | 协议 | 默认端口 | 说明 |
+|------|------|----------|------|
+| 面板 Web | TCP | 80 或 `PANEL_PORT` | 安装脚本默认开放 |
+| DST 游戏 | UDP | 10999 | `Master/server.ini` 可改 |
+| Steam 认证 | UDP | 8766 | |
+| Steam 主服务器 | UDP | 12346 | |
+| SteamCMD 下载 | HTTPS | 443 | 出站，无需对玩家入站开放 |
+| GHCR 镜像 | HTTPS | 443 | 面板/DST/SteamCMD 镜像拉取 |
+
+SteamCMD 安装走 Docker 临时容器，**不需要**开放 CS2 常用的 27015–27020 端口段。
 
 联网模式（面板 M1 三选一，须与 ini 一致）：
 

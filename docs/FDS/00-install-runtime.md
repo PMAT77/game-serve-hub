@@ -50,6 +50,15 @@
 | `GSH_PANEL_CONTAINER_NAME` | 面板容器名 |
 | `GSH_GITHUB_REPO` | GitHub 仓库（默认 `PMAT77/game-server-hub`），用于 Release 展示 |
 | `GSH_RELEASE_VERSION` | 构建时注入的面板版本号 |
+| `GSH_STEAMCMD_DOWNLOAD_REGION` | Steam 下载区域（国内建议 `cn`），注入 `+@sSteamCmdForceRegion` |
+| `GSH_STEAMCMD_HTTP_PROXY` / `GSH_STEAMCMD_HTTPS_PROXY` | SteamCMD 安装容器代理 |
+| `GSH_STEAMCMD_NETWORK_MODE` | SteamCMD 容器网络（`host` 可缓解 DNS/CDN 问题） |
+| `GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS` | 安装失败最大尝试次数（默认 5） |
+| `GSH_STEAMCMD_INSTALL_RETRY_DELAYS_MS` | 重试间隔毫秒，逗号分隔 |
+| `GSH_DST_CONTAINER_MEMORY_MB` | DST 运行容器内存上限（MiB，0 不限制） |
+| `GSH_DST_CONTAINER_CPU_QUOTA` | DST 运行容器 CPU 核数上限（如 `1.5`） |
+| `GSH_INSTALL_SEED_ENABLED` | 同机从已停止实例复制游戏 depot（默认开启） |
+| `GSH_INSTALL_DEFER_DST_IMAGE_PULL` | 安装完成时不 pull DST 运行镜像（默认开启，首次启动时拉取） |
 
 ## 6. 业务规则
 

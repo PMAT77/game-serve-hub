@@ -23,6 +23,8 @@ import {
 } from '../../infra/container'
 import { resolveDockerStatus } from '../../infra/docker'
 import { buildSteamcmdImageReadyMessage } from '../../infra/steamcmd'
+import { runSteamcmdDiagnostics } from '../../infra/container/steamcmd-diagnostics'
+import { loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
 import { getServerContainerConfig } from '../../shared/config/container'
 import {
   getSystemNetworkConfig,
@@ -100,7 +102,7 @@ export function registerSystemModule(app: FastifyInstance) {
     const theme = body.theme ?? 'system'
     const autoUpdate = body.autoUpdate ?? true
     const checkUpdateBeforeStart = body.checkUpdateBeforeStart ?? false
-    const updateCheckIntervalHours = body.updateCheckIntervalHours ?? 1
+    const updateCheckIntervalHours = body.updateCheckIntervalHours ?? 3
     if (!Number.isInteger(panelPort) || panelPort <= 0 || panelPort > 65535) {
       return businessError('面板端口不合法', request)
     }
@@ -175,6 +177,11 @@ export function registerSystemModule(app: FastifyInstance) {
     isSteamcmdInstalled: boolean
     isGameDstImageInstalled: boolean
     detectedSteamcmdPath: string
+    downloadRegion: string
+    networkMode: string
+    installMaxAttempts: number
+    httpProxyConfigured: boolean
+    httpsProxyConfigured: boolean
   }> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
     if (authError) {
@@ -189,6 +196,7 @@ export function registerSystemModule(app: FastifyInstance) {
     const isGameDstImageInstalled = isDockerAvailable && await isGameDstImagePresent()
     const steamcmdImage = containerConfig.steamcmdImage
     const gameDstImage = containerConfig.gameDstImage
+    const steamcmdRuntime = loadSteamcmdRuntimeConfig()
     return success({
       ...config,
       steamcmdPath: steamcmdImage,
@@ -200,7 +208,21 @@ export function registerSystemModule(app: FastifyInstance) {
       isSteamcmdInstalled,
       isGameDstImageInstalled,
       detectedSteamcmdPath: isSteamcmdInstalled ? steamcmdImage : '',
+      downloadRegion: steamcmdRuntime.downloadRegion,
+      networkMode: steamcmdRuntime.networkMode,
+      installMaxAttempts: steamcmdRuntime.installMaxAttempts,
+      httpProxyConfigured: Boolean(steamcmdRuntime.httpProxy),
+      httpsProxyConfigured: Boolean(steamcmdRuntime.httpsProxy),
     }, request)
+  })
+
+  app.get('/app/system/steamcmd/diagnostics', async (request): Promise<ApiSuccessResponse<Awaited<ReturnType<typeof runSteamcmdDiagnostics>>> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    const result = await runSteamcmdDiagnostics()
+    return success(result, request)
   })
 
   app.post('/app/system/steamcmd/config', async (request): Promise<ApiSuccessResponse<{

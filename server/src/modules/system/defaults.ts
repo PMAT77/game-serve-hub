@@ -43,7 +43,7 @@ export function getDefaultPanelSettings(): DbSystemPanelSettings {
     theme: 'system',
     autoUpdate: true,
     checkUpdateBeforeStart: false,
-    updateCheckIntervalHours: 1,
+    updateCheckIntervalHours: 3,
   }
 }
 

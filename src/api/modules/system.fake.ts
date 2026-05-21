@@ -5,7 +5,7 @@ let panelSettings = {
   theme: 'system' as const,
   autoUpdate: true,
   checkUpdateBeforeStart: false,
-  updateCheckIntervalHours: 1,
+  updateCheckIntervalHours: 3,
 }
 
 const panelUpdateStatus = {
@@ -70,7 +70,7 @@ export default defineFakeRoute([
         theme: body.theme ?? 'system',
         autoUpdate: Boolean(body.autoUpdate),
         checkUpdateBeforeStart: Boolean(body.checkUpdateBeforeStart),
-        updateCheckIntervalHours: Number(body.updateCheckIntervalHours) || 1,
+        updateCheckIntervalHours: Number(body.updateCheckIntervalHours) || 3,
       }
       return {
         error: '',

@@ -1,13 +1,47 @@
 import type { TabbarRecordRaw } from '@fantastic-admin/types'
 import type { RouteLocationNormalized } from 'vue-router'
 
+const TABBAR_MEMORY_STORAGE_KEY = 'app-tabbar-memory'
+
 export const useAppTabbarStore = defineStore(
   'appTabbar',
   () => {
     const appKeepAliveStore = useAppKeepAliveStore()
+    const appSettingsStore = useAppSettingsStore()
 
     const list = ref<TabbarRecordRaw[]>([])
     const leaveIndex = ref(-1)
+
+    function isMemoryEnabled() {
+      return appSettingsStore.settings.topbar.tabbar && appSettingsStore.settings.tabbar.memory === true
+    }
+
+    function updateStorage() {
+      if (!isMemoryEnabled()) {
+        sessionStorage.removeItem(TABBAR_MEMORY_STORAGE_KEY)
+        return
+      }
+      sessionStorage.setItem(TABBAR_MEMORY_STORAGE_KEY, JSON.stringify(list.value))
+    }
+
+    function recoveryStorage() {
+      if (!isMemoryEnabled()) {
+        return
+      }
+      const raw = sessionStorage.getItem(TABBAR_MEMORY_STORAGE_KEY)
+      if (!raw) {
+        return
+      }
+      try {
+        const parsed = JSON.parse(raw) as TabbarRecordRaw[]
+        if (Array.isArray(parsed)) {
+          list.value = parsed
+        }
+      }
+      catch {
+        sessionStorage.removeItem(TABBAR_MEMORY_STORAGE_KEY)
+      }
+    }
 
     // 添加标签页
     function add(route: RouteLocationNormalized) {
@@ -154,8 +188,19 @@ export const useAppTabbarStore = defineStore(
     // 清空所有标签页，登出的时候需要清空
     function clean() {
       list.value = []
+      sessionStorage.removeItem(TABBAR_MEMORY_STORAGE_KEY)
     }
-    function updateStorage() {}
+
+    recoveryStorage()
+
+    watch(() => appSettingsStore.settings.tabbar.memory, (enabled) => {
+      if (enabled) {
+        updateStorage()
+      }
+      else {
+        sessionStorage.removeItem(TABBAR_MEMORY_STORAGE_KEY)
+      }
+    })
 
     return {
       list,

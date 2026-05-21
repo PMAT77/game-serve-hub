@@ -67,6 +67,9 @@ export function resolveInstallPhase(instance: InstanceItem): string {
   if (text.includes('正在启动 SteamCMD')) {
     return '启动 SteamCMD'
   }
+  if (text.includes('排队等待')) {
+    return '排队等待'
+  }
   if (text.includes('正在准备')) {
     return '准备安装'
   }

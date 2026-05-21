@@ -10,6 +10,12 @@ INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-https://raw.githubusercontent.com/PMAT
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
 RETRY_MAX=3 # 可重试操作的最大重试次数。
 RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
+OPEN_DST_PORTS=0 # 是否在安装时开放 DST 默认 UDP 游戏端口。
+
+# DST 默认 UDP 端口（与 cluster.ini / server.ini 默认值一致）
+DST_GAME_PORT="${DST_GAME_PORT:-10999}"
+DST_AUTH_PORT="${DST_AUTH_PORT:-8766}"
+DST_MASTER_PORT="${DST_MASTER_PORT:-12346}"
 
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
 PANEL_PORT="${PANEL_PORT:-80}" # 面板对外暴露端口（默认使用常见放行端口）。
@@ -234,6 +240,43 @@ open_firewall_port() {
   log_warn "No ufw/firewalld detected. Please open tcp/${PANEL_PORT} manually."
 }
 
+# 可选：开放 DST 默认 UDP 游戏端口（地表 + Steam 注册/主服务器）
+open_firewall_dst_ports() {
+  local ports=("${DST_GAME_PORT}" "${DST_AUTH_PORT}" "${DST_MASTER_PORT}")
+  local port rule_desc
+
+  for port in "${ports[@]}"; do
+    rule_desc="udp/${port}"
+    if command -v ufw >/dev/null 2>&1; then
+      log_info "Configuring firewall via ufw: allow ${rule_desc}"
+      run_as_root ufw allow "${port}/udp" >/dev/null || true
+      continue
+    fi
+    if command -v firewall-cmd >/dev/null 2>&1; then
+      log_info "Configuring firewall via firewalld: allow ${rule_desc}"
+      run_as_root firewall-cmd --add-port="${port}/udp" --permanent >/dev/null || true
+      continue
+    fi
+    log_warn "No ufw/firewalld detected. Please open ${rule_desc} manually (and cloud security group)."
+    return
+  done
+
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    run_as_root firewall-cmd --reload >/dev/null || true
+  fi
+  log_warn "Firewall note: DST UDP ports ${DST_GAME_PORT}/${DST_AUTH_PORT}/${DST_MASTER_PORT} opened. Adjust if you changed server.ini ports."
+}
+
+print_usage() {
+  cat <<EOF
+Usage: ${SCRIPT_NAME} [options]
+
+Options:
+  --open-dst-ports   Open default DST UDP ports (${DST_GAME_PORT}, ${DST_AUTH_PORT}, ${DST_MASTER_PORT}) via ufw/firewalld
+  -h, --help         Show this help
+EOF
+}
+
 # 未提供 PANEL_HOST 时，自动探测主机首个可用 IP。
 detect_host_ip() {
   if [[ -n "${PANEL_HOST}" ]]; then
@@ -330,7 +373,13 @@ FORCE_PASSWORD_CHANGE=1
 GSH_EDITION=community
 DOCKER_HOST=unix:///var/run/docker.sock
 GSH_GAME_DST_IMAGE=ghcr.io/pmat77/game-server-hub-dst:${PANEL_IMAGE_TAG}
-GSH_STEAMCMD_IMAGE=cm2network/steamcmd:root
+GSH_STEAMCMD_IMAGE=cm2network/steamcmd:steam-bookworm
+# 国内服务器建议取消注释以下 SteamCMD 优化项：
+# GSH_STEAMCMD_DOWNLOAD_REGION=cn
+# GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8
+# GSH_STEAMCMD_INSTALL_RETRY_DELAYS_MS=5000,10000,15000,20000,25000,30000,35000
+# STEAMCMD_USERNAME=
+# STEAMCMD_PASSWORD=
 GSH_STACK_DIR=${PANEL_INSTALL_DIR}
 GSH_COMPOSE_FILES=docker-compose.yml:docker-compose.bind.yml
 GSH_GITHUB_REPO=PMAT77/game-server-hub
@@ -378,6 +427,22 @@ print_summary() {
 
 # 主流程：安装依赖 -> 预检 -> 网络处理 -> 生成配置 -> 部署。
 main() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --open-dst-ports)
+        OPEN_DST_PORTS=1
+        shift
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      *)
+        abort "Unknown option: $1 (use --help)"
+        ;;
+    esac
+  done
+
   # 任何未处理错误都会触发 rollback_install。
   trap 'rollback_install' ERR
 
@@ -398,6 +463,11 @@ main() {
   write_status "network" "start" "Checking panel port and firewall"
   check_port_conflict
   open_firewall_port
+  if [[ "${OPEN_DST_PORTS}" -eq 1 ]]; then
+    open_firewall_dst_ports
+  else
+    log_info "DST UDP ports not opened automatically. Use --open-dst-ports or configure firewall manually (see docs/others/DST.md)."
+  fi
   write_status "network" "ok" "Port and firewall processed"
 
   prepare_panel_files

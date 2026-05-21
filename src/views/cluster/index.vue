@@ -5,6 +5,7 @@ import type { InstanceItem } from '@/api/modules/instance'
 import { NButton, NDataTable, NEmpty, NSpin, NTag } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
 import apiCluster from '@/api/modules/cluster'
+import apiShard from '@/api/modules/shard'
 import apiInstance from '@/api/modules/instance'
 import { getStatusBadgeClass, getStatusLabel } from '@/views/node/instance/instanceDisplay'
 
@@ -18,6 +19,10 @@ interface ClusterListRow {
   instance: InstanceItem
   networkMode: ClusterNetworkMode | null
   clusterName: string | null
+  shardEnabled: boolean | null
+  cavesSummary: string | null
+  onlinePlayerCount: number | null
+  maxPlayers: number | null
   loadError: string | null
 }
 
@@ -28,7 +33,7 @@ const rows = ref<ClusterListRow[]>([])
 const networkModeLabel: Record<ClusterNetworkMode, string> = {
   offline: '离线',
   lan_only: '仅局域网',
-  public: '公网（Klei 列表）',
+  public: '公网',
 }
 
 const hasRows = computed(() => rows.value.length > 0)
@@ -57,9 +62,20 @@ const columns: DataTableColumns<ClusterListRow> = [
     },
   },
   {
+    title: '在线人数',
+    key: 'onlinePlayers',
+    width: 100,
+    render: row => formatOnlinePlayers(row),
+  },
+  {
     title: '联网模式',
     key: 'networkMode', 
     render: row => row.networkMode ? networkModeLabel[row.networkMode] : (row.loadError ?? '—'),
+  },
+  {
+    title: '洞穴',
+    key: 'caves',
+    render: row => row.cavesSummary ?? '—',
   },
   {
     title: '操作',
@@ -87,22 +103,70 @@ function openSettings(instanceId: string) {
   })
 }
 
+function buildCavesSummary(shardEnabled: boolean, cavesConfigured: boolean): string {
+  if (!shardEnabled) {
+    return cavesConfigured ? '未启用' : '未开启'
+  }
+  return cavesConfigured ? '已开启' : '待修复'
+}
+
+function formatOnlinePlayers(row: ClusterListRow): string {
+  if (row.instance.status !== 'running') {
+    return '—'
+  }
+  if (row.onlinePlayerCount === null || row.maxPlayers === null) {
+    return '—'
+  }
+  return `${row.onlinePlayerCount} / ${row.maxPlayers}`
+}
+
+async function loadOnlinePlayers(instance: InstanceItem): Promise<Pick<ClusterListRow, 'onlinePlayerCount' | 'maxPlayers'>> {
+  if (instance.status !== 'running') {
+    return { onlinePlayerCount: null, maxPlayers: null }
+  }
+  try {
+    const response = await apiCluster.getOnlinePlayers(instance.id)
+    const data = response.data
+    return {
+      onlinePlayerCount: data.onlinePlayerCount,
+      maxPlayers: data.maxPlayers,
+    }
+  }
+  catch {
+    return { onlinePlayerCount: null, maxPlayers: null }
+  }
+}
+
 async function loadClusterSummary(instance: InstanceItem): Promise<ClusterListRow> {
   if (instance.status === 'pending_install' || !instance.installPath) {
     return {
       instance,
       networkMode: null,
       clusterName: null,
+      shardEnabled: null,
+      cavesSummary: null,
+      onlinePlayerCount: null,
+      maxPlayers: null,
       loadError: instance.status === 'pending_install' ? '尚未安装' : null,
     }
   }
   try {
-    const response = await apiCluster.getClusterConfig(instance.id)
-    const config = response.data
+    const [clusterRes, shardRes, onlineRes] = await Promise.all([
+      apiCluster.getClusterConfig(instance.id),
+      apiShard.getShardList(instance.id),
+      loadOnlinePlayers(instance),
+    ])
+    const config = clusterRes.data
+    const caves = shardRes.data.shards.find(s => s.id === 'caves')
+    const cavesConfigured = Boolean(caves?.configured)
     return {
       instance,
       networkMode: config.networkMode,
       clusterName: config.clusterName,
+      shardEnabled: config.shardEnabled,
+      cavesSummary: buildCavesSummary(config.shardEnabled, cavesConfigured),
+      onlinePlayerCount: onlineRes.onlinePlayerCount,
+      maxPlayers: onlineRes.maxPlayers ?? config.maxPlayers,
       loadError: null,
     }
   }
@@ -111,6 +175,10 @@ async function loadClusterSummary(instance: InstanceItem): Promise<ClusterListRo
       instance,
       networkMode: null,
       clusterName: null,
+      shardEnabled: null,
+      cavesSummary: null,
+      onlinePlayerCount: null,
+      maxPlayers: null,
       loadError: '读取失败',
     }
   }
@@ -144,7 +212,7 @@ onMounted(() => {
           房间列表
         </h1>
         <p class="mt-1 text-sm text-muted-foreground">
-          每个 DST 实例对应一个房间（Cluster）。在此配置联网模式、房间名称与 Klei 令牌。
+          每个 DST 实例对应一个房间。在此配置联网模式、房间名称与 Klei 令牌。
         </p>
       </div>
       <NButton :loading="loading" @click="loadRows">
@@ -159,7 +227,7 @@ onMounted(() => {
         :single-line="false"
         :columns="columns"
         :data="rows" 
-        :scroll-x="760"
+        :scroll-x="1000"
       />
       <NEmpty
         v-else-if="!loading"

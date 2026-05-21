@@ -28,7 +28,8 @@ function buildInstance(installPath: string | null, id = 'test-instance'): DbGame
     gamePort: 10999,
     rconPort: null,
     containerId: null,
-    pid: null,
+    runtimePid: null,
+    runtimeStartedAt: null,
     lastCommand: null,
     lastError: null,
     lastExitCode: null,
@@ -36,6 +37,8 @@ function buildInstance(installPath: string | null, id = 'test-instance'): DbGame
     installLogStatus: null,
     installLogUpdatedAt: null,
     updateAvailable: false,
+    localBuildId: null,
+    remoteBuildId: null,
     updateCheckedAt: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -56,9 +59,6 @@ describe('cluster-service', () => {
 
   it('persists cluster.ini and reads it back after save', () => {
     const installPath = createTempInstallDir()
-    const cavesIni = resolveCavesServerIniPath(installPath)
-    fs.mkdirSync(path.dirname(cavesIni), { recursive: true })
-    fs.writeFileSync(cavesIni, '[NETWORK]\n', 'utf8')
     const instance = buildInstance(installPath)
     saveClusterConfig(instance, {
       instanceId: instance.id,
@@ -129,34 +129,70 @@ describe('cluster-service', () => {
     assert.ok(!('clusterToken' in loaded))
   })
 
-  it('blocks enabling shard when caves world is not configured', () => {
+  it('auto-scaffolds caves config when enabling shard on room save', () => {
     const installPath = createTempInstallDir()
     const instance = buildInstance(installPath)
-    assert.throws(
-      () => saveClusterConfig(instance, {
-        instanceId: instance.id,
-        networkMode: 'offline',
-        clusterName: 'Shard Room',
-        clusterDescription: '',
-        clusterPassword: '',
-        gameMode: 'survival',
-        maxPlayers: 6,
-        pvp: false,
-        pauseWhenEmpty: true,
-        voteEnabled: true,
-        clusterIntention: 'cooperative',
-        tickRate: 15,
-        maxSnapshots: 6,
-        shardEnabled: true,
-        bindIp: '127.0.0.1',
-        masterIp: '127.0.0.1',
-        masterPort: 10888,
-        clusterKey: 'secret-key',
-        steamGroupOnly: false,
-        steamGroupId: '0',
-        steamGroupAdmins: false,
-      }),
-      /无法开启洞穴分片/,
-    )
+    saveClusterConfig(instance, {
+      instanceId: instance.id,
+      networkMode: 'offline',
+      clusterName: 'Shard Room',
+      clusterDescription: '',
+      clusterPassword: '',
+      gameMode: 'survival',
+      maxPlayers: 6,
+      pvp: false,
+      pauseWhenEmpty: true,
+      voteEnabled: true,
+      clusterIntention: 'cooperative',
+      tickRate: 15,
+      maxSnapshots: 6,
+      shardEnabled: true,
+      bindIp: '127.0.0.1',
+      masterIp: '127.0.0.1',
+      masterPort: 10888,
+      clusterKey: 'secret-key',
+      steamGroupOnly: false,
+      steamGroupId: '0',
+      steamGroupAdmins: false,
+    })
+    const cavesIni = resolveCavesServerIniPath(installPath)
+    assert.ok(fs.existsSync(cavesIni))
+    const content = fs.readFileSync(cavesIni, 'utf8')
+    assert.match(content, /is_master = false/)
+    assert.match(content, /server_port = 11000/)
+  })
+
+  it('keeps caves files when disabling shard on room save', () => {
+    const installPath = createTempInstallDir()
+    const instance = buildInstance(installPath)
+    const payload = {
+      instanceId: instance.id,
+      networkMode: 'offline' as const,
+      clusterName: 'Shard Room',
+      clusterDescription: '',
+      clusterPassword: '',
+      gameMode: 'survival' as const,
+      maxPlayers: 6,
+      pvp: false,
+      pauseWhenEmpty: true,
+      voteEnabled: true,
+      clusterIntention: 'cooperative' as const,
+      tickRate: 15,
+      maxSnapshots: 6,
+      shardEnabled: true,
+      bindIp: '127.0.0.1',
+      masterIp: '127.0.0.1',
+      masterPort: 10888,
+      clusterKey: 'secret-key',
+      steamGroupOnly: false,
+      steamGroupId: '0',
+      steamGroupAdmins: false,
+    }
+    saveClusterConfig(instance, payload)
+    assert.ok(fs.existsSync(resolveCavesServerIniPath(installPath)))
+    saveClusterConfig(instance, { ...payload, shardEnabled: false })
+    assert.ok(fs.existsSync(resolveCavesServerIniPath(installPath)))
+    const loaded = getClusterConfig(instance)
+    assert.equal(loaded.shardEnabled, false)
   })
 })

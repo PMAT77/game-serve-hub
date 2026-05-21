@@ -2,8 +2,10 @@ import type Docker from 'dockerode'
 import DockerClient from 'dockerode'
 import { resolveDockerConnectOptions } from '../docker-connect'
 import { getServerContainerConfig } from '../../shared/config/container'
+import { buildSteamcmdContainerEnv, loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
 import { decodeDockerMultiplexLogChunk } from './docker-log'
 import { sanitizeSteamcmdLogLine } from './steamcmd-errors'
+import { resolveSteamcmdContainerMemoryLimits } from './steamcmd-container-resources'
 
 export const STEAMCMD_LABEL_MANAGED = 'gsh.managed'
 export const STEAMCMD_LABEL_MANAGED_VALUE = 'steamcmd-install'
@@ -263,16 +265,30 @@ export async function runSteamcmdJob(spec: SteamcmdJobSpec): Promise<SteamcmdJob
     labels[STEAMCMD_LABEL_JOB] = jobId
   }
 
+  const memoryLimits = resolveSteamcmdContainerMemoryLimits(
+    spec.kind === 'app-info' ? 'app-info' : 'app-update',
+  )
+  const steamcmdConfig = loadSteamcmdRuntimeConfig()
+  const hostConfig: NonNullable<Docker.ContainerCreateOptions['HostConfig']> = {
+    Binds: spec.hostBinds,
+    AutoRemove: true,
+    Ulimits: [{ Name: 'nofile', Soft: 65536, Hard: 65536 }],
+    ...(memoryLimits
+      ? { Memory: memoryLimits.Memory, MemorySwap: memoryLimits.MemorySwap }
+      : {}),
+    ...(steamcmdConfig.networkMode === 'host' ? { NetworkMode: 'host' } : {}),
+  }
+
+  const containerEnv = buildSteamcmdContainerEnv(steamcmdConfig)
+
   const container = await docker.createContainer({
     name: buildSteamcmdInstallContainerName(jobId),
     Image: spec.image,
     Cmd: spec.cmd,
     User: spec.user,
+    Env: containerEnv.length > 0 ? containerEnv : undefined,
     Labels: labels,
-    HostConfig: {
-      Binds: spec.hostBinds,
-      AutoRemove: true,
-    },
+    HostConfig: hostConfig,
     AttachStdout: true,
     AttachStderr: true,
   })

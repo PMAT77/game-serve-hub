@@ -3,10 +3,21 @@ import type { DataTableColumns, FormInst, FormRules } from 'naive-ui'
 import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceItem, InstanceRuntimeMetrics, InstanceStatus } from '@/api/modules/instance'
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
-import { NButton, NProgress, NTag, useDialog, useNotification } from 'naive-ui'
+import { NButton, NCheckbox, NProgress, NTag, useDialog, useNotification } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
+import apiCluster from '@/api/modules/cluster'
 import apiInstance from '@/api/modules/instance'
+import apiShard from '@/api/modules/shard'
 import { blurFocusedElement } from '@/utils'
+import {
+  blocksDefaultStart,
+  buildInstanceStartGuideContext,
+  buildStartGuideParagraphs,
+  buildStartGuideTitle,
+  setStartGuideSkipped,
+  shouldOfferStartGuide,
+  type InstanceStartGuideContext,
+} from '../instanceStartGuide'
 import {
   canOpenInstallLog,
   computeUptimeSecondsFromStartedAt,
@@ -62,10 +73,15 @@ const installLogContent = ref('')
 const installLogMeta = ref<InstanceInstallLogPayload | null>(null)
 const installLogInstanceName = ref('')
 const installLogTargetId = ref('')
+const installLogViewportRef = ref<HTMLElement | null>(null)
 const formattedInstallLogContent = computed(() => formatInstallLogForDisplay(installLogContent.value))
 let installLogPollTimer: ReturnType<typeof setInterval> | undefined
 let metricsPollingTimer: ReturnType<typeof setInterval> | undefined
 let uptimeTickTimer: ReturnType<typeof setInterval> | undefined
+/** 安装结束后的列表/版本刷新去重，避免 watch、日志轮询与列表边沿重复触发 */
+let installTerminalRefreshInFlight: Promise<void> | null = null
+/** 曾处于安装中的实例，用于在列表刷新后补发完成/失败提示 */
+const installNotifyPendingIds = new Set<string>()
 
 // --- 常量 ---
 /** 列宽总和，启用横向滚动，避免中间列被挤压为 0 */
@@ -200,7 +216,7 @@ const installLogHint = computed(() => {
   if (installLogMeta.value?.source === 'status_summary') {
     return {
       class: 'text-amber-600 dark:text-amber-400',
-      text: '以下为最近状态摘要，不是完整 SteamCMD 输出；安装进行中请保持弹窗打开以自动刷新。',
+      text: '以下为最近状态摘要，不是完整安装日志；安装进行中请保持弹窗打开以自动刷新。',
     }
   }
   if (shouldPollInstallLog()) {
@@ -289,7 +305,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
             size: 'small',
             secondary: true,
             disabled: !canOpen,
-            title: canOpen ? '查看 SteamCMD 安装输出' : '暂无安装日志',
+            title: canOpen ? '查看安装日志' : '暂无安装日志',
             onClick: () => openInstallLogModal(row),
           },
           { default: () => '查看日志' },
@@ -337,7 +353,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
             label: '启动',
             loading: isActionLoading(row.id, 'start'),
             disabled: row.status === 'running' || row.status === 'pending_install' || row.status === 'installing',
-            onClick: () => runInstanceAction(row.id, 'start'),
+            onClick: () => confirmStartInstance(row),
           }),
           createTextActionButton({
             label: row.status === 'installing' || row.status === 'pending_install' ? '取消安装' : '停止',
@@ -411,7 +427,6 @@ function renderInstallColumn(instance: InstanceItem) {
 
   const progress = extractInstallProgressPercent(instance)
   const isActiveInstall = instance.status === 'installing' || instance.status === 'pending_install'
-  const errorHint = instance.status === 'error' ? instance.lastError?.trim() : ''
 
   if (isActiveInstall || progress !== null) {
     const percentage = progress ?? 0
@@ -427,12 +442,11 @@ function renderInstallColumn(instance: InstanceItem) {
     ])
   }
 
-  return h('div', { class: 'w-full min-w-0' }, [
-    h('span', { class: 'text-sm text-muted-foreground' }, '—'),
-    errorHint
-      ? h('p', { class: 'text-xs text-red-500 truncate mt-1', title: errorHint }, errorHint)
-      : null,
-  ])
+  if (instance.status === 'error') {
+    return h('span', { class: 'text-sm text-red-500' }, '安装失败')
+  }
+
+  return h('span', { class: 'text-sm text-muted-foreground' }, '—')
 }
 
 /** 根据节点 ID 解析节点名称 */
@@ -622,14 +636,14 @@ function getUpdateInstanceButtonTitle(instance: InstanceItem) {
   if (isInstanceUpToDate(instance)) {
     return `已是最新版本（Build ${instance.localBuildId}）`
   }
-  return '通过 SteamCMD 拉取最新服务端'
+  return '拉取最新游戏服务端'
 }
 
 function confirmUpdateInstance(row: InstanceItem) {
   blurFocusedElement()
   dialog.warning({
     title: '确认更新服务端',
-    content: `将通过 SteamCMD 拉取「${row.name}」的最新服务端文件。更新前请确保实例已停止，过程可在「查看日志」中查看进度。`,
+    content: `将拉取「${row.name}」的最新游戏服务端文件。更新前请确保实例已停止，过程可在「查看日志」中查看进度。`,
     positiveText: '开始更新',
     negativeText: '取消',
     positiveButtonProps: {
@@ -677,7 +691,7 @@ function confirmDangerousInstanceAction(row: InstanceItem, action: 'stop' | 'can
     },
     cancel_install: {
       title: '确认取消安装',
-      content: `将中断「${row.name}」的 SteamCMD 安装，实例将标记为异常。可查看安装日志后删除并重新创建。`,
+      content: `将中断「${row.name}」的安装，实例将标记为异常。可查看安装日志后删除并重新创建。`,
       positiveText: '取消安装',
       type: 'warning' as const,
     },
@@ -751,6 +765,27 @@ function stopInstallLogPolling() {
   }
 }
 
+/** 安装日志视口是否已贴底（用于判断是否跟随新日志自动滚动） */
+const INSTALL_LOG_AT_BOTTOM_THRESHOLD_PX = 24
+
+function isInstallLogViewportAtBottom(el: HTMLElement) {
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+  return distanceFromBottom <= INSTALL_LOG_AT_BOTTOM_THRESHOLD_PX
+}
+
+/** 更新前已贴底时，写入新内容后滚动到底部 */
+function scrollInstallLogToBottomIfNeeded(wasAtBottom: boolean) {
+  if (!installLogVisible.value || !wasAtBottom) {
+    return
+  }
+  nextTick(() => {
+    const el = installLogViewportRef.value
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  })
+}
+
 /** 当前目标实例是否仍需轮询安装日志 */
 function shouldPollInstallLog() {
   if (!installLogTargetId.value) {
@@ -769,11 +804,11 @@ async function fetchInstallLogContent(options?: { silent?: boolean }) {
   }
   try {
     const res = await apiInstance.getInstanceInstallLog(installLogTargetId.value)
+    const viewport = installLogViewportRef.value
+    const wasAtBottom = !viewport || isInstallLogViewportAtBottom(viewport)
     installLogMeta.value = res.data
-    installLogContent.value = res.data.content || '暂无 SteamCMD 安装输出'
-    if (res.data.status === 'success' || res.data.status === 'failed') {
-      void refreshInstancesAfterInstallComplete()
-    }
+    installLogContent.value = res.data.content || '暂无安装日志'
+    scrollInstallLogToBottomIfNeeded(wasAtBottom)
   }
   finally {
     if (!options?.silent) {
@@ -782,18 +817,62 @@ async function fetchInstallLogContent(options?: { silent?: boolean }) {
   }
 }
 
-/** 安装/更新完成后刷新列表，同步版本标记并收起更新通知 */
-async function refreshInstancesAfterInstallComplete() {
-  const completedId = installLogTargetId.value
-  if (completedId && steamcmdInstalled.value) {
-    try {
-      await apiInstance.checkInstanceUpdates([completedId])
-    }
-    catch {
-      // 列表刷新仍执行，避免阻塞 UI
-    }
+/** 安装/更新结束后是否应检查 Steam 远端版本（仅成功且已停止） */
+function shouldCheckVersionAfterInstall(instanceId: string) {
+  if (!steamcmdInstalled.value) {
+    return false
+  }
+  if (installLogTargetId.value === instanceId && installLogMeta.value?.status === 'failed') {
+    return false
+  }
+  const row = instances.value.find(item => item.id === instanceId)
+  return row?.status === 'stopped'
+}
+
+/** 安装结束后立即刷新列表（成功或失败），不阻塞于版本检查 */
+async function refreshInstancesAfterInstallTerminal() {
+  try {
+    const res = await apiInstance.getInstanceList({
+      nodeId: selectedNodeId.value !== 'all' ? selectedNodeId.value : undefined,
+      keyword: keywordFilter.value.trim() || undefined,
+    })
+    syncInstallTerminalNotifications(res.data)
+  }
+  catch {
+    // 提示补发失败不阻断列表刷新
   }
   await fetchInstances({ silent: true })
+}
+
+/** 安装成功后同步 Build ID 与更新通知 */
+async function refreshVersionStatusAfterSuccessfulInstall(instanceId: string) {
+  if (!shouldCheckVersionAfterInstall(instanceId)) {
+    return
+  }
+  try {
+    await apiInstance.checkInstanceUpdates([instanceId])
+  }
+  catch {
+    // 版本检查失败不阻断 UI
+  }
+  await fetchInstances({ silent: true })
+}
+
+/** 安装结束统一入口：先刷新列表，成功时再检查版本（去重） */
+function handleInstallTerminal(preferredInstanceId?: string) {
+  if (installTerminalRefreshInFlight) {
+    return installTerminalRefreshInFlight
+  }
+  installTerminalRefreshInFlight = (async () => {
+    const instanceId = preferredInstanceId?.trim() || installLogTargetId.value || undefined
+    await refreshInstancesAfterInstallTerminal()
+    if (instanceId) {
+      await refreshVersionStatusAfterSuccessfulInstall(instanceId)
+    }
+  })().finally(() => {
+    installTerminalRefreshInFlight = null
+  })
+  return installTerminalRefreshInFlight
 }
 
 /** 在弹窗打开且实例安装中时启动日志轮询 */
@@ -812,7 +891,7 @@ function startInstallLogPolling() {
     }
     else {
       stopInstallLogPolling()
-      refreshInstancesAfterInstallComplete()
+      void handleInstallTerminal(installLogTargetId.value)
     }
   }, INSTANCE_INSTALL_LOG_POLL_MS)
 }
@@ -895,10 +974,36 @@ watch(
   () => installLogMeta.value?.status,
   (status, previous) => {
     if (previous === 'running' && (status === 'success' || status === 'failed')) {
-      void refreshInstancesAfterInstallComplete()
+      void handleInstallTerminal(installLogTargetId.value)
     }
   },
 )
+
+/** 记录安装中实例，并在其离开安装态后提示结果 */
+function syncInstallTerminalNotifications(list: InstanceItem[]) {
+  for (const item of list) {
+    if (isInstanceInstallingStatus(item.status)) {
+      installNotifyPendingIds.add(item.id)
+    }
+  }
+  for (const id of [...installNotifyPendingIds]) {
+    const row = list.find(item => item.id === id)
+    if (!row) {
+      installNotifyPendingIds.delete(id)
+      continue
+    }
+    if (isInstanceInstallingStatus(row.status)) {
+      continue
+    }
+    installNotifyPendingIds.delete(id)
+    if (row.status === 'stopped') {
+      faToast.success(`「${row.name}」安装完成，可以启动实例`)
+    }
+    else if (row.status === 'error') {
+      faToast.error(`「${row.name}」安装失败，请查看安装日志`)
+    }
+  }
+}
 
 /** 按当前筛选条件拉取实例列表 */
 async function fetchInstances(options?: { silent?: boolean }) {
@@ -912,6 +1017,7 @@ async function fetchInstances(options?: { silent?: boolean }) {
       keyword: keywordFilter.value.trim() || undefined,
     })
     instances.value = res.data
+    syncInstallTerminalNotifications(instances.value)
     syncRuntimeObservabilityPolling()
   }
   finally {
@@ -928,7 +1034,7 @@ async function searchInstances() {
 
 async function checkAllInstanceUpdates() {
   if (!steamcmdInstalled.value) {
-    faToast.error('请先拉取 SteamCMD 镜像（见上方 SteamCMD 面板）')
+    faToast.error('请先拉取游戏安装镜像（见上方容器镜像面板）')
     return
   }
   if (instances.value.length === 0) {
@@ -957,7 +1063,7 @@ async function refreshInstancesAndResetKeyword() {
 
 async function createInstance() {
   if (!steamcmdInstalled.value) {
-    faToast.error('请先拉取 SteamCMD 镜像，再创建实例')
+    faToast.error('请先拉取游戏安装镜像，再创建实例')
     return
   }
   if (!steamcmdConfigured.value) {
@@ -988,6 +1094,105 @@ async function createInstance() {
   finally {
     createLoading.value = false
   }
+}
+
+function renderStartGuideContent(
+  ctx: InstanceStartGuideContext,
+  instanceId: string,
+  dontShowAgainRef: { value: boolean },
+) {
+  const paragraphs = buildStartGuideParagraphs(ctx)
+  const children: ReturnType<typeof h>[] = paragraphs.map(text =>
+    h('p', { class: 'text-sm leading-relaxed text-foreground' }, text),
+  )
+
+  if (!blocksDefaultStart(ctx)) {
+    children.push(
+      h('div', { class: 'flex flex-wrap gap-2 pt-1' }, [
+        h(
+          NButton,
+          {
+            size: 'small',
+            tertiary: true,
+            onClick: () => {
+              dialog.destroyAll()
+              router.push({ name: 'clusterSettings', params: { instanceId } })
+            },
+          },
+          { default: () => '先去配置房间' },
+        ),
+        h(
+          NButton,
+          {
+            size: 'small',
+            tertiary: true,
+            onClick: () => {
+              dialog.destroyAll()
+              router.push({ name: 'shardSettings', params: { instanceId } })
+            },
+          },
+          { default: () => '先去配置世界' },
+        ),
+      ]),
+      h(NCheckbox, {
+        checked: dontShowAgainRef.value,
+        'onUpdate:checked': (v: boolean) => {
+          dontShowAgainRef.value = v
+        },
+      }, { default: () => '下次启动不再提示' }),
+    )
+  }
+
+  return h('div', { class: 'space-y-3 max-w-prose' }, children)
+}
+
+async function confirmStartInstance(row: InstanceItem) {
+  blurFocusedElement()
+
+  const quickStart = () => runInstanceAction(row.id, 'start')
+
+  if (!shouldOfferStartGuide(row, undefined)) {
+    await quickStart()
+    return
+  }
+
+  let guideContext: InstanceStartGuideContext
+  try {
+    const [clusterRes, shardRes] = await Promise.all([
+      apiCluster.getClusterConfig(row.id),
+      apiShard.getShardList(row.id),
+    ])
+    const master = shardRes.data.shards.find(s => s.id === 'master')
+    if (!shouldOfferStartGuide(row, master?.worldGenerated)) {
+      await quickStart()
+      return
+    }
+    guideContext = buildInstanceStartGuideContext(row, clusterRes.data, shardRes.data)
+  }
+  catch {
+    faToast.error('暂时无法读取房间与世界配置，请稍后再试')
+    return
+  }
+
+  const dontShowAgain = { value: false }
+  const publicBlocked = blocksDefaultStart(guideContext)
+
+  dialog.warning({
+    title: buildStartGuideTitle(),
+    content: () => renderStartGuideContent(guideContext, row.id, dontShowAgain),
+    positiveText: publicBlocked ? '去配置房间' : '用默认配置启动',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      if (dontShowAgain.value) {
+        setStartGuideSkipped(row.id)
+      }
+      if (publicBlocked) {
+        router.push({ name: 'clusterSettings', params: { instanceId: row.id } })
+        return
+      }
+      return quickStart()
+    },
+  })
 }
 
 async function runInstanceAction(
@@ -1049,7 +1254,7 @@ const instancePollingTimer = setInterval(() => {
   }
   if (hadInstallingInstance) {
     hadInstallingInstance = false
-    void refreshInstancesAfterInstallComplete()
+    void handleInstallTerminal()
   }
 }, INSTANCE_INSTALL_POLL_MS)
 
@@ -1212,7 +1417,7 @@ onBeforeUnmount(() => {
     <NModal
       v-model:show="installLogVisible"
       preset="card"
-      :title="`SteamCMD 安装输出 - ${installLogInstanceName || '实例'}`"
+      :title="`安装日志 - ${installLogInstanceName || '实例'}`"
       :style="{ width: '760px' }"
       @after-leave="stopInstallLogPolling"
     >
@@ -1228,7 +1433,10 @@ onBeforeUnmount(() => {
           </p>
         </div>
         <NSpin :show="installLogLoading">
-          <pre class="max-h-96 overflow-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-foreground">{{ formattedInstallLogContent || '暂无 SteamCMD 安装输出' }}</pre>
+          <pre
+            ref="installLogViewportRef"
+            class="max-h-96 overflow-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-foreground"
+          >{{ formattedInstallLogContent || '暂无安装日志' }}</pre>
         </NSpin>
       </div>
       <template #footer>

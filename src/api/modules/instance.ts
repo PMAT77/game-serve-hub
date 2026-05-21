@@ -98,6 +98,34 @@ export interface InstanceConsoleLogsPayload {
   running: boolean
 }
 
+export type InstanceConsoleLogFilter = 'all' | 'game' | 'panel'
+
+export interface InstanceConsoleShardStatus {
+  masterRunning: boolean
+  cavesConfigured: boolean
+  cavesRunning: boolean
+}
+
+export type InstanceConsoleCommandShard = 'master' | 'caves'
+
+export interface InstanceConnectInfo {
+  running: boolean
+  command: string
+  localCommand: string
+  lanCommand: string | null
+  host: string
+  port: number
+  udpPorts: number[]
+  roomName: string
+  networkMode: 'offline' | 'lan_only' | 'public'
+  networkModeLabel: string
+  hasPassword: boolean
+  hostSourceLabel: string
+  isPlaceholder: boolean
+  hints: string[]
+  consoleShards: InstanceConsoleShardStatus
+}
+
 export default {
   getInstanceList: (data?: InstanceListQuery) => api.post('app/instance/list', data),
   getInstanceMetrics: (ids?: string[]) => api.post('app/instance/metrics', ids?.length ? { ids } : {}) as Promise<{ data: InstanceMetricsPayload }>,
@@ -112,13 +140,21 @@ export default {
   stopInstance: (id: string) => api.post('app/instance/stop', { id }),
   restartInstance: (id: string) => api.post('app/instance/restart', { id }),
   deleteInstance: (id: string) => api.post('app/instance/delete', { id }),
-  getInstanceConsoleLogs: (instanceId: string, afterId = 0) => api.get('app/instance/console/logs', {
-    params: { instanceId, afterId },
+  getInstanceConnectInfo: (instanceId: string) => api.get('app/instance/connect-info', {
+    params: { instanceId },
+  }) as Promise<{ data: InstanceConnectInfo }>,
+  getInstanceConsoleLogs: (instanceId: string, afterId = 0, stream: InstanceConsoleLogFilter = 'all') => api.get('app/instance/console/logs', {
+    params: { instanceId, afterId, stream: stream === 'all' ? undefined : stream },
   }) as Promise<{ data: InstanceConsoleLogsPayload }>,
   clearInstanceConsoleLogs: (instanceId: string) => api.post('app/instance/console/logs/clear', { instanceId }),
-  sendInstanceConsoleCommand: (instanceId: string, command: string) => api.post('app/instance/console/command', {
+  sendInstanceConsoleCommand: (
+    instanceId: string,
+    command: string,
+    shard: InstanceConsoleCommandShard = 'master',
+  ) => api.post('app/instance/console/command', {
     instanceId,
     command,
+    shard,
   }),
   buildInstanceConsoleStreamUrl(instanceId: string, token: string) {
     const prefix = (import.meta.env.DEV && import.meta.env.VITE_ENABLE_PROXY)

@@ -38,6 +38,25 @@ function defaultClusterConfig(instanceId: string, instanceName: string): Cluster
 
 export default defineFakeRoute([
   {
+    url: '/fake/app/instance/cluster/online-players',
+    method: 'get',
+    response: ({ query }) => {
+      const instanceId = typeof query.instanceId === 'string' ? query.instanceId : ''
+      const existing = clusterStore.get(instanceId)
+      const running = existing?.instanceStatus === 'running'
+      return {
+        error: '',
+        status: 1,
+        data: {
+          instanceId,
+          running,
+          onlinePlayerCount: running ? 2 : null,
+          maxPlayers: existing?.maxPlayers ?? 6,
+        },
+      }
+    },
+  },
+  {
     url: '/fake/app/instance/cluster',
     method: 'get',
     response: ({ query }) => {
@@ -102,7 +121,7 @@ export default defineFakeRoute([
         effectiveHints: previous.instanceStatus === 'running'
           ? ['实例运行中，配置变更需重启实例后生效']
           : payload.shardEnabled
-            ? ['已启用分片：主世界与洞穴需使用相同的 cluster_key 与 master_port']
+            ? ['洞穴的端口、地图与世界规则请在「世界设置」中调整']
             : [],
         warnings: payload.networkMode === 'public' && !tokenConfigured
           ? ['公网模式但未配置有效的 Klei 集群令牌']

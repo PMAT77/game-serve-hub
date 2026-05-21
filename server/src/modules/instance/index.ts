@@ -28,6 +28,7 @@ import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { ensureDstLayout } from '../../infra/game-adapter/dst/cluster-config'
 import {
   ensureContainerRuntimeReady,
+  ensureInstanceContainerLogFollow,
   isInstanceContainerRunning,
   removeInstanceContainer,
   resolveDefaultInstanceInstallPath,
@@ -90,6 +91,7 @@ interface InstallLogQuery {
 interface InstallableGameItem {
   appId: string
   name: string
+  steamcmdLoginMode?: 'anonymous' | 'account' | 'account-fallback'
 }
 
 type InstallLogSource = 'install_log' | 'status_summary' | 'empty'
@@ -113,6 +115,7 @@ const INSTALLABLE_GAMES: InstallableGameItem[] = [
   {
     appId: '343050',
     name: '饥荒联机（Dedicated Server）',
+    steamcmdLoginMode: 'anonymous',
   },
 ]
 
@@ -228,6 +231,7 @@ async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<num
           runtimeStartedAt: new Date().toISOString(),
         })
       }
+      await ensureInstanceContainerLogFollow(instance.id)
       continue
     }
     await updateGameInstanceRuntime(instance.id, {
@@ -265,6 +269,7 @@ async function reconcileStoppedButContainerRunning(app: FastifyInstance): Promis
       runtimeStartedAt: instance.runtimeStartedAt ?? new Date().toISOString(),
       lastError: null,
     })
+    await ensureInstanceContainerLogFollow(instance.id)
     reconciled++
     app.log.info({ instanceId: instance.id }, '实例容器仍在运行，已同步状态为运行中')
   }

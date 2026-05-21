@@ -18,10 +18,8 @@ import {
   validateClusterToken,
   writeClusterTokenFile,
 } from './cluster-token'
-import {
-  isCavesShardConfigured,
-  SHARD_ENABLE_BLOCKED_MESSAGE,
-} from './shard-layout'
+import { ensureDstCavesShardConfig } from './cluster-config'
+import { isCavesShardConfigured } from './shard-layout'
 
 export interface ClusterPaths {
   clusterRoot: string
@@ -57,13 +55,20 @@ function buildEffectiveHints(
   networkMode: ClusterConfigDto['networkMode'],
   instanceStatus: DbGameInstance['status'],
   shardEnabled: boolean,
+  cavesConfigured: boolean,
 ): string[] {
   const hints: string[] = []
   if (instanceStatus === 'running') {
     hints.push('实例运行中，配置变更需重启实例后生效')
   }
-  if (shardEnabled) {
-    hints.push('已启用分片：主世界与洞穴需使用相同的 cluster_key 与 master_port')
+  if (!shardEnabled) {
+    hints.push('若需地下洞穴，请在下方开启「启用洞穴」并保存')
+  }
+  else if (!cavesConfigured) {
+    hints.push('洞穴配置尚未就绪，请重新保存房间设置或启动实例')
+  }
+  else {
+    hints.push('洞穴的端口、地图与世界规则请在「世界设置」中调整')
   }
   if (networkMode === 'public') {
     hints.push('公网模式需确保防火墙已放行游戏端口')
@@ -132,7 +137,12 @@ export function getClusterConfig(instance: DbGameInstance): ClusterConfigDto {
     clusterTokenConfigured: tokenConfigured,
     clusterTokenMasked: tokenConfigured && token ? maskClusterToken(token) : null,
     configDirty: instanceStatus === 'running',
-    effectiveHints: buildEffectiveHints(fields.networkMode, instanceStatus, fields.shardEnabled),
+    effectiveHints: buildEffectiveHints(
+      fields.networkMode,
+      instanceStatus,
+      fields.shardEnabled,
+      isCavesShardConfigured(installPath),
+    ),
     warnings,
   }
 }
@@ -148,10 +158,6 @@ export function saveClusterConfig(instance: DbGameInstance, payload: ClusterSave
   const fieldErrors = validateClusterFields(fields)
   if (fieldErrors.length > 0) {
     throw new Error(fieldErrors.join('；'))
-  }
-
-  if (payload.shardEnabled && !isCavesShardConfigured(installPath)) {
-    throw new Error(SHARD_ENABLE_BLOCKED_MESSAGE)
   }
 
   const { clusterIniPath, clusterTokenPath } = resolveClusterPaths(installPath)
@@ -177,6 +183,10 @@ export function saveClusterConfig(instance: DbGameInstance, payload: ClusterSave
   if (payload.networkMode === 'public' && payload.clusterToken?.trim()) {
     backupFile(clusterTokenPath)
     writeClusterTokenFile(clusterTokenPath, payload.clusterToken)
+  }
+
+  if (payload.shardEnabled) {
+    ensureDstCavesShardConfig(installPath, instance.gamePort ?? undefined)
   }
 
   return {

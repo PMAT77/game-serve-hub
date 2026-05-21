@@ -132,7 +132,7 @@ const formRules = computed<FormRules>(() => {
         required: true,
         min: 1,
         max: 65535,
-        message: 'master_port 须在 1–65535 之间',
+        message: '主机端口须在 1–65535 之间',
         trigger: ['blur', 'change'],
       },
     ],
@@ -472,8 +472,8 @@ onActivated(() => {
             </NFormItem>
           </NCard>
 
-          <NCard title="多世界设置" size="small" class="mt-4">
-            <NFormItem label="启用分片">
+          <NCard title="洞穴（地下世界）" size="small" class="mt-4">
+            <NFormItem label="启用洞穴">
               <NSwitch v-model:value="formModel.shardEnabled" />
               <NTooltip :style="{ maxWidth: '300px' }">
                 <template #trigger>
@@ -481,37 +481,25 @@ onActivated(() => {
                     <FaIcon name="i-lucide:info" class="size-4" />
                   </NButton>
                 </template>
-                <p>需要洞穴（地下）时打开；须先完成洞穴世界配置。地表与地下各运行一个进程，请填写下方互联参数。</p>
+                <p>开启后地上与洞穴各运行一个服务器；保存后将自动准备洞穴默认配置，请到「世界设置」调整地图与端口。互联地址由系统在启动时自动配置。</p>
               </NTooltip>
             </NFormItem>
             <template v-if="formModel.shardEnabled">
-              <NFormItem label="绑定IP">
-                <NInput v-model:value="formModel.bindIp" placeholder="127.0.0.1" />
-                <template #feedback>
-                  主世界监听从世界（洞穴）连接的 IP
-                </template>
-              </NFormItem>
-              <NFormItem label="主机IP">
-                <NInput v-model:value="formModel.masterIp" placeholder="127.0.0.1" />
-                <template #feedback>
-                  洞穴分片连接主世界的 IP
-                </template>
-              </NFormItem>
-              <NFormItem label="主机端口" path="masterPort">
+              <NFormItem label="内部通信端口" path="masterPort">
                 <NInputNumber v-model:value="formModel.masterPort" :min="1" :max="65535" class="w-40" />
                 <template #feedback>
-                  主世界与洞穴内部通信 UDP 端口，默认 10888
+                  地上与洞穴服务器之间的通信端口，默认 10888，两处须保持一致
                 </template>
               </NFormItem>
-              <NFormItem label="分片密钥">
+              <NFormItem label="互联密钥">
                 <NInput
                   v-model:value="formModel.clusterKey"
                   type="password"
                   show-password-on="click"
-                  placeholder="主世界与洞穴共享密钥"
+                  placeholder="地上与洞穴共用"
                 />
                 <template #feedback>
-                  分片互联密钥（非 Klei pds- 令牌），请务必修改默认值
+                  地上与洞穴共用的内部密钥，请修改默认值（不是 Klei 房间令牌）
                 </template>
               </NFormItem>
             </template>

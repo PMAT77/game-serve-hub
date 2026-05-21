@@ -22,7 +22,50 @@ export function sanitizeSteamcmdLogLine(line: string): string {
     .trim()
 }
 
-const DST_APP_ID = '343050'
+export type SteamcmdInstallFailureKind
+  = | 'network'
+    | 'permission'
+    | 'subscription'
+    | 'unknown'
+
+export {
+  resolveSteamcmdInstallMaxAttempts,
+  resolveSteamcmdInstallRetryDelaysMs,
+} from '../../shared/config/steamcmd'
+
+/**
+ * 根据 SteamCMD 输出归类失败原因。
+ * Missing configuration / 0x602 在 bind 已修复后仍偶发，运行时证据指向 Steam 侧瞬时故障，归入 network。
+ */
+export function classifySteamcmdInstallFailure(output: string): SteamcmdInstallFailureKind {
+  const text = sanitizeSteamcmdLogLine(output) || output.trim()
+  if (/Missing file permissions/i.test(text)) {
+    return 'permission'
+  }
+  if (/No subscription/i.test(text)) {
+    return 'subscription'
+  }
+  if (
+    /needs to be online/i.test(text)
+    || /network connection/i.test(text)
+    || /confirm your network/i.test(text)
+    || /timed?\s*out/i.test(text)
+    || /ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(text)
+    || /Could not connect|failed to connect|Unable to connect/i.test(text)
+    || /content server|CDN|Secure connection failed/i.test(text)
+    || /Fatal Error/i.test(text)
+    || /Missing configuration/i.test(text)
+    || /state is 0x602/i.test(text)
+    || /Illegal termination of worker thread/i.test(text)
+  ) {
+    return 'network'
+  }
+  return 'unknown'
+}
+
+export function isRetriableSteamcmdInstallOutput(output: string): boolean {
+  return classifySteamcmdInstallFailure(output) === 'network'
+}
 
 function extractSteamcmdFailureSnippet(output: string): string {
   const sanitized = sanitizeSteamcmdLogLine(output) || output.trim()
@@ -31,7 +74,7 @@ function extractSteamcmdFailureSnippet(output: string): string {
   }
   const lines = sanitized.split('\n').map(line => line.trim()).filter(Boolean)
   const errorLine = [...lines].reverse().find(line =>
-    /error|failed|failure|missing|denied|timeout|invalid|not available|no subscription/i.test(line),
+    /error|failed|failure|missing|denied|timeout|invalid|not available|no subscription|fatal|online/i.test(line),
   )
   if (errorLine) {
     return errorLine
@@ -50,23 +93,41 @@ export function formatSteamcmdAppUpdateFailureMessage(input: {
 }): string {
   const output = sanitizeSteamcmdLogLine(input.output) || input.output.trim()
   const failureSnippet = extractSteamcmdFailureSnippet(input.output)
-  const missingLicenseOrPerm = /Missing configuration|Missing file permissions/i.test(output)
-  const isDst = input.appId.trim() === DST_APP_ID
+  const kind = classifySteamcmdInstallFailure(input.output)
 
-  if (missingLicenseOrPerm && isDst && input.mode === 'anonymous' && !input.hasAccountCredentials) {
+  if (kind === 'subscription') {
+    const steamClientSelfUpdate = /app\s*['"]?8['"]?/i.test(output)
+    if (steamClientSelfUpdate) {
+      return [
+        'SteamCMD 自更新 Steam 客户端（AppID 8）失败（No subscription），未开始安装目标游戏。',
+        '容器镜像已内置 SteamCMD，请勿在安装命令中执行 app_update 8；若仍出现此错误请升级面板版本。',
+        `SteamCMD 输出：${failureSnippet}`,
+      ].join('')
+    }
     return [
-      'SteamCMD 安装 343050 失败（匿名不可用或目录权限不足）。',
-      '饥荒联机版为 Steam 免费游戏，专用服务器通常需使用已入库该游戏的 Steam 账号登录安装（非 anonymous）。',
-      '请在 panel.env / Compose 环境变量中配置 STEAMCMD_USERNAME、STEAMCMD_PASSWORD 后重试；',
-      '账号需已在 Steam 库中加入「饥荒联机版」（免费）。',
+      `SteamCMD 安装 ${input.appId} 失败（No subscription）。`,
+      '该 AppID 可能需要已入库对应游戏的 Steam 账号登录安装；',
+      '部分未来游戏将支持在 panel.env 配置 STEAMCMD_USERNAME / STEAMCMD_PASSWORD。',
       `SteamCMD 输出：${failureSnippet}`,
     ].join('')
   }
 
-  if (missingLicenseOrPerm && isDst && input.mode === 'account') {
+  if (kind === 'permission') {
     return [
-      '使用 Steam 账号登录后仍无法安装 343050（Missing configuration）。',
-      '请确认：① 该账号库中已有饥荒联机版；② 未启用需令牌的非交互限制；③ 密码正确。',
+      `SteamCMD 安装 ${input.appId} 失败（Missing file permissions）。`,
+      '通常为 Docker 卷挂载或安装目录权限问题：',
+      '请检查 force_install_dir 是否可写、panel 是否正确解析 instances 卷挂载、',
+      '必要时在 panel.env 设置 GSH_STEAMCMD_RUN_USER=0:0 或 GSH_STEAMCMD_BIND_OPTS=rw,z。',
+      `SteamCMD 输出：${failureSnippet}`,
+    ].join('')
+  }
+
+  if (kind === 'network') {
+    return [
+      `SteamCMD 安装 ${input.appId} 失败（网络或 Steam 服务不稳定）。`,
+      '可能原因：访问 Steam CDN/API 超时、连续安装触发限速、Docker 出网抖动，或 Steam 返回瞬时错误（如 Missing configuration）。',
+      '建议：在 panel.env 设置 GSH_STEAMCMD_DOWNLOAD_REGION=cn；必要时配置 GSH_STEAMCMD_HTTPS_PROXY；',
+      '等待数分钟后点击「更新服务端」重试；在系统设置查看 SteamCMD 诊断；避免 dev:compose 与 dev:server 同时运行。',
       `SteamCMD 输出：${failureSnippet}`,
     ].join('')
   }

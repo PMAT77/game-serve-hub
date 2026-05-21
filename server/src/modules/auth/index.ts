@@ -151,6 +151,28 @@ const routeList: RouteItem[] = [
               menu: false,
             },
           },
+          {
+            path: 'shard-list',
+            name: 'shardList',
+            component: 'shard/index.vue',
+            meta: {
+              title: '世界列表',
+              icon: 'ri:earth-line',
+              auth: NODE_INSTANCE_MANAGE_PERMISSION,
+            },
+          },
+          {
+            path: 'shard-settings/:instanceId',
+            name: 'shardSettings',
+            component: 'shard/settings.vue',
+            meta: {
+              title: '世界设置',
+              icon: 'ri:landscape-line',
+              auth: NODE_INSTANCE_MANAGE_PERMISSION,
+              activeMenu: '/cluster/shard-list',
+              menu: false,
+            },
+          },
         ],
       },
     ],

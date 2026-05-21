@@ -82,3 +82,29 @@
 - 大流量操作（拉 `ghcr.io` 镜像、SteamCMD 安装）期间避免同时压测网络。
 
 Linux 生产环境排障见 [10-OPERATIONS-RUNBOOK.md](./10-OPERATIONS-RUNBOOK.md)。
+
+## 10. Open Core / Pro 开发约束
+
+涉及 Community / Pro 分层的模块须遵循 [`13-PRO-OPEN-CORE-ARCHITECTURE.md`](./13-PRO-OPEN-CORE-ARCHITECTURE.md)。开工前：
+
+1. 在 FDS 中写明 **Open Core 落点**（edition 类型、Community 路径、Pro 包名、entitlement 键）。
+2. 确认模块 edition：`community-only` / `hybrid` / `pro-only`（对照 [`TODO.md`](./TODO.md) §5）。
+
+**禁止**
+
+- 在 MIT 公开仓提交 Pro 业务逻辑（调度引擎、Pro-only API 实现、Pro 专有 DB migration）。
+- Hybrid 模块在 Community API 返回 Pro 字段占位假数据。
+- Hybrid 模块在 MIT 仓实现「灰态不可用」的 Pro UI 控件（应显示「升级 Pro」引导）。
+
+**Community 仓允许**
+
+- 扩展点接口与 no-op stub（M3-b 起）。
+- Pro-only 模块的菜单占位与升级引导页。
+- Hybrid 模块的基础能力与稳定扩展点（事件 / 端口 interface）。
+
+**Pro 私有包**
+
+- 包名 `@gsh/pro-*`；通过 `ProModuleRegistrar.register()` 注入路由与 migration。
+- API 须挂载 entitlement middleware；校验在服务端完成。
+
+功能边界与 entitlement 键见 [`TODO.md`](./TODO.md) §5 与 [`COMMERCIAL.md`](./COMMERCIAL.md)。

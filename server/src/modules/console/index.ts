@@ -1,16 +1,34 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import type { InstanceConnectInfoDto, InstanceConsoleCommandShard } from '../../../../shared/contracts/console'
+import type { ConsoleLogLine } from '../../shared/instance-runtime/console-log-store'
 import type { DbGameInstance } from '../../shared/db/index'
 import { findUserByToken, getGameInstanceById } from '../../shared/db/index'
+import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
+import { buildDstConnectInfo } from '../../infra/game-adapter/dst/direct-connect'
+import { resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
-import { ensureContainerRuntimeReady, isInstanceContainerRunning, sendInstanceContainerCommand } from '../instance/container-lifecycle'
+import {
+  ensureContainerRuntimeReady,
+  isCavesContainerRunning,
+  isInstanceContainerRunning,
+  sendInstanceContainerCommand,
+} from '../instance/container-lifecycle'
+import { isCavesShardConfigured, readClusterShardEnabledFromInstall } from '../../infra/game-adapter/dst/shard-service'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 
 const LOCAL_NODE_ID = 'local-node'
 
+type ConsoleLogFilter = 'all' | 'game' | 'panel'
+
 interface ConsoleLogsQuery {
   instanceId?: string
   afterId?: string
+  stream?: string
+}
+
+interface ConnectInfoQuery {
+  instanceId?: string
 }
 
 interface ConsoleInstanceBody {
@@ -20,6 +38,7 @@ interface ConsoleInstanceBody {
 interface ConsoleCommandBody {
   instanceId?: string
   command?: string
+  shard?: string
 }
 
 interface ConsoleStreamQuery {
@@ -84,11 +103,74 @@ function writeSse(reply: FastifyReply, event: string, data: unknown) {
   reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
 }
 
+function normalizeCommandShard(value: string | undefined): InstanceConsoleCommandShard | undefined {
+  const raw = value?.trim().toLowerCase()
+  if (!raw || raw === 'master') {
+    return 'master'
+  }
+  if (raw === 'caves') {
+    return 'caves'
+  }
+  return undefined
+}
+
+function normalizeLogFilter(value: string | undefined): ConsoleLogFilter {
+  const raw = value?.trim().toLowerCase()
+  if (raw === 'game' || raw === 'panel') {
+    return raw
+  }
+  return 'all'
+}
+
+function filterConsoleLines(lines: ConsoleLogLine[], filter: ConsoleLogFilter): ConsoleLogLine[] {
+  if (filter === 'all') {
+    return lines
+  }
+  if (filter === 'game') {
+    return lines.filter(line => line.stream === 'stdout' || line.stream === 'stderr')
+  }
+  return lines.filter(line => line.stream === 'system')
+}
+
 /**
  * console 模块：游戏实例运行时控制台（日志流 + 命令下发）。
  * 与「主机监控台」`/console/monitor` 区分，API 统一挂在 `/app/instance/console/*`。
  */
 export function registerConsoleModule(app: FastifyInstance) {
+  app.get('/app/instance/connect-info', async (request): Promise<ApiSuccessResponse<InstanceConnectInfoDto> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    const query = request.query as ConnectInfoQuery
+    const instanceId = normalizeInstanceId(query.instanceId)
+    const resolved = await resolveLocalInstance(instanceId, request)
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    const instance = resolved.instance
+    if (instance.gameCode.trim() !== DST_APP_ID) {
+      return businessError('当前仅支持饥荒（343050）连接信息', request)
+    }
+    const installPath = resolveInstanceInstallPath(instance)
+    const masterRunning = await isInstanceContainerRunning(instanceId)
+    const shardEnabled = readClusterShardEnabledFromInstall(installPath)
+    const cavesConfigured = shardEnabled && isCavesShardConfigured(installPath)
+    const cavesRunning = cavesConfigured ? await isCavesContainerRunning(instanceId) : false
+    const info = await buildDstConnectInfo(installPath, {
+      gamePort: instance.gamePort,
+      running: masterRunning,
+    })
+    return success({
+      ...info,
+      consoleShards: {
+        masterRunning,
+        cavesConfigured,
+        cavesRunning,
+      },
+    }, request)
+  })
+
   app.get('/app/instance/console/logs', async (request): Promise<ApiSuccessResponse<{
     lines: ReturnType<typeof instanceConsoleLogStore.listLogs>
     running: boolean
@@ -104,9 +186,14 @@ export function registerConsoleModule(app: FastifyInstance) {
       return resolved.error
     }
     const afterId = Number.parseInt(query.afterId ?? '0', 10)
+    const logFilter = normalizeLogFilter(query.stream)
     const running = await isInstanceContainerRunning(instanceId)
+    const lines = filterConsoleLines(
+      instanceConsoleLogStore.listLogs(instanceId, Number.isNaN(afterId) ? 0 : afterId),
+      logFilter,
+    )
     return success({
-      lines: instanceConsoleLogStore.listLogs(instanceId, Number.isNaN(afterId) ? 0 : afterId),
+      lines,
       running,
     }, request)
   })
@@ -134,6 +221,10 @@ export function registerConsoleModule(app: FastifyInstance) {
     const body = (request.body ?? {}) as ConsoleCommandBody
     const instanceId = normalizeInstanceId(body.instanceId)
     const command = body.command?.trim() ?? ''
+    const shard = normalizeCommandShard(body.shard)
+    if (!shard) {
+      return businessError('分片参数无效，仅支持 master 或 caves', request)
+    }
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       return resolved.error
@@ -145,7 +236,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     if (!runtimeReady.ok) {
       return businessError(runtimeReady.message ?? '容器运行时未就绪', request)
     }
-    const result = await sendInstanceContainerCommand(instanceId, command)
+    const result = await sendInstanceContainerCommand(instanceId, command, shard)
     if (!result.ok) {
       return businessError(result.message ?? '命令发送失败', request)
     }

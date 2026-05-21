@@ -174,15 +174,28 @@ export const useAppMenuStore = defineStore(
       return res
     }
     // 设置主导航
-    function isPathInMenus(menus: MenuRecordRaw[], path: string) {
-      let flag = false
-      flag = menus.some((item) => {
-        if (item.children) {
-          return isPathInMenus(item.children, path)
+    function isPathMatchMenu(path: string, menuPath: string) {
+      return path.indexOf(`${menuPath}/`) === 0 || path === menuPath
+    }
+    function isPathInMenus(menus: MenuRecordRaw[], path: string): boolean {
+      return menus.some((item): boolean => {
+        if (!item.path) {
+          if (item.children?.length) {
+            return isPathInMenus(item.children, path)
+          }
+          return false
         }
-        return path.indexOf(`${item.path}/`) === 0 || path === item.path
+        const matched = isPathMatchMenu(path, item.path)
+        if (item.children?.length) {
+          return matched || isPathInMenus(item.children, path)
+        }
+        return matched
       })
-      return flag
+    }
+    /** 根据当前路由解析用于主导航定位的路径（优先 activeMenu） */
+    function resolveActivedPathFromRoute(route: { path: string, meta?: { activeMenu?: string } }) {
+      const activeMenu = route.meta?.activeMenu
+      return typeof activeMenu === 'string' && activeMenu.length > 0 ? activeMenu : route.path
     }
     function setActived(indexOrPath: number | string) {
       if (typeof indexOrPath === 'number') {
@@ -206,6 +219,7 @@ export const useAppMenuStore = defineStore(
       sidebarMenusHasOnlyMenu,
       defaultExpandPaths,
       setActived,
+      resolveActivedPathFromRoute,
     }
   },
 )

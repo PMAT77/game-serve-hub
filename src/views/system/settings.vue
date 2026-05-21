@@ -17,7 +17,7 @@ const form = reactive<PanelSettingsPayload>({
   theme: 'system',
   autoUpdate: true,
   checkUpdateBeforeStart: false,
-  updateCheckIntervalHours: 1,
+  updateCheckIntervalHours: 3,
 })
 
 const panelPortInput = computed({
@@ -74,7 +74,7 @@ async function loadSettings() {
     form.theme = res.data.theme
     form.autoUpdate = res.data.autoUpdate
     form.checkUpdateBeforeStart = res.data.checkUpdateBeforeStart ?? false
-    form.updateCheckIntervalHours = res.data.updateCheckIntervalHours ?? 1
+    form.updateCheckIntervalHours = res.data.updateCheckIntervalHours ?? 3
   }
   finally {
     loading.value = false

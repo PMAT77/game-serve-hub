@@ -70,3 +70,12 @@ export interface ClusterSaveResult {
   saved: true
   restarted: boolean
 }
+
+/** GET /app/instance/cluster/online-players 响应体 */
+export interface ClusterOnlinePlayersDto {
+  instanceId: string
+  running: boolean
+  /** 实例未运行或查询失败时为 null */
+  onlinePlayerCount: number | null
+  maxPlayers: number
+}

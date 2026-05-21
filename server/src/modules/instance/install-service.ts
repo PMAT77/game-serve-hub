@@ -6,23 +6,36 @@ import {
   updateGameInstanceRuntime,
 } from '../../shared/db/index'
 import { loadServerConfig, resolveInstallLogsDir } from '../../shared/config'
+import { shouldDeferDstImagePullOnInstall } from '../../shared/config/install'
 import {
   InstanceInstallLogWriter,
 } from '../../shared/instance-install/log-store'
 import { parseSteamcmdProgressPercent } from '../../shared/instance-install/log-format'
+import { resolveSteamcmdLoginMode } from '../../shared/instance-install/steamcmd-login-mode'
 import {
   cancelSteamcmdInstallContainer,
   cleanupOrphanedSteamcmdInstallContainers,
   isSteamcmdJobRunning,
   runSteamcmdAppUpdateInContainer,
 } from '../../infra/container'
-import { formatSteamcmdAppUpdateFailureMessage } from '../../infra/container/steamcmd-errors'
+import { isSteamcmdAppUpdateBusy } from '../../infra/container/steamcmd-app-update-queue'
+import DockerClient from 'dockerode'
+import { resolveDockerConnectOptions } from '../../infra/docker-connect'
+import { getServerContainerConfig } from '../../shared/config/container'
+import { appendInstallResourceSnapshot } from '../../infra/container/install-resource-monitor'
+import {
+  formatSteamcmdAppUpdateFailureMessage,
+  isRetriableSteamcmdInstallOutput,
+  resolveSteamcmdInstallMaxAttempts,
+  resolveSteamcmdInstallRetryDelaysMs,
+} from '../../infra/container/steamcmd-errors'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { diagnoseDstInstallReadiness } from '../../infra/game-adapter/dst/install-readiness'
 import { ensureDstLayout } from '../../infra/game-adapter/dst/cluster-config'
-import { prepareInstallPathForSteamcmd } from './install-path'
+import { cleanupIncompleteSteamcmdInstallDir, prepareInstallPathForSteamcmd } from './install-path'
 import { ensureGameRuntimeImageReady } from '../../infra/game-adapter/runtime-image'
-import { refreshInstanceUpdateStatusAfterInstall } from './update-check'
+import { refreshInstanceUpdateStatusAfterInstall, refreshInstanceUpdateStatusAfterSeed } from './update-check'
+import { tryInstallGameDepotFromSeed, type InstallSeedDonor } from './install-seed'
 
 export interface InstanceInstallJobInput {
   instanceId: string
@@ -38,12 +51,34 @@ const LOCAL_NODE_ID = 'local-node'
 
 export const INSTALL_INTERRUPTED_MESSAGE = '安装已中断。请点击「更新服务端」重试，或删除实例后重建。'
 export const INSTALL_RESTART_INTERRUPTED_MESSAGE = '服务重启导致安装中断，请点击「更新服务端」重新拉取。'
+export const INSTALL_STEAMCMD_QUEUE_MESSAGE = '排队等待其他实例的 SteamCMD 安装完成...'
 
 const installingInstanceIds = new Set<string>()
 const cancelledInstallInstanceIds = new Set<string>()
 
 export function isInstallJobActive(instanceId: string): boolean {
   return installingInstanceIds.has(instanceId)
+}
+
+function hasOtherActiveInstallJobs(instanceId: string): boolean {
+  for (const id of installingInstanceIds) {
+    if (id !== instanceId) {
+      return true
+    }
+  }
+  return isSteamcmdAppUpdateBusy()
+}
+
+async function markInstallSteamcmdQueueWaiting(
+  instanceId: string,
+  logWriter: InstanceInstallLogWriter,
+) {
+  logWriter.appendLine(INSTALL_STEAMCMD_QUEUE_MESSAGE)
+  await updateGameInstanceRuntime(instanceId, {
+    status: 'installing',
+    lastCommand: INSTALL_STEAMCMD_QUEUE_MESSAGE,
+    lastError: null,
+  })
 }
 
 export function getInstallLogsDirPath() {
@@ -116,6 +151,33 @@ export function shouldAllowInstallDespiteUpToDate(input: {
   return false
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function logInstallResourcePhase(
+  logWriter: InstanceInstallLogWriter,
+  instanceId: string,
+  phase: string,
+  extra?: Record<string, unknown>,
+) {
+  try {
+    const { dockerHost } = getServerContainerConfig()
+    const docker = new DockerClient(resolveDockerConnectOptions(dockerHost))
+    const lines = await appendInstallResourceSnapshot(getInstallLogsDirPath(), docker, {
+      instanceId,
+      phase,
+      extra,
+    })
+    for (const line of lines) {
+      logWriter.appendLine(line)
+    }
+  }
+  catch {
+    logWriter.appendLine(`[资源快照 ${phase}] 记录失败`)
+  }
+}
+
 export function mapDbInstallLogStatusToResponse(
   installLogStatus: DbInstallLogStatus | null,
   instanceStatus: string,
@@ -135,9 +197,10 @@ export function mapDbInstallLogStatusToResponse(
 async function finalizeSuccessfulInstall(
   input: InstanceInstallJobInput,
   logWriter: InstanceInstallLogWriter,
-  mode: 'anonymous' | 'account',
+  mode: 'anonymous' | 'account' | 'seed',
+  seedDonor?: InstallSeedDonor,
 ) {
-  logWriter.appendLine(`安装完成（${mode}）`)
+  logWriter.appendLine(`安装完成（${mode === 'seed' ? '本地复制' : mode}）`)
   const startScriptResult = input.appId.trim() === DST_APP_ID
     ? ensureDstLayout(input.installPath, {
         instanceName: input.instanceName,
@@ -152,22 +215,40 @@ async function finalizeSuccessfulInstall(
   }
   let runtimeImageResult: Awaited<ReturnType<typeof ensureGameRuntimeImageReady>> | undefined
   if (startScriptResult.ok) {
-    logWriter.appendLine('正在准备游戏运行环境镜像（首次可能需数分钟）…')
-    runtimeImageResult = await ensureGameRuntimeImageReady(input.appId)
-    if (runtimeImageResult.ok) {
-      logWriter.appendLine('游戏运行环境镜像已就绪')
+    if (shouldDeferDstImagePullOnInstall()) {
+      logWriter.appendLine('DST 运行镜像将在首次启动实例时拉取（GSH_INSTALL_DEFER_DST_IMAGE_PULL 默认开启）')
     }
     else {
-      logWriter.appendLine(`游戏运行环境镜像准备失败（不影响已下载的游戏文件）：${runtimeImageResult.error}`)
+      logWriter.appendLine('正在准备游戏运行环境镜像（首次可能需数分钟）…')
+      runtimeImageResult = await ensureGameRuntimeImageReady(input.appId)
+      if (runtimeImageResult.ok) {
+        logWriter.appendLine('游戏运行环境镜像已就绪')
+      }
+      else {
+        logWriter.appendLine(`游戏运行环境镜像准备失败（不影响已下载的游戏文件）：${runtimeImageResult.error}`)
+      }
     }
-    await refreshInstanceUpdateStatusAfterInstall(
-      input.instanceId,
-      input.installPath,
-      input.appId,
-      input.steamcmdCommand,
-    )
+    if (mode === 'seed' && seedDonor) {
+      await refreshInstanceUpdateStatusAfterSeed(
+        input.instanceId,
+        input.installPath,
+        input.appId,
+        seedDonor,
+      )
+    }
+    else {
+      await refreshInstanceUpdateStatusAfterInstall(
+        input.instanceId,
+        input.installPath,
+        input.appId,
+        input.steamcmdCommand,
+      )
+    }
   }
-  const runtimeImageFailed = startScriptResult.ok && runtimeImageResult !== undefined && !runtimeImageResult.ok
+  const runtimeImageFailed = startScriptResult.ok
+    && !shouldDeferDstImagePullOnInstall()
+    && runtimeImageResult !== undefined
+    && !runtimeImageResult.ok
   const runtimeHint = runtimeImageFailed
     ? '；运行环境镜像未就绪，启动时将自动重试拉取'
     : ''
@@ -175,8 +256,8 @@ async function finalizeSuccessfulInstall(
   await updateGameInstanceRuntime(input.instanceId, {
     status: startScriptResult.ok ? 'stopped' : 'error',
     lastCommand: startScriptResult.ok
-      ? `安装完成（${mode}），启动脚本已生成${runtimeHint}`
-      : `安装完成（${mode}），启动脚本生成失败: ${startScriptResult.message ?? '未知错误'}`,
+      ? `安装完成（${mode === 'seed' ? '本地复制' : mode}），启动脚本已生成${runtimeHint}`
+      : `安装完成（${mode === 'seed' ? '本地复制' : mode}），启动脚本生成失败: ${startScriptResult.message ?? '未知错误'}`,
     lastError: startScriptResult.ok
       ? (runtimeImageFailed ? '运行环境镜像未就绪，启动实例时将自动重试拉取' : null)
       : startScriptResult.message ?? null,
@@ -222,25 +303,62 @@ async function runInstallPipeline(
   }
 
   logWriter.appendLine('安装任务启动（已调整安装目录为 SteamCMD 容器用户可写）')
+  await logInstallResourcePhase(logWriter, input.instanceId, 'install_pipeline_start')
   await writeInstallLogMeta(input.instanceId, 'running', null)
+  const queueHint = hasOtherActiveInstallJobs(input.instanceId)
+    ? INSTALL_STEAMCMD_QUEUE_MESSAGE
+    : '正在启动 SteamCMD 安装任务...'
+  if (queueHint === INSTALL_STEAMCMD_QUEUE_MESSAGE) {
+    logWriter.appendLine(INSTALL_STEAMCMD_QUEUE_MESSAGE)
+  }
   await updateGameInstanceRuntime(input.instanceId, {
     status: 'installing',
-    lastCommand: '正在启动 SteamCMD 安装任务...',
+    lastCommand: queueHint,
     lastError: null,
     installPercent: null,
   })
 
-  const isDst = input.appId.trim() === DST_APP_ID
-  const preferAccountFirst = isDst && Boolean(input.steamcmdCredentials)
-
-  if (isDst && !input.steamcmdCredentials) {
-    logWriter.appendLine(
-      '提示：饥荒联机版（343050）为 Steam 免费游戏，匿名安装常会失败；建议在 panel.env 配置 STEAMCMD_USERNAME / STEAMCMD_PASSWORD 后重试。',
-    )
+  const recipientAlreadyReady = diagnoseDstInstallReadiness(input.installPath).ready
+  if (!recipientAlreadyReady && input.appId.trim() === DST_APP_ID) {
+    const seedResult = await tryInstallGameDepotFromSeed({
+      recipientId: input.instanceId,
+      recipientPath: input.installPath,
+      appId: input.appId,
+    })
+    if (seedResult.ok) {
+      logWriter.appendLine(
+        `已从实例「${seedResult.donor.instanceName}」(${seedResult.donor.instanceId.slice(0, 8)}…) 复制游戏文件，跳过 Steam 下载`,
+      )
+      logWriter.appendLine(`供体 Build ID: ${seedResult.donor.localBuildId ?? '未知'}`)
+      await logInstallResourcePhase(logWriter, input.instanceId, 'install_pipeline_seed_success', {
+        donorId: seedResult.donor.instanceId,
+      })
+      await finalizeSuccessfulInstall(input, logWriter, 'seed', seedResult.donor)
+      return
+    }
+    if (seedResult.reason) {
+      logWriter.appendLine(`本地复制不可用，将使用 SteamCMD 安装：${seedResult.reason}`)
+    }
   }
 
-  let anonymousResult: Awaited<ReturnType<typeof runSteamcmdAppUpdateInContainer>> | undefined
-  let accountResult: Awaited<ReturnType<typeof runSteamcmdAppUpdateInContainer>> | undefined
+  const loginMode = resolveSteamcmdLoginMode(input.appId)
+  const useAccount = loginMode === 'account'
+    || (loginMode === 'account-fallback' && Boolean(input.steamcmdCredentials))
+
+  const runAnonymousInstall = async () => {
+    if (isInstallCancelled(input.instanceId)) {
+      return { cancelled: true as const, ok: false, output: '' }
+    }
+    logWriter.appendLine('正在使用 anonymous 登录安装...')
+    return runSteamcmdAppUpdateInContainer({
+      hostInstallPath: input.installPath,
+      appId: input.appId,
+      loginArgs: ['+login', 'anonymous'],
+      cancelKey: input.instanceId,
+      onLogLine: line => void updateProgress(line),
+      onAwaitingSteamcmdLock: () => markInstallSteamcmdQueueWaiting(input.instanceId, logWriter),
+    })
+  }
 
   const runAccountInstall = async () => {
     if (!input.steamcmdCredentials) {
@@ -251,41 +369,22 @@ async function runInstallPipeline(
     }
     await updateGameInstanceRuntime(input.instanceId, {
       status: 'installing',
-      lastCommand: preferAccountFirst
-        ? '正在使用 Steam 账号登录安装...'
-        : 'anonymous 失败，正在尝试账号登录重试...',
+      lastCommand: '正在使用 Steam 账号登录安装...',
       lastError: null,
     })
-    if (!preferAccountFirst) {
-      logWriter.appendLine('anonymous 失败，正在尝试账号登录重试...')
-    }
-    else {
-      logWriter.appendLine('正在使用 Steam 账号登录安装（343050）...')
-    }
+    logWriter.appendLine(`正在使用 Steam 账号登录安装（${input.appId}）...`)
     return runSteamcmdAppUpdateInContainer({
       hostInstallPath: input.installPath,
       appId: input.appId,
       loginArgs: ['+login', input.steamcmdCredentials.username, input.steamcmdCredentials.password],
       cancelKey: input.instanceId,
       onLogLine: line => void updateProgress(line),
+      onAwaitingSteamcmdLock: () => markInstallSteamcmdQueueWaiting(input.instanceId, logWriter),
     })
   }
 
-  const runAnonymousInstall = async () => {
-    if (isInstallCancelled(input.instanceId)) {
-      return { cancelled: true as const, ok: false, output: '' }
-    }
-    return runSteamcmdAppUpdateInContainer({
-      hostInstallPath: input.installPath,
-      appId: input.appId,
-      loginArgs: ['+login', 'anonymous'],
-      cancelKey: input.instanceId,
-      onLogLine: line => void updateProgress(line),
-    })
-  }
-
-  if (preferAccountFirst) {
-    accountResult = await runAccountInstall()
+  if (useAccount && loginMode === 'account') {
+    const accountResult = await runAccountInstall()
     if (accountResult?.cancelled || isInstallCancelled(input.instanceId)) {
       await markInstallInterrupted(input.instanceId, logWriter)
       return
@@ -294,69 +393,109 @@ async function runInstallPipeline(
       await finalizeSuccessfulInstall(input, logWriter, 'account')
       return
     }
-    anonymousResult = await runAnonymousInstall()
+    const failureMessage = formatSteamcmdAppUpdateFailureMessage({
+      appId: input.appId,
+      output: accountResult?.output ?? '',
+      mode: 'account',
+      hasAccountCredentials: true,
+    })
+    logWriter.appendLine(failureMessage)
+    await writeInstallLogMeta(input.instanceId, 'failed', null)
+    await updateGameInstanceRuntime(input.instanceId, {
+      status: 'error',
+      lastCommand: null,
+      lastError: failureMessage,
+    })
+    return
   }
-  else {
-    anonymousResult = await runAnonymousInstall()
+
+  let anonymousResult = await runAnonymousInstall()
+  const installMaxAttempts = resolveSteamcmdInstallMaxAttempts()
+  const installRetryDelaysMs = resolveSteamcmdInstallRetryDelaysMs()
+  for (let attempt = 2; attempt <= installMaxAttempts; attempt++) {
     if (anonymousResult.cancelled || isInstallCancelled(input.instanceId)) {
       await markInstallInterrupted(input.instanceId, logWriter)
       return
     }
-    if (anonymousResult.ok) {
-      await finalizeSuccessfulInstall(input, logWriter, 'anonymous')
-      return
+    if (anonymousResult.ok || !isRetriableSteamcmdInstallOutput(anonymousResult.output)) {
+      break
     }
-    if (!input.steamcmdCredentials) {
-      const failureMessage = formatSteamcmdAppUpdateFailureMessage({
-        appId: input.appId,
-        output: anonymousResult.output,
-        mode: 'anonymous',
-        hasAccountCredentials: false,
-      })
-      logWriter.appendLine(failureMessage)
-      await writeInstallLogMeta(input.instanceId, 'failed', null)
-      await updateGameInstanceRuntime(input.instanceId, {
-        status: 'error',
-        lastCommand: null,
-        lastError: failureMessage,
-      })
-      return
+    const delayMs = installRetryDelaysMs[attempt - 2]
+      ?? installRetryDelaysMs[installRetryDelaysMs.length - 1]
+      ?? 8000
+    logWriter.appendLine(
+      `Steam 安装失败（网络或服务不稳定），${Math.round(delayMs / 1000)} 秒后进行第 ${attempt}/${installMaxAttempts} 次尝试...`,
+    )
+    await updateGameInstanceRuntime(input.instanceId, {
+      status: 'installing',
+      lastCommand: `安装重试中（${attempt}/${installMaxAttempts}）...`,
+      lastError: null,
+    })
+    await sleep(delayMs)
+    if (cleanupIncompleteSteamcmdInstallDir(input.installPath)) {
+      logWriter.appendLine('已清理半成品 Steam 目录后重试')
     }
-    accountResult = await runAccountInstall()
+    anonymousResult = await runAnonymousInstall()
   }
-
-  if (accountResult?.cancelled || anonymousResult?.cancelled || isInstallCancelled(input.instanceId)) {
+  if (anonymousResult.cancelled || isInstallCancelled(input.instanceId)) {
     await markInstallInterrupted(input.instanceId, logWriter)
     return
   }
-  if (accountResult?.ok) {
-    await finalizeSuccessfulInstall(input, logWriter, 'account')
+  if (anonymousResult.ok) {
+    await logInstallResourcePhase(logWriter, input.instanceId, 'install_pipeline_success')
+    await finalizeSuccessfulInstall(input, logWriter, 'anonymous')
     return
   }
 
-  const anonymousDetail = formatSteamcmdAppUpdateFailureMessage({
+  if (loginMode === 'account-fallback' && input.steamcmdCredentials) {
+    logWriter.appendLine('anonymous 失败，正在尝试账号登录重试...')
+    const accountResult = await runAccountInstall()
+    if (accountResult?.cancelled || isInstallCancelled(input.instanceId)) {
+      await markInstallInterrupted(input.instanceId, logWriter)
+      return
+    }
+    if (accountResult?.ok) {
+      await finalizeSuccessfulInstall(input, logWriter, 'account')
+      return
+    }
+    const anonymousDetail = formatSteamcmdAppUpdateFailureMessage({
+      appId: input.appId,
+      output: anonymousResult.output,
+      mode: 'anonymous',
+      hasAccountCredentials: true,
+    })
+    const accountDetail = formatSteamcmdAppUpdateFailureMessage({
+      appId: input.appId,
+      output: accountResult?.output ?? '',
+      mode: 'account',
+      hasAccountCredentials: true,
+    })
+    const combined = `安装失败。\n--- anonymous ---\n${anonymousDetail}\n--- account ---\n${accountDetail}`
+    logWriter.appendLine(combined)
+    await writeInstallLogMeta(input.instanceId, 'failed', null)
+    await updateGameInstanceRuntime(input.instanceId, {
+      status: 'error',
+      lastCommand: null,
+      lastError: combined,
+    })
+    return
+  }
+
+  await logInstallResourcePhase(logWriter, input.instanceId, 'install_pipeline_failed', {
+    exitCode: anonymousResult.output.includes('137') ? 137 : undefined,
+  })
+  const failureMessage = formatSteamcmdAppUpdateFailureMessage({
     appId: input.appId,
-    output: anonymousResult?.output ?? '',
+    output: anonymousResult.output,
     mode: 'anonymous',
     hasAccountCredentials: Boolean(input.steamcmdCredentials),
   })
-  const accountDetail = accountResult
-    ? formatSteamcmdAppUpdateFailureMessage({
-        appId: input.appId,
-        output: accountResult.output,
-        mode: 'account',
-        hasAccountCredentials: true,
-      })
-    : ''
-  const combined = accountDetail
-    ? `安装失败。\n--- anonymous ---\n${anonymousDetail}\n--- account ---\n${accountDetail}`
-    : `安装失败。\n--- account ---\n${accountDetail || anonymousDetail}`
-  logWriter.appendLine(combined)
+  logWriter.appendLine(failureMessage)
   await writeInstallLogMeta(input.instanceId, 'failed', null)
   await updateGameInstanceRuntime(input.instanceId, {
     status: 'error',
     lastCommand: null,
-    lastError: combined,
+    lastError: failureMessage,
   })
 }
 

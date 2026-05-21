@@ -19,6 +19,8 @@ export interface ShardContainerSpec {
   hostInstallPath: string
   containerGameRoot?: string
   hostBinds?: string[]
+  /** 双容器分片互联用的 Docker 自定义网络名 */
+  networkName?: string
   cmd: string[]
   workingDir: string
   env?: Record<string, string>
@@ -56,6 +58,8 @@ export interface ContainerStats {
 
 export interface ContainerRuntime {
   createShardContainer(spec: ShardContainerSpec): Promise<ContainerRef>
+  ensureShardNetwork(instanceId: string): Promise<string>
+  removeShardNetwork(instanceId: string): Promise<void>
   start(ref: ContainerRef): Promise<void>
   stop(ref: ContainerRef, timeoutSec?: number): Promise<void>
   remove(ref: ContainerRef): Promise<void>

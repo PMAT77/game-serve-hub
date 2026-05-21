@@ -170,7 +170,92 @@ curl -fsS "http://127.0.0.1:${PANEL_PORT:-80}/health"
 
 生产环境 **通常不会出现** 开发机上那种「任务管理器里除 IDE 外全网为 0」的 WSL2 特征；更多为 Docker 不可用或单个容器/端口异常。
 
-## 5. 兜底与监控（建议）
+## 6. 宿主机性能基线（Linux 生产推荐）
+
+Game Server Hub 以 Docker 运行面板、SteamCMD 安装与 DST 进程。以下宿主机调优可显著改善 **SteamCMD 下载** 与 **存档 IO**，需在安装目录外手动配置（Community 文档指引；一键加固为 Pro `runtime_hardening` 规划）。
+
+### 6.1 磁盘 IO
+
+- 实例数据目录（默认 `/var/lib/game-server-hub/instances`）建议单独分区或 NVMe。
+- `/etc/fstab` 游戏分区挂载选项：`noatime,nodiratime,errors=remount-ro`（ext4/xfs）。
+- NVMe IO 调度器 `none`；HDD 使用 `mq-deadline`。
+
+### 6.2 内存与 swap
+
+- **建议禁用宿主机 swap**（`swapoff -a` 并注释 `/etc/fstab` 中 swap 行）。SteamCMD 安装容器已在 cgroup 内禁用 swap，但宿主机 swap 仍会在压力下拖慢面板与 DST。
+- 可选：`vm.swappiness=1`（`/etc/sysctl.conf`）。
+
+### 6.3 DNS 与时间同步
+
+- 国内建议 DNS：`223.5.5.5`、`114.114.114.114`（`systemd-resolved` 或 `/etc/docker/daemon.json` 的 `"dns"`）。
+- 启用 `chrony` 或 `systemd-timesyncd`；系统时间偏差 >5 分钟会导致 Steam SSL 登录失败。
+
+### 6.4 Docker 镜像加速
+
+`/etc/docker/daemon.json` 示例：
+
+```json
+{
+  "registry-mirrors": ["https://你的镜像加速地址"],
+  "dns": ["223.5.5.5", "114.114.114.114"]
+}
+```
+
+需确保可拉取：`PANEL_IMAGE`、`GSH_STEAMCMD_IMAGE`、`GSH_GAME_DST_IMAGE`。
+
+### 6.5 文件描述符
+
+`/etc/security/limits.conf` 增加 `* soft/hard nofile 65536`（多容器 + SteamCMD 下载）。
+
+## 7. SteamCMD 国内网络排障
+
+面板通过 **Docker 临时容器** 执行 `app_update 343050`，不依赖宿主机直装 SteamCMD。
+
+### 7.1 推荐 panel.env（国内）
+
+```env
+GSH_STEAMCMD_DOWNLOAD_REGION=cn
+GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8
+GSH_STEAMCMD_INSTALL_RETRY_DELAYS_MS=5000,10000,15000,20000,25000,30000,35000
+```
+
+修改后：`cd /opt/game-server-hub && docker compose up -d` 重启面板。
+
+### 7.2 诊断 API
+
+登录 Hub 后请求 `GET /app/system/steamcmd/diagnostics`（或系统设置页），检查 SteamCDN 连通性、Docker 状态与配置建议。
+
+### 7.3  escalation 顺序
+
+1. 设置 `GSH_STEAMCMD_DOWNLOAD_REGION=cn`（或 `shanghai` / `beijing`）
+2. 优化 DNS / 时间同步 / Docker registry mirrors
+3. 配置 `GSH_STEAMCMD_HTTPS_PROXY`（IP 被 SteamCDN 限制时）
+4. 设置 `GSH_STEAMCMD_NETWORK_MODE=host` 后重启面板
+5. 查看实例安装日志；清理半成品目录后重试「更新服务端」
+
+### 7.4 DST 防火墙
+
+| 端口 | 协议 | 用途 |
+|------|------|------|
+| `PANEL_PORT` | TCP | 面板 |
+| 10999 | UDP | DST 游戏（默认，可改） |
+| 8766 | UDP | Steam 认证 |
+| 12346 | UDP | Steam 主服务器 |
+
+安装脚本：`./install.linux.sh --open-dst-ports`。云安全组须同步。
+
+### 7.5 同机第二实例：depot 复制（跳过 Steam 下载）
+
+当宿主机上已有 **已停止** 且 **版本最新** 的 DST 实例 A 时，再创建实例 B 会优先 **复制 A 的游戏文件**（不含存档），安装日志可见「已从实例 … 复制游戏文件，跳过 Steam 下载」。若无可用供体或复制失败，自动走 SteamCMD。
+
+注意：
+
+- **不要**手动把 B 的 `installPath` 指向 A 的目录（会共享存档）；seed 是复制到新目录 `{instancesRoot}/{新实例Id}/`。
+- 供体须 **stopped**；运行中复制 depot 虽理论可行，面板 intentionally 不选用 running 实例为供体。
+- 关闭 seed：`GSH_INSTALL_SEED_ENABLED=0`
+- 安装结束立即拉 DST 运行镜像：`GSH_INSTALL_DEFER_DST_IMAGE_PULL=0`
+
+## 8. 兜底与监控（建议）
 
 应用层已具备：Docker 不可达时拒绝实例关键操作并返回业务错误（见 FDS-00）。
 
@@ -197,7 +282,7 @@ cd "$INSTALL_DIR"
 docker compose restart panel || docker compose up -d
 ```
 
-## 6. 相关文档
+## 9. 相关文档
 
 - 安装与运行时： [FDS/00-install-runtime.md](./FDS/00-install-runtime.md)
 - 架构与 Docker 依赖： [05-SYSTEM-ARCHITECTURE-DESIGN.md](./05-SYSTEM-ARCHITECTURE-DESIGN.md)

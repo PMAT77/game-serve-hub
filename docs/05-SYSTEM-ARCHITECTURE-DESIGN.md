@@ -96,5 +96,27 @@ flowchart LR
 ## 6. 当前架构限制
 
 - v1 仅 DST 单游戏与本地节点核心路径。
-- **Cluster（模块 03）** 房间配置 API 与设置页已落地（M1）；**Shard（模块 04）** 独立编排、计划任务、通知审计仍在规划态。
+- **Cluster（模块 03）** 房间配置 API 与设置页已落地（M1，2026-05-20 验收）。
+- **Shard（模块 04）** 世界配置 API、世界列表/设置页与双容器编排已落地（M1，2026-05-21 验收）；洞穴默认配置在房间开启分片保存时自动生成。
+- 计划任务、通知审计等仍在规划态；模块 11 为 Pro-only。
 - 细粒度 API 授权与企业级审计链路尚未完成。
+
+## 7. Open Core 分层（Community / Pro）
+
+Game Server Hub 采用 **Open Core** 架构：Community 代码 MIT 公开；Pro 能力以私有 npm 包（`@gsh/pro-*`）注入同一 Fastify 运行时，用户升级无需重装实例数据。
+
+```mermaid
+flowchart LR
+  community[CommunityModules MIT] --> app[FastifyApp]
+  license[LicensePort] --> proLoader[ProModuleLoader]
+  proLoader --> proPkg["@gsh/pro-*"]
+  proPkg --> app
+```
+
+要点：
+
+- 模块注册入口：[`server/src/app.ts`](../server/src/app.ts)（Community）；Pro 包在 License 有效时动态加载。
+- 前端动态路由：auth 模块 `/app/route/list`；Pro 包追加路由或 Community 提供升级引导。
+- 功能边界与开发约束：[`13-PRO-OPEN-CORE-ARCHITECTURE.md`](./13-PRO-OPEN-CORE-ARCHITECTURE.md)、[`TODO.md`](./TODO.md) §5、[`COMMERCIAL.md`](./COMMERCIAL.md)。
+
+M3-b 起在 Community 仓实现 `LicensePort` / `ProModuleLoader` stub；M3-c 起首个 Pro 包 `@gsh/pro-scheduler`。

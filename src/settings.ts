@@ -16,7 +16,8 @@ export default setSettings({
     "mode": "fixed"
   },
   "tabbar": {
-    "icon": true
+    "icon": true,
+    "memory": true
   },
   "toolbar": {
     "fullscreen": true,

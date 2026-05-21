@@ -8,6 +8,14 @@ import {
 } from './constants'
 import { buildGameFilesBlockedMessage, diagnoseDstInstallReadiness } from './install-readiness'
 import { buildClusterIni, defaultClusterIniFields } from './cluster-ini'
+import {
+  buildServerIni,
+  defaultCavesServerIniFields,
+  defaultMasterServerIniFields,
+  parseServerIni,
+} from './server-ini'
+import { buildWorldgenOverride, defaultWorldgenPreset } from './worldgen-override'
+import { resolveMasterServerIniPath } from './shard-layout'
 
 export interface DstServerBinary {
   binDir: string
@@ -72,33 +80,21 @@ export function buildDstClusterIni(clusterName: string) {
   return buildClusterIni(defaultClusterIniFields(clusterName))
 }
 
-function buildDstMasterServerIni(gamePort: number) {
-  return [
-    '[SHARD]',
-    'is_master = true',
-    '',
-    '[NETWORK]',
-    `server_port = ${gamePort}`,
-    '',
-    '[STEAM]',
-    'master_server_port = 12346',
-    'authentication_port = 8766',
-    '',
-    '[ACCOUNT]',
-    'encode_user_path = true',
-    '',
-  ].join('\n')
+export function buildDstMasterServerIniContent(gamePort: number) {
+  return buildServerIni(defaultMasterServerIniFields(gamePort))
 }
 
-function buildDstWorldgenOverride() {
-  return [
-    'return {',
-    '  override_enabled = true,',
-    '  preset = "SURVIVAL_TOGETHER",',
-    '  overrides = {},',
-    '}',
-    '',
-  ].join('\n')
+export function buildDstCavesServerIniContent(masterGamePort: number) {
+  const masterFields = defaultMasterServerIniFields(masterGamePort)
+  return buildServerIni(defaultCavesServerIniFields(masterFields))
+}
+
+export function buildDstMasterWorldgenContent() {
+  return buildWorldgenOverride(defaultWorldgenPreset('master'))
+}
+
+export function buildDstCavesWorldgenContent() {
+  return buildWorldgenOverride(defaultWorldgenPreset('caves'))
 }
 
 export function ensureDstClusterConfig(installPath: string, input: EnsureDstClusterInput) {
@@ -107,18 +103,55 @@ export function ensureDstClusterConfig(installPath: string, input: EnsureDstClus
   const masterRoot = path.join(clusterRoot, 'Master')
   const gamePort = input.gamePort ?? DST_DEFAULT_GAME_PORT
   writeFileIfMissing(path.join(clusterRoot, 'cluster.ini'), buildDstClusterIni(input.instanceName ?? 'Game Server Hub'))
-  writeFileIfMissing(path.join(masterRoot, 'server.ini'), buildDstMasterServerIni(gamePort))
-  writeFileIfMissing(path.join(masterRoot, 'worldgenoverride.lua'), buildDstWorldgenOverride())
+  writeFileIfMissing(path.join(masterRoot, 'server.ini'), buildDstMasterServerIniContent(gamePort))
+  writeFileIfMissing(path.join(masterRoot, 'worldgenoverride.lua'), buildDstMasterWorldgenContent())
   return storageRoot
+}
+
+export function ensureDstCavesShardConfig(installPath: string, masterGamePort?: number): {
+  created: boolean
+  serverPort: number
+  steamAuthPort: number
+  steamMasterPort: number
+} {
+  const gamePort = masterGamePort ?? DST_DEFAULT_GAME_PORT
+  let masterFields = defaultMasterServerIniFields(gamePort)
+  const masterIniPath = resolveMasterServerIniPath(installPath)
+  if (fs.existsSync(masterIniPath)) {
+    const content = fs.readFileSync(masterIniPath, 'utf8')
+    masterFields = parseServerIni(content, 'master').fields
+  }
+  const cavesFields = defaultCavesServerIniFields(masterFields)
+  const cavesRoot = path.join(
+    path.join(installPath, DST_STORAGE_DIR, DST_CONF_DIR, DST_CLUSTER_NAME),
+    'Caves',
+  )
+  const cavesIniPath = path.join(cavesRoot, 'server.ini')
+  const cavesWorldgenPath = path.join(cavesRoot, 'worldgenoverride.lua')
+  const created = !fs.existsSync(cavesIniPath)
+  writeFileIfMissing(cavesIniPath, buildServerIni(cavesFields))
+  writeFileIfMissing(cavesWorldgenPath, buildDstCavesWorldgenContent())
+  return {
+    created,
+    serverPort: cavesFields.serverPort,
+    steamAuthPort: cavesFields.steamAuthPort,
+    steamMasterPort: cavesFields.steamMasterPort,
+  }
 }
 
 export function ensureDstLayout(installPath: string, input: EnsureDstClusterInput): {
   ok: boolean
   message?: string
 } {
+  const readiness = diagnoseDstInstallReadiness(installPath)
+  if (!readiness.ready) {
+    return {
+      ok: false,
+      message: buildGameFilesBlockedMessage(readiness, { instanceStatus: 'error' }),
+    }
+  }
   const binary = findDstServerBinary(installPath)
   if (!binary) {
-    const readiness = diagnoseDstInstallReadiness(installPath)
     return {
       ok: false,
       message: buildGameFilesBlockedMessage(readiness, { instanceStatus: 'error' }),
@@ -130,7 +163,7 @@ export function ensureDstLayout(installPath: string, input: EnsureDstClusterInpu
   return { ok: true }
 }
 
-export function buildDstLaunchArgs(storageRoot: string): string[] {
+export function buildDstLaunchArgs(storageRoot: string, shardFolder: 'Master' | 'Caves' = 'Master'): string[] {
   return [
     '-persistent_storage_root',
     storageRoot,
@@ -139,7 +172,7 @@ export function buildDstLaunchArgs(storageRoot: string): string[] {
     '-cluster',
     DST_CLUSTER_NAME,
     '-shard',
-    'Master',
+    shardFolder,
     '-console',
   ]
 }

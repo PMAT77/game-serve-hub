@@ -190,7 +190,8 @@ game-server-hub/
 | 条款简短清晰，降低使用者合规成本 |
 
 **Pro 版**：商业功能、授权与技术方案见 [docs/COMMERCIAL.md](docs/COMMERCIAL.md)，**不包含在 MIT 默认可用范围内**（除非另行书面授权）。  
-功能边界见 [docs/TODO.md §8](docs/TODO.md#8-community--pro-功能对照表)。
+Open Core 技术架构见 [docs/13-PRO-OPEN-CORE-ARCHITECTURE.md](docs/13-PRO-OPEN-CORE-ARCHITECTURE.md)。  
+功能边界见 [docs/TODO.md §5](docs/TODO.md#5-community--pro-功能对照表)。
 
 ```text
 Copyright (c) 2026 PMAT77

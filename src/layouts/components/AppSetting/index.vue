@@ -29,7 +29,7 @@ watch(() => appSettingsStore.settings.menu.mode, (value) => {
     appMenuStore.setActived(0)
   }
   else {
-    appMenuStore.setActived(route.fullPath)
+    appMenuStore.setActived(appMenuStore.resolveActivedPathFromRoute(route))
   }
 })
 onMounted(() => {
@@ -187,6 +187,12 @@ function handleCopy() {
             快捷键
           </div>
           <FaSwitch v-model="appSettingsStore.settings.tabbar.hotkeys" />
+        </div>
+        <div class="setting-item">
+          <div class="label">
+            记忆功能
+          </div>
+          <FaSwitch v-model="appSettingsStore.settings.tabbar.memory" />
         </div>
       </FaPageMain>
       <FaPageMain title="工具栏" class="m-0 mb-4 break-inside-avoid light:border-none" title-class="pb-0 border-none font-bold" main-class="space-y-4">

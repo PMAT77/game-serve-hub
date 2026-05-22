@@ -1,0 +1,175 @@
+# 开发指南
+
+面向参与 Game Server Hub 代码贡献的开发者。生产安装见 [INSTALL.md](INSTALL.md)。
+
+> 模块级 FDS、TODO、验收标准等内部文档位于本地 **`docs_local/`**（已 `.gitignore`，不入库）。克隆后若无该目录，请向维护者索取或自行按团队规范维护副本。
+
+---
+
+## 环境要求
+
+| 项 | 要求 |
+|----|------|
+| Node.js | `^20.19` / `^22.13` / `>=24` |
+| 包管理 | pnpm `10.33+`（见 `packageManager` 字段） |
+| Docker | 实例安装/启停依赖 Docker Engine（开发 Compose 模式亦需要） |
+| 数据库 | SQLite（`pnpm run dev:prepare` 自动初始化） |
+
+---
+
+## 克隆与依赖
+
+```bash
+git clone https://github.com/GameServerHub/game-server-hub.git
+cd game-server-hub
+corepack enable
+pnpm install
+```
+
+---
+
+## 环境变量
+
+```bash
+cp .env.development.example .env.development
+cp server/.env.development.example server/.env.development
+```
+
+按需修改 `VITE_APP_API_BASEURL`（默认 `http://127.0.0.1:9527`）与后端 `SERVER_PORT`（默认 `9527`）。
+
+Docker Compose 开发模式使用 `panel.env.example`：
+
+```bash
+cp panel.env.example panel.env
+```
+
+---
+
+## 初始化数据库
+
+```bash
+pnpm run dev:prepare
+```
+
+创建 SQLite、运行 Drizzle 迁移、初始化日志目录。
+
+---
+
+## 启动（宿主机 Node，推荐日常改代码）
+
+```bash
+pnpm run dev
+```
+
+| 服务 | 地址 | 说明 |
+|------|------|------|
+| 前端 | `http://127.0.0.1:9000` | Vite 开发服务器 |
+| 后端 | `http://127.0.0.1:9527` | Fastify API |
+| 健康检查 | `GET http://127.0.0.1:9527/health` | 含 Docker 状态 |
+
+默认管理员（`panel.env` / 开发预填）：账号 `superadmin`，密码 `123456`（亦可在 `panel.env` 或 `.env.development` 中覆盖）。
+
+---
+
+## 启动（Docker Compose 开发栈，贴近生产）
+
+需已安装 Docker。`dev:compose` 与 `dev:server` **不要同时运行**（实例卷 bind 会冲突）。
+
+```bash
+pnpm run dev:compose:prepare   # 可选：预拉 SteamCMD 镜像
+pnpm run dev:compose             # 启动 panel + web 容器
+```
+
+停止：
+
+```bash
+pnpm run dev:compose:down
+```
+
+Compose 开发栈下面板端口见 `panel.env` 中 `PANEL_PORT`（示例默认 `3000`）。
+
+---
+
+## 测试与代码检查
+
+```bash
+pnpm test:server
+pnpm run lint
+```
+
+---
+
+## 从源码构建生产镜像
+
+适用于自托管构建或 CI 调试。
+
+### 构建前端
+
+```bash
+cp .env.production.example .env.production
+cp server/.env.production.example server/.env.production
+pnpm install
+pnpm run build          # 输出 dist/
+```
+
+### 构建 Docker 镜像
+
+```bash
+# 面板镜像（含 dist + 后端）
+docker build -t ghcr.io/gameserverhub/game-server-hub:local .
+
+# DST 运行环境镜像
+docker build -t ghcr.io/gameserverhub/game-server-hub-dst:local docker/game-dst
+```
+
+### 本地 Compose 启动（非安装脚本路径）
+
+```bash
+cp panel.env.example panel.env
+# 编辑 panel.env，将 PANEL_IMAGE 改为本地 tag
+docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d
+```
+
+官方镜像由 GitHub Actions 在推送 `main` 或 `v*` tag 时发布至 GHCR：
+
+- `ghcr.io/gameserverhub/game-server-hub:<tag>`
+- `ghcr.io/gameserverhub/game-server-hub-dst:<tag>`
+
+---
+
+## 仓库结构
+
+```text
+game-server-hub/
+├── docs/                   # 公开文档（本目录）
+├── src/                    # Vue 3 前端
+├── server/                 # Fastify 后端、Drizzle、SQLite 迁移
+├── shared/                 # 前后端共享契约与错误码
+├── scripts/                # 安装脚本、开发工具
+├── packages/               # 工作区 UI 组件
+├── docker/                 # DST 运行镜像等
+├── docker-compose.yml      # 生产编排
+├── docker-compose.dev.yml  # 开发 overlay
+├── panel.env.example       # Compose / 安装脚本环境变量模板
+├── .env.*.example          # 前端 Vite 环境变量模板
+└── server/.env.*.example   # 后端环境变量模板
+```
+
+Standalone 副本与上游 fantastic-admin 母仓的同步说明见根目录 [MIGRATION.md](../MIGRATION.md)。
+
+---
+
+## 参与贡献
+
+欢迎 [Issue](https://github.com/GameServerHub/game-server-hub/issues) 与 [Pull Request](https://github.com/GameServerHub/game-server-hub/pulls)。
+
+提交前建议：
+
+```bash
+pnpm run lint
+pnpm test:server
+```
+
+提交说明采用 Conventional Commits 风格（中文）。
+
+**请勿提交**：`panel.env`、本地 SQLite、`docs_local/`、`.env` 凭据或任何密钥文件。

@@ -10,7 +10,17 @@ dist-test/
 packages/*/dist/
 
 # Internal documentation (not published in open-source repo)
-docs/
+docs_local/
+
+# Public docs: track guides only; other paths under docs/ stay local
+docs/*
+!docs/README.md
+!docs/INSTALL.md
+!docs/DEVELOPMENT.md
+!docs/assets/
+!docs/assets/**
+!docs/images/
+!docs/images/**
 
 # Local runtime data & logs
 server/data/
@@ -34,6 +44,8 @@ panel.env
 
 # IDE & local tooling
 .agents/
+.skills/
+skills/
 .cursor/
 .vscode/
 .idea/

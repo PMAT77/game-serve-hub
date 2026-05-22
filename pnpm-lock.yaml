@@ -24,9 +24,6 @@ catalogs:
     '@iconify/vue':
       specifier: ^5.0.0
       version: 5.0.1
-    '@libsql/client':
-      specifier: ^0.17.3
-      version: 0.17.3
     '@spiriit/vite-plugin-svg-spritemap':
       specifier: ^7.0.0
       version: 7.0.0
@@ -39,9 +36,6 @@ catalogs:
     '@types/path-browserify':
       specifier: ^1.0.3
       version: 1.0.3
-    '@types/qs':
-      specifier: ^6.15.0
-      version: 6.15.1
     '@unocss/core':
       specifier: ^66.6.8
       version: 66.6.8
@@ -69,9 +63,6 @@ catalogs:
     '@vueuse/integrations':
       specifier: ^14.2.1
       version: 14.3.0
-    '@zumer/snapdom':
-      specifier: ^2.8.0
-      version: 2.12.0
     axios:
       specifier: ^1.15.0
       version: 1.16.1
@@ -156,9 +147,6 @@ catalogs:
     postcss-nested:
       specifier: ^7.0.2
       version: 7.0.2
-    qs:
-      specifier: ^6.15.1
-      version: 6.15.2
     reka-ui:
       specifier: ^2.9.6
       version: 2.9.7
@@ -282,9 +270,6 @@ importers:
       '@vueuse/integrations':
         specifier: 'catalog:'
         version: 14.3.0(async-validator@4.2.5)(axios@1.16.1)(nprogress@0.2.0)(vue@3.5.34(typescript@5.9.3))
-      '@zumer/snapdom':
-        specifier: 'catalog:'
-        version: 2.12.0
       axios:
         specifier: 'catalog:'
         version: 1.16.1
@@ -345,9 +330,6 @@ importers:
       pinyin-pro:
         specifier: 'catalog:'
         version: 3.28.1
-      qs:
-        specifier: 'catalog:'
-        version: 6.15.2
       reka-ui:
         specifier: 'catalog:'
         version: 2.9.7(vue@3.5.34(typescript@5.9.3))
@@ -357,9 +339,6 @@ importers:
       tailwind-merge:
         specifier: 'catalog:'
         version: 3.6.0
-      type-fest:
-        specifier: 'catalog:'
-        version: 5.6.0
       ua-parser-js:
         specifier: 'catalog:'
         version: 2.0.9
@@ -397,9 +376,6 @@ importers:
       '@iconify/vue':
         specifier: 'catalog:'
         version: 5.0.1(vue@3.5.34(typescript@5.9.3))
-      '@libsql/client':
-        specifier: 'catalog:'
-        version: 0.17.3
       '@spiriit/vite-plugin-svg-spritemap':
         specifier: 'catalog:'
         version: 7.0.0(svgo@4.0.1)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.7.0)(sass-embedded@1.99.0)(sass@1.99.0)(terser@5.47.1)(tsx@4.22.1)(yaml@2.9.0))(vue@3.5.34(typescript@5.9.3))
@@ -412,9 +388,6 @@ importers:
       '@types/path-browserify':
         specifier: 'catalog:'
         version: 1.0.3
-      '@types/qs':
-        specifier: 'catalog:'
-        version: 6.15.1
       '@unocss/core':
         specifier: 'catalog:'
         version: 66.6.8
@@ -2896,9 +2869,6 @@ packages:
   '@types/path-browserify@1.0.3':
     resolution: {integrity: sha512-ZmHivEbNCBtAfcrFeBCiTjdIc2dey0l7oCGNGpSuRTy8jP6UVND7oUowlvDujBy8r2Hoa8bfFUOCiPWfmtkfxw==}
 
-  '@types/qs@6.15.1':
-    resolution: {integrity: sha512-GZHUBZR9hckSUhrxmp1nG6NwdpM9fCunJwyThLW1X3AyHgd9IlHb6VANpQQqDr2o/qQp6McZ3y/IA2rVzKzSbw==}
-
   '@types/resolve@1.20.2':
     resolution: {integrity: sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q==}
 
@@ -3194,9 +3164,6 @@ packages:
   '@xmldom/xmldom@0.9.10':
     resolution: {integrity: sha512-A9gOqLdi6cV4ibazAjcQufGj0B1y/vDqYrcuP6d/6x8P27gRS8643Dj9o1dEKtB6O7fwxb2FgBmJS2mX7gpvdw==}
     engines: {node: '>=14.6'}
-
-  '@zumer/snapdom@2.12.0':
-    resolution: {integrity: sha512-TdLGu+1RkKI3JKfMFvn1gRPD/rl8hrAeN6aFjjd0w7S39nulbd94ChxSlfH7nSCm8kzuQkeWFxIsij4+Mk1RDg==}
 
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
@@ -7248,10 +7215,12 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
 
   '@libsql/core@0.17.3':
     dependencies:
       js-base64: 3.7.8
+    optional: true
 
   '@libsql/darwin-arm64@0.5.29':
     optional: true
@@ -7266,6 +7235,7 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
 
   '@libsql/isomorphic-ws@0.1.5':
     dependencies:
@@ -7274,6 +7244,7 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
 
   '@libsql/linux-arm-gnueabihf@0.5.29':
     optional: true
@@ -7305,7 +7276,8 @@ snapshots:
       '@tybys/wasm-util': 0.10.2
     optional: true
 
-  '@neon-rs/load@0.0.4': {}
+  '@neon-rs/load@0.0.4':
+    optional: true
 
   '@oxc-parser/binding-android-arm-eabi@0.124.0':
     optional: true
@@ -7772,8 +7744,6 @@ snapshots:
 
   '@types/path-browserify@1.0.3': {}
 
-  '@types/qs@6.15.1': {}
-
   '@types/resolve@1.20.2': {}
 
   '@types/ssh2@1.15.5':
@@ -7785,6 +7755,7 @@ snapshots:
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 25.8.0
+    optional: true
 
   '@unocss/cli@66.6.8':
     dependencies:
@@ -8196,8 +8167,6 @@ snapshots:
       vue: 3.5.34(typescript@5.9.3)
 
   '@xmldom/xmldom@0.9.10': {}
-
-  '@zumer/snapdom@2.12.0': {}
 
   abort-controller@3.0.0:
     dependencies:
@@ -8718,7 +8687,8 @@ snapshots:
 
   detect-europe-js@0.1.2: {}
 
-  detect-libc@2.0.2: {}
+  detect-libc@2.0.2:
+    optional: true
 
   detect-libc@2.1.2: {}
 
@@ -9306,7 +9276,8 @@ snapshots:
 
   jiti@2.7.0: {}
 
-  js-base64@3.7.8: {}
+  js-base64@3.7.8:
+    optional: true
 
   js-tokens@4.0.0: {}
 
@@ -9351,6 +9322,7 @@ snapshots:
       '@libsql/linux-x64-gnu': 0.5.29
       '@libsql/linux-x64-musl': 0.5.29
       '@libsql/win32-x64-msvc': 0.5.29
+    optional: true
 
   light-my-request@6.6.0:
     dependencies:
@@ -9967,7 +9939,8 @@ snapshots:
 
   process@0.11.10: {}
 
-  promise-limit@2.7.0: {}
+  promise-limit@2.7.0:
+    optional: true
 
   protobufjs@7.5.9:
     dependencies:
@@ -11001,7 +10974,8 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  ws@8.20.1: {}
+  ws@8.20.1:
+    optional: true
 
   wsl-utils@0.1.0:
     dependencies:

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { InstanceConnectInfo, InstanceConsoleLogLine, InstanceItem } from '@/api/modules/instance'
+import type { InstanceConnectInfo, InstanceConsoleLogLine, InstanceItem, InstanceMaintenancePushLog } from '@/api/modules/instance'
 import apiInstance from '@/api/modules/instance'
+import { routeToNodeInstance } from '@/navigation/game-routes'
 import { formatDateTime } from './utils'
 import type { InstanceConsoleCommandShard } from '@/api/modules/instance'
 import {
@@ -8,12 +9,15 @@ import {
   NCard,
   NDescriptions,
   NDescriptionsItem,
+  NEmpty,
+  NInput,
   NRadioButton,
   NRadioGroup,
   NSpace,
   NTabPane,
   NTabs,
   NTag,
+  NTooltip,
   useDialog,
 } from 'naive-ui'
 
@@ -21,7 +25,7 @@ defineOptions({
   name: 'NodeInstanceConsole',
 })
 
-type ConsoleTab = 'logs' | 'panel'
+type ConsoleTab = 'logs' | 'panel' | 'maintenance'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,6 +43,12 @@ const activeTab = ref<ConsoleTab>('panel')
 const commandInput = ref('')
 const commandShard = ref<InstanceConsoleCommandShard>('master')
 const commandSending = ref(false)
+const maintenanceMessage = ref('')
+const maintenanceDraftUpdatedAt = ref<string | null>(null)
+const maintenancePushLogs = ref<InstanceMaintenancePushLog[]>([])
+const maintenanceLoading = ref(false)
+const maintenanceSaving = ref(false)
+const maintenancePushing = ref(false)
 const autoScroll = ref(true)
 const logViewportLogsRef = ref<HTMLElement | null>(null)
 const logViewportPanelRef = ref<HTMLElement | null>(null)
@@ -131,7 +141,7 @@ async function loadInstanceMeta() {
   const target = list.find((item: InstanceItem) => item.id === instanceId.value)
   if (!target) {
     faToast.warning('实例不存在或已删除')
-    router.replace({ name: 'nodeInstance' })
+    router.replace(routeToNodeInstance())
     return
   }
   instanceName.value = target.name
@@ -154,6 +164,89 @@ async function loadConnectInfo() {
   finally {
     connectInfoLoading.value = false
   }
+}
+
+async function loadMaintenanceAnnounce() {
+  if (!instanceId.value) {
+    return
+  }
+  maintenanceLoading.value = true
+  try {
+    const res = await apiInstance.getInstanceMaintenanceAnnounce(instanceId.value)
+    maintenanceMessage.value = res.data.draft.message
+    maintenanceDraftUpdatedAt.value = res.data.draft.updatedAt
+    maintenancePushLogs.value = res.data.recentPushes
+  }
+  catch {
+    maintenancePushLogs.value = []
+  }
+  finally {
+    maintenanceLoading.value = false
+  }
+}
+
+async function saveMaintenanceDraft() {
+  const message = maintenanceMessage.value.trim()
+  if (!message) {
+    faToast.warning('请先输入公告内容')
+    return
+  }
+  maintenanceSaving.value = true
+  try {
+    const res = await apiInstance.saveInstanceMaintenanceAnnounceDraft(instanceId.value, message)
+    maintenanceMessage.value = res.data.draft.message
+    maintenanceDraftUpdatedAt.value = res.data.draft.updatedAt
+    maintenancePushLogs.value = res.data.recentPushes
+    faToast.success('公告草稿已保存')
+  }
+  finally {
+    maintenanceSaving.value = false
+  }
+}
+
+function confirmPushMaintenanceAnnounce() {
+  const message = maintenanceMessage.value.trim()
+  if (!message) {
+    faToast.warning('请先输入公告内容')
+    return
+  }
+  dialog.info({
+    title: '推送到游戏房间',
+    content: '将向主世界在线玩家广播此公告。确认推送？',
+    positiveText: '确认推送',
+    negativeText: '取消',
+    onPositiveClick: () => pushMaintenanceAnnounce(message),
+  })
+}
+
+async function pushMaintenanceAnnounce(message: string) {
+  maintenancePushing.value = true
+  try {
+    const res = await apiInstance.pushInstanceMaintenanceAnnounce(instanceId.value, message)
+    maintenancePushLogs.value = [
+      res.data.pushLog,
+      ...maintenancePushLogs.value.filter(item => item.id !== res.data.pushLog.id),
+    ]
+    if (res.data.isSuccess) {
+      faToast.success('维护公告已推送到游戏房间')
+      await refreshLogs()
+      await loadMaintenanceAnnounce()
+    }
+    else {
+      faToast.error(res.data.errorMessage ?? '推送失败')
+    }
+  }
+  finally {
+    maintenancePushing.value = false
+  }
+}
+
+function formatMaintenancePushStatus(status: InstanceMaintenancePushLog['status']) {
+  return status === 'success' ? '成功' : '失败'
+}
+
+function maintenancePushStatusTagType(status: InstanceMaintenancePushLog['status']) {
+  return status === 'success' ? 'success' : 'error'
 }
 
 async function refreshLogs() {
@@ -248,6 +341,62 @@ async function copyLogs() {
 
 type ConnectCopyMode = 'public' | 'local' | 'lan'
 
+const connectDisplayMode = ref<ConnectCopyMode>('public')
+
+const availableConnectModes: ConnectCopyMode[] = ['public', 'local', 'lan']
+
+const connectDisplayBlock = computed(() => {
+  const info = connectInfo.value
+  if (!info) {
+    return null
+  }
+  if (connectDisplayMode.value === 'local') {
+    return {
+      title: '本机进服',
+      command: info.localCommand,
+      hint: '仅当游戏客户端装在与面板同一台电脑上时使用。',
+    }
+  }
+  if (connectDisplayMode.value === 'lan') {
+    return {
+      title: '局域网进服',
+      command: info.lanCommand ?? '',
+      hint: info.lanCommand
+        ? '同一 WiFi / 内网的其他电脑；地址为当前探测结果，连不上请在服务器主机 ipconfig 核对 IPv4。'
+        : '面板未能自动探测局域网 IP。请在游戏服主机执行 ipconfig 查看 IPv4，或于环境配置中指定进服地址。',
+    }
+  }
+  return {
+    title: '公网 / 对外',
+    command: info.command,
+    hint: '适合外网或云服务器；本机 WSL2 / Docker 开发时此地址往往无法直连。',
+  }
+})
+
+const canCopyConnectDisplay = computed(() => {
+  const info = connectInfo.value
+  const block = connectDisplayBlock.value
+  if (!info || !block?.command) {
+    return false
+  }
+  if (connectDisplayMode.value === 'public' && info.isPlaceholder) {
+    return false
+  }
+  return true
+})
+
+const connectModeToggleTitle = computed(() => {
+  const idx = availableConnectModes.indexOf(connectDisplayMode.value)
+  const next = availableConnectModes[(idx + 1) % availableConnectModes.length]
+  const nextLabel = next === 'local' ? '本机' : next === 'lan' ? '局域网' : '公网'
+  return `切换为${nextLabel}直连命令`
+})
+
+function cycleConnectDisplayMode() {
+  const idx = availableConnectModes.indexOf(connectDisplayMode.value)
+  connectDisplayMode.value = availableConnectModes[(idx + 1) % availableConnectModes.length]!
+}
+
 async function copyConnectCommand(mode: ConnectCopyMode) {
   const info = connectInfo.value
   if (!info) {
@@ -277,7 +426,7 @@ const udpPortsLabel = computed(() => {
 })
 
 function goBack() {
-  router.push({ name: 'nodeInstance' })
+  router.push(routeToNodeInstance())
 }
 
 watch(consoleShards, (shards) => {
@@ -286,8 +435,10 @@ watch(consoleShards, (shards) => {
   }
 })
 
-watch(activeTab, () => {
-  scrollToBottom()
+watch(activeTab, (tab) => {
+  if (tab === 'logs' || tab === 'panel') {
+    scrollToBottom()
+  }
 })
 
 watch(running, (value) => {
@@ -303,6 +454,7 @@ onMounted(async () => {
   }
   await loadInstanceMeta()
   await loadConnectInfo()
+  await loadMaintenanceAnnounce()
   await refreshLogs()
   connectStream()
   pollTimer = setInterval(() => {
@@ -368,43 +520,54 @@ onBeforeUnmount(() => {
             </NDescriptionsItem>
           </NDescriptions>
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
-            在游戏内按 ~ 打开控制台，粘贴下方命令。外网玩家用公网直连；局域网内其他电脑用局域网地址（多为
-            <span class="font-mono">192.168.x.x</span>，以服务器所在电脑的 ipconfig 为准，每台网络不同）。
+            在游戏内按 ~ 打开控制台，粘贴下方命令。命令框右侧可复制当前命令，或切换公网 / 本机 / 局域网直连。
           </p>
 
-          <p class="text-xs text-muted-foreground mb-1">
-            公网 / 对外：
-          </p>
-          <div class="font-mono text-xs p-3 rounded-md bg-zinc-950 text-zinc-100 break-all mb-1">
-            {{ connectInfo.command }}
-          </div>
-          <p class="text-xs text-muted-foreground/80 mb-3">
-            适合外网或云服务器；本机 WSL2 / Docker 开发时此地址往往无法直连。
-          </p>
-
-          <p class="text-xs text-muted-foreground mb-1">
-            本机进服（仅游戏装在与面板同一台电脑）：
-          </p>
-          <div class="font-mono text-xs p-3 rounded-md bg-zinc-950 text-zinc-100 break-all mb-3">
-            {{ connectInfo.localCommand }}
-          </div>
-
-          <p class="text-xs text-muted-foreground mb-1">
-            局域网进服（同一 WiFi / 内网的其他电脑）：
-          </p>
-          <template v-if="connectInfo.lanCommand">
-            <div class="font-mono text-xs p-3 rounded-md bg-zinc-950 text-zinc-100 break-all mb-1">
-              {{ connectInfo.lanCommand }}
+          <template v-if="connectDisplayBlock">
+            <p class="text-xs text-muted-foreground mb-1">
+              {{ connectDisplayBlock.title }}
+            </p>
+            <div class="flex gap-2 items-stretch mb-1">
+              <div
+                class="min-w-0 flex-1 font-mono text-xs p-3 rounded-md bg-zinc-950 text-zinc-100 break-all min-h-10"
+                :class="{ 'text-zinc-500': !connectDisplayBlock.command }"
+              >
+                {{ connectDisplayBlock.command || '暂无可用命令' }}
+              </div>
+              <div class="flex shrink-0 items-center gap-1 self-center">
+                <NTooltip>
+                  <template #trigger>
+                    <NButton
+                      quaternary
+                      circle
+                      size="small"
+                      :disabled="!canCopyConnectDisplay"
+                      @click="copyConnectCommand(connectDisplayMode)"
+                    >
+                      <FaIcon name="i-lucide:copy" class="size-4" />
+                    </NButton>
+                  </template>
+                  复制当前直连命令
+                </NTooltip>
+                <NTooltip>
+                  <template #trigger>
+                    <NButton
+                      quaternary
+                      circle
+                      size="small"
+                      @click="cycleConnectDisplayMode"
+                    >
+                      <FaIcon name="i-ri:arrow-left-right-line" class="size-4" />
+                    </NButton>
+                  </template>
+                  {{ connectModeToggleTitle }}
+                </NTooltip>
+              </div>
             </div>
-            <p class="text-xs text-muted-foreground/80 mb-3">
-              为当前探测到的局域网地址；若连不上，请在服务器主机上执行 ipconfig 核对 IPv4（每台电脑的 192.168.x.x 可能不同）。
+            <p class="text-xs text-muted-foreground/80 mb-3 leading-relaxed">
+              {{ connectDisplayBlock.hint }}
             </p>
           </template>
-          <p v-else class="text-xs text-muted-foreground/80 mb-3 leading-relaxed">
-            面板未能自动探测到局域网 IP。请在运行游戏服的 Windows 主机上执行
-            <span class="font-mono">ipconfig</span>
-            查看 IPv4（常见为 192.168.0.x / 192.168.1.x，因网络而异），手动替换公网命令中的 IP；若仍无法识别，可在面板环境配置中指定进服地址。
-          </p>
 
           <p v-if="udpPortsLabel" class="text-xs text-muted-foreground mb-2">
             直连进服需放行 UDP 端口：{{ udpPortsLabel }}。从游戏浏览列表进入不受此限制。
@@ -417,31 +580,6 @@ onBeforeUnmount(() => {
               {{ hint }}
             </li>
           </ul>
-          <NSpace size="small" wrap>
-            <FaButton
-              size="sm"
-              variant="default"
-              :disabled="connectInfo.isPlaceholder"
-              @click="copyConnectCommand('public')"
-            >
-              复制公网直连
-            </FaButton>
-            <FaButton
-              size="sm"
-              variant="outline"
-              @click="copyConnectCommand('local')"
-            >
-              复制本机直连
-            </FaButton>
-            <FaButton
-              v-if="connectInfo.lanCommand"
-              size="sm"
-              variant="outline"
-              @click="copyConnectCommand('lan')"
-            >
-              复制局域网直连
-            </FaButton>
-          </NSpace>
         </template>
         <p v-else class="text-sm text-muted-foreground">
           无法加载连接信息。
@@ -482,7 +620,7 @@ onBeforeUnmount(() => {
             <div class="flex flex-wrap gap-2 items-center mb-3">
               <span class="text-xs text-muted-foreground">命令发送到：</span>
               <NRadioGroup v-model:value="commandShard" size="small">
-                <NRadioButton value="master" label="主世界" />
+                <NRadioButton value="master" label="地上" />
                 <NRadioButton
                   value="caves"
                   label="洞穴"
@@ -494,7 +632,7 @@ onBeforeUnmount(() => {
               </span>
             </div>
             <p class="text-xs text-muted-foreground mb-4 leading-relaxed">
-              改玩家属性、刷物品等命令需在玩家当前所在世界执行（人在洞穴时选「洞穴」）；保存、回档等命令通常只需选「主世界」。
+              改玩家属性、刷物品等命令需在玩家当前所在世界执行（人在洞穴时选「洞穴」）；保存、回档等命令通常只需选「地上」。
             </p>
             <NSpace class="mb-4" wrap>
               <NButton
@@ -558,6 +696,74 @@ onBeforeUnmount(() => {
               <input v-model="autoScroll" type="checkbox" class="accent-primary">
               自动滚动
             </label>
+          </div>
+        </NTabPane>
+
+        <NTabPane name="maintenance" tab="维护公告">
+          <p class="text-xs text-muted-foreground mt-3 mb-4 leading-relaxed max-w-3xl">
+            向游戏内在线玩家推送公告。常见用法：面板升级或维护前先通知玩家（游戏服可继续运行）。
+          </p>
+          <NInput
+            v-model:value="maintenanceMessage"
+            type="textarea"
+            placeholder="例如：10 分钟后面板升级，游戏服保持在线，暂无法打开管理页"
+            :disabled="maintenanceLoading || maintenanceSaving || maintenancePushing"
+            :maxlength="500"
+            show-count
+            :autosize="{ minRows: 4, maxRows: 8 }"
+            class="mb-3"
+          />
+          <p v-if="maintenanceDraftUpdatedAt" class="text-xs text-muted-foreground mb-3">
+            草稿上次保存：{{ formatDateTime(maintenanceDraftUpdatedAt) }}
+          </p>
+          <NSpace class="mb-6" justify="start" wrap>
+            <NButton
+              size="small"
+              :loading="maintenanceSaving"
+              :disabled="maintenanceLoading || maintenancePushing"
+              @click="saveMaintenanceDraft"
+            >
+              保存草稿
+            </NButton>
+            <NButton
+              size="small"
+              type="primary"
+              :loading="maintenancePushing"
+              :disabled="!running || maintenanceLoading || maintenanceSaving"
+              @click="confirmPushMaintenanceAnnounce"
+            >
+              推送到房间
+            </NButton>
+          </NSpace>
+          <p class="text-xs text-muted-foreground mb-2">
+            最近推送记录
+          </p>
+          <NEmpty
+            v-if="!maintenanceLoading && maintenancePushLogs.length === 0"
+            description="暂无推送记录"
+            size="small"
+            class="py-4"
+          />
+          <div v-else class="space-y-2 max-h-[min(48vh,520px)] overflow-y-auto">
+            <div
+              v-for="item in maintenancePushLogs"
+              :key="item.id"
+              class="rounded-md border border-border px-3 py-2 text-xs"
+            >
+              <div class="flex flex-wrap gap-2 items-center mb-1">
+                <NTag :type="maintenancePushStatusTagType(item.status)" size="small">
+                  {{ formatMaintenancePushStatus(item.status) }}
+                </NTag>
+                <span class="text-muted-foreground">{{ formatDateTime(item.pushedAt) }}</span>
+                <span class="text-muted-foreground">· {{ item.operatorAccount }}</span>
+              </div>
+              <p class="whitespace-pre-wrap break-all">
+                {{ item.message }}
+              </p>
+              <p v-if="item.errorMessage" class="text-rose-500 mt-1">
+                {{ item.errorMessage }}
+              </p>
+            </div>
           </div>
         </NTabPane>
       </NTabs>

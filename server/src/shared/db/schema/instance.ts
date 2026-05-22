@@ -48,3 +48,19 @@ export const backups = sqliteTable('backups', {
   note: text('note').notNull().default(''),
   createdAt: text('created_at').notNull(),
 })
+
+export const instanceMaintenanceDrafts = sqliteTable('instance_maintenance_drafts', {
+  instanceId: text('instance_id').primaryKey(),
+  message: text('message').notNull().default(''),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const instanceMaintenancePushLogs = sqliteTable('instance_maintenance_push_logs', {
+  id: text('id').primaryKey(),
+  instanceId: text('instance_id').notNull(),
+  message: text('message').notNull(),
+  operatorAccount: text('operator_account').notNull(),
+  status: text('status').notNull(),
+  errorMessage: text('error_message'),
+  pushedAt: text('pushed_at').notNull(),
+})

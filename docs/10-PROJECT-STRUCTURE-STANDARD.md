@@ -14,16 +14,29 @@ game-server-hub-standalone/
 
 ## 2. 前端结构规范（`src/`）
 
-- `views/`：按业务域组织页面（console/node/system 等）。
+- `views/`：按业务域组织页面，多游戏约定见下表。
+- `views/node/instance/`：跨游戏实例生命周期（列表、控制台）。
+- `views/games/{gameCode}/`：游戏域页面（如 DST 的 `cluster/`、`shard/`）。
+- `views/console/`、`views/system/`：平台级页面（非实例域）。
+- `navigation/`：路由 name 与 `router.push` 辅助（与 `server/src/shared/menu-routes.ts` 对齐）。
+- `constants/games.ts`：再导出 `shared/constants/games.ts` 中的 `gameCode`。
 - `api/modules/`：按领域拆分 API 封装与 mock。
-- `router/`：路由定义与守卫逻辑。
+- `router/`：固定路由、旧路径重定向；动态菜单由后端 `/app/route/list` 下发。
 - `store/modules/`：全局状态分域管理。
 - `components/`：复用组件与业务通用组件。
+
+| 层级 | 目录示例 | 路由前缀示例 | 说明 |
+|------|----------|--------------|------|
+| 平台 | `console/monitor` | `/console/monitor` | 主机监控，不绑实例 |
+| 节点/实例 | `node/instance` | `/node/instance` | 创建、启停、安装日志 |
+| 游戏域 | `games/dst/cluster` | `/games/dst/rooms` | DST 房间（FDS-03） |
+| 游戏域 | `games/dst/shard` | `/games/dst/worlds` | DST 世界（FDS-04） |
 
 规范要求：
 
 - 页面只做组合与交互，复杂业务逻辑沉淀到可复用模块。
 - 同一业务域的页面、API、类型尽量同层聚合。
+- 新增游戏时在 `views/games/<code>/` 增加域页面，并在 `server/src/shared/menu-routes.ts` 注册路由；跳转统一走 `src/navigation/game-routes.ts`。
 
 ## 3. 后端结构规范（`server/src/`）
 

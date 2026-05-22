@@ -3,20 +3,8 @@ import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/co
 import { randomUUID } from 'node:crypto'
 import { consumeFirstLoginPasswordChangePrompt, createSession, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
 import { businessError, success, unauthorized } from '../../shared/http/response'
-import type { RouteMetaRaw } from '../../../../packages/types/types'
-
-/** 与前端 `vue-router` RouteMeta（RouteMetaRaw）对齐，避免后端菜单字段遗漏 */
-type RouteMeta = RouteMetaRaw & {
-  title: string
-}
-
-interface RouteItem {
-  path?: string
-  component?: string
-  name?: string
-  meta: RouteMeta
-  children?: RouteItem[]
-}
+import type { MenuRouteItem } from '../../shared/menu-routes'
+import { menuRouteList } from '../../shared/menu-routes'
 
 interface LoginBody {
   account: string
@@ -35,177 +23,11 @@ interface PasswordChangeRateState {
   blockedUntil: number
 }
 
-const NODE_INSTANCE_MANAGE_PERMISSION = 'pages.node.instance:manage'
 const PASSWORD_CHANGE_ATTEMPT_LIMIT = 5
 const PASSWORD_CHANGE_WINDOW_MS = 10 * 60 * 1000
 const PASSWORD_CHANGE_BLOCK_MS = 15 * 60 * 1000
 const PASSWORD_CHANGE_MIN_INTERVAL_MS = 60 * 1000
 const passwordChangeRateMap = new Map<string, PasswordChangeRateState>()
-
-const routeList: RouteItem[] = [
-  {
-    meta: {
-      title: '控制台',
-      icon: 'ri:dashboard-line',
-    },
-    children: [
-      {
-        path: '/console',
-        component: 'Layout',
-        name: 'console',
-        meta: {
-          title: '控制台',
-          icon: 'ri:terminal-box-line',
-        },
-        children: [
-          {
-            path: 'monitor',
-            name: 'consoleMonitor',
-            component: 'console/monitor/index.vue',
-            meta: {
-              title: '监控台',
-              icon: 'ri:pulse-line',
-            },
-          },
-        ],
-      },
-    ],
-  },
-  {
-    meta: {
-      title: '节点',
-      icon: 'ri:server-line',
-    },
-    children: [
-      {
-        path: '/node',
-        component: 'Layout',
-        name: 'node',
-        meta: {
-          title: '节点管理',
-          icon: 'ri:hard-drive-3-line',
-          auth: NODE_INSTANCE_MANAGE_PERMISSION,
-        },
-        children: [
-          {
-            path: 'instance',
-            name: 'nodeInstance',
-            component: 'node/instance/index.vue',
-            meta: {
-              title: '实例管理',
-              icon: 'ri:stack-line',
-              auth: NODE_INSTANCE_MANAGE_PERMISSION,
-            },
-          },
-          {
-            path: 'instance/console/:instanceId',
-            name: 'nodeInstanceConsole',
-            component: 'node/instance/console.vue',
-            meta: {
-              title: '实例控制台',
-              icon: 'ri:terminal-line',
-              auth: NODE_INSTANCE_MANAGE_PERMISSION,
-              activeMenu: '/node/instance',
-              menu: false,
-            },
-          },
-        ],
-      },
-    ],
-  },
-  {
-    meta: {
-      title: '房间',
-      icon: 'ri:home-wifi-line',
-    },
-    children: [
-      {
-        path: '/cluster',
-        component: 'Layout',
-        name: 'cluster',
-        meta: {
-          title: '房间管理',
-          icon: 'ri:community-line',
-          auth: NODE_INSTANCE_MANAGE_PERMISSION,
-        },
-        children: [
-          {
-            path: 'list',
-            name: 'clusterList',
-            component: 'cluster/index.vue',
-            meta: {
-              title: '房间列表',
-              icon: 'ri:list-check',
-              auth: NODE_INSTANCE_MANAGE_PERMISSION,
-            },
-          },
-          {
-            path: 'settings/:instanceId',
-            name: 'clusterSettings',
-            component: 'cluster/settings.vue',
-            meta: {
-              title: '房间设置',
-              icon: 'ri:settings-3-line',
-              auth: NODE_INSTANCE_MANAGE_PERMISSION,
-              activeMenu: '/cluster/list',
-              menu: false,
-            },
-          },
-          {
-            path: 'shard-list',
-            name: 'shardList',
-            component: 'shard/index.vue',
-            meta: {
-              title: '世界列表',
-              icon: 'ri:earth-line',
-              auth: NODE_INSTANCE_MANAGE_PERMISSION,
-            },
-          },
-          {
-            path: 'shard-settings/:instanceId',
-            name: 'shardSettings',
-            component: 'shard/settings.vue',
-            meta: {
-              title: '世界设置',
-              icon: 'ri:landscape-line',
-              auth: NODE_INSTANCE_MANAGE_PERMISSION,
-              activeMenu: '/cluster/shard-list',
-              menu: false,
-            },
-          },
-        ],
-      },
-    ],
-  },
-  {
-    meta: {
-      title: '系统',
-      icon: 'ri:settings-3-line',
-    },
-    children: [
-      {
-        path: '/system',
-        component: 'Layout',
-        name: 'system',
-        meta: {
-          title: '系统管理',
-          icon: 'ri:computer-line',
-        },
-        children: [
-          {
-            path: 'settings',
-            name: 'systemSettings',
-            component: 'system/settings.vue',
-            meta: {
-              title: '系统设置',
-              icon: 'ri:settings-4-line',
-            },
-          },
-        ],
-      },
-    ],
-  },
-]
 
 function normalizeToken(tokenHeader: string | string[] | undefined): string {
   if (Array.isArray(tokenHeader)) {
@@ -270,8 +92,8 @@ function clearPasswordChangeFailures(userId: string) {
  * 负责认证、登录态、密码管理等能力。
  */
 export function registerAuthModule(app: FastifyInstance) {
-  app.get('/app/route/list', async (request): Promise<ApiSuccessResponse<RouteItem[]>> => {
-    return success(routeList, request)
+  app.get('/app/route/list', async (request): Promise<ApiSuccessResponse<MenuRouteItem[]>> => {
+    return success(menuRouteList, request)
   })
 
   app.post('/app/account/login', async (request): Promise<ApiSuccessResponse<{

@@ -1,6 +1,6 @@
 # Game Server Hub 商业与授权说明
 
-> 最后更新：2026-05-21  
+> 最后更新：2026-05-22  
 > 状态：草案（Pro 产品尚未公开发售）  
 > 技术架构：[13-PRO-OPEN-CORE-ARCHITECTURE.md](./13-PRO-OPEN-CORE-ARCHITECTURE.md)  
 > 功能对照：[TODO.md §5](./TODO.md#5-community--pro-功能对照表)
@@ -37,6 +37,7 @@ Pro 功能**不包含**在 MIT 默认可用范围内，须购买或签署商业�
 | 06 备份 | Hybrid | 手动备份与恢复 | 自动备份、云存储 |
 | 07 配置中心 | Hybrid | INI/LUA 编辑与校验 | diff、导入导出 |
 | 08 文件 | Hybrid | 沙箱浏览、文本编辑 | 大文件、断点续传 |
+| 09 实例控制台 | Hybrid | 连接信息、日志、快捷指令、自定义命令输入 | DST 命令库、输入补全、自定义命令模板 |
 | 10 玩家访问 | Hybrid | 名单维护 | 规则策略增强 |
 | **11 计划任务** | **Pro-only** | 升级引导页 | 任务 CRUD、调度引擎、执行历史、编排 |
 | 12 通知审计 | Hybrid | 站内通知、关键操作审计 | 外部通知通道（邮件/Webhook 等） |
@@ -64,6 +65,7 @@ License 可包含一项或多项 entitlement，例如：
 | 键 | 能力 |
 |----|------|
 | `scheduler` | 计划任务（模块 11） |
+| `console_commands` | 实例控制台 DST 命令库与输入补全（模块 09 Pro） |
 | `cloud_backup` | 自动备份与云存储 |
 | `multinode` | 远程节点与多节点编排 |
 | `external_notify` | 外部通知通道 |
@@ -89,6 +91,7 @@ License 可包含一项或多项 entitlement，例如：
 | `game-server-hub-pro` | 私有 Git 仓库，商业许可 |
 | `@gsh/pro-core` | 许可证、路由注册、共享 Pro 基础设施 |
 | `@gsh/pro-scheduler` | 模块 11 计划任务（首个 Pro 包，M3-c） |
+| `@gsh/pro-console` | 模块 09 控制台命令库与输入补全（M4） |
 | `@gsh/pro-audit` | 模块 12 外部通知等（M4） |
 
 包名前缀 `@gsh/` 为规划命名，正式发布前可能调整。

@@ -26,15 +26,19 @@ import {
 } from 'naive-ui'
 import { computed, onActivated, reactive, ref, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
+import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
+import { routeToDstRoomList } from '@/navigation/game-routes'
 
 defineOptions({
-  name: 'ClusterSettings',
+  name: 'DstRoomSettings',
 })
 
 const route = useRoute()
 const router = useRouter()
 const dialog = useDialog()
 const message = useMessage()
+
+const { formLabelPlacement, formLabelWidth } = useNarrowFormLayout(120)
 
 const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
@@ -265,7 +269,7 @@ async function saveConfig(restart = false) {
 }
 
 function goBack() {
-  router.push({ name: 'clusterList' })
+  router.push(routeToDstRoomList())
 }
 
 function confirmSaveAndRestart() {
@@ -329,8 +333,8 @@ onActivated(() => {
           ref="formRef"
           :model="formModel"
           :rules="formRules"
-          label-placement="left"
-          label-width="120"
+          :label-placement="formLabelPlacement"
+          :label-width="formLabelWidth"
           require-mark-placement="right-hanging"
         >
           <NCard title="联网模式" size="small">

@@ -23,6 +23,8 @@ declare global {
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
   const h: typeof import('vue').h
   const inject: typeof import('vue').inject
+  const instanceSupportsDstRoom: typeof import('../composables/useGameInstance').instanceSupportsDstRoom
+  const isInstallableGameInstance: typeof import('../composables/useGameInstance').isInstallableGameInstance
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
@@ -88,6 +90,7 @@ declare global {
   const useId: typeof import('vue').useId
   const useLink: typeof import('vue-router').useLink
   const useModel: typeof import('vue').useModel
+  const useNarrowFormLayout: typeof import('../composables/useNarrowFormLayout').useNarrowFormLayout
   const usePanelUpdateNotifier: typeof import('../composables/usePanelUpdateNotifier').usePanelUpdateNotifier
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter

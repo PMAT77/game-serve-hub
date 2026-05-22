@@ -136,6 +136,31 @@ export interface InstanceConnectInfo {
   consoleShards: InstanceConsoleShardStatus
 }
 
+export interface InstanceMaintenanceDraft {
+  message: string
+  updatedAt: string | null
+}
+
+export interface InstanceMaintenancePushLog {
+  id: string
+  message: string
+  operatorAccount: string
+  status: 'success' | 'failed'
+  errorMessage: string | null
+  pushedAt: string
+}
+
+export interface InstanceMaintenanceAnnounceState {
+  draft: InstanceMaintenanceDraft
+  recentPushes: InstanceMaintenancePushLog[]
+}
+
+export interface InstanceMaintenancePushResult {
+  isSuccess: boolean
+  pushLog: InstanceMaintenancePushLog
+  errorMessage?: string
+}
+
 export default {
   getInstanceList: (data?: InstanceListQuery) => api.post('app/instance/list', data),
   getInstanceMetrics: (ids?: string[]) => api.post('app/instance/metrics', ids?.length ? { ids } : {}) as Promise<{ data: InstanceMetricsPayload }>,
@@ -173,6 +198,17 @@ export default {
     command,
     shard,
   }),
+  getInstanceMaintenanceAnnounce: (instanceId: string) => api.get('app/instance/maintenance/announce', {
+    params: { instanceId },
+  }) as Promise<{ data: InstanceMaintenanceAnnounceState }>,
+  saveInstanceMaintenanceAnnounceDraft: (instanceId: string, message: string) => api.put('app/instance/maintenance/announce', {
+    instanceId,
+    message,
+  }) as Promise<{ data: InstanceMaintenanceAnnounceState }>,
+  pushInstanceMaintenanceAnnounce: (instanceId: string, message?: string) => api.post('app/instance/maintenance/announce/push', {
+    instanceId,
+    ...(message !== undefined ? { message } : {}),
+  }) as Promise<{ data: InstanceMaintenancePushResult }>,
   buildInstanceConsoleStreamUrl(instanceId: string, token: string) {
     const prefix = (import.meta.env.DEV && import.meta.env.VITE_ENABLE_PROXY)
       ? '/proxy/'

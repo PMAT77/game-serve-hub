@@ -1,6 +1,6 @@
 # 新模块开发前必读文档指南
 
-> 最后更新：2026-05-21  
+> 最后更新：2026-05-22  
 > 用途：在动手写业务代码之前，明确「读什么、读到哪、对应哪份 FDS」；与 Cursor 规则 `module-kickoff-doc-sync` 配套使用。  
 > 模块清单与状态以 [`TODO.md`](TODO.md) §2 与 [`FDS/README.md`](FDS/README.md) 为准。
 
@@ -66,8 +66,8 @@
 | 00 | [00-install-runtime](FDS/00-install-runtime.md) | 平台安装与运行时 | 已实现 | `08-TECH-STACK`；根目录 `scripts/`、`docker-compose` 相关 | `05` 基础设施层 | — | `server/src/infra/container/`、`server/src/infra/docker*.ts`、`scripts/` |
 | 01 | [01-monitor](FDS/01-monitor.md) | 监控台 | 部分实现 | [FDS-00](FDS/00-install-runtime.md) | `05` §2.1 前端层、`system` 模块 | 00 | `server/src/modules/system/`（metrics）、`src/views/console/monitor/` |
 | 02 | [02-node-instance](FDS/02-node-instance.md) | 节点与实例 | 已实现 | [FDS-00](FDS/00-install-runtime.md)、[FDS-14](FDS/14-game-adapter.md)；`06` §2.2 | `04` 实例创建/安装/启停泳道 | 00、14 | `server/src/modules/node/`、`instance/`；`src/views/node/instance/` |
-| 03 | [03-dst-cluster](FDS/03-dst-cluster.md) | DST 房间（Cluster） | 已实现（M1 Community） | [FDS-02](FDS/02-node-instance.md)、[FDS-14](FDS/14-game-adapter.md)；`others/DST.md` | `07` 与 03 边界（§6 易混淆表） | 02、14 | `server/src/modules/cluster/`、`server/src/infra/game-adapter/dst/cluster-*.ts`；`src/views/cluster/` |
-| 04 | [04-dst-shard](FDS/04-dst-shard.md) | DST 世界（Shard） | 已实现（M1 Community，2026-05-21 验收） | [FDS-03](FDS/03-dst-cluster.md)、`others/DST.md` | `04` 多世界编排相关状态 | 02、03、14 | `server/src/modules/shard/`、`server/src/infra/game-adapter/dst/`；`src/views/shard/` |
+| 03 | [03-dst-cluster](FDS/03-dst-cluster.md) | DST 房间（Cluster） | 已实现（M1 Community） | [FDS-02](FDS/02-node-instance.md)、[FDS-14](FDS/14-game-adapter.md)；`others/DST.md` | `07` 与 03 边界（§6 易混淆表） | 02、14 | `server/src/modules/cluster/`、`server/src/infra/game-adapter/dst/cluster-*.ts`；`src/views/games/dst/cluster/` |
+| 04 | [04-dst-shard](FDS/04-dst-shard.md) | DST 世界（Shard） | 已实现（M1 Community） | [FDS-03](FDS/03-dst-cluster.md)、`others/DST.md` | `04` 多世界编排相关状态 | 02、03、14 | `server/src/modules/shard/`、`server/src/infra/game-adapter/dst/`；`src/views/games/dst/shard/` |
 | 05 | [05-mod](FDS/05-mod.md) | Mod 管理 | 规划态 | [FDS-02](FDS/02-node-instance.md)；`06` §2.4 `instance_mods`；`others/DST.md` modoverrides | [FDS-07](FDS/07-config.md) 配置写入边界 | 02 | `server/src/modules/mod/`（占位） |
 | 06 | [06-backup](FDS/06-backup.md) | 备份恢复 | 规划态 | [FDS-02](FDS/02-node-instance.md)；`06` §2.4 `backups` | [FDS-08](FDS/08-file.md) 路径与权限 | 02 | `server/src/modules/backup/`（占位） |
 | 07 | [07-config](FDS/07-config.md) | 配置中心 | 规划态 | [FDS-02](FDS/02-node-instance.md)、[FDS-03](FDS/03-dst-cluster.md)；`others/DST.md` | `04` 配置变更与重启影响 | 02、03 | `server/src/modules/config/`（占位）；`game-adapter/dst/` |
@@ -103,13 +103,13 @@
 
 - **目标**：`cluster.ini` 可视化读写；v1 保持 **1 实例 : 1 Cluster**。
 - **必读细节**：`others/DST.md` §2；FDS §6 运行中修改需提示重启。
-- **验收**：FDS §9（规划接口落地后执行）。
+- **验收**：FDS §9；记录见 `TODO.md` §7、`M0-M1-REGRESSION.md` §M1 Cluster。
 
 #### FDS-04 DST 世界（Shard）
 
 - **目标**：多世界/洞穴分片配置与编排。
 - **必读细节**：`others/DST.md` §4；依赖 Cluster 已可用；用户流程为「房间开分片保存 → 世界设置 → 启动」。
-- **验收**：FDS §9；2026-05-21 产品验收通过（回归见 `M0-M1-REGRESSION.md` §M1 Shard 验收记录）。
+- **验收**：FDS §9；记录见 `TODO.md` §7、`M0-M1-REGRESSION.md` §M1 Shard。
 
 #### FDS-05 Mod 管理
 
@@ -134,7 +134,7 @@
 #### FDS-09 实例控制台
 
 - **目标**：日志、SSE、命令下发；**不是**监控台。
-- **必读细节**：FDS §6 仅运行中可写命令；DST 命令表。
+- **必读细节**：FDS §6 仅运行中可写命令；DST 命令表；**Pro 命令补全**见 FDS §11 Open Core 落点（Community 不实现补全）。
 - **验收**：`11-ACCEPTANCE` §2.1 模块 09。
 
 #### FDS-10 玩家与访问
@@ -194,7 +194,7 @@
 | 里程碑 | 模块 ID | 阅读顺序建议 |
 |--------|---------|----------------|
 | M0 可运行闭环 | 00 → 14 → 02 → 09 | **已完成**（2026-05-19）；回归见 `M0-M1-REGRESSION.md` |
-| M1 管理能力 | 01、03、04、07 | **当前迭代**；监控增强；Cluster/Shard/配置 |
+| M1 管理能力 | 01、03、04、07 | **当前迭代**；03/04 已验收；监控增强与配置中心（07）待落地 |
 | M2 运维效率 | 05、06、08、10、13 | Mod、备份、文件、玩家、引导 |
 | M3 自动化治理 | 11、12 | 计划任务（Pro-only）、通知审计（Hybrid）；Open Core 基础设施见 `TODO` §3.5 |
 
@@ -228,9 +228,10 @@
 
 | 必做 | 说明 |
 |------|------|
-| [`TODO.md`](TODO.md) | §2 状态、§4 待办勾选、§7 验收映射 |
-| [`07-API-STANDARD-AND-DOCS.md`](07-API-STANDARD-AND-DOCS.md) | 新增/变更接口（项目若单独维护 `API.md` 则一并更新） |
-| 本模块 `FDS/xx-*.md` | 状态、接口 §5、验收 §9 与实现一致 |
+| [`TODO.md`](TODO.md) | §2 状态、§4 待办勾选、§7 验收映射（**验收日期权威索引**） |
+| [`07-API-STANDARD-AND-DOCS.md`](07-API-STANDARD-AND-DOCS.md) | 新增/变更接口 |
+| [`M0-M1-REGRESSION.md`](M0-M1-REGRESSION.md) | 可执行回归剧本与验收记录（若适用） |
+| 本模块 `FDS/xx-*.md` | 状态、接口 §5、验收 §9、§10 实现落点与实现一致 |
 
 ### 7.3 有变更才改（选做）
 

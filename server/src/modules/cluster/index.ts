@@ -7,7 +7,7 @@ import type {
   ClusterSavePayload,
   ClusterSaveResult,
 } from '../../../../shared/contracts/cluster'
-import { findUserByToken, getGameInstanceById, updateGameInstanceRuntime } from '../../shared/db/index'
+import { findUserByToken, getGameInstanceById } from '../../shared/db/index'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import {
   ensureClusterDirectory,

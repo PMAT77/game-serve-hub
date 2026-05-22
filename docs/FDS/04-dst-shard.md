@@ -124,7 +124,7 @@
 | 适配层 | `server/src/infra/game-adapter/dst/shard-service.ts`、`server-ini.ts`、`worldgen-override.ts`、`runtime-spec.ts` |
 | 生命周期 | `server/src/modules/instance/container-lifecycle.ts` |
 | 前端 API | `src/api/modules/shard.ts` |
-| 前端页面 | `src/views/shard/index.vue`、`settings.vue` |
+| 前端页面 | `src/views/games/dst/shard/index.vue`、`settings.vue`（路由 `/games/dst/worlds`） |
 
 ## 11. 后续里程碑（Pro / 增强）
 

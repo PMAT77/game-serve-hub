@@ -56,6 +56,27 @@ const installableGames: InstallableGameItem[] = [
 
 let instanceList: FakeInstanceItem[] = []
 
+const maintenanceDrafts = new Map<string, { message: string, updatedAt: string }>()
+const maintenancePushLogs = new Map<string, Array<{
+  id: string
+  message: string
+  operatorAccount: string
+  status: 'success' | 'failed'
+  errorMessage: string | null
+  pushedAt: string
+}>>()
+
+function getMaintenanceState(instanceId: string) {
+  const draft = maintenanceDrafts.get(instanceId)
+  return {
+    draft: {
+      message: draft?.message ?? '',
+      updatedAt: draft?.updatedAt ?? null,
+    },
+    recentPushes: maintenancePushLogs.get(instanceId) ?? [],
+  }
+}
+
 function matchStatus(value: unknown): value is InstanceStatus {
   return value === 'running' || value === 'stopped' || value === 'installing' || value === 'error'
 }
@@ -393,6 +414,67 @@ export default defineFakeRoute([
         status: 1,
         data: {
           isSuccess: Boolean(target && command),
+        },
+      }
+    },
+  },
+  {
+    url: '/fake/app/instance/maintenance/announce',
+    method: 'get',
+    response: ({ query }) => {
+      const instanceId = typeof query.instanceId === 'string' ? query.instanceId : ''
+      return {
+        error: '',
+        status: 1,
+        data: getMaintenanceState(instanceId),
+      }
+    },
+  },
+  {
+    url: '/fake/app/instance/maintenance/announce',
+    method: 'put',
+    response: ({ body }) => {
+      const instanceId = String(body.instanceId ?? '')
+      const message = String(body.message ?? '').trim()
+      const updatedAt = nowIso()
+      maintenanceDrafts.set(instanceId, { message, updatedAt })
+      return {
+        error: '',
+        status: 1,
+        data: getMaintenanceState(instanceId),
+      }
+    },
+  },
+  {
+    url: '/fake/app/instance/maintenance/announce/push',
+    method: 'post',
+    response: ({ body }) => {
+      const instanceId = String(body.instanceId ?? '')
+      const target = instanceList.find(item => item.id === instanceId)
+      const bodyMessage = String(body.message ?? '').trim()
+      const draftMessage = maintenanceDrafts.get(instanceId)?.message?.trim() ?? ''
+      const message = bodyMessage || draftMessage
+      const running = target?.status === 'running'
+      const pushLog = {
+        id: generateId(),
+        message,
+        operatorAccount: 'admin',
+        status: running && message ? 'success' as const : 'failed' as const,
+        errorMessage: running && message ? null : (message ? '实例未运行' : '公告内容不能为空'),
+        pushedAt: nowIso(),
+      }
+      const logs = maintenancePushLogs.get(instanceId) ?? []
+      maintenancePushLogs.set(instanceId, [pushLog, ...logs].slice(0, 20))
+      if (bodyMessage) {
+        maintenanceDrafts.set(instanceId, { message, updatedAt: nowIso() })
+      }
+      return {
+        error: '',
+        status: 1,
+        data: {
+          isSuccess: pushLog.status === 'success',
+          pushLog,
+          ...(pushLog.errorMessage ? { errorMessage: pushLog.errorMessage } : {}),
         },
       }
     },

@@ -177,7 +177,7 @@ Pro 侧：
 | M3-b 扩展点 stub | `LicensePort`、`ProModuleLoader` 接口 + no-op；`/api/meta/edition` | M3-a |
 | M3-c 首个 Pro 包 | 私有仓 `@gsh/pro-scheduler`；Pro 镜像 POC | M3-b |
 | M3-d 授权与升级 UX | License 激活页、离线宽限、Pro migration 流水线 | M3-c |
-| M4 Pro 模块扩展 | `@gsh/pro-audit`、多节点、云备份等按对照表逐个落地 | M3-d |
+| M4 Pro 模块扩展 | `@gsh/pro-console`、多节点、云备份等按对照表逐个落地 | M3-d |
 
 ## 10. 参考实现落点（规划）
 
@@ -187,6 +187,7 @@ Pro 侧：
 | Pro 模块加载 | `server/src/bootstrap/load-pro-modules.ts` | 各 `@gsh/pro-*` |
 | 升级引导 UI | `src/views/system/license.vue` | — |
 | 计划任务 | 占位菜单 only | `@gsh/pro-scheduler` |
+| 实例控制台命令补全 | 快捷按钮 + 普通输入 only | `@gsh/pro-console` |
 
 ## 11. 维护规则
 

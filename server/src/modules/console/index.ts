@@ -132,6 +132,8 @@ function filterConsoleLines(lines: ConsoleLogLine[], filter: ConsoleLogFilter): 
   return lines.filter(line => line.stream === 'system')
 }
 
+import { registerMaintenanceAnnounceRoutes } from './maintenance-routes'
+
 /**
  * console 模块：游戏实例运行时控制台（日志流 + 命令下发）。
  * 与「主机监控台」`/console/monitor` 区分，API 统一挂在 `/app/instance/console/*`。
@@ -287,4 +289,6 @@ export function registerConsoleModule(app: FastifyInstance) {
       reply.raw.end()
     })
   })
+
+  registerMaintenanceAnnounceRoutes(app)
 }

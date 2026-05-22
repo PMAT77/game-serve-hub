@@ -4,11 +4,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { DatabaseSync } from 'node:sqlite'
-import { and, asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { drizzle } from 'drizzle-orm/sqlite-proxy'
 import { migrate } from 'drizzle-orm/sqlite-proxy/migrator'
-import { authSessions, gameInstances, serverNodes, systemSettings, userPermissions, users } from './schema/index'
+import {
+  authSessions,
+  gameInstances,
+  instanceMaintenanceDrafts,
+  instanceMaintenancePushLogs,
+  serverNodes,
+  systemSettings,
+  userPermissions,
+  users,
+} from './schema/index'
 
 interface DbUserRow {
   id: string
@@ -1254,4 +1263,121 @@ export async function deleteGameInstanceById(id: string): Promise<boolean> {
     .delete(gameInstances)
     .where(eq(gameInstances.id, id))
   return true
+}
+
+export type DbMaintenancePushStatus = 'success' | 'failed'
+
+export interface DbMaintenanceDraft {
+  instanceId: string
+  message: string
+  updatedAt: string
+}
+
+export interface DbMaintenancePushLog {
+  id: string
+  instanceId: string
+  message: string
+  operatorAccount: string
+  status: DbMaintenancePushStatus
+  errorMessage: string | null
+  pushedAt: string
+}
+
+const DEFAULT_MAINTENANCE_PUSH_LOG_LIMIT = 20
+
+export async function getMaintenanceDraft(instanceId: string): Promise<DbMaintenanceDraft | undefined> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      instanceId: instanceMaintenanceDrafts.instanceId,
+      message: instanceMaintenanceDrafts.message,
+      updatedAt: instanceMaintenanceDrafts.updatedAt,
+    })
+    .from(instanceMaintenanceDrafts)
+    .where(eq(instanceMaintenanceDrafts.instanceId, instanceId))
+    .limit(1)
+  return rows[0]
+}
+
+export async function upsertMaintenanceDraft(instanceId: string, message: string): Promise<DbMaintenanceDraft> {
+  const { drizzleDb } = ensureDb()
+  const now = nowIso()
+  const existing = await getMaintenanceDraft(instanceId)
+  if (existing) {
+    await drizzleDb
+      .update(instanceMaintenanceDrafts)
+      .set({
+        message,
+        updatedAt: now,
+      })
+      .where(eq(instanceMaintenanceDrafts.instanceId, instanceId))
+  }
+  else {
+    await drizzleDb.insert(instanceMaintenanceDrafts).values({
+      instanceId,
+      message,
+      updatedAt: now,
+    })
+  }
+  return {
+    instanceId,
+    message,
+    updatedAt: now,
+  }
+}
+
+export async function listMaintenancePushLogs(
+  instanceId: string,
+  limit = DEFAULT_MAINTENANCE_PUSH_LOG_LIMIT,
+): Promise<DbMaintenancePushLog[]> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({
+      id: instanceMaintenancePushLogs.id,
+      instanceId: instanceMaintenancePushLogs.instanceId,
+      message: instanceMaintenancePushLogs.message,
+      operatorAccount: instanceMaintenancePushLogs.operatorAccount,
+      status: instanceMaintenancePushLogs.status,
+      errorMessage: instanceMaintenancePushLogs.errorMessage,
+      pushedAt: instanceMaintenancePushLogs.pushedAt,
+    })
+    .from(instanceMaintenancePushLogs)
+    .where(eq(instanceMaintenancePushLogs.instanceId, instanceId))
+    .orderBy(desc(instanceMaintenancePushLogs.pushedAt))
+    .limit(limit)
+  return rows.map(row => ({
+    ...row,
+    status: row.status as DbMaintenancePushStatus,
+  }))
+}
+
+export interface InsertMaintenancePushLogInput {
+  instanceId: string
+  message: string
+  operatorAccount: string
+  status: DbMaintenancePushStatus
+  errorMessage?: string | null
+}
+
+export async function insertMaintenancePushLog(input: InsertMaintenancePushLogInput): Promise<DbMaintenancePushLog> {
+  const { drizzleDb } = ensureDb()
+  const row: DbMaintenancePushLog = {
+    id: randomUUID(),
+    instanceId: input.instanceId,
+    message: input.message,
+    operatorAccount: input.operatorAccount,
+    status: input.status,
+    errorMessage: input.errorMessage ?? null,
+    pushedAt: nowIso(),
+  }
+  await drizzleDb.insert(instanceMaintenancePushLogs).values({
+    id: row.id,
+    instanceId: row.instanceId,
+    message: row.message,
+    operatorAccount: row.operatorAccount,
+    status: row.status,
+    errorMessage: row.errorMessage,
+    pushedAt: row.pushedAt,
+  })
+  return row
 }

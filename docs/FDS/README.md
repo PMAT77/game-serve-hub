@@ -14,8 +14,8 @@
 | 00 | [00-install-runtime.md](00-install-runtime.md) | 平台安装与运行时 | 已实现（M0 已完成） |
 | 01 | [01-monitor.md](01-monitor.md) | 监控台 | 部分实现（M1） |
 | 02 | [02-node-instance.md](02-node-instance.md) | 节点与实例 | 已实现（单节点，M0 已完成） |
-| 03 | [03-dst-cluster.md](03-dst-cluster.md) | DST 房间（Cluster） | 已实现（M1 Community，2026-05-20 验收） |
-| 04 | [04-dst-shard.md](04-dst-shard.md) | DST 世界（Shard） | 已实现（M1 Community，2026-05-21 验收） |
+| 03 | [03-dst-cluster.md](03-dst-cluster.md) | DST 房间（Cluster） | 已实现（M1 Community） |
+| 04 | [04-dst-shard.md](04-dst-shard.md) | DST 世界（Shard） | 已实现（M1 Community） |
 | 05 | [05-mod.md](05-mod.md) | Mod 管理 | 规划态 |
 | 06 | [06-backup.md](06-backup.md) | 备份恢复 | 规划态 |
 | 07 | [07-config.md](07-config.md) | 配置中心 | 规划态 |
@@ -45,5 +45,6 @@
 ## 4. 维护规则
 
 - 模块实现变化需同步更新对应 FDS。
-- TODO 状态与 FDS 状态必须一致。
-- 规划态模块必须显式标注“未实现能力”与“实现前置条件”。
+- **模块状态**（已实现 / 部分实现 / 规划态）与 `TODO.md` §2 保持一致。
+- **验收日期与回归记录**以 `TODO.md` §7 为权威索引，FDS 清单表不重复维护日期。
+- 规划态模块必须显式标注「未实现能力」与「实现前置条件」。

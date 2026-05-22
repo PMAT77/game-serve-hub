@@ -8,10 +8,7 @@ import {
 } from '../../infra/game-adapter/dst/port-allocation'
 import { collectPortSet } from '../../infra/game-adapter/dst/server-ini'
 import { isCavesShardConfigured } from '../../infra/game-adapter/dst/shard-layout'
-import {
-  defaultCavesServerIniFields,
-  defaultMasterServerIniFields,
-} from '../../infra/game-adapter/dst/server-ini'
+import { defaultCavesServerIniFields } from '../../infra/game-adapter/dst/server-ini'
 import {
   readCavesServerIniFields,
   readMasterServerIniFields,

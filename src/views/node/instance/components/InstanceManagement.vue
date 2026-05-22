@@ -3,11 +3,18 @@ import type { DataTableColumns, FormInst, FormRules } from 'naive-ui'
 import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceItem, InstanceRuntimeMetrics, InstanceStatus } from '@/api/modules/instance'
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
-import { NButton, NCheckbox, NProgress, NTag, useDialog, useNotification } from 'naive-ui'
+import type { DropdownOption } from 'naive-ui'
+import { NButton, NCheckbox, NDropdown, NProgress, NTag, useDialog, useNotification } from 'naive-ui'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
 import apiInstance from '@/api/modules/instance'
 import apiShard from '@/api/modules/shard'
+import { instanceSupportsDstRoom } from '@/composables/useGameInstance'
+import {
+  routeToDstRoomSettings,
+  routeToDstWorldSettings,
+  routeToInstanceConsole,
+} from '@/navigation/game-routes'
 import { blurFocusedElement } from '@/utils'
 import {
   formatPortConflictDetail,
@@ -58,6 +65,8 @@ const { nodes, steamcmdInstalled, steamcmdConfigured } = toRefs(props)
 const dialog = useDialog()
 const notification = useNotification()
 const router = useRouter()
+const appSettingsStore = useAppSettingsStore()
+const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
 
 const instanceLoading = ref(false)
 const updateCheckLoading = ref(false)
@@ -90,8 +99,8 @@ let installTerminalRefreshInFlight: Promise<void> | null = null
 const installNotifyPendingIds = new Set<string>()
 
 // --- 常量 ---
-/** 列宽总和，启用横向滚动，避免中间列被挤压为 0 */
-const INSTANCE_TABLE_SCROLL_X = 1542
+/** 列宽总和，启用横向滚动，避免中间列被挤压为 0（操作列移动端收拢为「更多」） */
+const INSTANCE_TABLE_SCROLL_X = computed(() => (isMobileMode.value ? 1210 : 1542))
 const INSTANCE_INSTALL_POLL_MS = 1000
 const INSTANCE_INSTALL_LOG_POLL_MS = 1000
 const INSTANCE_METRICS_POLL_MS = 5000
@@ -327,62 +336,9 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '操作',
       key: 'actions',
-      width: 420,
+      width: isMobileMode.value ? 88 : 420,
       fixed: 'right',
-      render: row =>
-        h('div', { class: 'flex flex-wrap gap-4' }, [
-          createTextActionButton({
-            label: '房间设置',
-            disabled: row.status === 'pending_install' || row.gameCode !== '343050',
-            title: row.gameCode !== '343050' ? '当前仅 DST 实例支持房间配置' : undefined,
-            onClick: () => router.push({
-              name: 'clusterSettings',
-              params: { instanceId: row.id },
-            }),
-          }),
-          createTextActionButton({
-            label: '控制台',
-            disabled: row.status === 'pending_install' || row.status === 'installing',
-            onClick: () => router.push({
-              name: 'nodeInstanceConsole',
-              params: { instanceId: row.id },
-            }),
-          }),
-          createTextActionButton({
-            label: '更新服务端',
-            loading: isActionLoading(row.id, 'update'),
-            disabled: !canUpdateInstance(row),
-            title: getUpdateInstanceButtonTitle(row),
-            onClick: () => confirmUpdateInstance(row),
-          }),
-          createTextActionButton({
-            label: '启动',
-            loading: isActionLoading(row.id, 'start'),
-            disabled: row.status === 'running' || row.status === 'pending_install' || row.status === 'installing',
-            onClick: () => confirmStartInstance(row),
-          }),
-          createTextActionButton({
-            label: row.status === 'installing' || row.status === 'pending_install' ? '取消安装' : '停止',
-            loading: isActionLoading(row.id, 'stop'),
-            disabled: row.status === 'stopped' || row.status === 'error',
-            onClick: () => confirmDangerousInstanceAction(
-              row,
-              row.status === 'installing' || row.status === 'pending_install' ? 'cancel_install' : 'stop',
-            ),
-          }),
-          createTextActionButton({
-            label: '重启',
-            loading: isActionLoading(row.id, 'restart'),
-            disabled: row.status === 'pending_install' || row.status === 'installing',
-            onClick: () => confirmDangerousInstanceAction(row, 'restart'),
-          }),
-          createTextActionButton({
-            label: '删除',
-            type: 'error',
-            disabled: row.status === 'pending_install' || row.status === 'installing',
-            onClick: () => confirmDangerousInstanceAction(row, 'delete'),
-          }),
-        ]),
+      render: row => renderInstanceRowActions(row),
     },
   ]
 })
@@ -396,6 +352,123 @@ watch(nodes, (list) => {
 /** 数据表行唯一键 */
 function getInstanceRowKey(row: InstanceItem) {
   return row.id
+}
+
+interface InstanceRowAction {
+  key: string
+  label: string
+  disabled?: boolean
+  loading?: boolean
+  title?: string
+  type?: 'default' | 'error'
+  onClick: () => void
+}
+
+function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
+  const stopAction = row.status === 'installing' || row.status === 'pending_install' ? 'cancel_install' : 'stop'
+  const stopLabel = stopAction === 'cancel_install' ? '取消安装' : '停止'
+  return [
+    {
+      key: 'room',
+      label: '房间设置',
+      disabled: row.status === 'pending_install' || !instanceSupportsDstRoom(row),
+      title: !instanceSupportsDstRoom(row) ? '当前仅 DST 实例支持房间配置' : undefined,
+      onClick: () => router.push(routeToDstRoomSettings(row.id)),
+    },
+    {
+      key: 'console',
+      label: '控制台',
+      disabled: row.status === 'pending_install' || row.status === 'installing',
+      onClick: () => router.push(routeToInstanceConsole(row.id)),
+    },
+    {
+      key: 'update',
+      label: '更新服务端',
+      loading: isActionLoading(row.id, 'update'),
+      disabled: !canUpdateInstance(row),
+      title: getUpdateInstanceButtonTitle(row),
+      onClick: () => confirmUpdateInstance(row),
+    },
+    {
+      key: 'start',
+      label: '启动',
+      loading: isActionLoading(row.id, 'start'),
+      disabled: row.status === 'running' || row.status === 'pending_install' || row.status === 'installing',
+      onClick: () => confirmStartInstance(row),
+    },
+    {
+      key: 'stop',
+      label: stopLabel,
+      loading: isActionLoading(row.id, 'stop'),
+      disabled: row.status === 'stopped' || row.status === 'error',
+      onClick: () => confirmDangerousInstanceAction(row, stopAction),
+    },
+    {
+      key: 'restart',
+      label: '重启',
+      loading: isActionLoading(row.id, 'restart'),
+      disabled: row.status === 'pending_install' || row.status === 'installing',
+      onClick: () => confirmDangerousInstanceAction(row, 'restart'),
+    },
+    {
+      key: 'delete',
+      label: '删除',
+      type: 'error',
+      disabled: row.status === 'pending_install' || row.status === 'installing',
+      onClick: () => confirmDangerousInstanceAction(row, 'delete'),
+    },
+  ]
+}
+
+function renderInstanceRowActions(row: InstanceItem) {
+  const actions = buildInstanceRowActions(row)
+  if (!isMobileMode.value) {
+    return h(
+      'div',
+      { class: 'flex flex-wrap gap-4' },
+      actions.map(action => createTextActionButton(action)),
+    )
+  }
+
+  const options: DropdownOption[] = actions.map((action) => {
+    const option: DropdownOption = {
+      label: action.loading ? `${action.label}…` : action.label,
+      key: action.key,
+      disabled: Boolean(action.disabled || action.loading),
+    }
+    if (action.type === 'error') {
+      option.props = { class: 'text-red-600 dark:text-red-400' }
+    }
+    return option
+  })
+
+  const hasLoading = actions.some(action => action.loading)
+
+  return h(
+    NDropdown,
+    {
+      trigger: 'click',
+      options,
+      onSelect: (key: string) => {
+        const action = actions.find(item => item.key === key)
+        if (!action || action.disabled || action.loading) {
+          return
+        }
+        action.onClick()
+      },
+    },
+    {
+      default: () => h(
+        NButton,
+        {
+          size: 'small',
+          secondary: true,
+          loading: hasLoading,
+        },
+        { default: () => '更多' },
+      ),
+    },
+  )
 }
 
 /** 渲染表格操作列中的文本按钮 */
@@ -1122,7 +1195,7 @@ function renderStartGuideContent(
             tertiary: true,
             onClick: () => {
               dialog.destroyAll()
-              router.push({ name: 'clusterSettings', params: { instanceId } })
+              router.push(routeToDstRoomSettings(instanceId))
             },
           },
           { default: () => '先去配置房间' },
@@ -1134,7 +1207,7 @@ function renderStartGuideContent(
             tertiary: true,
             onClick: () => {
               dialog.destroyAll()
-              router.push({ name: 'shardSettings', params: { instanceId } })
+              router.push(routeToDstWorldSettings(instanceId))
             },
           },
           { default: () => '先去配置世界' },
@@ -1193,7 +1266,7 @@ async function confirmStartInstance(row: InstanceItem) {
         setStartGuideSkipped(row.id)
       }
       if (publicBlocked) {
-        router.push({ name: 'clusterSettings', params: { instanceId: row.id } })
+        router.push(routeToDstRoomSettings(row.id))
         return
       }
       return quickStart()
@@ -1219,11 +1292,7 @@ function showInstancePortConflictDialog(
     negativeText: '自行配置',
     onPositiveClick: () => onAutoResolve?.(),
     onNegativeClick: () => {
-      router.push({
-        name: 'shardSettings',
-        params: { instanceId },
-        query: { tab: 'network' },
-      })
+      router.push(routeToDstWorldSettings(instanceId, { tab: 'network' }))
     },
   })
 }
@@ -1379,22 +1448,22 @@ onBeforeUnmount(() => {
           </NButton>
         </div>
         <div class="flex flex-col gap-3 md:flex-row md:flex-nowrap md:items-center">
-          <div class="flex gap-3 min-w-0 md:flex-initial md:shrink">
-            <div class="flex flex-1 gap-2 items-center min-w-0 md:flex-none md:w-auto">
-              <label class="text-sm text-muted-foreground shrink-0">节点：</label>
+          <div class="flex w-full min-w-0 flex-col gap-3 md:w-auto md:flex-row md:shrink md:flex-initial">
+            <div class="flex w-full min-w-0 items-center gap-2 md:w-44 md:flex-none">
+              <label class="shrink-0 text-sm text-muted-foreground">节点：</label>
               <NSelect
                 v-model:value="selectedNodeId"
                 :options="nodeOptions"
-                class="flex-1 min-w-0 md:flex-none md:w-44"
+                class="min-w-0 flex-1 md:w-44 md:flex-none"
                 @update:value="fetchInstances"
               />
             </div>
-            <div class="flex flex-1 gap-2 items-center min-w-0 md:flex-none md:w-auto">
-              <label class="text-sm text-muted-foreground shrink-0">状态：</label>
+            <div class="flex w-full min-w-0 items-center gap-2 md:w-44 md:flex-none">
+              <label class="shrink-0 text-sm text-muted-foreground">状态：</label>
               <NSelect
                 v-model:value="statusFilter"
                 :options="statusFilterOptions"
-                class="flex-1 min-w-0 md:flex-none md:w-44"
+                class="min-w-0 flex-1 md:w-44 md:flex-none"
                 @update:value="fetchInstances"
               />
             </div>

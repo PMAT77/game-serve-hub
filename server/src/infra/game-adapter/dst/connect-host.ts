@@ -157,6 +157,11 @@ async function discoverPublicIpv4(): Promise<{ ip: string, source: 'cloud_metada
   return null
 }
 
+/** Node 18+ 使用字符串 family；旧版/部分类型定义可能为数字 4 */
+function isNetworkInterfaceIpv4(family: string | number): boolean {
+  return family === 'IPv4' || family === 4
+}
+
 function listInterfaceIpv4Candidates(): { publicIps: string[], privateIps: string[] } {
   const publicIps: string[] = []
   const privateIps: string[] = []
@@ -165,8 +170,7 @@ function listInterfaceIpv4Candidates(): { publicIps: string[], privateIps: strin
       continue
     }
     for (const entry of entries) {
-      const family = entry.family
-      const isIpv4 = family === 'IPv4' || family === 4
+      const isIpv4 = isNetworkInterfaceIpv4(entry.family)
       if (!isIpv4 || entry.internal) {
         continue
       }

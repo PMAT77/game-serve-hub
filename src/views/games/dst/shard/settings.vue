@@ -23,6 +23,11 @@ import {
 import { computed, h, onActivated, onMounted, reactive, ref, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
 import apiShard from '@/api/modules/shard'
+import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
+import {
+  routeToDstRoomSettings,
+  routeToDstWorldList,
+} from '@/navigation/game-routes'
 import {
   formatPortConflictDetail,
   getPortConflictDialogLabels,
@@ -39,13 +44,15 @@ import {
 type ShardSubTab = 'rules' | 'worldgen' | 'network'
 
 defineOptions({
-  name: 'ShardSettings',
+  name: 'DstWorldSettings',
 })
 
 const route = useRoute()
 const router = useRouter()
 const dialog = useDialog()
 const message = useMessage()
+
+const { formLabelPlacement, formLabelWidth } = useNarrowFormLayout(140)
 
 const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
@@ -284,14 +291,11 @@ function confirmSaveAndRestart(shard: ShardId) {
 }
 
 function goClusterSettings() {
-  router.push({
-    name: 'clusterSettings',
-    params: { instanceId: instanceId.value },
-  })
+  router.push(routeToDstRoomSettings(instanceId.value))
 }
 
 function goBack() {
-  router.push({ name: 'shardList' })
+  router.push(routeToDstWorldList())
 }
 
 function applyRouteTabFromQuery() {
@@ -431,8 +435,8 @@ onActivated(() => {
               ref="masterFormRef"
               :model="masterForm"
               :rules="portRules"
-              label-placement="left"
-              label-width="140"
+              :label-placement="formLabelPlacement"
+              :label-width="formLabelWidth"
             >
               <NTabs v-model:value="surfaceSubTab" type="card" placement="left" size="small" display-directive="show" class="mt-2">
                 <NTabPane name="rules" tab="世界规则">
@@ -476,7 +480,7 @@ onActivated(() => {
               </NTabs>
             </NForm>
 
-            <div class="flex flex-wrap gap-2 mt-4 pt-2 border-t border-border">
+            <div class="flex flex-wrap justify-center gap-2 mt-4 pt-2 border-t border-border">
               <NButton type="primary" size="small" :loading="saving" @click="saveShard('master', false)">
                 保存地上
               </NButton>
@@ -517,8 +521,8 @@ onActivated(() => {
                 ref="cavesFormRef"
                 :model="cavesForm"
                 :rules="portRules"
-                label-placement="left"
-                label-width="140"
+                :label-placement="formLabelPlacement"
+                :label-width="formLabelWidth"
               >
                 <NTabs v-model:value="cavesSubTab" type="card" placement="left" size="small" display-directive="show" class="mt-2">
                   <NTabPane name="rules" tab="世界规则">
@@ -551,7 +555,7 @@ onActivated(() => {
                 </NTabs>
               </NForm>
 
-              <div class="flex flex-wrap gap-2 mt-4 pt-2 border-t border-border">
+              <div class="flex flex-wrap justify-center gap-2 mt-4 pt-2 border-t border-border">
                 <NButton type="primary" size="small" :loading="saving" @click="saveShard('caves', false)">
                   保存洞穴
                 </NButton>

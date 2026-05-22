@@ -83,6 +83,7 @@
 
 - `GET /app/instance/cluster?instanceId={instanceId}`：读取 DST 房间配置（`ClusterConfigDto`；令牌仅掩码）
 - `PUT /app/instance/cluster`：保存房间配置（`ClusterSavePayload`；可选 `restart: true` 保存后重启）
+- `GET /app/instance/cluster/online-players?instanceId={instanceId}`：运行中实例在线人数（`ClusterOnlinePlayersDto`）
 - 保存且 `shardEnabled=true` 时：服务端幂等生成 `Caves/server.ini` 与 `worldgenoverride.lua`（`writeFileIfMissing`，不覆盖已有洞穴配置）
 
 ### 2.7 世界配置（Shard，模块 04）
@@ -128,20 +129,19 @@
 
 ### 3.5 读取 / 保存房间配置
 
-- **读取**：`GET /app/instance/cluster?instanceId=...`
-- **保存**：`PUT /app/instance/cluster`，body 含 `instanceId` 与表单字段；公网模式可带 `clusterToken`（仅提交时传入，响应不回显明文）
+> 接口路径见 §2.6；契约见 `shared/contracts/cluster.ts`、FDS-03 §5。
+
+- **保存**：公网模式 body 可带 `clusterToken`（仅提交时传入，响应不回显明文）
 - **输出**：读取为 `ClusterConfigDto`（含 `warnings`、`effectiveHints`、`configDirty`）；保存为 `{ saved: true, restarted?: boolean }`
 - **异常**：实例不存在、非 DST、安装目录缺失、公网无令牌、字段校验失败
-- **分片**：`shardEnabled=true` 保存时自动生成洞穴默认配置（不再因缺少 `Caves/server.ini` 拒绝保存）
 
 ### 3.6 读取 / 保存世界（分片）配置
 
-- **读取**：`GET /app/instance/shards?instanceId=...` → `ShardListDto`（含 `clusterShardEnabled`、Master/Caves 容器状态与端口摘要）
-- **保存**：`PUT /app/instance/shards`，body 含 `instanceId`、`shard`、`serverPort`、`steamAuthPort`、`steamMasterPort`、`worldgenPreset`
-- **规则**：`shard=caves` 时要求房间已开启分片（`cluster.ini` `shard_enabled=true`）；Master/Caves 端口不得冲突
+> 接口路径见 §2.7；契约见 `shared/contracts/shard.ts`、FDS-04 §5。
+
+- **规则**：`shard=caves` 时要求房间已开启分片；Master/Caves 端口不得冲突；`shard_enabled=true` 时启动 Master 后启 Caves
 - **输出**：保存为 `{ saved: true, restarted?: boolean }`
-- **异常**：实例不存在、非 DST、未开房间分片却保存洞穴、端口互斥、字段非法
-- **实例启动**：`shard_enabled=true` 时启 Master 后启 Caves；`false` 时仅 Master；缺洞穴配置时启动前自愈（见 FDS-04）
+- **异常**：未开房间分片却保存洞穴、端口互斥、字段非法
 
 ## 4. 接口鉴权与安全要求
 
@@ -167,7 +167,5 @@
 
 ## 6. 规划态接口域
 
-- 模块 **03** 房间配置接口已上线（见 §2.6、§3.5；FDS-03）。
-- 模块 **04** 世界（分片）接口已上线并已验收（2026-05-21；见 §2.7、§3.6；FDS-04 §9；回归 `docs/M0-M1-REGRESSION.md` §M1 Shard 验收记录）。
-- 模块 05/06/07/08/10/11/12 当前为规划态，接口定义详见对应 FDS。
-- 规划态接口不得在外部文档中标记为“已可用”。
+- **模块 03/04**：Community v1 已上线（概要 §2.6/2.7，详细 §3.5/3.6；验收见 `TODO.md` §7）。
+- **模块 05–12**：规划态，接口定义见对应 FDS；未落地前不得对外标注「已可用」。

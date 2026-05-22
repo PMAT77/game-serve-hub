@@ -46,7 +46,7 @@
 
 - v1 仅支持 DST（`gameCode=343050`）。
 - v1 仅支持本地节点主路径，远程多节点能力为后续迭代范围。
-- 房间（Cluster）与世界（Shard）在文档层区分，当前实现仍以单分片可运行闭环为主。
+- 房间（Cluster）与世界（Shard）在文档与 UI 分层；Community 已支持 Master/Caves 双分片编排（见 FDS-03/04、`TODO.md` §7）。
 - Pro 商业化策略已预留（Open Core 架构文档已发布），不作为 v1 发布阻断项。
 
 ## 6. 成功指标（v1）

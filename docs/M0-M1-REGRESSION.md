@@ -120,6 +120,25 @@ pnpm exec tsx server/scripts/m0-m1-regression-supplement.ts
 
 ---
 
+## M1 Cluster（模块 03）建议回归
+
+> 标准见 `docs/FDS/03-dst-cluster.md` §9；自动化见 `cluster-service.test.ts`、`cluster-ini.test.ts` 及 `pnpm test:server`。
+
+| # | 场景 | 操作步骤 | 期望结果 |
+|---|------|----------|----------|
+| C1 | 联网模式 | 依次保存 offline / lan_only / public（公网需令牌） | `cluster.ini` 中 `offline_cluster` / `lan_only_cluster` 与所选一致 |
+| C2 | 令牌安全 | 公网粘贴令牌保存 → GET 房间配置 | 磁盘有 `cluster_token.txt`；API 仅掩码，日志无完整 `pds-` |
+| C3 | 分片联动 | 开启「启用洞穴」并保存 | 自动生成 `Caves/` 默认配置；世界设置可编辑洞穴 |
+| C4 | 运行中保存 | 实例 running 时改房间配置 | 保存成功且有重启提示；可选「保存并重启」 |
+
+### M1 Cluster 验收记录
+
+| 日期 | 结论 | 执行人 | 备注 |
+|------|------|--------|------|
+| 2026-05-20 | **已验收** | 产品方 | FDS §9；单元测试通过 |
+
+---
+
 ## M1 Shard（模块 04）建议回归
 
 > 标准见 `docs/FDS/04-dst-shard.md` §9；自动化见 `pnpm test:server`（含 cluster/shard 相关用例）。
@@ -138,7 +157,7 @@ pnpm exec tsx server/scripts/m0-m1-regression-supplement.ts
 
 | 日期 | 主测实例 | 执行人 | S1–S7 | FDS §9 进洞 | 备注 |
 |------|----------|--------|-------|-------------|------|
-| 2026-05-21 | `902623f7-…`（饥荒联机）；S2 首次 scaffold 另验 `reg-m1-shard` `2335e9c4-…` | Agent + 产品方 | **全部通过** | **PASS**（产品方已验） | `pnpm test:server` 118/118；脚本 `server/scripts/m1-shard-regression.ts` |
+| 2026-05-21 | `902623f7-…`（饥荒联机）；S2 首次 scaffold 另验 `reg-m1-shard` `2335e9c4-…` | Agent + 产品方 | **全部通过** | **PASS**（产品方已验） | `pnpm test:server` 全通过；脚本 `m1-shard-regression.ts` |
 
 | # | 结果 | 验证方式 |
 |---|------|----------|
@@ -171,4 +190,4 @@ pnpm exec tsx server/scripts/m1-shard-regression.ts
 ## M1 待办（非 M0 阻塞）
 
 - 监控台容器摘要、模块 07 配置中心等见 `docs/TODO.md` §3.2
-- 模块 03 已于 2026-05-20 验收；**模块 04 已于 2026-05-21 验收**（见上表）
+- 模块 03/04 验收记录见上文 §M1 Cluster / §M1 Shard 及 `TODO.md` §7

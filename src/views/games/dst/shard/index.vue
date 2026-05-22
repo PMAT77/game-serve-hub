@@ -6,13 +6,13 @@ import { NButton, NDataTable, NEmpty, NSpin, NTag } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
 import apiShard from '@/api/modules/shard'
 import apiInstance from '@/api/modules/instance'
+import { isInstallableGameInstance } from '@/composables/useGameInstance'
+import { routeToDstWorldSettings, routeToNodeInstance } from '@/navigation/game-routes'
 import { getStatusBadgeClass, getStatusLabel } from '@/views/node/instance/instanceDisplay'
 
 defineOptions({
-  name: 'ShardList',
+  name: 'DstWorldList',
 })
-
-const DST_APP_ID = '343050'
 
 interface ShardListRow {
   instance: InstanceItem
@@ -127,10 +127,7 @@ const columns: DataTableColumns<ShardListRow> = [
 ]
 
 function openSettings(instanceId: string) {
-  router.push({
-    name: 'shardSettings',
-    params: { instanceId },
-  })
+  router.push(routeToDstWorldSettings(instanceId))
 }
 
 async function loadShardSummary(instance: InstanceItem): Promise<ShardListRow> {
@@ -163,9 +160,7 @@ async function loadRows() {
   try {
     const response = await apiInstance.getInstanceList()
     const instances = (response.data ?? []) as InstanceItem[]
-    const dstInstances = instances.filter(item =>
-      item.gameCode === DST_APP_ID && item.status !== 'pending_install',
-    )
+    const dstInstances = instances.filter(isInstallableGameInstance)
     rows.value = await Promise.all(dstInstances.map(loadShardSummary))
   }
   finally {
@@ -208,7 +203,7 @@ onMounted(() => {
         description="暂无已安装的 DST 实例"
       >
         <template #extra>
-          <NButton type="primary" @click="router.push({ name: 'nodeInstance' })">
+          <NButton type="primary" @click="router.push(routeToNodeInstance())">
             前往实例管理
           </NButton>
         </template>

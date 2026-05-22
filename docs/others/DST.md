@@ -50,12 +50,12 @@ DST 进程启动参数 `-persistent_storage_root` 指向 `{installPath}/klei-sto
 
 面板通过 stdin 或 `docker exec` 发送以下 Lua（无需前缀 `~`）：
 
-| 操作 | 命令 | 面板快捷（规划） |
-|------|------|----------------|
-| 保存 | `c_save()` | 保存 |
-| 回档 n 天 | `c_rollback(n)` n=1..6 | 回档 1～6 天 |
-| 重置世界 | `c_reset()` | 重置（需二次确认） |
-| 注册投票 | `TheNet:ListSnapshotTimeout()` 等 | 高级，v1 可不暴露 |
+| 操作 | 命令 | Community 快捷 | Pro 补全（规划） |
+|------|------|----------------|------------------|
+| 保存 | `c_save()` | 保存 | 命令库 + 输入补全 |
+| 回档 n 天 | `c_rollback(n)` n=1..6 | 回档 1～3 天按钮 | 命令库 + 参数提示 |
+| 重置世界 | `c_reset()` | 重置（需二次确认） | 命令库 + 二次确认 |
+| 注册投票 | `TheNet:ListSnapshotTimeout()` 等 | 高级，v1 不暴露 | Pro 命令库扩展 |
 
 **注意**：重置与回档影响全体玩家，UI 必须强确认。
 

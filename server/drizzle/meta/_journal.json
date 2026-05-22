@@ -36,6 +36,20 @@
       "when": 1779120000000,
       "tag": "0004_instance_update_status",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779206400000,
+      "tag": "0005_instance_runtime_started_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779292800000,
+      "tag": "0006_instance_maintenance",
+      "breakpoints": true
     }
   ]
 }

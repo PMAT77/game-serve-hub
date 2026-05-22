@@ -2,8 +2,28 @@ import type { RouteRecordMainRaw } from '@fantastic-admin/types'
 import type { RouteRecordRaw } from 'vue-router'
 import pinia from '@/store'
 
+/** 旧版 DST 菜单路径重定向（书签/外链兼容） */
+const legacyRouteRedirects: RouteRecordRaw[] = [
+  { path: '/cluster', redirect: '/games/dst/rooms' },
+  { path: '/cluster/list', redirect: '/games/dst/rooms' },
+  {
+    path: '/cluster/settings/:instanceId',
+    redirect: to => ({
+      path: `/games/dst/rooms/${String(to.params.instanceId)}/settings`,
+    }),
+  },
+  { path: '/cluster/shard-list', redirect: '/games/dst/worlds' },
+  {
+    path: '/cluster/shard-settings/:instanceId',
+    redirect: to => ({
+      path: `/games/dst/worlds/${String(to.params.instanceId)}/settings`,
+    }),
+  },
+]
+
 // 固定路由（默认路由）
 const constantRoutes: RouteRecordRaw[] = [
+  ...legacyRouteRedirects,
   {
     path: '/login',
     name: 'login',

@@ -1,6 +1,6 @@
 # Game Server Hub 开发任务清单（重建版）
 
-> 最后同步：2026-05-21（**Open Core 架构文档已发布**；**M0 已完成**；**模块 03** 已验收；**模块 04** 已落地，待验收）  
+> 最后同步：2026-05-22（**M0 已完成**；**M1 模块 03/04** 已验收；Open Core 架构文档已发布）  
 > 状态口径：已实现 / 部分实现 / 规划态  
 > 事实来源：`server/src`、`src/views`、`docs/FDS/*`
 
@@ -24,7 +24,7 @@
 | 06   | 备份恢复            | 规划态      | `FDS/06-backup.md`          |
 | 07   | 配置中心            | 规划态      | `FDS/07-config.md`          |
 | 08   | 文件管理            | 规划态      | `FDS/08-file.md`            |
-| 09   | 实例控制台           | 已实现      | `FDS/09-console.md`         |
+| 09   | 实例控制台           | 已实现（Community）；Pro 命令补全规划态 | `FDS/09-console.md`         |
 | 10   | 玩家与访问           | 规划态      | `FDS/10-player-access.md`   |
 | 11   | 计划任务            | 规划态（Pro-only） | `FDS/11-scheduler.md`       |
 | 12   | 通知与审计           | 规划态      | `FDS/12-notice-audit.md`    |
@@ -47,7 +47,7 @@
 
 - [~] 监控台增强（容器摘要、异常提示）
 - [x] Cluster 可视化管理（模块 03，2026-05-20 验收）
-- [x] Shard 可视化管理（模块 04；双容器编排、洞穴 UX 与 dst-admin-go 对齐，见 FDS-04）
+- [x] Shard 可视化管理（模块 04，2026-05-21 验收；见 FDS-04）
 - 配置中心落地
 
 ### 3.2.1 规划：游戏内维护公告推送（未开工）
@@ -92,6 +92,46 @@
 - [ ] 前端：实例控制台「游戏控制」维护公告编辑区 + 推送按钮 + 最近推送记录
 - [ ] 文档：`DST-OPS` / RUNBOOK 增加「仅重启面板且保持游戏在线」推荐流程
 
+### 3.2.2 规划：DST 控制台命令提示与补全（Pro-only，未开工）
+
+> **需求背景**：饥荒 DST 控制台命令为 Lua 语法，管理员需记忆 `c_save()`、`c_rollback(n)`、`TheNet:Announce(...)` 等写法。Community 版已提供少量快捷按钮与普通文本输入，但**不含**输入时的命令提示与自动补全。  
+> **本次范围**：仅记录 Pro 开发计划，**不在 Community（MIT）仓实现**；不含命令审计、服务端命令解析（仍走现有 `POST /app/instance/console/command` 透传 stdin）。
+
+**功能名称（建议）**：DST 控制台命令库 + 输入补全（Pro）。
+
+**用户故事**
+
+1. Pro 管理员在实例控制台「面板与控制」Tab 输入命令时，获得前缀匹配的下拉候选（如输入 `c_rol` → `c_rollback(n)`）。
+2. 选中候选后填入完整命令模板；带参数命令展示简要说明（如回档天数 1～6）。
+3. 危险命令（如 `c_reset()`）选中或发送前仍走二次确认；与 Community 现有确认逻辑一致。
+4. Community 用户保持现状：快捷按钮 + 普通输入框 + placeholder，**不出现**补全下拉或「升级 Pro」灰态控件。
+
+**职能边界**
+
+| 归属 | 说明 |
+|------|------|
+| **Community（MIT）** | 连接信息、日志 SSE、快捷指令（`c_save` / `c_rollback` / `c_reset`）、自定义命令输入与发送、分片选择（地上/洞穴） |
+| **Pro（`@gsh/pro-console`）** | DST 命令静态库、输入补全 UI、命令说明/tooltip、可选自定义命令模板与最近使用历史 |
+| **不做（v1 Pro 规划外）** | 从游戏进程动态拉取命令列表；服务端 Lua 语法校验；命令执行结果结构化解析 |
+
+**技术要点（实现时核对）**
+
+- 补全为**纯前端**能力：静态命令库 + 前缀/分类匹配；下发仍调用 Community 已有 `POST /app/instance/console/command`。
+- Pro 包通过扩展点注入控制台命令输入区（如 `pro.ui.console.commandInput`），**不在** MIT 仓提交 `NAutoComplete`、命令库 JSON/TS 或模板 CRUD。
+- 命令库数据源可参考 `docs/others/DST.md` §3 与 Klei Wiki；Pro 包内维护，可随 Pro 版本独立更新。
+- Community 控制台页保留稳定扩展槽（占位/空插槽），供 Pro 挂载；未激活 Pro 时不渲染补全 UI。
+
+**Open Core**：模块 09 为 **hybrid**；entitlement `console_commands`；详见 [FDS-09 §11 Open Core 落点](FDS/09-console.md)。
+
+**建议里程碑**：M4（`@gsh/pro-console` 与 `@gsh/pro-audit` 等 Pro 模块扩展阶段）；晚于 M3-d 授权与 Pro 路由注入基础设施。
+
+**实现检查清单（规划，未开工）**
+
+- [ ] FDS-09 增补 Open Core 落点与 Pro 验收项（§11）
+- [ ] Pro 包：`@gsh/pro-console` — 命令库、`registerProConsoleUi` 扩展点、可选 `GET /app/instance/console/command-templates`（Pro API）
+- [ ] Community：控制台命令输入区扩展槽 stub；**禁止**实现补全逻辑或命令库数据
+- [ ] 文档：同步 `TODO.md` §5、`COMMERCIAL.md` entitlement、`13-PRO-OPEN-CORE-ARCHITECTURE.md` §10
+
 ## 3.3 M2（运维效率）
 
 - Mod 管理
@@ -115,7 +155,7 @@
 | **M3-b 扩展点 stub** | Community 仓：`LicensePort`、`ProModuleLoader` 接口 + no-op；`GET /api/meta/edition` | 规划态 |
 | **M3-c 首个 Pro 包** | 私有仓 `@gsh/pro-scheduler`（整模块）；Pro Docker 镜像 POC | 规划态 |
 | **M3-d 授权与升级 UX** | License 激活页、离线宽限、Pro migration 流水线 | 规划态 |
-| **M4 Pro 模块扩展** | `@gsh/pro-audit`、多节点、云备份等按 §5 对照表逐个落地 | 规划态 |
+| **M4 Pro 模块扩展** | `@gsh/pro-console`（命令补全）、`@gsh/pro-audit`、多节点、云备份等按 §5 对照表逐个落地 | 规划态 |
 
 ## 4. 当前迭代待办（按优先级）
 
@@ -128,8 +168,6 @@
 
 ## 4.2 P1
 
-- [x] 模块 03 接口与页面（已落地并验收）
-- [x] 模块 04 接口与页面（已落地；洞穴分片：房间保存自动生成 Caves 配置，世界设置编辑端口/worldgen）
 - [x] Open Core 架构文档与 Pro 功能对照表已发布（M3-a）
 - 设计模块 12 的最小可用实现切片（Community 站内通知 + 审计）
 - 规范化错误码映射与排障指引
@@ -139,6 +177,7 @@
 - 完善 Mock 覆盖（metrics、SSE、steamcmd、network）
 - 增强引导与帮助中心
 - 游戏内维护公告推送（见 §3.2.1，依赖 FDS-09 命令通道）
+- DST 控制台命令提示与补全（Pro-only，见 §3.2.2；`@gsh/pro-console`）
 
 ## 5. Community / Pro 功能对照表
 
@@ -164,6 +203,7 @@
 | 06 备份 | hybrid | 手动备份与恢复 | 自动备份、云存储 | `cloud_backup` |
 | 07 配置中心 | hybrid | INI/LUA 编辑与校验 | diff、导入导出 | `config_advanced` |
 | 08 文件 | hybrid | 沙箱浏览、文本编辑 | 大文件、断点续传 | `file_advanced` |
+| 09 实例控制台 | hybrid | 连接信息、日志 SSE、快捷指令、自定义命令输入 | DST 命令库、输入补全、自定义命令模板 | `console_commands` |
 | 10 玩家访问 | hybrid | 名单维护 | 规则策略增强 | `access_advanced` |
 | **11 计划任务** | **pro-only** | **升级引导页** | **任务 CRUD、调度引擎、执行历史** | `scheduler` |
 | 12 通知审计 | hybrid | 站内通知、关键操作审计 | 外部通知通道 | `external_notify` |
@@ -183,11 +223,15 @@
 
 ## 7. 验收映射
 
-- 模块级验收：见 `docs/FDS/*` 各自“验收标准”
-- 系统级验收：见 `docs/11-ACCEPTANCE-TEST-STANDARD.md`
-- **M0 里程碑（已完成）**：2026-05-19 产品方确认；回归记录见 `docs/M0-M1-REGRESSION.md`（§M0 验收记录、§M0 回归终局状态）
-- **模块 03（DST 房间 / Cluster）**：2026-05-20 产品方确认验收；标准见 `FDS/03-dst-cluster.md` §9；Pro 项（多 Cluster、配置模板库）未纳入本次验收
-- **模块 04（DST 世界 / Shard）**：实现已落地；标准见 `FDS/04-dst-shard.md` §9；建议回归：房间开分片保存 → 世界设置 → 双容器启停（`docs/M0-M1-REGRESSION.md` §M1 Shard）
+模块级标准见各 FDS §9；系统级流程见 `docs/11-ACCEPTANCE-TEST-STANDARD.md`。已验收项记录如下（**验收日期与回归细节以此表为准**，其他文档仅引用）：
+
+| 对象 | 日期 | 结论 | 标准 | 回归 / 记录 |
+|------|------|------|------|-------------|
+| M0 可运行闭环 | 2026-05-19 | 已完成 | `11-ACCEPTANCE` §2.1 模块 00/02/09/14 | `M0-M1-REGRESSION.md` §M0 |
+| 模块 03 Cluster | 2026-05-20 | 已验收 | `FDS/03-dst-cluster.md` §9 | 产品验收；`cluster-service.test.ts` 等 |
+| 模块 04 Shard | 2026-05-21 | 已验收 | `FDS/04-dst-shard.md` §9 | `M0-M1-REGRESSION.md` §M1 Shard（S1–S7） |
+
+Pro 能力（多 Cluster、配置模板库、高级 worldgen 等）未纳入上表 Community 验收范围。
 
 ## 8. 维护规则
 

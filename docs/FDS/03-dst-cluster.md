@@ -38,6 +38,7 @@
 
 - `GET /app/instance/cluster?instanceId={instanceId}` — 读取房间配置
 - `PUT /app/instance/cluster` — 保存；请求体为 `ClusterSavePayload`，含 `instanceId` 及表单字段（可选 `restart: true` 保存后重启）
+- `GET /app/instance/cluster/online-players?instanceId={instanceId}` — 运行中实例在线人数（列表页展示用）
 
 > 说明：部分其他 FDS 草案仍写 `/app/instances/:instanceId/...`；v1 已落地模块以 **`/app/instance/*` + query/body** 为准，新实现与之保持一致，不在本模块单独引入复数路径段。
 
@@ -140,7 +141,7 @@
 | 后端模块 | `server/src/modules/cluster/index.ts` |
 | 适配层 | `server/src/infra/game-adapter/dst/cluster-service.ts`、`cluster-ini.ts`、`cluster-token.ts` |
 | 前端 API | `src/api/modules/cluster.ts`（`cluster.fake.ts`） |
-| 前端页面 | `src/views/cluster/index.vue`、`settings.vue` |
+| 前端页面 | `src/views/games/dst/cluster/index.vue`、`settings.vue`（路由 `/games/dst/rooms`） |
 
 ## 11. 后续里程碑（Pro / 增强）
 

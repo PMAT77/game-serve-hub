@@ -178,10 +178,10 @@ export interface UpdateGameInstanceRuntimeInput {
 
 const defaultUserSeeds: DbDefaultUserSeed[] = [
   {
-    account: 'superman',
+    account: 'superadmin',
     password: '123456',
-    email: 'superman@game.com',
-    avatar: 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=superman',
+    email: 'superadmin@game.com',
+    avatar: 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=superadmin',
     permissions: [
       'pages.general:browse',
       'pages.form:browse',
@@ -526,7 +526,7 @@ async function applyForcePasswordChangePolicy(options: InitDatabaseOptions) {
     return
   }
 
-  const adminAccount = options.adminUsername?.trim() || 'admin'
+  const adminAccount = options.adminUsername?.trim() || 'superadmin'
   const state = await getAuthForcePasswordChangeState()
   if (state?.completed) {
     return

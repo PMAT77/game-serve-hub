@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const BASE = process.env.REGRESSION_BASE_URL ?? 'http://127.0.0.1:9527'
-const ACCOUNT = process.env.REGRESSION_ACCOUNT ?? 'superman'
+const ACCOUNT = process.env.REGRESSION_ACCOUNT ?? 'superadmin'
 const PASSWORD = process.env.REGRESSION_PASSWORD ?? '123456'
 
 interface CaseResult {

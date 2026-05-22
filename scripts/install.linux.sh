@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-https://raw.githubusercontent.com/PMAT77/game-server-hub/main}"
+INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-https://raw.githubusercontent.com/GameServerHub/game-server-hub/main}"
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
 RETRY_MAX=3 # 可重试操作的最大重试次数。
 RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
@@ -20,7 +20,7 @@ DST_MASTER_PORT="${DST_MASTER_PORT:-12346}"
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
 PANEL_PORT="${PANEL_PORT:-80}" # 面板对外暴露端口（默认使用常见放行端口）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
-PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_REPOSITORY:-ghcr.io/pmat77/game-server-hub}" # 容器镜像仓库地址。
+PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub}" # 容器镜像仓库地址。
 PANEL_INSTANCES_DIR="${PANEL_INSTANCES_DIR:-${PANEL_DATA_DIR}/instances}" # 游戏实例数据目录。
 PANEL_BACKUPS_DIR="${PANEL_BACKUPS_DIR:-${PANEL_DATA_DIR}/backups}" # 备份目录。
 PANEL_BIND_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.bind.yml"
@@ -37,8 +37,8 @@ DISTRO_ID="" # 发行版 ID（如 ubuntu/debian）。
 DISTRO_CODENAME="" # 发行版代号（如 jammy/bookworm）。
 PANEL_HOST="${PANEL_HOST:-}" # 面板访问主机地址（为空时自动探测）。
 PANEL_ACCESS_URL="" # 最终拼装出的访问 URL。
-ADMIN_USERNAME="${ADMIN_USERNAME:-admin}" # 初始管理员用户名。
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" # 初始管理员密码（为空时自动生成）。
+ADMIN_USERNAME="${ADMIN_USERNAME:-superadmin}" # 初始管理员用户名。
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}" # 初始管理员密码（为空时使用预设值）。
 ROLLBACK_ENABLED=0 # 是否允许回滚（部署开始后置为 1）。
 
 # 基础日志函数，统一输出格式。
@@ -372,7 +372,7 @@ ADMIN_PASSWORD=${ADMIN_PASSWORD}
 FORCE_PASSWORD_CHANGE=1
 GSH_EDITION=community
 DOCKER_HOST=unix:///var/run/docker.sock
-GSH_GAME_DST_IMAGE=ghcr.io/pmat77/game-server-hub-dst:${PANEL_IMAGE_TAG}
+GSH_GAME_DST_IMAGE=ghcr.io/gameserverhub/game-server-hub-dst:${PANEL_IMAGE_TAG}
 GSH_STEAMCMD_IMAGE=cm2network/steamcmd:steam-bookworm
 # 国内服务器建议取消注释以下 SteamCMD 优化项：
 # GSH_STEAMCMD_DOWNLOAD_REGION=cn
@@ -382,7 +382,7 @@ GSH_STEAMCMD_IMAGE=cm2network/steamcmd:steam-bookworm
 # STEAMCMD_PASSWORD=
 GSH_STACK_DIR=${PANEL_INSTALL_DIR}
 GSH_COMPOSE_FILES=docker-compose.yml:docker-compose.bind.yml
-GSH_GITHUB_REPO=PMAT77/game-server-hub
+GSH_GITHUB_REPO=GameServerHub/game-server-hub
 TZ=UTC
 EOF"
   run_as_root chmod 600 "${PANEL_ENV_FILE}"

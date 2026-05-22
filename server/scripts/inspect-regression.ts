@@ -30,7 +30,7 @@ async function main() {
   const login = await fetch(`${BASE}/app/account/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ account: 'superman', password: '123456' }),
+    body: JSON.stringify({ account: 'superadmin', password: '123456' }),
   }).then(r => r.json()) as { data: { token: string } }
   const token = login.data.token
 

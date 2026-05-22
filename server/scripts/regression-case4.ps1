@@ -2,7 +2,7 @@ $Base = 'http://127.0.0.1:9527'
 $InstanceId = '3b7440ed-aa9d-46f0-b96b-0e4f2174604d'
 $ErrorActionPreference = 'Stop'
 
-$login = Invoke-RestMethod -Uri "$Base/app/account/login" -Method POST -ContentType 'application/json' -Body '{"account":"superman","password":"123456"}' -TimeoutSec 30
+$login = Invoke-RestMethod -Uri "$Base/app/account/login" -Method POST -ContentType 'application/json' -Body '{"account":"superadmin","password":"123456"}' -TimeoutSec 30
 $token = $login.data.token
 $headers = @{ token = $token; 'Content-Type' = 'application/json' }
 

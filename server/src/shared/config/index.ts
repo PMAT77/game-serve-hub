@@ -110,24 +110,24 @@ export function loadServerConfig(): ServerConfig {
     logLevel: parsed.LOG_LEVEL,
     envFile: path.resolve(serverRootDir, `.env.${mode}`),
     forcePasswordChange: isTruthyEnv(parsed.FORCE_PASSWORD_CHANGE),
-    adminUsername: parsed.ADMIN_USERNAME || 'admin',
-    adminPassword: parsed.ADMIN_PASSWORD ?? '',
+    adminUsername: parsed.ADMIN_USERNAME || 'superadmin',
+    adminPassword: parsed.ADMIN_PASSWORD ?? '123456',
     dockerHost: parsed.DOCKER_HOST || (process.platform === 'win32'
       ? 'npipe:////./pipe/docker_engine'
       : 'unix:///var/run/docker.sock'),
     instancesRoot: path.resolve(parsed.GSH_INSTANCES_ROOT || defaultInstancesRoot),
     backupsRoot: path.resolve(parsed.GSH_BACKUPS_ROOT || defaultBackupsRoot),
-    gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/pmat77/game-server-hub-dst:latest',
+    gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/gameserverhub/game-server-hub-dst:latest',
     steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'cm2network/steamcmd:steam-bookworm',
     edition: parsed.GSH_EDITION || 'community',
-    panelImage: parsed.PANEL_IMAGE || 'ghcr.io/pmat77/game-server-hub:latest',
+    panelImage: parsed.PANEL_IMAGE || 'ghcr.io/gameserverhub/game-server-hub:latest',
     stackDir: parsed.GSH_STACK_DIR?.trim() || '',
     composeFiles: (parsed.GSH_COMPOSE_FILES?.trim() || 'docker-compose.yml:docker-compose.bind.yml')
       .split(':')
       .map(item => item.trim())
       .filter(Boolean),
     panelContainerName: parsed.GSH_PANEL_CONTAINER_NAME?.trim() || 'game-server-hub-panel',
-    githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'PMAT77/game-server-hub',
+    githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'GameServerHub/game-server-hub',
     releaseVersion: parsed.GSH_RELEASE_VERSION?.trim() || '',
     buildSha: parsed.GSH_BUILD_SHA?.trim() || '',
   }

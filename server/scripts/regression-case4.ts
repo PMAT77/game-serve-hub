@@ -29,7 +29,7 @@ async function requestJson(method: string, urlPath: string, token: string, body?
 }
 
 async function main() {
-  const login = await requestJson('POST', '/app/account/login', '', { account: 'superman', password: '123456' })
+  const login = await requestJson('POST', '/app/account/login', '', { account: 'superadmin', password: '123456' })
   const token = (login.data as { token: string }).token
 
   const db = new DatabaseSync(dbPath)

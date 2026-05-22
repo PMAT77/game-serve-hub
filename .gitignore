@@ -7,6 +7,10 @@ dist/
 dist-*/
 dist-test/
 *.tsbuildinfo
+packages/*/dist/
+
+# Internal documentation (not published in open-source repo)
+docs/
 
 # Local runtime data & logs
 server/data/
@@ -15,16 +19,24 @@ data/
 logs/
 *.sqlite*
 **/install-logs/
+debug-*.log
+*.ndjson
 
-# Environment & secrets (keep *.example / tracked Vite env templates)
-.env*.local
-.env.local
+# Environment & secrets (track only *.example templates)
+.env
+.env.*
+!.env.*.example
+server/.env
+server/.env.*
+!server/.env.*.example
 panel.env
 .dev/
 
 # IDE & local tooling
-.agents
+.agents/
 .cursor/
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
 

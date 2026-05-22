@@ -15,8 +15,8 @@ const webPort = process.env.VITE_DEV_WEB_PORT?.trim() || '9000'
 const panelUrl = `http://127.0.0.1:${panelPort}`
 const webUrl = `http://127.0.0.1:${webPort}`
 const steamcmdImage = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'cm2network/steamcmd:steam-bookworm'
-const account = process.env.ADMIN_USERNAME?.trim() || 'admin'
-const password = process.env.ADMIN_PASSWORD ?? 'admin'
+const account = process.env.ADMIN_USERNAME?.trim() || 'superadmin'
+const password = process.env.ADMIN_PASSWORD ?? '123456'
 
 import { createDevComposeLogFilter, filterDevComposeLogLine } from './dev-compose-log-filter.ts'
 

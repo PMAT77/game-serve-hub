@@ -10,7 +10,7 @@ let panelSettings = {
 
 const panelUpdateStatus = {
   panel: {
-    image: 'ghcr.io/pmat77/game-server-hub:latest',
+    image: 'ghcr.io/gameserverhub/game-server-hub:latest',
     tag: 'latest',
     releaseVersion: '0.1.0',
     localDigest: 'sha256:abc123',
@@ -22,7 +22,7 @@ const panelUpdateStatus = {
     checkError: null,
   },
   dst: {
-    image: 'ghcr.io/pmat77/game-server-hub-dst:latest',
+    image: 'ghcr.io/gameserverhub/game-server-hub-dst:latest',
     tag: 'latest',
     releaseVersion: '0.1.0',
     localDigest: 'sha256:abc123',
@@ -38,7 +38,7 @@ const panelUpdateStatus = {
     name: 'v0.2.0',
     body: '- 面板更新检测\n- DST 运行镜像优化',
     publishedAt: new Date().toISOString(),
-    htmlUrl: 'https://github.com/PMAT77/game-server-hub/releases/tag/v0.2.0',
+    htmlUrl: 'https://github.com/GameServerHub/game-server-hub/releases/tag/v0.2.0',
   },
   lastCheckedAt: new Date().toISOString(),
   checking: false,

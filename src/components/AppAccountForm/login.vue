@@ -29,8 +29,8 @@ const type = ref<'default' | 'qrcode'>('default')
 function resolveLoginInitialValues() {
   if (import.meta.env.DEV) {
     return {
-      account: import.meta.env.VITE_DEV_LOGIN_ACCOUNT?.trim() || 'admin',
-      password: import.meta.env.VITE_DEV_LOGIN_PASSWORD || 'admin',
+      account: import.meta.env.VITE_DEV_LOGIN_ACCOUNT?.trim() || 'superadmin',
+      password: import.meta.env.VITE_DEV_LOGIN_PASSWORD || '123456',
       remember: false,
     }
   }
@@ -150,8 +150,8 @@ function testAccount(account: string) {
       <div class="mt-4 text-center -mb-4">
         <FaDivider>演示账号一键登录</FaDivider>
         <div class="space-x-2">
-          <FaButton variant="default" size="sm" plain @click="testAccount('superman')">
-            admin
+          <FaButton variant="default" size="sm" plain @click="testAccount('superadmin')">
+            superadmin
           </FaButton>
           <FaButton variant="outline" size="sm" plain @click="testAccount('test')">
             test

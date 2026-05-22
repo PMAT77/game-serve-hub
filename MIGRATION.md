@@ -18,7 +18,7 @@
 ## 后续项（非阻塞）
 
 - [ ] `src/views/index.vue` 中 fantastic-admin Git 外链
-- [ ] `scripts/install.linux.sh` 镜像 `ghcr.io/fantastic-admin/game-server-hub`
+- [ ] `scripts/install.linux.sh` 镜像 `ghcr.io/gameserverhub/game-server-hub`
 - [ ] 可选：包名由 `@fantastic-admin/game-server-hub` 改为 `game-server-hub`
 
 ## Git 分支（本副本）

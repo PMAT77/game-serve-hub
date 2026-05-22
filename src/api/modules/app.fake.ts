@@ -27,7 +27,7 @@ export default defineFakeRoute([
           avatar: `https://api.dicebear.com/9.x/bottts-neutral/svg?seed=${body.account}`,
           email: `${body.account}@game.com`,
           remember: body.remember === true,
-          mustChangePassword: body.account === 'superman',
+          mustChangePassword: body.account === 'superadmin',
         },
       }
     },
@@ -50,7 +50,7 @@ export default defineFakeRoute([
     method: 'get',
     response: ({ headers }) => {
       let permissions: string[] = []
-      if (headers.token?.indexOf('admin') === 0) {
+      if (headers.token?.indexOf('superadmin') === 0) {
         permissions = [
           'pages.general:browse',
           'pages.form:browse',

@@ -1,6 +1,6 @@
 services:
   panel:
-    image: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:latest}
+    image: ${PANEL_IMAGE:-ghcr.io/gameserverhub/game-server-hub:latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -19,8 +19,8 @@ services:
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
-      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:latest}
-      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub-dst:latest}
+      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/gameserverhub/game-server-hub:latest}
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/gameserverhub/game-server-hub-dst:latest}
       GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:steam-bookworm}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB:-}
@@ -44,7 +44,7 @@ services:
       GSH_EDITION: ${GSH_EDITION:-community}
       GSH_STACK_DIR: ${GSH_STACK_DIR:-/opt/game-server-hub}
       GSH_COMPOSE_FILES: ${GSH_COMPOSE_FILES:-docker-compose.yml:docker-compose.bind.yml}
-      GSH_GITHUB_REPO: ${GSH_GITHUB_REPO:-PMAT77/game-server-hub}
+      GSH_GITHUB_REPO: ${GSH_GITHUB_REPO:-GameServerHub/game-server-hub}
     volumes:
       - gsh-data:/app/data
       - gsh-logs:/app/logs

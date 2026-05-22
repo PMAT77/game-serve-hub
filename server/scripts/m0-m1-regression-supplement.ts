@@ -10,8 +10,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const BASE = process.env.REGRESSION_BASE_URL ?? 'http://127.0.0.1:3000'
-const ACCOUNT = process.env.REGRESSION_ACCOUNT ?? 'admin'
-const PASSWORD = process.env.REGRESSION_PASSWORD ?? 'admin'
+const ACCOUNT = process.env.REGRESSION_ACCOUNT ?? 'superadmin'
+const PASSWORD = process.env.REGRESSION_PASSWORD ?? '123456'
 const DOCKER_SOCK = process.env.REGRESSION_DOCKER_SOCK ?? '/var/run/docker.sock'
 const DOCKER_SOCK_BAK = `${DOCKER_SOCK}.regression-bak`
 const CACHE_WAIT_MS = Number(process.env.REGRESSION_DOCKER_CACHE_WAIT_MS ?? 35_000)

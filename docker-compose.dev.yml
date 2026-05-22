@@ -20,7 +20,7 @@ services:
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
-      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub-dst:latest}
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/gameserverhub/game-server-hub-dst:latest}
       GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:steam-bookworm}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB:-}
@@ -30,8 +30,8 @@ services:
       GSH_STEAMCMD_BIND_OPTS: ${GSH_STEAMCMD_BIND_OPTS:-}
       STEAMCMD_USERNAME: ${STEAMCMD_USERNAME:-}
       STEAMCMD_PASSWORD: ${STEAMCMD_PASSWORD:-}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-superadmin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-123456}
     volumes:
       - .:/app
       - panel-node-modules:/app/node_modules

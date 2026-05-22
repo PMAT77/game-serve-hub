@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import logo from '@/assets/images/logo.svg'
-import placeholdPreview from '@/assets/images/placehold.png'
+import logo from '@/assets/images/logo.png' 
 
 /** 待补充：文档站、镜像站、Pro 购买页等外链 */
 const LINKS = {
   docs: '#',
-  github: 'https://github.com/PMAT77/game-server-hub',
+  github: 'https://github.com/GameServerHub/game-server-hub',
   gitee: '#',
   gitcode: '#',
   pro: '#',
@@ -44,9 +43,7 @@ const products = ref([
     tagline: '贴近游戏内的运维体验，少登录、少切终端',
     logo,
     url: LINKS.docs,
-    images: [
-      placeholdPreview,
-    ],
+    images: [ ],
   },
 ])
 
@@ -68,7 +65,7 @@ function open(url: string) {
       <!-- Top Bar -->
       <div class="mb-6 flex items-center justify-between">
         <div class="flex gap-3 items-center">
-          <FaIcon :name="logo" class="p-1 border rounded-lg size-10" />
+          <FaIcon :name="logo" class="p-1 border rounded-lg w-40px h-30px" />
           <span class="tracking-tight font-semibold">GameServerHub</span>
         </div>
         <FaTabs

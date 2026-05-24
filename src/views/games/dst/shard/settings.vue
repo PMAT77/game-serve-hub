@@ -64,10 +64,10 @@ const surfaceSubTab = ref<ShardSubTab>('rules')
 const cavesSubTab = ref<ShardSubTab>('rules')
 const allocatingPorts = ref(false)
 
-const masterWorldRules = reactive<Record<string, string>>({})
-const cavesWorldRules = reactive<Record<string, string>>({})
-const masterWorldgenConfig = reactive<Record<string, string>>({})
-const cavesWorldgenConfig = reactive<Record<string, string>>({})
+const masterWorldRules = ref<Record<string, string>>({})
+const cavesWorldRules = ref<Record<string, string>>({})
+const masterWorldgenConfig = ref<Record<string, string>>({})
+const cavesWorldgenConfig = ref<Record<string, string>>({})
 
 const masterFormRef = ref<FormInst | null>(null)
 const cavesFormRef = ref<FormInst | null>(null)
@@ -136,28 +136,20 @@ function containerStatusTag(shard: ShardSummaryDto | undefined) {
 }
 
 function resetLocalWorldRules() {
-  for (const key of Object.keys(masterWorldRules)) {
-    delete masterWorldRules[key]
-  }
-  for (const key of Object.keys(cavesWorldRules)) {
-    delete cavesWorldRules[key]
-  }
-  for (const key of Object.keys(masterWorldgenConfig)) {
-    delete masterWorldgenConfig[key]
-  }
-  for (const key of Object.keys(cavesWorldgenConfig)) {
-    delete cavesWorldgenConfig[key]
-  }
+  masterWorldRules.value = {}
+  cavesWorldRules.value = {}
+  masterWorldgenConfig.value = {}
+  cavesWorldgenConfig.value = {}
 }
 
 function applyShardToForm(shard: ShardSummaryDto) {
   if (shard.id === 'master') {
-    applyLeveldataOverridesFromServer(masterWorldRules, 'rules', 'master', shard.leveldataOverrides)
-    applyLeveldataOverridesFromServer(masterWorldgenConfig, 'worldgen', 'master', shard.leveldataOverrides)
+    applyLeveldataOverridesFromServer(masterWorldRules.value, 'rules', 'master', shard.leveldataOverrides)
+    applyLeveldataOverridesFromServer(masterWorldgenConfig.value, 'worldgen', 'master', shard.leveldataOverrides)
   }
   else {
-    applyLeveldataOverridesFromServer(cavesWorldRules, 'rules', 'caves', shard.leveldataOverrides)
-    applyLeveldataOverridesFromServer(cavesWorldgenConfig, 'worldgen', 'caves', shard.leveldataOverrides)
+    applyLeveldataOverridesFromServer(cavesWorldRules.value, 'rules', 'caves', shard.leveldataOverrides)
+    applyLeveldataOverridesFromServer(cavesWorldgenConfig.value, 'worldgen', 'caves', shard.leveldataOverrides)
   }
   if (shard.serverPort != null) {
     if (shard.id === 'master') {
@@ -203,8 +195,8 @@ async function loadConfig() {
 
 function buildSavePayload(shard: ShardId, restart: boolean): ShardSavePayload {
   const form = shard === 'master' ? masterForm : cavesForm
-  const worldRules = shard === 'master' ? masterWorldRules : cavesWorldRules
-  const worldgenConfig = shard === 'master' ? masterWorldgenConfig : cavesWorldgenConfig
+  const worldRules = shard === 'master' ? masterWorldRules.value : cavesWorldRules.value
+  const worldgenConfig = shard === 'master' ? masterWorldgenConfig.value : cavesWorldgenConfig.value
   const summary = shard === 'master' ? masterShard.value : cavesShard.value
   const payload: ShardSavePayload = {
     instanceId: instanceId.value,
@@ -386,24 +378,6 @@ onActivated(() => {
           :title="w"
           class="mb-2"
         />
-        <NAlert
-          v-if="configAlerts.hints.length"
-          type="info"
-          title="提示"
-        >
-          <ul class="list-disc pl-4 space-y-1">
-            <li v-for="(hint, index) in configAlerts.hints" :key="`hint-${index}`">
-              {{ hint }}
-            </li>
-          </ul>
-        </NAlert> 
-
-        <NAlert type="info" :bordered="false" title="保存说明">
-          <ul class="list-disc pl-4 text-sm space-y-1">
-            <li><strong>世界规则</strong>、<strong>网络</strong>：可随时保存；实例运行中需重启后生效。</li>
-            <li><strong>世界生成</strong>（预设与详细参数）：仅在世界<strong>尚未生成</strong>（无存档）时可编辑并保存；生成后界面锁定。</li>
-          </ul>
-        </NAlert>
 
         <NCard size="small" title="洞穴开关">
           <p class="text-sm text-muted-foreground mb-2">
@@ -480,7 +454,7 @@ onActivated(() => {
               </NTabs>
             </NForm>
 
-            <div class="flex flex-wrap justify-center gap-2 mt-4 pt-2 border-t border-border">
+            <div class="flex flex-wrap justify-center gap-2 mt-4 pt-4 border-t border-border">
               <NButton type="primary" size="small" :loading="saving" @click="saveShard('master', false)">
                 保存地上
               </NButton>
@@ -555,7 +529,7 @@ onActivated(() => {
                 </NTabs>
               </NForm>
 
-              <div class="flex flex-wrap justify-center gap-2 mt-4 pt-2 border-t border-border">
+              <div class="flex flex-wrap justify-center gap-2 mt-4 pt-4 border-t border-border">
                 <NButton type="primary" size="small" :loading="saving" @click="saveShard('caves', false)">
                   保存洞穴
                 </NButton>

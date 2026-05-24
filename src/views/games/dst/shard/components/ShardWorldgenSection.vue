@@ -19,7 +19,9 @@ const worldgenLocked = computed(() => Boolean(props.worldGenerated))
 
 const worldgenConfigModel = computed({
   get: () => props.worldgenConfig,
-  set: (value: Record<string, string>) => emit('update:worldgenConfig', value),
+  set: (value: Record<string, string>) => {
+    emit('update:worldgenConfig', { ...value })
+  },
 })
 </script>
 

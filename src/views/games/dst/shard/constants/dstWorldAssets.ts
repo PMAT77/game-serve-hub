@@ -5,6 +5,7 @@ export type DstShardScope = 'master' | 'caves' | 'both'
 export type DstWorldOptionKind = 'worldgen' | 'rule'
 
 export interface DstWorldOption {
+  /** 与 `src/assets/images/dst/{id}.webp` 文件名一致 */
   id: string
   label: string
   image: string
@@ -15,27 +16,19 @@ export interface DstWorldOption {
 }
 
 const ruleImageModules = import.meta.glob<string>(
-  '@/assets/images/dst/*.png',
+  '@/assets/images/dst/*.webp',
   { eager: true, import: 'default' },
 )
 
-const CAVES_RULE_NAME_PATTERN = /cave|depths|darkness|earthquake|bat cave|bunnyman|dart trap|moleworm|bioluminescence|ancient gateway|ancient spirit|enlightenment/i
-
-function slugFromLabel(label: string): string {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_|_$/g, '')
-}
+const CAVES_RULE_ID_PATTERN = /cave|depths|darkness|earthquake|bat_cave|bunnyman|dart_trap|moleworm|bioluminescence|ancient_gateway|ancient_spirit|enlightenment/
 
 function parseRuleFilename(filePath: string, imageUrl: string): DstWorldOption {
   const filename = filePath.split('/').pop() ?? filePath
-  const label = filename.replace(/ Settings Icon\.png$/i, '')
-  const id = slugFromLabel(label)
-  const cavesThemed = CAVES_RULE_NAME_PATTERN.test(label)
+  const id = filename.replace(/\.webp$/i, '')
+  const cavesThemed = CAVES_RULE_ID_PATTERN.test(id)
   return {
     id,
-    label,
+    label: id,
     image: imageUrl,
     shard: cavesThemed ? 'caves' : 'master',
     kind: 'rule',
@@ -45,17 +38,17 @@ function parseRuleFilename(filePath: string, imageUrl: string): DstWorldOption {
 
 const allRuleOptions: DstWorldOption[] = Object.entries(ruleImageModules)
   .map(([path, url]) => parseRuleFilename(path, url))
-  .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))
+  .sort((a, b) => a.id.localeCompare(b.id))
 
-function findRuleImage(label: string): string | undefined {
-  return allRuleOptions.find(o => o.label === label)?.image
+function findRuleImageById(id: string): string | undefined {
+  return allRuleOptions.find(o => o.id === id)?.image
 }
 
 const WORLDGEN_IMAGE_FALLBACK: Record<string, string> = {
-  SURVIVAL_TOGETHER: findRuleImage('Biomes') ?? '',
-  DST_CAVE: findRuleImage('Cave Fern') ?? '',
-  DST_CAVE_PLUS: findRuleImage('Cave Banana Tree') ?? '',
-  COMPLETE_DARKNESS: findRuleImage('Darkness Damage') ?? '',
+  SURVIVAL_TOGETHER: findRuleImageById('biomes') ?? '',
+  DST_CAVE: findRuleImageById('cave_fern') ?? '',
+  DST_CAVE_PLUS: findRuleImageById('cave_banana_tree') ?? '',
+  COMPLETE_DARKNESS: findRuleImageById('darkness_damage') ?? '',
 }
 
 const worldgenOptions: DstWorldOption[] = [

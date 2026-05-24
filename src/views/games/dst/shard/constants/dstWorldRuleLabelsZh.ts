@@ -80,6 +80,7 @@ export const DST_RULE_LABEL_ZH: Record<string, string> = {
   earthquake: '地震',
   elder_mandrake: '长老曼德拉草',
   enlightenment_monsters: '启蒙怪物',
+  winter: '冬季',
   meteor_frequency: '流星频率',
   midsummer_cawnival: '仲夏鸦年华',
   mild: '温和季',

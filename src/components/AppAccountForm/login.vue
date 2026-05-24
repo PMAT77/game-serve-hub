@@ -29,8 +29,8 @@ const type = ref<'default' | 'qrcode'>('default')
 function resolveLoginInitialValues() {
   if (import.meta.env.DEV) {
     return {
-      account: import.meta.env.VITE_DEV_LOGIN_ACCOUNT?.trim() || 'superadmin',
-      password: import.meta.env.VITE_DEV_LOGIN_PASSWORD || '123456',
+      account: String(import.meta.env.VITE_DEV_LOGIN_ACCOUNT ?? '').trim() || 'superadmin',
+      password: String(import.meta.env.VITE_DEV_LOGIN_PASSWORD ?? '') || '123456',
       remember: false,
     }
   }

@@ -14,15 +14,13 @@ import {
 
 const props = defineProps<{
   shard: 'master' | 'caves'
-  shardFolder: 'Master' | 'Caves'
-  modelValue: Record<string, string>
+  /** 分片目录名（Master/Caves），预留展示用 */
+  shardFolder?: 'Master' | 'Caves'
   configTab?: DstWorldConfigTab
   disabled?: boolean
 }>()
 
-const emit = defineEmits<{
-  'update:modelValue': [value: Record<string, string>]
-}>()
+const model = defineModel<Record<string, string>>({ required: true })
 
 const activeTab = computed(() => props.configTab ?? 'rules')
 
@@ -43,19 +41,22 @@ function ruleLevel(overrideKey: string): string {
     return 'default'
   }
   const profile = resolveRowLevelProfile(row)
-  return normalizeLevelValue(profile.levels, props.modelValue[overrideKey])
+  return normalizeLevelValue(profile.levels, model.value[overrideKey])
 }
 
-function setRuleLevel(overrideKey: string, level: string) {
-  emit('update:modelValue', {
-    ...props.modelValue,
+function setRuleLevel(overrideKey: string, level: string | null) {
+  if (level == null) {
+    return
+  }
+  model.value = {
+    ...model.value,
     [overrideKey]: level,
-  })
-} 
+  }
+}
 </script>
 
 <template>
-  <div class="space-y-6"> 
+  <div class="space-y-6">
     <section
       v-for="section in ruleSections"
       :key="section.sectionId"
@@ -68,7 +69,7 @@ function setRuleLevel(overrideKey: string, level: string) {
       <div class="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         <div
           v-for="item in section.items"
-          :key="item.overrideKey"
+          :key="`${section.sectionId}-${item.overrideKey}`"
           class="flex items-stretch gap-3 rounded-lg border border-border bg-card p-3"
         >
           <div
@@ -90,7 +91,7 @@ function setRuleLevel(overrideKey: string, level: string) {
           </div>
 
           <div class="flex min-w-0 flex-1 flex-col justify-between gap-2">
-            <p class="flex justify-center items-center flex-grow text-center text-lg leading-snug font-medium text-foreground ">
+            <p class="text-center text-sm leading-snug font-medium text-foreground">
               {{ item.labelZh }}
             </p>
 
@@ -108,7 +109,9 @@ function setRuleLevel(overrideKey: string, level: string) {
               :value="ruleLevel(item.overrideKey)"
               :options="toSelectOptions(resolveRowLevelProfile(item).levels)"
               :disabled="disabled"
-              @update:value="setRuleLevel(item.overrideKey, $event ?? ruleLevel(item.overrideKey))"
+              size="small"
+              to="body"
+              @update:value="setRuleLevel(item.overrideKey, $event)"
             />
           </div>
         </div>

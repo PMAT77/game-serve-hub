@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LogoMark from '@/components/LogoMark.vue'
+import { APP_TITLE } from '@/utils/app-title'
 
 defineOptions({
   name: 'Logo',
@@ -18,7 +19,7 @@ withDefaults(
 
 const appSettingsStore = useAppSettingsStore()
 
-const title = ref(import.meta.env.VITE_APP_TITLE)
+const title = ref(APP_TITLE)
 
 const to = computed(() => appSettingsStore.settings.app.home.enable ? appSettingsStore.settings.app.home.fullPath : '')
 </script>

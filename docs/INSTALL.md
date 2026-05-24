@@ -59,7 +59,7 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `PANEL_PORT` | `80` | 面板访问端口 |
+| `PANEL_PORT` | `9527` | 面板访问端口 |
 | `PANEL_INSTALL_DIR` | `/opt/game-server-hub` | Compose 与 `panel.env` |
 | `PANEL_DATA_DIR` | `/var/lib/game-server-hub` | SQLite、实例、备份 |
 | `PANEL_LOG_DIR` | `/var/log/game-server-hub` | 日志与安装状态 |
@@ -71,7 +71,7 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 ### 安装后验证
 
 ```bash
-curl -fsS "http://127.0.0.1:80/health"
+curl -fsS "http://127.0.0.1:9527/health"
 docker compose -f /opt/game-server-hub/docker-compose.yml ps
 docker logs --tail 50 game-server-hub-panel
 ```
@@ -122,7 +122,7 @@ docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind
 
 | 用途 | 协议 | 默认端口 |
 |------|------|----------|
-| 面板 | TCP | `80`（安装脚本默认） |
+| 面板 | TCP | `9527`（安装脚本默认） |
 | DST 游戏 | UDP | `10999` |
 | Steam 认证 | UDP | `8766` |
 | 主服务器 | UDP | `12346` |
@@ -138,6 +138,12 @@ docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind
 ```bash
 GSH_STEAMCMD_DOWNLOAD_REGION=cn
 GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8
+```
+
+如 Docker Hub 访问不稳定，可额外配置 SteamCMD 镜像候选 registry（按顺序自动回退）：
+
+```bash
+GSH_STEAMCMD_IMAGE_MIRRORS=docker.m.daocloud.io,hub-mirror.c.163.com
 ```
 
 修改后重新拉起栈：

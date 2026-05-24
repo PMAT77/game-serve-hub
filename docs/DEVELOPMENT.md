@@ -88,6 +88,12 @@ pnpm run dev:compose:down
 
 Compose 开发栈下面板端口见 `panel.env` 中 `PANEL_PORT`（示例默认 `3000`）。
 
+端口说明（避免与安装文档混淆）：
+
+- **源码开发（`pnpm run dev`）**：前端 `9000`，后端 `9527`（`SERVER_PORT` 默认值）。
+- **Compose 开发栈（`pnpm run dev:compose`）**：容器内服务监听 `3000`，宿主机映射由 `PANEL_PORT` 控制（示例默认 `3000`）。
+- **安装脚本（生产安装）**：默认对外端口为 `9527`（见 `INSTALL.md` 与 `scripts/install.linux.sh`）。
+
 ---
 
 ## 测试与代码检查

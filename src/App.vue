@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import dayjs from '@/utils/dayjs'
+import { APP_TITLE } from '@/utils/app-title'
 import { ua } from '@/utils/ua'
 import Provider from './ui/provider/index.vue'
 import 'dayjs/locale/zh-cn'
@@ -13,6 +14,21 @@ const { generateTitle } = useAppMenu()
 
 document.body.setAttribute('data-os', ua.getOS().name || '')
 
+function resolveDynamicPageTitle() {
+  if (!appSettingsStore.title) {
+    return ''
+  }
+  const normalizedTitle = String(generateTitle(appSettingsStore.title) ?? '').trim()
+  if (!normalizedTitle) {
+    return ''
+  }
+  const normalizedLowerTitle = normalizedTitle.toLowerCase()
+  if (normalizedLowerTitle === 'undefined' || normalizedLowerTitle === 'null') {
+    return ''
+  }
+  return normalizedTitle
+}
+
 const isAuth = computed(() => {
   return route.matched.every((item) => {
     return auth(item.meta.auth ?? '')
@@ -25,11 +41,12 @@ watch([
   () => appSettingsStore.title,
 ], () => {
   nextTick(() => {
-    if (appSettingsStore.settings.app.dynamicTitle && appSettingsStore.title) {
-      document.title = `${generateTitle(appSettingsStore.title)} - ${import.meta.env.VITE_APP_TITLE}`
+    const dynamicPageTitle = resolveDynamicPageTitle()
+    if (appSettingsStore.settings.app.dynamicTitle && dynamicPageTitle) {
+      document.title = `${dynamicPageTitle} - ${APP_TITLE}`
     }
     else {
-      document.title = import.meta.env.VITE_APP_TITLE
+      document.title = APP_TITLE
     }
   })
 }, {

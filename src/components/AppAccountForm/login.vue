@@ -2,6 +2,7 @@
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import * as z from 'zod'
+import { APP_TITLE } from '@/utils/app-title'
 import { FormControl, FormField, FormItem, FormMessage } from '@/ui/shadcn/ui/form'
 
 defineOptions({
@@ -20,7 +21,7 @@ const emits = defineEmits<{
 
 const appAccountStore = useAppAccountStore()
 
-const title = import.meta.env.VITE_APP_TITLE
+const title = APP_TITLE
 const loading = ref(false)
 
 // 登录方式，default 账号密码登录，qrcode 扫码登录

@@ -26,14 +26,18 @@ DST_AUTH_PORT="${DST_AUTH_PORT:-8766}"
 DST_MASTER_PORT="${DST_MASTER_PORT:-12346}"
 
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
-PANEL_PORT="${PANEL_PORT:-80}" # 面板对外暴露端口（默认使用常见放行端口）。
+PANEL_PORT="${PANEL_PORT:-9527}" # 面板对外暴露端口（默认使用高位端口以降低备案拦截影响）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
-USE_CN_GHCR_MIRROR="${USE_CN_GHCR_MIRROR:-1}" # 是否优先使用国内 GHCR 镜像（1=启用，0=关闭）。
+USE_ACR_MIRROR="${USE_ACR_MIRROR:-${USE_CN_GHCR_MIRROR:-1}}" # 是否优先使用 ACR 镜像（1=启用，0=关闭）；兼容历史 USE_CN_GHCR_MIRROR。
 PANEL_IMAGE_REPOSITORY_OVERRIDE="${PANEL_IMAGE_REPOSITORY:-}" # 兼容旧变量：显式指定面板镜像仓库时优先使用。
 PANEL_IMAGE_OFFICIAL_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub}" # 面板官方镜像仓库。
-PANEL_IMAGE_CN_REPOSITORY="${PANEL_IMAGE_CN_REPOSITORY:-ghcr.nju.edu.cn/gameserverhub/game-server-hub}" # 面板国内镜像仓库。
+ACR_REGISTRY="${ACR_REGISTRY:-registry.cn-hangzhou.aliyuncs.com}" # ACR Registry 域名。
+ACR_NAMESPACE="${ACR_NAMESPACE:-game-server-hub}" # ACR 命名空间。
+PANEL_IMAGE_ACR_REPOSITORY="${PANEL_IMAGE_ACR_REPOSITORY:-${ACR_REGISTRY}/${ACR_NAMESPACE}/game-server-hub}" # 面板 ACR 镜像仓库。
+PANEL_IMAGE_CN_REPOSITORY="${PANEL_IMAGE_CN_REPOSITORY:-${PANEL_IMAGE_ACR_REPOSITORY}}" # 兼容历史变量名：默认等价 ACR 仓库。
 GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub-dst}" # DST 官方镜像仓库。
-GSH_GAME_DST_IMAGE_CN_REPOSITORY="${GSH_GAME_DST_IMAGE_CN_REPOSITORY:-ghcr.nju.edu.cn/gameserverhub/game-server-hub-dst}" # DST 国内镜像仓库。
+GSH_GAME_DST_IMAGE_ACR_REPOSITORY="${GSH_GAME_DST_IMAGE_ACR_REPOSITORY:-${ACR_REGISTRY}/${ACR_NAMESPACE}/game-server-hub-dst}" # DST ACR 镜像仓库。
+GSH_GAME_DST_IMAGE_CN_REPOSITORY="${GSH_GAME_DST_IMAGE_CN_REPOSITORY:-${GSH_GAME_DST_IMAGE_ACR_REPOSITORY}}" # 兼容历史变量名：默认等价 ACR 仓库。
 PANEL_INSTALL_DIR="${PANEL_INSTALL_DIR:-/opt/game-server-hub}" # 安装目录（放置 env/compose）。
 PANEL_DATA_DIR="${PANEL_DATA_DIR:-/var/lib/game-server-hub}" # 面板持久化数据目录。
 PANEL_LOG_DIR="${PANEL_LOG_DIR:-/var/log/game-server-hub}" # 面板日志与安装状态目录。
@@ -43,13 +47,13 @@ PANEL_BIND_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.bind.yml"
 PANEL_IMAGE_TAG="${PANEL_IMAGE_TAG:-latest}" # 容器镜像标签。
 if [[ -n "${PANEL_IMAGE_REPOSITORY_OVERRIDE}" ]]; then
   PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_REPOSITORY_OVERRIDE}"
-elif [[ "${USE_CN_GHCR_MIRROR}" == "1" ]]; then
-  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_CN_REPOSITORY}"
+elif [[ "${USE_ACR_MIRROR}" == "1" ]]; then
+  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_ACR_REPOSITORY}"
 else
   PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY}"
 fi
-if [[ "${USE_CN_GHCR_MIRROR}" == "1" ]]; then
-  GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_CN_REPOSITORY}"
+if [[ "${USE_ACR_MIRROR}" == "1" ]]; then
+  GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_ACR_REPOSITORY}"
 else
   GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}"
 fi
@@ -521,11 +525,11 @@ switch_to_official_images() {
 deploy_panel() {
   write_status "deploy" "start" "Pulling panel image ${PANEL_IMAGE}"
   if ! pull_runtime_images; then
-    if [[ "${USE_CN_GHCR_MIRROR}" == "1" ]]; then
-      log_warn "CN GHCR mirror pull failed, falling back to official ghcr.io..."
+    if [[ "${USE_ACR_MIRROR}" == "1" ]]; then
+      log_warn "ACR mirror pull failed, falling back to official ghcr.io..."
       switch_to_official_images
       write_status "deploy" "start" "Retrying image pull via official ghcr.io"
-      pull_runtime_images || abort "Image pull failed on both CN mirror and official ghcr.io."
+      pull_runtime_images || abort "Image pull failed on both ACR mirror and official ghcr.io."
     else
       abort "Image pull failed. Please check outbound network or image repository settings."
     fi

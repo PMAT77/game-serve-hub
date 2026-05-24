@@ -13,6 +13,8 @@ RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
 OPEN_DST_PORTS=0 # 是否在安装时开放 DST 默认 UDP 游戏端口。
 GHCR_CHECK_TIMEOUT_SECONDS="${GHCR_CHECK_TIMEOUT_SECONDS:-20}" # ghcr.io 连通性预检查超时时间（秒）。
 STRICT_GHCR_CHECK="${STRICT_GHCR_CHECK:-0}" # 是否要求 ghcr.io 预检查必须通过（1=失败即终止，0=失败仅告警）。
+DOCKER_REPO_CHECK_TIMEOUT_SECONDS="${DOCKER_REPO_CHECK_TIMEOUT_SECONDS:-8}" # download.docker.com 连通性预检查超时时间（秒）。
+STRICT_DOCKER_REPO_CHECK="${STRICT_DOCKER_REPO_CHECK:-1}" # 是否要求 download.docker.com 预检查必须通过（1=失败即终止，0=失败仅告警）。
 USE_CN_DEBIAN_MIRROR="${USE_CN_DEBIAN_MIRROR:-1}" # Debian 是否优先尝试国内镜像（1=启用，0=关闭）。
 DEBIAN_MIRROR_URL="${DEBIAN_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}" # Debian 主仓库镜像。
 DEBIAN_SECURITY_MIRROR_URL="${DEBIAN_SECURITY_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}" # Debian 安全仓库镜像。
@@ -405,8 +407,15 @@ preflight_checks() {
     abort "Insufficient disk space on /. Require >= ${MIN_FREE_DISK_MB} MB."
   fi
 
-  if ! curl -fsSI --max-time 8 "https://download.docker.com" >/dev/null; then
-    abort "Cannot reach https://download.docker.com. Please check outbound network."
+  if ! command -v docker >/dev/null 2>&1; then
+    if ! curl -fsSI --max-time "${DOCKER_REPO_CHECK_TIMEOUT_SECONDS}" "https://download.docker.com" >/dev/null; then
+      if [[ "${STRICT_DOCKER_REPO_CHECK}" == "1" ]]; then
+        abort "Cannot reach https://download.docker.com within ${DOCKER_REPO_CHECK_TIMEOUT_SECONDS}s. Please check outbound network."
+      fi
+      log_warn "Cannot reach https://download.docker.com within ${DOCKER_REPO_CHECK_TIMEOUT_SECONDS}s during preflight. Continue because strict check is disabled."
+    fi
+  else
+    log_info "Docker already installed, skipping download.docker.com preflight check."
   fi
 
   if ! curl -fsSI --max-time "${GHCR_CHECK_TIMEOUT_SECONDS}" "https://ghcr.io" >/dev/null; then

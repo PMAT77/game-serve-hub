@@ -24,7 +24,7 @@ jobs:
             image: ghcr.io/gameserverhub/game-server-hub
           - name: game-dst
             context: docker/game-dst
-            file: Dockerfile
+            file: docker/game-dst/Dockerfile
             image: ghcr.io/gameserverhub/game-server-hub-dst
     steps:
       - name: Checkout

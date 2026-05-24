@@ -11,6 +11,12 @@ MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
 RETRY_MAX=3 # 可重试操作的最大重试次数。
 RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
 OPEN_DST_PORTS=0 # 是否在安装时开放 DST 默认 UDP 游戏端口。
+GHCR_CHECK_TIMEOUT_SECONDS="${GHCR_CHECK_TIMEOUT_SECONDS:-20}" # ghcr.io 连通性预检查超时时间（秒）。
+STRICT_GHCR_CHECK="${STRICT_GHCR_CHECK:-0}" # 是否要求 ghcr.io 预检查必须通过（1=失败即终止，0=失败仅告警）。
+USE_CN_DEBIAN_MIRROR="${USE_CN_DEBIAN_MIRROR:-1}" # Debian 是否优先尝试国内镜像（1=启用，0=关闭）。
+DEBIAN_MIRROR_URL="${DEBIAN_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}" # Debian 主仓库镜像。
+DEBIAN_SECURITY_MIRROR_URL="${DEBIAN_SECURITY_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}" # Debian 安全仓库镜像。
+APT_SOURCES_BACKUP_DIR="/tmp/gsh-apt-sources-backup"
 
 # DST 默认 UDP 端口（与 cluster.ini / server.ini 默认值一致）
 DST_GAME_PORT="${DST_GAME_PORT:-10999}"
@@ -20,7 +26,12 @@ DST_MASTER_PORT="${DST_MASTER_PORT:-12346}"
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
 PANEL_PORT="${PANEL_PORT:-80}" # 面板对外暴露端口（默认使用常见放行端口）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
-PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub}" # 容器镜像仓库地址。
+USE_CN_GHCR_MIRROR="${USE_CN_GHCR_MIRROR:-1}" # 是否优先使用国内 GHCR 镜像（1=启用，0=关闭）。
+PANEL_IMAGE_REPOSITORY_OVERRIDE="${PANEL_IMAGE_REPOSITORY:-}" # 兼容旧变量：显式指定面板镜像仓库时优先使用。
+PANEL_IMAGE_OFFICIAL_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub}" # 面板官方镜像仓库。
+PANEL_IMAGE_CN_REPOSITORY="${PANEL_IMAGE_CN_REPOSITORY:-ghcr.nju.edu.cn/gameserverhub/game-server-hub}" # 面板国内镜像仓库。
+GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub-dst}" # DST 官方镜像仓库。
+GSH_GAME_DST_IMAGE_CN_REPOSITORY="${GSH_GAME_DST_IMAGE_CN_REPOSITORY:-ghcr.nju.edu.cn/gameserverhub/game-server-hub-dst}" # DST 国内镜像仓库。
 PANEL_INSTALL_DIR="${PANEL_INSTALL_DIR:-/opt/game-server-hub}" # 安装目录（放置 env/compose）。
 PANEL_DATA_DIR="${PANEL_DATA_DIR:-/var/lib/game-server-hub}" # 面板持久化数据目录。
 PANEL_LOG_DIR="${PANEL_LOG_DIR:-/var/log/game-server-hub}" # 面板日志与安装状态目录。
@@ -28,7 +39,22 @@ PANEL_INSTANCES_DIR="${PANEL_INSTANCES_DIR:-${PANEL_DATA_DIR}/instances}" # 游�
 PANEL_BACKUPS_DIR="${PANEL_BACKUPS_DIR:-${PANEL_DATA_DIR}/backups}" # 备份目录。
 PANEL_BIND_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.bind.yml"
 PANEL_IMAGE_TAG="${PANEL_IMAGE_TAG:-latest}" # 容器镜像标签。
+if [[ -n "${PANEL_IMAGE_REPOSITORY_OVERRIDE}" ]]; then
+  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_REPOSITORY_OVERRIDE}"
+elif [[ "${USE_CN_GHCR_MIRROR}" == "1" ]]; then
+  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_CN_REPOSITORY}"
+else
+  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY}"
+fi
+if [[ "${USE_CN_GHCR_MIRROR}" == "1" ]]; then
+  GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_CN_REPOSITORY}"
+else
+  GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}"
+fi
 PANEL_IMAGE="${PANEL_IMAGE_REPOSITORY}:${PANEL_IMAGE_TAG}" # 完整镜像引用（仓库:标签）。
+PANEL_IMAGE_FALLBACK="${PANEL_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}" # 回退镜像引用。
+GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_REPOSITORY}:${PANEL_IMAGE_TAG}" # DST 镜像引用。
+GSH_GAME_DST_IMAGE_FALLBACK="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}" # DST 回退镜像引用。
 PANEL_ENV_FILE="${PANEL_INSTALL_DIR}/panel.env" # 运行时环境变量文件路径。
 PANEL_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.yml" # Docker Compose 文件路径。
 STATUS_FILE="${PANEL_LOG_DIR}/install.status" # 安装状态追踪文件路径。
@@ -149,10 +175,70 @@ apt_install() {
   run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
 }
 
+# 备份 apt 源配置，便于失败时恢复到系统默认。
+backup_apt_sources() {
+  run_as_root rm -rf "${APT_SOURCES_BACKUP_DIR}"
+  run_as_root mkdir -p "${APT_SOURCES_BACKUP_DIR}"
+
+  if run_as_root test -f /etc/apt/sources.list; then
+    run_as_root cp /etc/apt/sources.list "${APT_SOURCES_BACKUP_DIR}/sources.list"
+  fi
+
+  if run_as_root test -f /etc/apt/sources.list.d/debian.sources; then
+    run_as_root cp /etc/apt/sources.list.d/debian.sources "${APT_SOURCES_BACKUP_DIR}/debian.sources"
+  fi
+}
+
+# 恢复 apt 源配置到脚本运行前状态。
+restore_apt_sources_backup() {
+  if run_as_root test -f "${APT_SOURCES_BACKUP_DIR}/sources.list"; then
+    run_as_root cp "${APT_SOURCES_BACKUP_DIR}/sources.list" /etc/apt/sources.list
+  else
+    run_as_root rm -f /etc/apt/sources.list
+  fi
+
+  if run_as_root test -f "${APT_SOURCES_BACKUP_DIR}/debian.sources"; then
+    run_as_root cp "${APT_SOURCES_BACKUP_DIR}/debian.sources" /etc/apt/sources.list.d/debian.sources
+  else
+    run_as_root rm -f /etc/apt/sources.list.d/debian.sources
+  fi
+}
+
+# 将 Debian apt 源切换为国内镜像（bookworm/bookworm-updates/bookworm-backports/security）。
+apply_cn_debian_mirror() {
+  run_as_root rm -f /etc/apt/sources.list.d/debian.sources
+  run_as_root bash -c "cat > /etc/apt/sources.list <<EOF
+deb ${DEBIAN_MIRROR_URL} ${DISTRO_CODENAME} main contrib non-free non-free-firmware
+deb ${DEBIAN_MIRROR_URL} ${DISTRO_CODENAME}-updates main contrib non-free non-free-firmware
+deb ${DEBIAN_MIRROR_URL} ${DISTRO_CODENAME}-backports main contrib non-free non-free-firmware
+deb ${DEBIAN_SECURITY_MIRROR_URL} ${DISTRO_CODENAME}-security main contrib non-free non-free-firmware
+EOF"
+}
+
+# Debian 优先使用国内镜像；失败则回退系统默认源。
+prepare_apt_sources() {
+  if [[ "${DISTRO_ID}" != "debian" || "${USE_CN_DEBIAN_MIRROR}" != "1" ]]; then
+    run_with_retry "apt-get update" run_as_root apt-get update -y || abort "apt-get update failed."
+    return
+  fi
+
+  backup_apt_sources
+  apply_cn_debian_mirror
+
+  if run_with_retry "apt-get update with CN mirror" run_as_root apt-get update -y; then
+    log_info "Using CN Debian mirror: ${DEBIAN_MIRROR_URL}"
+    return
+  fi
+
+  log_warn "CN mirror update failed. Rolling back to default apt sources..."
+  restore_apt_sources_backup
+  run_with_retry "apt-get update after rollback" run_as_root apt-get update -y || abort "apt-get update failed after rollback."
+}
+
 # 安装后续步骤所需的基础依赖。
 install_base_packages() {
   log_info "Installing base packages..."
-  run_as_root apt-get update -y
+  prepare_apt_sources
   apt_install ca-certificates curl gnupg lsb-release software-properties-common apt-transport-https jq
 }
 
@@ -323,8 +409,11 @@ preflight_checks() {
     abort "Cannot reach https://download.docker.com. Please check outbound network."
   fi
 
-  if ! curl -fsSI --max-time 8 "https://ghcr.io" >/dev/null; then
-    abort "Cannot reach https://ghcr.io. Please check outbound network."
+  if ! curl -fsSI --max-time "${GHCR_CHECK_TIMEOUT_SECONDS}" "https://ghcr.io" >/dev/null; then
+    if [[ "${STRICT_GHCR_CHECK}" == "1" ]]; then
+      abort "Cannot reach https://ghcr.io within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Please check outbound network."
+    fi
+    log_warn "Cannot reach https://ghcr.io within ${GHCR_CHECK_TIMEOUT_SECONDS}s during preflight. Continue and rely on docker pull retries."
   fi
 
   write_status "preflight" "ok" "Host checks passed"
@@ -372,7 +461,7 @@ ADMIN_PASSWORD=${ADMIN_PASSWORD}
 FORCE_PASSWORD_CHANGE=1
 GSH_EDITION=community
 DOCKER_HOST=unix:///var/run/docker.sock
-GSH_GAME_DST_IMAGE=ghcr.io/gameserverhub/game-server-hub-dst:${PANEL_IMAGE_TAG}
+GSH_GAME_DST_IMAGE=${GSH_GAME_DST_IMAGE}
 GSH_STEAMCMD_IMAGE=cm2network/steamcmd:steam-bookworm
 # 国内服务器建议取消注释以下 SteamCMD 优化项：
 # GSH_STEAMCMD_DOWNLOAD_REGION=cn
@@ -400,10 +489,38 @@ rollback_install() {
   write_status "rollback" "ok" "Rollback finished"
 }
 
+# 拉取运行时镜像（面板 + DST），用于在 compose 启动前尽早暴露网络问题。
+pull_runtime_images() {
+  run_with_retry "docker pull ${PANEL_IMAGE}" run_as_root docker pull "${PANEL_IMAGE}" || return 1
+  run_with_retry "docker pull ${GSH_GAME_DST_IMAGE}" run_as_root docker pull "${GSH_GAME_DST_IMAGE}" || return 1
+}
+
+# 切换为官方 GHCR 镜像并同步更新 panel.env，供后续 compose 使用。
+switch_to_official_images() {
+  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY}"
+  GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}"
+  PANEL_IMAGE="${PANEL_IMAGE_FALLBACK}"
+  GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_FALLBACK}"
+
+  if run_as_root test -f "${PANEL_ENV_FILE}"; then
+    run_as_root sed -i "s|^PANEL_IMAGE=.*$|PANEL_IMAGE=${PANEL_IMAGE}|g" "${PANEL_ENV_FILE}"
+    run_as_root sed -i "s|^GSH_GAME_DST_IMAGE=.*$|GSH_GAME_DST_IMAGE=${GSH_GAME_DST_IMAGE}|g" "${PANEL_ENV_FILE}"
+  fi
+}
+
 # 拉取镜像并启动服务栈；通过重试应对临时网络抖动。
 deploy_panel() {
   write_status "deploy" "start" "Pulling panel image ${PANEL_IMAGE}"
-  run_with_retry "docker pull ${PANEL_IMAGE}" run_as_root docker pull "${PANEL_IMAGE}"
+  if ! pull_runtime_images; then
+    if [[ "${USE_CN_GHCR_MIRROR}" == "1" ]]; then
+      log_warn "CN GHCR mirror pull failed, falling back to official ghcr.io..."
+      switch_to_official_images
+      write_status "deploy" "start" "Retrying image pull via official ghcr.io"
+      pull_runtime_images || abort "Image pull failed on both CN mirror and official ghcr.io."
+    else
+      abort "Image pull failed. Please check outbound network or image repository settings."
+    fi
+  fi
   write_status "deploy" "ok" "Image pull completed"
 
   write_status "deploy" "start" "Starting panel stack"
@@ -417,6 +534,7 @@ print_summary() {
   write_status "install" "ok" "Installation completed"
   log_info "Installation completed."
   log_info "Panel image: ${PANEL_IMAGE}"
+  log_info "DST image: ${GSH_GAME_DST_IMAGE}"
   log_info "Panel URL: ${PANEL_ACCESS_URL}"
   log_info "Admin username: ${ADMIN_USERNAME}"
   log_info "Admin password: ${ADMIN_PASSWORD}"

@@ -11,6 +11,29 @@ const saveLoading = ref(false)
 const updateStatusLoading = ref(false)
 const applyLoading = ref(false)
 const updateStatus = ref<Awaited<ReturnType<typeof apiSystem.getPanelUpdateStatus>>['data'] | null>(null)
+const apiPort = ref<number | null>(null)
+
+function resolveBrowserAccessPort(): number {
+  if (typeof window === 'undefined') {
+    return 80
+  }
+  if (window.location.port) {
+    const parsed = Number.parseInt(window.location.port, 10)
+    if (!Number.isNaN(parsed)) {
+      return parsed
+    }
+  }
+  return window.location.protocol === 'https:' ? 443 : 80
+}
+
+const browserAccessPort = computed(() => resolveBrowserAccessPort())
+
+const isSplitDevMode = computed(() => {
+  if (apiPort.value === null) {
+    return false
+  }
+  return browserAccessPort.value !== apiPort.value
+})
 
 const form = reactive<PanelSettingsPayload>({
   panelPort: 80,
@@ -66,18 +89,24 @@ function formatImageLine(
   return `${label}：${version}${digest}${status}`
 }
 
-async function loadSettings() {
-  loading.value = true
+async function loadSettings(options?: { silent?: boolean }) {
+  if (!options?.silent) {
+    loading.value = true
+  }
   try {
     const res = await apiSystem.getSettings()
-    form.panelPort = res.data.panelPort
-    form.theme = res.data.theme
-    form.autoUpdate = res.data.autoUpdate
-    form.checkUpdateBeforeStart = res.data.checkUpdateBeforeStart ?? false
-    form.updateCheckIntervalHours = res.data.updateCheckIntervalHours ?? 3
+    const data = res.data
+    apiPort.value = data.apiPort
+    form.panelPort = data.panelPort
+    form.theme = data.theme
+    form.autoUpdate = data.autoUpdate
+    form.checkUpdateBeforeStart = data.checkUpdateBeforeStart ?? false
+    form.updateCheckIntervalHours = data.updateCheckIntervalHours ?? 3
   }
   finally {
-    loading.value = false
+    if (!options?.silent) {
+      loading.value = false
+    }
   }
 }
 
@@ -149,6 +178,7 @@ async function saveSettings() {
       updateCheckIntervalHours: form.updateCheckIntervalHours,
     })
     faToast.success('系统设置已保存')
+    await loadSettings({ silent: true })
   }
   finally {
     saveLoading.value = false
@@ -157,6 +187,10 @@ async function saveSettings() {
 
 onMounted(async () => {
   await Promise.all([loadSettings(), loadUpdateStatus()])
+})
+
+onActivated(async () => {
+  await loadSettings({ silent: true })
 })
 </script>
 
@@ -170,9 +204,21 @@ onMounted(async () => {
         <h3 class="text-base font-semibold">
           面板端口
         </h3>
-        <FaInput v-model="panelPortInput" type="text" class="max-w-80" placeholder="请输入面板端口" />
+        <div v-if="isSplitDevMode" class="text-sm text-muted-foreground space-y-1">
+          <p>当前访问端口：{{ browserAccessPort }}（浏览器地址栏）</p>
+          <p>后端 API 端口：{{ apiPort }}（开发双容器，仅内部/直连 API 使用）</p>
+        </div>
+        <p v-else class="text-sm text-muted-foreground">
+          当前访问端口：{{ browserAccessPort }}
+        </p>
+        <FaInput v-model="panelPortInput" type="text" class="max-w-80" placeholder="请输入对外发布端口" />
         <p class="text-xs text-muted-foreground">
-          端口范围 1-65535，保存后由网关编排模块统一生效。
+          <template v-if="isSplitDevMode">
+            开发环境前后端分离：请用 {{ browserAccessPort }} 打开面板。下方为生产/网关对外发布端口（当前 API {{ apiPort }}），保存后下次重启 dev:compose 生效。
+          </template>
+          <template v-else>
+            端口范围 1-65535，保存后由网关编排模块统一生效。
+          </template>
         </p>
       </section>
 

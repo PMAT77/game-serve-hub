@@ -58,4 +58,5 @@ interface ImportMetaEnv {
    * Enable fake data in development
    */
   readonly VITE_USE_FAKE: boolean
+  readonly VITE_DEV_WEB_PORT: number
 }

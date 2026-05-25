@@ -10,6 +10,7 @@
 |----|------|
 | 系统 | Ubuntu 22.04+ / Debian 12+（`apt`） |
 | 架构 | x86_64 / aarch64 |
+| 内存 | **推荐 ≥ 6 GB**（单实例 + 洞穴 + 中等 Mod）；约 4 GB 仅适合单实例地上、少 Mod（见 [MEMORY.md](MEMORY.md)） |
 | 磁盘 | 根分区可用空间 ≥ 4 GB（仅面板；游戏与存档另计） |
 | 网络 | 可访问 Docker 与 `ghcr.io` |
 | 权限 | root 或 sudo |
@@ -49,9 +50,9 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 ### 安装脚本做了什么
 
 1. 安装 Docker Engine 与 Compose 插件  
-2. 预检架构、磁盘、网络（需能访问 `download.docker.com` 与 `ghcr.io`）  
+2. 预检架构、磁盘、**内存档位提示**、网络（需能访问 `download.docker.com` 与 `ghcr.io`）  
 3. 检查面板端口并尝试配置防火墙（ufw / firewalld）  
-4. 生成 `/opt/game-server-hub/panel.env` 与 Compose 文件  
+4. 生成 `/opt/game-server-hub/panel.env`（可按总内存自动合并 `config/panel.env.presets/` 预设）与 Compose 文件  
 5. 拉取面板镜像并 `docker compose up -d`  
 6. 在终端输出 **面板 URL**、**管理员账号** 与 **初始密码**
 
@@ -173,6 +174,18 @@ docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind
 ```
 
 `docker compose down` **不会** 删除 `/var/lib/game-server-hub` 中的实例与存档；请勿随意加 `-v`。
+
+---
+
+## 内存与 Mod / 洞穴
+
+全 Docker 部署时，除面板外每个 DST 实例至少一个游戏容器，开启洞穴会再增加一个容器；Steam 安装阶段还有短时峰值。  
+**4 GiB** 机适合单实例地上、少量 Mod；**6 GiB** 适合洞穴与中等 Mod；**8 GiB+** 更适合 Mod 较多的长期服。
+
+- 档位说明、预设文件与变量：[MEMORY.md](MEMORY.md)  
+- 安装脚本在总内存偏低时会 WARN，并默认按档位合并 `config/panel.env.presets/*.env`  
+- 手动指定预设：`sudo GSH_PANEL_ENV_PRESET=small bash ./scripts/install.linux.sh`  
+- 不合并预设：`sudo GSH_PANEL_ENV_PRESET=none bash ./scripts/install.linux.sh`
 
 ---
 

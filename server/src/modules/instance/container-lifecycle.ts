@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import type { HostMemoryPressureFailure } from '../../infra/container/host-resource-guard'
 import path from 'node:path'
 import DockerClient from 'dockerode'
 import { resolveDockerStatus } from '../../infra/docker'
@@ -219,13 +220,16 @@ export async function startInstanceContainer(
     instanceName: string
     gamePort: number | null
   },
-): Promise<{ ok: true, ref: ContainerRef, displayCommand: string } | { ok: false, message: string }> {
+): Promise<
+  | { ok: true, ref: ContainerRef, displayCommand: string }
+  | { ok: false, message: string, hostMemoryPressure?: HostMemoryPressureFailure }
+> {
   if (input.gameCode.trim() !== DST_APP_ID) {
     return { ok: false, message: '当前仅支持饥荒（343050）容器化启动' }
   }
   const memoryPressure = assessHostMemoryForHeavyOperation('dst-container-start')
   if (!memoryPressure.ok) {
-    return { ok: false, message: memoryPressure.message }
+    return { ok: false, message: memoryPressure.detail, hostMemoryPressure: memoryPressure }
   }
   const { gameDstImage, instancesRoot, dockerHost } = getServerContainerConfig()
   const docker = new DockerClient(resolveDockerConnectOptions(dockerHost))

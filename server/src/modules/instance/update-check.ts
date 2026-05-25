@@ -41,6 +41,87 @@ export interface InstanceCheckUpdatesResponse {
   updateAvailableCount: number
 }
 
+export interface InstanceUpdateCheckJobStatus {
+  checking: boolean
+  startedAt: string | null
+  finishedAt: string | null
+  result: InstanceCheckUpdatesResponse | null
+  error: string | null
+}
+
+let updateCheckJobStatus: InstanceUpdateCheckJobStatus = {
+  checking: false,
+  startedAt: null,
+  finishedAt: null,
+  result: null,
+  error: null,
+}
+
+let updateCheckJobInFlight: Promise<void> | null = null
+
+function cloneUpdateCheckJobStatus(): InstanceUpdateCheckJobStatus {
+  return {
+    ...updateCheckJobStatus,
+    result: updateCheckJobStatus.result
+      ? {
+          ...updateCheckJobStatus.result,
+          items: [...updateCheckJobStatus.result.items],
+        }
+      : null,
+  }
+}
+
+export function getInstanceUpdateCheckJobStatus(): InstanceUpdateCheckJobStatus {
+  return cloneUpdateCheckJobStatus()
+}
+
+export function enqueueInstanceUpdateCheck(input: {
+  steamcmdCommand: string
+  instanceIds?: string[]
+  force?: boolean
+  validateRuntime?: () => Promise<{ ok: boolean, message?: string }>
+}): InstanceUpdateCheckJobStatus {
+  if (updateCheckJobStatus.checking && updateCheckJobInFlight) {
+    return getInstanceUpdateCheckJobStatus()
+  }
+
+  updateCheckJobStatus = {
+    checking: true,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    result: null,
+    error: null,
+  }
+
+  updateCheckJobInFlight = (async () => {
+    try {
+      if (input.validateRuntime) {
+        const runtimeReady = await input.validateRuntime()
+        if (!runtimeReady.ok) {
+          updateCheckJobStatus.error = runtimeReady.message ?? '容器运行时未就绪，无法检查更新'
+          return
+        }
+      }
+      const result = await checkInstancesForUpdates({
+        steamcmdCommand: input.steamcmdCommand,
+        instanceIds: input.instanceIds,
+        force: input.force ?? false,
+      })
+      updateCheckJobStatus.result = result
+    }
+    catch (error) {
+      updateCheckJobStatus.error = error instanceof Error ? error.message : String(error)
+    }
+    finally {
+      updateCheckJobStatus.checking = false
+      updateCheckJobStatus.finishedAt = new Date().toISOString()
+      updateCheckJobInFlight = null
+    }
+  })()
+
+  return getInstanceUpdateCheckJobStatus()
+}
+
 export function isUpdateCheckStale(instance: Pick<DbGameInstance, 'updateCheckedAt'>): boolean {
   if (!instance.updateCheckedAt) {
     return true

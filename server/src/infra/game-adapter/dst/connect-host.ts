@@ -217,8 +217,16 @@ export function resolveLanConnectHost(): string | null {
   return privateIps.find(ip => !isLikelyContainerBridgeIp(ip)) ?? null
 }
 
+/** 从网卡公网候选选取进服地址；无私网回退（局域网见 resolveLanConnectHost） */
+export function pickConnectHostFromInterfacePublicIps(publicIps: string[]): ResolvedConnectHost {
+  if (publicIps[0]) {
+    return { host: publicIps[0], source: 'interface_public', isPlaceholder: false }
+  }
+  return { host: CONNECT_HOST_PLACEHOLDER, source: 'placeholder', isPlaceholder: true }
+}
+
 /**
- * 解析玩家用于 c_connect 的宿主机地址：云环境优先公网 IP（元数据 / 出站探测），本地环境回退网卡。
+ * 解析玩家用于 c_connect 的公网/对外宿主机地址：云环境优先公网 IP（元数据 / 出站探测），其次网卡公网；不回落局域网。
  */
 export async function resolveDstConnectHost(): Promise<ResolvedConnectHost> {
   const fromEnv = process.env.GSH_DST_CONNECT_HOST?.trim()
@@ -237,14 +245,8 @@ export async function resolveDstConnectHost(): Promise<ResolvedConnectHost> {
     }
   }
 
-  const { publicIps, privateIps } = listInterfaceIpv4Candidates()
-  if (publicIps[0]) {
-    return { host: publicIps[0], source: 'interface_public', isPlaceholder: false }
-  }
-  if (privateIps[0]) {
-    return { host: privateIps[0], source: 'interface_private', isPlaceholder: false }
-  }
-  return { host: CONNECT_HOST_PLACEHOLDER, source: 'placeholder', isPlaceholder: true }
+  const { publicIps } = listInterfaceIpv4Candidates()
+  return pickConnectHostFromInterfacePublicIps(publicIps)
 }
 
 export function connectHostSourceLabel(source: ConnectHostSource): string {

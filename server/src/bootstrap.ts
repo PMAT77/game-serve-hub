@@ -3,6 +3,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { createServerApp } from './app'
+import { syncPanelPortSettingIfStale } from './modules/system/panel-port'
 import { ensureServerRuntimeDirs, loadServerConfig } from './shared/config'
 import { initDatabase } from './shared/db/index'
 
@@ -46,6 +47,7 @@ export async function bootstrap() {
     adminUsername: config.adminUsername,
     adminPassword: config.adminPassword,
   })
+  await syncPanelPortSettingIfStale(config.port)
 
   try {
     await app.listen({ port: config.port, host: config.host })

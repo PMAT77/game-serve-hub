@@ -68,9 +68,14 @@ export function isAnyInstallJobActive(): boolean {
   return installingInstanceIds.size > 0
 }
 
-export function assertHostMemoryForInstall(): string | undefined {
+export function getInstallHostMemoryPressure() {
   const pressure = assessHostMemoryForHeavyOperation('steamcmd-install')
-  return pressure.ok ? undefined : pressure.message
+  return pressure.ok ? undefined : pressure
+}
+
+export function assertHostMemoryForInstall(): string | undefined {
+  const pressure = getInstallHostMemoryPressure()
+  return pressure ? `${pressure.summary}\n\n${pressure.detail}` : undefined
 }
 
 function hasOtherActiveInstallJobs(instanceId: string): boolean {
@@ -329,6 +334,7 @@ async function runInstallPipeline(
       status: 'error',
       lastCommand: null,
       lastError: memoryError,
+      installPercent: null,
     })
     return
   }
@@ -341,6 +347,7 @@ async function runInstallPipeline(
       status: 'error',
       lastCommand: null,
       lastError: pathError,
+      installPercent: null,
     })
     return
   }
@@ -381,10 +388,10 @@ async function runInstallPipeline(
   if (!recipientAlreadyReady && input.appId.trim() === DST_APP_ID) {
     const seedMemory = assessHostMemoryForHeavyOperation('install-seed-copy')
     if (!seedMemory.ok) {
-      logWriter.appendLine(seedMemory.message)
+      logWriter.appendLine(`${seedMemory.summary}\n\n${seedMemory.detail}`)
     }
     const seedResult = !seedMemory.ok
-      ? { ok: false as const, reason: seedMemory.message }
+      ? { ok: false as const, reason: `${seedMemory.summary}\n\n${seedMemory.detail}` }
       : await tryInstallGameDepotFromSeed({
           recipientId: input.instanceId,
           recipientPath: input.installPath,
@@ -470,6 +477,7 @@ async function runInstallPipeline(
       status: 'error',
       lastCommand: null,
       lastError: failureMessage,
+      installPercent: null,
     })
     return
   }
@@ -542,6 +550,7 @@ async function runInstallPipeline(
       status: 'error',
       lastCommand: null,
       lastError: combined,
+      installPercent: null,
     })
     return
   }
@@ -561,6 +570,7 @@ async function runInstallPipeline(
     status: 'error',
     lastCommand: null,
     lastError: failureMessage,
+    installPercent: null,
   })
 }
 
@@ -585,6 +595,7 @@ async function runInstallJobInBackground(
       status: 'error',
       lastCommand: null,
       lastError: message,
+      installPercent: null,
     })
   }
 }

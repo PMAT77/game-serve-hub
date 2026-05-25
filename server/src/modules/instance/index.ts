@@ -45,7 +45,7 @@ import {
   clearInstallJobTracking,
   getInstallLogsDirPath,
   getSteamcmdLoginCredentials,
-  assertHostMemoryForInstall,
+  getInstallHostMemoryPressure,
   isAnyInstallJobActive,
   isInstallJobActive,
   mapDbInstallLogStatusToResponse,
@@ -56,12 +56,14 @@ import {
 } from './install-service'
 import { prepareInstallPathForRuntime, prepareInstallPathForSteamcmd } from './install-path'
 import { businessError, success, unauthorized } from '../../shared/http/response'
+import { hostMemoryPressureError } from '../../shared/http/host-memory-pressure-error'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
 import { registerInstanceMetricsRoute } from './metrics'
-import type { InstanceCheckUpdatesResponse } from './update-check'
+import type { InstanceUpdateCheckJobStatus } from './update-check'
 import { readLocalBuildId } from '../../shared/steam-update/build-id'
 import {
-  checkInstancesForUpdates,
+  enqueueInstanceUpdateCheck,
+  getInstanceUpdateCheckJobStatus,
   needsRemoteUpdatePrecheck,
   refreshInstanceUpdateStatus,
   resolveStartBlockedByPendingUpdate,
@@ -469,9 +471,9 @@ export function registerInstanceModule(app: FastifyInstance) {
       lastCommand: '等待安装任务启动',
       lastError: null,
     })
-    const memoryError = assertHostMemoryForInstall()
-    if (memoryError) {
-      return businessError(memoryError, request)
+    const memoryPressure = getInstallHostMemoryPressure()
+    if (memoryPressure) {
+      return hostMemoryPressureError(memoryPressure, request)
     }
     const started = startInstallJob(app, {
       instanceId,
@@ -486,31 +488,40 @@ export function registerInstanceModule(app: FastifyInstance) {
       return businessError('该实例已有安装任务进行中', request)
     }
     if (started === 'blocked') {
-      return businessError(assertHostMemoryForInstall() ?? '宿主机内存不足，无法启动安装', request)
+      const blockedPressure = getInstallHostMemoryPressure()
+      if (blockedPressure) {
+        return hostMemoryPressureError(blockedPressure, request)
+      }
+      return businessError('宿主机内存不足，无法启动安装', request)
     }
     return success(instance, request)
   })
 
-  app.post('/app/instance/check-updates', async (request): Promise<ApiSuccessResponse<InstanceCheckUpdatesResponse> | ApiErrorResponse> => {
+  app.post('/app/instance/check-updates', async (request): Promise<ApiSuccessResponse<InstanceUpdateCheckJobStatus> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
     if (authError) {
       return authError
     }
     const body = (request.body ?? {}) as { ids?: string[] }
     const steamcmdCommand = await resolveSteamcmdCommandForUpdateCheck()
-    const runtimeReady = await checkContainerInstallReady()
-    if (!runtimeReady.ok) {
-      return businessError(runtimeReady.message ?? '容器运行时未就绪，无法检查更新', request)
-    }
     const instanceIds = Array.isArray(body.ids)
       ? body.ids.map(id => (typeof id === 'string' ? id.trim() : '')).filter(Boolean)
       : undefined
-    const result = await checkInstancesForUpdates({
+    const status = enqueueInstanceUpdateCheck({
       steamcmdCommand,
       instanceIds,
-      force: true,
+      force: false,
+      validateRuntime: checkContainerInstallReady,
     })
-    return success(result, request)
+    return success(status, request)
+  })
+
+  app.get('/app/instance/check-updates/status', async (request): Promise<ApiSuccessResponse<InstanceUpdateCheckJobStatus> | ApiErrorResponse> => {
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    return success(getInstanceUpdateCheckJobStatus(), request)
   })
 
   app.post('/app/instance/update', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {
@@ -590,9 +601,9 @@ export function registerInstanceModule(app: FastifyInstance) {
         )
       }
     }
-    const memoryError = assertHostMemoryForInstall()
-    if (memoryError) {
-      return businessError(memoryError, request)
+    const memoryPressure = getInstallHostMemoryPressure()
+    if (memoryPressure) {
+      return hostMemoryPressureError(memoryPressure, request)
     }
     // 须在 startInstallJob 之前写入 installing：本地复制可在数百毫秒内完成，
     // 若后置写入会覆盖 finalize 已设置的 stopped，重启后面板会误判为安装中断。
@@ -616,7 +627,11 @@ export function registerInstanceModule(app: FastifyInstance) {
       return businessError('该实例已有安装任务进行中', request)
     }
     if (started === 'blocked') {
-      return businessError(assertHostMemoryForInstall() ?? '宿主机内存不足，无法启动安装', request)
+      const blockedPressure = getInstallHostMemoryPressure()
+      if (blockedPressure) {
+        return hostMemoryPressureError(blockedPressure, request)
+      }
+      return businessError('宿主机内存不足，无法启动安装', request)
     }
     app.log.info({
       instanceId: id,
@@ -870,6 +885,9 @@ export function registerInstanceModule(app: FastifyInstance) {
         status: 'error',
         lastError: started.message,
       })
+      if (started.hostMemoryPressure) {
+        return hostMemoryPressureError(started.hostMemoryPressure, request)
+      }
       return businessError(started.message, request)
     }
     await updateGameInstanceRuntime(id, {

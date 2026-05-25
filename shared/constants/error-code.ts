@@ -8,6 +8,8 @@ export const ErrorCode = {
   INTERNAL_ERROR: 'COMMON_INTERNAL_ERROR',
   /** 同节点 DST 实例端口与已有实例冲突，需用户选择手动改端口或自动分配 */
   INSTANCE_PORT_CONFLICT: 'INSTANCE_PORT_CONFLICT',
+  /** 宿主机可用内存不足，无法执行安装/启动等重操作 */
+  HOST_MEMORY_PRESSURE: 'HOST_MEMORY_PRESSURE',
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

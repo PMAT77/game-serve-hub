@@ -75,7 +75,6 @@ export function resolveEffectiveInstallRoot(rawInstallRoot: string | undefined, 
   return installRoot
 }
 
-export function buildSteamcmdImageReadyMessage(image: string): string {
-  const name = image.trim() || 'GSH_STEAMCMD_IMAGE 未配置'
-  return `SteamCMD 镜像已就绪（${name}），可以创建游戏实例`
+export function buildSteamcmdImageReadyMessage(_image?: string): string {
+  return 'SteamCMD 镜像已就绪，可以创建游戏实例'
 }

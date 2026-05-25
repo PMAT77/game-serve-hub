@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DataTableColumns, FormInst, FormRules } from 'naive-ui'
-import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceItem, InstanceRuntimeMetrics, InstanceStatus } from '@/api/modules/instance'
+import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceItem, InstanceRuntimeMetrics, InstanceStatus, InstanceUpdateCheckJobPayload } from '@/api/modules/instance'
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
@@ -23,9 +23,13 @@ import {
   type InstancePortConflictAction,
 } from '@/utils/instancePortConflict'
 import {
+  tryNotifyHostMemoryPressure,
+} from '@/utils/hostMemoryPressure'
+import {
   blocksDefaultStart,
   buildInstanceStartGuideContext,
   buildStartGuideParagraphs,
+  buildStartGuidePositiveText,
   buildStartGuideTitle,
   setStartGuideSkipped,
   shouldOfferStartGuide,
@@ -65,11 +69,14 @@ const { nodes, steamcmdInstalled, steamcmdConfigured } = toRefs(props)
 const dialog = useDialog()
 const notification = useNotification()
 const router = useRouter()
+
 const appSettingsStore = useAppSettingsStore()
 const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
 
 const instanceLoading = ref(false)
 const updateCheckLoading = ref(false)
+const UPDATE_CHECK_POLL_MS = 2000
+const UPDATE_CHECK_POLL_MAX_ATTEMPTS = 45
 const createLoading = ref(false)
 const actionLoadingId = ref('')
 const instances = ref<InstanceItem[]>([])
@@ -500,6 +507,9 @@ function renderInstallColumn(instance: InstanceItem) {
   if (instance.status === 'running' || instance.status === 'stopped') {
     return h('span', { class: 'text-sm text-muted-foreground' }, '已安装')
   }
+  if (instance.status === 'error') {
+    return h('span', { class: 'text-sm text-red-500' }, '安装失败')
+  }
   if (!shouldShowInstallDetail(instance)) {
     return h('span', { class: 'text-sm text-muted-foreground' }, '—')
   }
@@ -519,10 +529,6 @@ function renderInstallColumn(instance: InstanceItem) {
         class: 'w-full',
       }), 
     ])
-  }
-
-  if (instance.status === 'error') {
-    return h('span', { class: 'text-sm text-red-500' }, '安装失败')
   }
 
   return h('span', { class: 'text-sm text-muted-foreground' }, '—')
@@ -751,7 +757,11 @@ async function runUpdateInstance(row: InstanceItem) {
     await fetchInstances()
     await openInstallLogModal(row)
   }
-  catch {
+  catch (error) {
+    if (tryNotifyHostMemoryPressure(notification, error)) {
+      await fetchInstances()
+      return
+    }
     await fetchInstances()
   }
   finally {
@@ -923,18 +933,43 @@ async function refreshInstancesAfterInstallTerminal() {
   await fetchInstances({ silent: true })
 }
 
-/** 安装成功后同步 Build ID 与更新通知 */
+/** 安装成功后同步 Build ID 与更新通知（后台执行，不阻塞 UI） */
 async function refreshVersionStatusAfterSuccessfulInstall(instanceId: string) {
   if (!shouldCheckVersionAfterInstall(instanceId)) {
     return
   }
-  try {
-    await apiInstance.checkInstanceUpdates([instanceId])
-  }
-  catch {
-    // 版本检查失败不阻断 UI
-  }
+  void apiInstance.checkInstanceUpdates([instanceId]).catch(() => {})
   await fetchInstances({ silent: true })
+}
+
+function sleep(ms: number) {
+  return new Promise<void>(resolve => setTimeout(resolve, ms))
+}
+
+async function waitForInstanceUpdateCheckJob(): Promise<InstanceUpdateCheckJobPayload> {
+  for (let attempt = 0; attempt < UPDATE_CHECK_POLL_MAX_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(UPDATE_CHECK_POLL_MS)
+    }
+    const res = await apiInstance.getInstanceUpdateCheckStatus()
+    if (!res.data.checking) {
+      return res.data
+    }
+  }
+  throw new Error('版本检查超时，请稍后重试')
+}
+
+function notifyInstanceUpdateCheckResult(status: InstanceUpdateCheckJobPayload) {
+  if (status.error) {
+    faToast.error(status.error)
+    return
+  }
+  const updateAvailableCount = status.result?.updateAvailableCount ?? 0
+  if (updateAvailableCount === 0) {
+    faToast.success('已全部是最新版本')
+    return
+  }
+  faToast.info(`有 ${updateAvailableCount} 个实例可更新`)
 }
 
 /** 安装结束统一入口：先刷新列表，成功时再检查版本（去重） */
@@ -1120,15 +1155,19 @@ async function checkAllInstanceUpdates() {
     return
   }
   updateCheckLoading.value = true
-  faToast.info('正在检查游戏版本，约需数秒…', {
-    duration: 5000,
+  faToast.info('版本检查已在后台进行，约需半分钟，完成后自动刷新', {
+    duration: 6000,
   })
   try {
-    const res = await apiInstance.checkInstanceUpdates()
+    const startRes = await apiInstance.checkInstanceUpdates()
+    const finalStatus = startRes.data.checking
+      ? await waitForInstanceUpdateCheckJob()
+      : startRes.data
     await fetchInstances()
-    if (res.data.updateAvailableCount === 0) {
-      faToast.success('已检查全部实例，当前均为最新版本')
-    }
+    notifyInstanceUpdateCheckResult(finalStatus)
+  }
+  catch (error) {
+    faToast.error(error instanceof Error ? error.message : '版本检查失败，请稍后重试')
   }
   finally {
     updateCheckLoading.value = false
@@ -1169,6 +1208,11 @@ async function createInstance() {
     createModalVisible.value = false
     resetCreateForm()
     await fetchInstances()
+  }
+  catch (error) {
+    if (tryNotifyHostMemoryPressure(notification, error)) {
+      return
+    }
   }
   finally {
     createLoading.value = false
@@ -1259,7 +1303,7 @@ async function confirmStartInstance(row: InstanceItem) {
   dialog.warning({
     title: buildStartGuideTitle(),
     content: () => renderStartGuideContent(guideContext, row.id, dontShowAgain),
-    positiveText: publicBlocked ? '去配置房间' : '用默认配置启动',
+    positiveText: buildStartGuidePositiveText(guideContext),
     negativeText: '取消',
     onPositiveClick: () => {
       if (dontShowAgain.value) {
@@ -1327,6 +1371,9 @@ async function runInstanceLifecycleWithPortHandling(
       showInstancePortConflictDialog(instanceId, action, error, () => runInstanceLifecycleWithPortHandling(instanceId, action, {
         autoAllocatePorts: true,
       }))
+      return
+    }
+    if (tryNotifyHostMemoryPressure(notification, error)) {
       return
     }
     faToast.error(action === 'restart' ? '重启失败' : '启动失败', {

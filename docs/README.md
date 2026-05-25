@@ -5,6 +5,7 @@
 | 文档 | 说明 |
 |------|------|
 | [INSTALL.md](INSTALL.md) | Linux 生产安装、升级、DST 使用、运维与故障排查 |
+| [MEMORY.md](MEMORY.md) | 宿主机内存档位（4G/6G/8G）、洞穴/Mod 建议与 `panel.env` 预设 |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 本地开发环境、测试、构建镜像与参与贡献 |
 
 ## 内部文档说明

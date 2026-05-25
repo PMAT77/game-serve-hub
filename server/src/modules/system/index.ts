@@ -7,6 +7,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { buildHostMemoryGuidance } from '../../../../shared/host-memory-guidance.ts'
+import {
+  readHostMemoryAvailableMb,
+  readHostMemoryTotalMb,
+} from '../../infra/container/host-resource-guard.ts'
 import {
   isAllowedBrowsePath,
   isReadableDirectoryPath,
@@ -24,6 +29,7 @@ import {
 import { resolveDockerStatus } from '../../infra/docker'
 import { buildSteamcmdImageReadyMessage } from '../../infra/steamcmd'
 import { runSteamcmdDiagnostics } from '../../infra/container/steamcmd-diagnostics'
+import { loadServerConfig } from '../../shared/config'
 import { loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
 import { getServerContainerConfig } from '../../shared/config/container'
 import {
@@ -62,6 +68,8 @@ import {
   refreshPanelUpdateStatus,
   schedulePanelUpdateChecks,
 } from './panel-update'
+import { resolveActualPanelPortFromRequest } from './panel-port'
+import { syncDevComposeWebPort } from './dev-compose-env'
 
 interface DirectoryListQuery {
   path?: string
@@ -81,13 +89,20 @@ export function registerSystemModule(app: FastifyInstance) {
     schedulePanelUpdateChecks(app)
   })
 
-  app.get('/app/system/settings', async (request): Promise<ApiSuccessResponse<ReturnType<typeof getDefaultPanelSettings>> | ApiErrorResponse> => {
+  app.get('/app/system/settings', async (request): Promise<ApiSuccessResponse<ReturnType<typeof getDefaultPanelSettings> & {
+    apiPort: number
+  }> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
     if (authError) {
       return authError
     }
-    const settings = await getSystemPanelSettings()
-    return success(settings ?? getDefaultPanelSettings(), request)
+    const config = loadServerConfig()
+    const settings = await getSystemPanelSettings() ?? getDefaultPanelSettings()
+    const actualPanelPort = resolveActualPanelPortFromRequest(config.port, request)
+    return success({
+      ...settings,
+      apiPort: actualPanelPort,
+    }, request)
   })
 
   app.post('/app/system/settings', async (request): Promise<ApiSuccessResponse<{
@@ -119,6 +134,12 @@ export function registerSystemModule(app: FastifyInstance) {
       checkUpdateBeforeStart,
       updateCheckIntervalHours,
     })
+    try {
+      syncDevComposeWebPort(panelPort)
+    }
+    catch (error) {
+      app.log.warn({ error }, '同步开发环境前端端口到 panel.env 失败')
+    }
     return success({
       isSuccess: true,
     }, request)
@@ -373,7 +394,9 @@ export function registerSystemModule(app: FastifyInstance) {
       usedGb: number
       freeGb: number
       usageRate: number
+      availableGb: number | null
     }
+    memoryGuidance: import('../../../../shared/contracts/host-memory-guidance.ts').HostMemoryGuidancePayload
     disk: {
       totalGb: number
       usedGb: number
@@ -400,6 +423,15 @@ export function registerSystemModule(app: FastifyInstance) {
     const freeMem = os.freemem()
     const usedMem = totalMem - freeMem
     const memoryUsageRate = Number(((usedMem / totalMem) * 100).toFixed(2))
+    const hostTotalMb = readHostMemoryTotalMb()
+    const hostAvailableMb = readHostMemoryAvailableMb()
+    const memoryGuidance = buildHostMemoryGuidance({
+      totalMb: hostTotalMb ?? Math.round(totalMem / 1024 / 1024),
+      availableMb: hostAvailableMb,
+    })
+    const availableGb = hostAvailableMb !== null
+      ? Number((hostAvailableMb / 1024).toFixed(2))
+      : null
     const diskUsage = getDiskUsage()
     const diskUsageRate = diskUsage.totalGb > 0
       ? clampPercent((diskUsage.usedGb / diskUsage.totalGb) * 100)
@@ -452,7 +484,9 @@ export function registerSystemModule(app: FastifyInstance) {
         usedGb: Number((usedMem / 1024 / 1024 / 1024).toFixed(2)),
         freeGb: Number((freeMem / 1024 / 1024 / 1024).toFixed(2)),
         usageRate: memoryUsageRate,
+        availableGb,
       },
+      memoryGuidance,
       disk: diskUsage,
       os: {
         platform: os.platform(),

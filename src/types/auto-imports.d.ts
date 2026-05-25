@@ -87,6 +87,7 @@ declare global {
   const useFaDrawer: typeof import('@fantastic-admin/components').useFaDrawer
   const useFaImagePreview: typeof import('@fantastic-admin/components').useFaImagePreview
   const useFaModal: typeof import('@fantastic-admin/components').useFaModal
+  const useHostMemoryGuidance: typeof import('../composables/useHostMemoryGuidance').useHostMemoryGuidance
   const useId: typeof import('vue').useId
   const useLink: typeof import('vue-router').useLink
   const useModel: typeof import('vue').useModel

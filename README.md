@@ -2,9 +2,12 @@
 
 [License: MIT](LICENSE)
 [GitHub](https://github.com/GameServerHub/game-server-hub)
+![Public Beta](https://img.shields.io/badge/status-Public%20Beta%20(Pre--1.0)-orange)
 
 开源 **Steam 专用服务器** 运维面板，把部署、运行和日常管理收进同一套界面。  
 v1 先从 **饥荒联机版（Don't Starve Together）** 做起，支持一键开服。
+
+> **当前版本：v0.x 公测（Pre-1.0 / Public Beta）** — 核心链路（安装、实例、DST 开服）可用；v1 完整能力仍在开发中，升级前请关注 [Release](https://github.com/GameServerHub/game-server-hub/releases) 说明。
 
 ## 界面预览
 
@@ -78,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/main/
 
 ## 功能模块
 
-### 已实装（Community v1）
+### 已实装（v1 核心 · 公测可用）
 
 | 模块 | 说明 |
 | --- | --- |
@@ -105,14 +108,14 @@ v1 仍在补齐以下能力，将按规划陆续发布：
 
 | 游戏 | 状态 |
 | --- | --- |
-| 饥荒联机版（DST） | **v1 已支持** |
+| 饥荒联机版（DST） | **核心能力可用（公测）** |
 | 其他 Steam 专用服 | 计划中 |
 
 ---
 
 ## Community 与 Pro
 
-- **Community**：本仓库 MIT 开源，提供自托管核心能力（见上文「已开发」模块）。
+- **Community**：本仓库 MIT 开源，提供自托管核心能力（见上文「已实装」模块）。
 - **Pro**：商业扩展（多集群、计划任务、高级运维等）通过独立授权与扩展包提供；**含多集群能力的 Pro 版正在推进中**，详情敬请期待。
 
 ---
@@ -125,7 +128,7 @@ v1 仍在补齐以下能力，将按规划陆续发布：
 
 ## 技术栈与致谢
 
-前端管理界面基于 [Fantastic-admin](https://fantastic-admin.hurui.me) 构建，使用用 [Vue 3](https://vuejs.org/)、[Vite](https://vite.dev/) 等开源技术。
+前端管理界面基于 [Fantastic-admin](https://fantastic-admin.hurui.me) 构建，使用 [Vue 3](https://vuejs.org/)、[Vite](https://vite.dev/) 等开源技术。
 后端采用 [Fastify](https://fastify.dev/) 与 [Drizzle ORM](https://orm.drizzle.team/)。
 感谢上述项目及社区贡献者。
 
@@ -151,5 +154,10 @@ SPDX-License-Identifier: MIT
 ```
 
 ---
+
+## 商业合作
+Game Server Hub 采用 Open Core 模式：Community 可自由自托管；Pro 能力与官方云集成通过商业授权提供。
+云服务器厂商、托管服务商合作欢迎 [联系我们](https://github.com/GameServerHub/game-server-hub/issues/new?title=%5B商业合作%5D)。
+在产品名称或宣传中使用 Game Server Hub 商标与 Logo 需事先授权。
 
 **Game Server Hub** — 让开服像点一下那么简单。

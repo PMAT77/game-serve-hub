@@ -8,6 +8,11 @@ export interface PanelSettingsPayload {
   updateCheckIntervalHours: number
 }
 
+export interface PanelSettingsResponse extends PanelSettingsPayload {
+  /** 后端 API 当前监听/映射端口（开发双容器时与浏览器访问端口不同） */
+  apiPort: number
+}
+
 export interface HubImageUpdateInfoPayload {
   image: string
   tag: string
@@ -77,7 +82,7 @@ export interface DirectoryItem {
 }
 
 export default {
-  getSettings: () => api.get('app/system/settings'),
+  getSettings: () => api.get('app/system/settings') as Promise<{ data: PanelSettingsResponse }>,
   saveSettings: (data: PanelSettingsPayload) => api.post('app/system/settings', data),
   getSystemInfo: () => api.get('app/system/info'),
   getNetworkRealtime: () => api.get('app/system/network/realtime'),

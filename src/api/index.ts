@@ -74,7 +74,10 @@ api.interceptors.response.use(
     if (typeof response.data === 'object') {
       if (response.data.status === 1) {
         if (response.data.error) {
-          if (response.data.code !== 'INSTANCE_PORT_CONFLICT') {
+          if (
+            response.data.code !== 'INSTANCE_PORT_CONFLICT'
+            && response.data.code !== 'HOST_MEMORY_PRESSURE'
+          ) {
             faToast.warning('Warning', {
               description: response.data.error,
             })

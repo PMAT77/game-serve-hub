@@ -58,7 +58,10 @@ export default defineFakeRoute([
     response: () => ({
       error: '',
       status: 1,
-      data: panelSettings,
+      data: {
+        ...panelSettings,
+        apiPort: 9527,
+      },
     }),
   },
   {
@@ -107,6 +110,24 @@ export default defineFakeRoute([
           usedGb: 6.2,
           freeGb: 9.8,
           usageRate: 38.75,
+          availableGb: 9.5,
+        },
+        memoryGuidance: {
+          tier: 'large',
+          tierLabelZh: '充足（8 GiB 及以上）',
+          presetName: 'large',
+          totalMb: 16384,
+          availableMb: 9728,
+          summaryZh: '总内存较充足：适合洞穴与较多 Mod；仍建议为 SteamCMD 安装预留空闲内存。',
+          scenarios: {
+            singleInstance: '单实例 + 洞穴 + 较多 Mod 较从容',
+            caves: '洞穴与地上可同时运行',
+            mods: '较多 Mod 仍建议观察 DST 容器内存',
+            multiInstance: '同机多实例需自行规划总内存与上限',
+          },
+          cavesWarning: null,
+          modsWarning: null,
+          installWarning: null,
         },
         disk: {
           totalGb: 512,

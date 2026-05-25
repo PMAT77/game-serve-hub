@@ -1,4 +1,5 @@
 import type { SelectOption } from 'naive-ui'
+import type { HostMemoryGuidancePayload } from '@/types/host-memory-guidance'
 
 export interface SystemInfoData {
   cpu: {
@@ -20,7 +21,9 @@ export interface SystemInfoData {
     usedGb: number
     freeGb: number
     usageRate: number
+    availableGb: number | null
   }
+  memoryGuidance: HostMemoryGuidancePayload
   disk: {
     totalGb: number
     usedGb: number

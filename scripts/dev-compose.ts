@@ -10,8 +10,31 @@ import { execFileSync } from 'node:child_process'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const panelEnvPath = path.join(repoRoot, 'panel.env')
 
-const panelPort = process.env.PANEL_PORT?.trim() || '3000'
-const webPort = process.env.VITE_DEV_WEB_PORT?.trim() || '9000'
+function readEnvFileVar(key: string): string | undefined {
+  if (!fs.existsSync(panelEnvPath)) {
+    return undefined
+  }
+  const content = fs.readFileSync(panelEnvPath, 'utf8')
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue
+    }
+    const separatorIndex = trimmed.indexOf('=')
+    if (separatorIndex <= 0) {
+      continue
+    }
+    const name = trimmed.slice(0, separatorIndex).trim()
+    if (name !== key) {
+      continue
+    }
+    return trimmed.slice(separatorIndex + 1).trim()
+  }
+  return undefined
+}
+
+const panelPort = process.env.PANEL_PORT?.trim() || readEnvFileVar('PANEL_PORT') || '3000'
+const webPort = process.env.VITE_DEV_WEB_PORT?.trim() || readEnvFileVar('VITE_DEV_WEB_PORT') || '9000'
 const panelUrl = `http://127.0.0.1:${panelPort}`
 const webUrl = `http://127.0.0.1:${webPort}`
 const steamcmdImage = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'cm2network/steamcmd:steam-bookworm'

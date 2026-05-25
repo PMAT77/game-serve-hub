@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemInfoData } from './types'
-import { NProgress, NSkeleton } from 'naive-ui'
+import { NPopover, NProgress, NSkeleton, NSpace } from 'naive-ui'
 
 defineOptions({
   name: 'MemoryInfoCard',
@@ -19,6 +19,7 @@ function clampPercent(value: number) {
 }
 
 const memoryPercent = computed(() => clampPercent(props.info?.memory.usageRate ?? 0))
+const memoryGuidance = computed(() => props.info?.memoryGuidance ?? null)
 </script>
 
 <template>
@@ -41,24 +42,44 @@ const memoryPercent = computed(() => clampPercent(props.info?.memory.usageRate ?
       </div>
     </div>
   </div>
-  <div v-if="mode === 'charts'" class="p-3 rounded-lg flex flex-col cursor-pointer items-center justify-center">
-    <NProgress
-      type="circle"
-      :percentage="memoryPercent"
-      :height="110"
-      :stroke-width="8"
-      :offset-degree="180"
-      :show-indicator="true"
-    >
-      <n-space vertical align="center" :size="0">
-        <span class="text-lg text-muted-foreground">
-          {{ memoryPercent.toFixed(2) }}%
-        </span>
-        <span class="text-xs text-muted-foreground">
-          内存
-        </span>
-      </n-space>
-    </NProgress>
-    <span class="text-xs text-muted-foreground mt-4">{{ info?.memory.usedGb ?? '--' }} / {{ info?.memory.totalGb ?? '--' }} GB</span>
-  </div>
+  <NPopover
+    v-if="mode === 'charts'"
+    trigger="hover"
+    placement="top"
+    :disabled="!memoryGuidance"
+  >
+    <template #trigger>
+      <div
+        class="p-3 rounded-lg flex flex-col items-center justify-center"
+        :class="memoryGuidance ? 'cursor-help' : ''"
+      >
+        <NProgress
+          type="circle"
+          :percentage="memoryPercent"
+          :height="110"
+          :stroke-width="8"
+          :offset-degree="180"
+          :show-indicator="true"
+        >
+          <NSpace vertical align="center" :size="0">
+            <span class="text-lg text-muted-foreground">
+              {{ memoryPercent.toFixed(2) }}%
+            </span>
+            <span class="text-xs text-muted-foreground">
+              内存
+            </span>
+          </NSpace>
+        </NProgress>
+        <span class="text-xs text-muted-foreground mt-4">{{ info?.memory.usedGb ?? '--' }} / {{ info?.memory.totalGb ?? '--' }} GB</span>
+      </div>
+    </template>
+    <div v-if="memoryGuidance" class="max-w-xs text-sm leading-relaxed">
+      <p class="font-medium">
+        内存档位：{{ memoryGuidance.tierLabelZh }}
+      </p>
+      <p class="text-muted-foreground mt-1">
+        {{ memoryGuidance.summaryZh }}
+      </p>
+    </div>
+  </NPopover>
 </template>

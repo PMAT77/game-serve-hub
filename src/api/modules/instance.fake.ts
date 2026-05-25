@@ -56,6 +56,65 @@ const installableGames: InstallableGameItem[] = [
 
 let instanceList: FakeInstanceItem[] = []
 
+interface FakeUpdateCheckJobPayload {
+  checking: boolean
+  startedAt: string | null
+  finishedAt: string | null
+  result: {
+    items: Array<{
+      id: string
+      name: string
+      updateAvailable: boolean
+      localBuildId: string
+      remoteBuildId: string
+      updateCheckedAt: string
+    }>
+    updateAvailableCount: number
+  } | null
+  error: string | null
+}
+
+let fakeUpdateCheckJob: FakeUpdateCheckJobPayload = {
+  checking: false,
+  startedAt: null,
+  finishedAt: null,
+  result: null,
+  error: null,
+}
+
+function buildFakeUpdateCheckResult(ids?: string[]) {
+  const idSet = ids?.length ? new Set(ids) : null
+  const items = instanceList
+    .filter(item => item.status === 'stopped' || item.status === 'running')
+    .filter(item => !idSet || idSet.has(item.id))
+    .map(item => ({
+      id: item.id,
+      name: item.name,
+      updateAvailable: item.id.endsWith('1'),
+      localBuildId: '100',
+      remoteBuildId: item.id.endsWith('1') ? '101' : '100',
+      updateCheckedAt: nowIso(),
+    }))
+  instanceList = instanceList.map((item) => {
+    const hit = items.find(row => row.id === item.id)
+    if (!hit) {
+      return item
+    }
+    return {
+      ...item,
+      updateAvailable: hit.updateAvailable,
+      localBuildId: hit.localBuildId,
+      remoteBuildId: hit.remoteBuildId,
+      updateCheckedAt: hit.updateCheckedAt,
+      updatedAt: nowIso(),
+    }
+  })
+  return {
+    items,
+    updateAvailableCount: items.filter(item => item.updateAvailable).length,
+  }
+}
+
 const maintenanceDrafts = new Map<string, { message: string, updatedAt: string }>()
 const maintenancePushLogs = new Map<string, Array<{
   id: string
@@ -194,40 +253,49 @@ export default defineFakeRoute([
   {
     url: '/fake/app/instance/check-updates',
     method: 'post',
-    response: () => {
-      const items = instanceList
-        .filter(item => item.status === 'stopped' || item.status === 'running')
-        .map(item => ({
-          id: item.id,
-          name: item.name,
-          updateAvailable: item.id.endsWith('1'),
-          localBuildId: '100',
-          remoteBuildId: item.id.endsWith('1') ? '101' : '100',
-          updateCheckedAt: nowIso(),
-        }))
-      instanceList = instanceList.map((item) => {
-        const hit = items.find(row => row.id === item.id)
-        if (!hit) {
-          return item
-        }
+    response: ({ body }) => {
+      const ids = Array.isArray(body?.ids)
+        ? body.ids.map((id: unknown) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean)
+        : undefined
+      if (fakeUpdateCheckJob.checking) {
         return {
-          ...item,
-          updateAvailable: hit.updateAvailable,
-          localBuildId: hit.localBuildId,
-          remoteBuildId: hit.remoteBuildId,
-          updateCheckedAt: hit.updateCheckedAt,
-          updatedAt: nowIso(),
+          error: '',
+          status: 1,
+          data: fakeUpdateCheckJob,
         }
-      })
+      }
+      fakeUpdateCheckJob = {
+        checking: true,
+        startedAt: nowIso(),
+        finishedAt: null,
+        result: null,
+        error: null,
+      }
+      setTimeout(() => {
+        const result = buildFakeUpdateCheckResult(ids)
+        fakeUpdateCheckJob = {
+          checking: false,
+          startedAt: fakeUpdateCheckJob.startedAt,
+          finishedAt: nowIso(),
+          result,
+          error: null,
+        }
+      }, 1500)
       return {
         error: '',
         status: 1,
-        data: {
-          items,
-          updateAvailableCount: items.filter(item => item.updateAvailable).length,
-        },
+        data: fakeUpdateCheckJob,
       }
     },
+  },
+  {
+    url: '/fake/app/instance/check-updates/status',
+    method: 'get',
+    response: () => ({
+      error: '',
+      status: 1,
+      data: fakeUpdateCheckJob,
+    }),
   },
   {
     url: '/fake/app/instance/update',

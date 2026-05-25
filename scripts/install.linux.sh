@@ -8,6 +8,10 @@ set -Eeuo pipefail
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-https://raw.githubusercontent.com/GameServerHub/game-server-hub/main}"
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
+HOST_MEMORY_WARN_MIN_MB=3800 # 总内存低于此值（约 4GiB）时输出 WARN。
+HOST_MEMORY_TIER_SMALL_MAX_MB=5120 # < 此值视为 small 预设。
+HOST_MEMORY_TIER_MEDIUM_MAX_MB=8192 # < 此值视为 medium 预设。
+GSH_PANEL_ENV_PRESET="${GSH_PANEL_ENV_PRESET:-auto}" # auto | small | medium | large | none
 RETRY_MAX=3 # 可重试操作的最大重试次数。
 RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
 OPEN_DST_PORTS=0 # 是否在安装时开放 DST 默认 UDP 游戏端口。
@@ -392,16 +396,128 @@ generate_admin_credentials() {
   fi
 }
 
+# 读取宿主机总内存（MiB），失败时返回 0。
+read_host_mem_total_mb() {
+  awk '/^MemTotal:/ { printf "%d", int($2 / 1024); exit }' /proc/meminfo 2>/dev/null || echo 0
+}
+
+# 按总内存解析 panel.env 预设名（auto 时自动分档）。
+resolve_panel_env_preset_name() {
+  local total_mb="$1"
+  local preset="${GSH_PANEL_ENV_PRESET}"
+
+  case "${preset}" in
+    none|off|disable)
+      printf '%s' "none"
+      return
+      ;;
+    small|medium|large)
+      printf '%s' "${preset}"
+      return
+      ;;
+    auto|"")
+      ;;
+    *)
+      log_warn "Unknown GSH_PANEL_ENV_PRESET=${preset}, fallback to auto."
+      ;;
+  esac
+
+  if [[ "${total_mb}" -lt "${HOST_MEMORY_TIER_SMALL_MAX_MB}" ]]; then
+    printf '%s' "small"
+  elif [[ "${total_mb}" -lt "${HOST_MEMORY_TIER_MEDIUM_MAX_MB}" ]]; then
+    printf '%s' "medium"
+  else
+    printf '%s' "large"
+  fi
+}
+
+# 安装前内存档位提示（不阻断安装）。
+warn_host_memory_tier() {
+  local total_mb="$1"
+  local preset_name tier_label
+
+  if [[ "${total_mb}" -le 0 ]]; then
+    log_warn "Cannot read host MemTotal; skip memory tier warning."
+    return
+  fi
+
+  preset_name="$(resolve_panel_env_preset_name "${total_mb}")"
+  case "${preset_name}" in
+    small) tier_label="小内存（约 4 GiB）" ;;
+    medium) tier_label="中等（约 6 GiB）" ;;
+    large) tier_label="充足（8 GiB 及以上）" ;;
+    *) tier_label="未应用预设" ;;
+  esac
+
+  log_info "Host memory total: ${total_mb} MB (tier: ${tier_label}, preset: ${preset_name})"
+
+  if [[ "${total_mb}" -lt "${HOST_MEMORY_WARN_MIN_MB}" ]]; then
+    log_warn "Host RAM is below ~4 GiB. Recommended: single surface shard, few mods, avoid caves. See docs/MEMORY.md."
+    log_warn "Single instance + caves + many mods may OOM. Consider upgrading to 6–8 GiB or use preset: config/panel.env.presets/small.env"
+    write_status "preflight" "warn" "Low host RAM ${total_mb} MB; see docs/MEMORY.md"
+  elif [[ "${total_mb}" -lt "${HOST_MEMORY_TIER_SMALL_MAX_MB}" ]]; then
+    log_warn "Host RAM tier is small (<5 GiB). Caves and heavy mod sets increase OOM risk. See docs/MEMORY.md."
+    write_status "preflight" "warn" "Host RAM tier small (${total_mb} MB)"
+  fi
+}
+
+# 同步 panel.env 预设到安装目录（本地克隆或从 INSTALLER_REPO_RAW 拉取）。
+sync_panel_env_presets() {
+  local script_dir src_dir dest_dir item
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  src_dir="${script_dir}/../config/panel.env.presets"
+  dest_dir="${PANEL_INSTALL_DIR}/config/panel.env.presets"
+
+  run_as_root mkdir -p "${dest_dir}"
+  for item in small.env medium.env large.env README.md; do
+    if [[ -f "${src_dir}/${item}" ]]; then
+      run_as_root cp "${src_dir}/${item}" "${dest_dir}/${item}"
+    elif curl -fsSL "${INSTALLER_REPO_RAW}/config/panel.env.presets/${item}" 2>/dev/null | run_as_root tee "${dest_dir}/${item}" >/dev/null; then
+      log_info "Downloaded panel.env preset asset: ${item}"
+    else
+      log_warn "Could not sync preset asset: ${item}"
+    fi
+  done
+}
+
+# 将 config/panel.env.presets/<name>.env 追加到 panel.env（若存在）。
+append_panel_env_preset() {
+  local preset_name="$1"
+  local script_dir preset_file
+
+  if [[ "${preset_name}" == "none" ]]; then
+    log_info "GSH_PANEL_ENV_PRESET=none, skip merging panel.env preset."
+    return
+  fi
+
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  preset_file="${PANEL_INSTALL_DIR}/config/panel.env.presets/${preset_name}.env"
+  if [[ ! -f "${preset_file}" ]]; then
+    preset_file="${script_dir}/../config/panel.env.presets/${preset_name}.env"
+  fi
+  if [[ ! -f "${preset_file}" ]]; then
+    log_warn "Preset file not found: ${preset_name}.env (install dir and repo copy missing)"
+    return
+  fi
+
+  run_as_root bash -c "printf '\n# --- merged by install.linux.sh (GSH_PANEL_ENV_PRESET=%s) ---\n' \"${preset_name}\" >> \"${PANEL_ENV_FILE}\""
+  run_as_root bash -c "cat \"${preset_file}\" >> \"${PANEL_ENV_FILE}\""
+  log_info "Merged panel.env preset: ${preset_name} (${preset_file})"
+  write_status "deploy" "ok" "Merged panel.env preset ${preset_name}"
+}
+
 # 在生成配置与部署前，先校验主机前置条件。
 preflight_checks() {
-  local arch free_disk_mb
+  local arch free_disk_mb host_mem_total_mb
   arch="$(uname -m)"
   free_disk_mb="$(df -Pm / | awk 'NR == 2 { print $4 }')"
+  host_mem_total_mb="$(read_host_mem_total_mb)"
 
   write_status "preflight" "start" "Collecting host information"
   log_info "OS: ${DISTRO_ID} (${DISTRO_CODENAME})"
   log_info "Architecture: ${arch}"
   log_info "Free disk on /: ${free_disk_mb} MB"
+  warn_host_memory_tier "${host_mem_total_mb}"
 
   if [[ "${arch}" != "x86_64" && "${arch}" != "aarch64" ]]; then
     abort "Unsupported architecture ${arch}. Only x86_64/aarch64 are supported."
@@ -441,6 +557,7 @@ prepare_panel_files() {
 
   write_status "deploy" "start" "Preparing runtime files"
   run_as_root mkdir -p "${PANEL_INSTALL_DIR}" "${PANEL_DATA_DIR}" "${PANEL_LOG_DIR}" "${PANEL_INSTANCES_DIR}"
+  sync_panel_env_presets
   run_as_root chmod 700 "${PANEL_INSTALL_DIR}"
   run_as_root chmod 750 "${PANEL_DATA_DIR}" "${PANEL_LOG_DIR}" "${PANEL_INSTANCES_DIR}"
 
@@ -488,6 +605,11 @@ GSH_GITHUB_REPO=GameServerHub/game-server-hub
 TZ=UTC
 EOF"
   run_as_root chmod 600 "${PANEL_ENV_FILE}"
+
+  local host_mem_total_mb preset_name
+  host_mem_total_mb="$(read_host_mem_total_mb)"
+  preset_name="$(resolve_panel_env_preset_name "${host_mem_total_mb}")"
+  append_panel_env_preset "${preset_name}"
 }
 
 # 仅在部署阶段开始后启用容器栈回滚。
@@ -554,6 +676,7 @@ print_summary() {
   log_warn "Security note: change the admin password immediately after first login."
   log_info "First-login force password change flag: FORCE_PASSWORD_CHANGE=1"
   log_info "Install status file: ${STATUS_FILE}"
+  log_info "Host memory guidance: docs/MEMORY.md (panel.env presets under config/panel.env.presets/)"
 }
 
 # 主流程：安装依赖 -> 预检 -> 网络处理 -> 生成配置 -> 部署。

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import LogoMark from '@/components/LogoMark.vue'
 import { APP_TITLE } from '@/utils/app-title'
 
 defineOptions({
@@ -26,7 +25,7 @@ const to = computed(() => appSettingsStore.settings.app.home.enable ? appSetting
 
 <template>
   <RouterLink :to class="text-primary px-3 no-underline flex-center gap-2 h-[var(--g-sidebar-logo-height)] w-inherit" :class="{ 'cursor-default': !appSettingsStore.settings.app.home.enable }" :title="title">
-    <LogoMark v-if="showLogo" class="logo" />
+    <AppLogoMark v-if="showLogo" class="logo" />
     <span v-if="showTitle" class="font-bold block truncate">{{ title }}</span>
   </RouterLink>
 </template>

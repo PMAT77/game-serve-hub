@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import logoSvg from '@/assets/images/logo.svg?raw'
 
+defineOptions({
+  name: 'AppLogoMark',
+})
+
 withDefaults(
   defineProps<{
     /** Tailwind 尺寸类，如 `h-[30px] w-[35px]` */

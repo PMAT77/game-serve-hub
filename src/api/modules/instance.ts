@@ -52,6 +52,14 @@ export interface InstanceCheckUpdatesPayload {
   updateAvailableCount: number
 }
 
+export interface InstanceUpdateCheckJobPayload {
+  checking: boolean
+  startedAt: string | null
+  finishedAt: string | null
+  result: InstanceCheckUpdatesPayload | null
+  error: string | null
+}
+
 export interface InstanceListQuery {
   nodeId?: string
   status?: InstanceStatus
@@ -170,7 +178,8 @@ export default {
   }) as Promise<{ data: InstanceInstallLogPayload }>,
   createInstance: (data: CreateInstancePayload) => api.post('app/instance/create', data),
   updateInstance: (id: string, options?: { force?: boolean }) => api.post('app/instance/update', { id, force: options?.force }),
-  checkInstanceUpdates: (ids?: string[]) => api.post('app/instance/check-updates', ids?.length ? { ids } : {}) as Promise<{ data: InstanceCheckUpdatesPayload }>,
+  checkInstanceUpdates: (ids?: string[]) => api.post('app/instance/check-updates', ids?.length ? { ids } : {}) as Promise<{ data: InstanceUpdateCheckJobPayload }>,
+  getInstanceUpdateCheckStatus: () => api.get('app/instance/check-updates/status') as Promise<{ data: InstanceUpdateCheckJobPayload }>,
   allocateInstancePorts: (id: string) => api.post('app/instance/allocate-ports', { id }) as Promise<{ data: InstanceAllocatePortsPayload }>,
   startInstance: (id: string, options?: { autoAllocatePorts?: boolean }) => api.post('app/instance/start', {
     id,

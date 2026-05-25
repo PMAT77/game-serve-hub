@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import LogoMark from '@/components/LogoMark.vue'
-
 const router = useRouter()
 
 const LINKS = {
@@ -76,7 +74,7 @@ function goLogin() {
       <!-- Top Bar -->
       <div class="mb-6 flex items-center justify-between">
         <div class="flex gap-3 items-center">
-          <LogoMark size-class="h-[30px] w-[40px]" class="p-1 border rounded-lg" />
+          <AppLogoMark size-class="h-[30px] w-[40px]" class="p-1 border rounded-lg" />
           <span class="tracking-tight font-semibold">GameServerHub</span>
           <span class="text-xs text-muted-foreground px-2 py-0.5 border rounded-full">
             Community · MIT
@@ -195,7 +193,7 @@ function goLogin() {
           >
             <div class="flex flex-col h-full">
               <div class="p-6 border-b flex gap-4 items-start">
-                <LogoMark size-class="h-10 w-10" />
+                <AppLogoMark size-class="h-10 w-10" />
                 <div>
                   <div class="text-sm tracking-tight font-semibold">
                     {{ product.name }}

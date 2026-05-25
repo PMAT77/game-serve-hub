@@ -24,8 +24,9 @@ import {
   useDialog,
   useMessage,
 } from 'naive-ui'
-import { computed, onActivated, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
+import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
 import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
 import { routeToDstRoomList } from '@/navigation/game-routes'
 
@@ -39,6 +40,14 @@ const dialog = useDialog()
 const message = useMessage()
 
 const { formLabelPlacement, formLabelWidth } = useNarrowFormLayout(120)
+const { guidance: hostMemoryGuidance } = useHostMemoryGuidance()
+
+const cavesMemoryAlert = computed(() => {
+  if (!formModel.shardEnabled) {
+    return null
+  }
+  return hostMemoryGuidance.value?.cavesWarning ?? null
+})
 
 const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
@@ -160,17 +169,21 @@ const formRules = computed<FormRules>(() => {
   if (formModel.networkMode === 'public') {
     rules.clusterToken = [
       {
+        required: true,
         validator: (_rule, value: string) => {
           const input = String(value ?? '').trim()
-          if (!input && !serverConfig.value?.clusterTokenConfigured) {
+          if (!input && serverConfig.value?.clusterTokenConfigured) {
+            return true
+          }
+          if (!input) {
             return new Error('联机模式必须填写 Klei 集群令牌')
           }
-          if (input && !input.startsWith('pds-')) {
+          if (!input.startsWith('pds-')) {
             return new Error('Klei 集群令牌应以 pds- 开头')
           }
           return true
         },
-        trigger: ['blur', 'input'],
+        trigger: ['blur', 'input', 'change'],
       },
     ]
   }
@@ -282,6 +295,17 @@ function confirmSaveAndRestart() {
   })
 } 
 
+watch(() => formModel.networkMode, (mode) => {
+  void nextTick(() => {
+    if (mode === 'public') {
+      void formRef.value?.validate(undefined, rule => rule?.key === 'clusterToken')
+    }
+    else {
+      formRef.value?.restoreValidation()
+    }
+  })
+})
+
 watch(instanceId, (id) => {
   if (id) {
     void loadConfig()
@@ -380,6 +404,7 @@ onActivated(() => {
             <NFormItem
               label="服务器令牌"
               path="clusterToken"
+              :required="formModel.networkMode === 'public' && !serverConfig?.clusterTokenConfigured"
             >
               <NInput
                 v-model:value="formModel.clusterToken"
@@ -477,6 +502,11 @@ onActivated(() => {
           </NCard>
 
           <NCard title="洞穴（地下世界）" size="small" class="mt-4">
+            <AppHostMemoryAlert
+              v-if="cavesMemoryAlert"
+              title="内存提示"
+              :message="cavesMemoryAlert"
+            />
             <NFormItem label="启用洞穴">
               <NSwitch v-model:value="formModel.shardEnabled" />
               <NTooltip :style="{ maxWidth: '300px' }">

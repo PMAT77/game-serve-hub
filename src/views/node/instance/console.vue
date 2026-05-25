@@ -2,6 +2,7 @@
 import type { InstanceConnectInfo, InstanceConsoleLogLine, InstanceItem, InstanceMaintenancePushLog } from '@/api/modules/instance'
 import apiInstance from '@/api/modules/instance'
 import { routeToNodeInstance } from '@/navigation/game-routes'
+import { copyTextToClipboard } from '@/utils/copyToClipboard'
 import { formatDateTime } from './utils'
 import type { InstanceConsoleCommandShard } from '@/api/modules/instance'
 import {
@@ -335,7 +336,11 @@ async function copyLogs() {
     faToast.warning('暂无日志可复制')
     return
   }
-  await navigator.clipboard.writeText(text)
+  const ok = await copyTextToClipboard(text)
+  if (!ok) {
+    faToast.error('复制失败，请手动选中日志文本复制')
+    return
+  }
   faToast.success('日志已复制')
 }
 
@@ -374,15 +379,8 @@ const connectDisplayBlock = computed(() => {
 })
 
 const canCopyConnectDisplay = computed(() => {
-  const info = connectInfo.value
   const block = connectDisplayBlock.value
-  if (!info || !block?.command) {
-    return false
-  }
-  if (connectDisplayMode.value === 'public' && info.isPlaceholder) {
-    return false
-  }
-  return true
+  return Boolean(block?.command?.trim())
 })
 
 const connectModeToggleTitle = computed(() => {
@@ -408,11 +406,15 @@ async function copyConnectCommand(mode: ConnectCopyMode) {
     : mode === 'lan'
       ? info.lanCommand
       : info.command
-  if (!command) {
+  if (!command?.trim()) {
     faToast.warning('暂无直连命令')
     return
   }
-  await navigator.clipboard.writeText(command)
+  const ok = await copyTextToClipboard(command)
+  if (!ok) {
+    faToast.error('复制失败，请手动选中命令文本复制')
+    return
+  }
   const label = mode === 'local' ? '本机直连' : mode === 'lan' ? '局域网直连' : '公网直连'
   faToast.success(`${label}命令已复制`)
 }

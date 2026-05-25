@@ -30,7 +30,7 @@ export {
   resolveMinHostAvailableMbForOperation,
   resolveSteamcmdPlanningMb,
 } from './host-resource-guard'
-export type { HeavyHostOperation, HostMemoryPressureResult } from './host-resource-guard'
+export type { HeavyHostOperation, HostMemoryPressureFailure, HostMemoryPressureResult } from './host-resource-guard'
 export {
   formatGameDstImageError,
   isGameDstImagePresent,

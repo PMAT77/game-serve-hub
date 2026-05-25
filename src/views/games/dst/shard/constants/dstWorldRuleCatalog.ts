@@ -134,7 +134,7 @@ export const DST_WORLD_CONFIG_CATALOG: DstWorldRuleCatalogSection[] = [
       { overrideKey: 'basicresource_regrowth', labelZh: '基础资源', iconId: 'basic_resources', levelProfileId: 'dst_none_default' },
       { overrideKey: 'twiggytrees_regrowth', labelZh: '多枝树', iconId: 'twiggy_tree' },
       { overrideKey: 'evergreen_regrowth', labelZh: '常青树', iconId: 'trees' },
-      { overrideKey: 'moon_tree_regrowth', labelZh: '月树', iconId: 'lune_tree' },
+      { overrideKey: 'moon_tree_regrowth', labelZh: '月树', iconId: 'luner_tree' },
       { overrideKey: 'deciduoustree_regrowth', labelZh: '桦栗树', iconId: 'birchnut_tree' },
       { overrideKey: 'palmconetree_regrowth', labelZh: '棕榈松果树', iconId: 'palmcone_tree' },
       { overrideKey: 'saltstack_regrowth', labelZh: '盐堆', iconId: 'salt_formation' },

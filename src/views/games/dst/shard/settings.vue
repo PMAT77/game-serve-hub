@@ -23,6 +23,7 @@ import {
 import { computed, h, onActivated, onMounted, reactive, ref, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
 import apiShard from '@/api/modules/shard'
+import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
 import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
 import {
   routeToDstRoomSettings,
@@ -53,6 +54,7 @@ const dialog = useDialog()
 const message = useMessage()
 
 const { formLabelPlacement, formLabelWidth } = useNarrowFormLayout(140)
+const { guidance: hostMemoryGuidance } = useHostMemoryGuidance()
 
 const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
@@ -541,6 +543,11 @@ onActivated(() => {
           </NTabPane>
 
           <NTabPane name="mods" tab="模组">
+            <AppHostMemoryAlert
+              v-if="hostMemoryGuidance?.modsWarning"
+              title="内存与模组"
+              :message="hostMemoryGuidance.modsWarning"
+            />
             <NAlert type="info" class="mt-2" title="模组配置（规划中）">
               <p class="text-sm">
                 v1 世界设置页暂不编辑模组。模组管理将在后续版本提供；当前请通过 Klei 官方工具或手动维护。

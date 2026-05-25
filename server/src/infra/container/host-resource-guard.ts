@@ -1,3 +1,4 @@
+import type { HostMemoryPressureData } from '../../../../shared/contracts/host-memory-pressure'
 import fs from 'node:fs'
 import { resolveDstContainerResourceLimits } from './dst-container-resources'
 import { resolveSteamcmdContainerMemoryCapMb } from './steamcmd-container-resources'
@@ -112,9 +113,52 @@ export function readHostMemoryTotalMb(): number | null {
   return kbToMb(readProcMeminfoKb('MemTotal'))
 }
 
+export type HostMemoryPressureFailure = {
+  ok: false
+  availableMb: number
+  requiredMb: number
+  summary: string
+  detail: string
+  data: HostMemoryPressureData
+}
+
 export type HostMemoryPressureResult =
   | { ok: true, availableMb: number | null, requiredMb: number }
-  | { ok: false, availableMb: number | null, requiredMb: number, message: string }
+  | HostMemoryPressureFailure
+
+function buildHostMemoryPressureFailure(
+  availableMb: number,
+  requiredMb: number,
+  totalMb: number | null,
+  capMb: number | undefined,
+): HostMemoryPressureFailure {
+  const totalHint = totalMb ? `（总内存约 ${totalMb} MiB）` : ''
+  const explanationLines = [
+    '说明：安装/启动按典型峰值估算，并非按容器上限占满内存。',
+    ...(capMb ? [`SteamCMD 容器内存硬上限为 ${capMb} MiB（非预留占用）。`] : []),
+  ]
+  const detail = [
+    `当前可用约 ${availableMb} MiB，本操作建议至少 ${requiredMb} MiB${totalHint}。`,
+    '',
+    ...explanationLines,
+    '',
+    '建议：',
+    '1. 停止其他正在运行的实例，释放内存',
+    '2. 启用同机 seed 复制，跳过 Steam 下载',
+    '3. 小内存机可在 panel.env 设置 GSH_STEAMCMD_CONTAINER_MEMORY_MB 限制 SteamCMD 容器内存（高配机可不设置）',
+    '',
+    '若确需强制执行：在 panel.env 设置 GSH_HOST_MIN_AVAILABLE_MB=0 可关闭内存守卫（小内存机慎用，可能触发 OOM）。',
+  ].join('\n')
+  const summary = `宿主机可用内存不足（当前约 ${availableMb} MiB，建议至少 ${requiredMb} MiB${totalHint}）`
+  const data: HostMemoryPressureData = {
+    availableMb,
+    requiredMb,
+    totalMb,
+    capMb: capMb ?? null,
+    detail,
+  }
+  return { ok: false, availableMb, requiredMb, summary, detail, data }
+}
 
 /**
  * 在面板容器内读取 MemAvailable，避免 SteamCMD 与 DST 同时压垮小内存宿主机。
@@ -131,13 +175,5 @@ export function assessHostMemoryForHeavyOperation(operation: HeavyHostOperation)
     return { ok: true, availableMb, requiredMb }
   }
   const capMb = resolveSteamcmdContainerMemoryCapMb('app-update')
-  const capHint = capMb ? `SteamCMD 容器硬上限 ${capMb} MiB（非预留）；` : ''
-  const totalHint = totalMb ? `（总内存约 ${totalMb} MiB）` : ''
-  const message = [
-    `宿主机可用内存不足：当前约 ${availableMb} MiB，执行该操作建议至少 ${requiredMb} MiB${totalHint}。`,
-    `${capHint}安装/启动按典型峰值估算，非按上限占满。`,
-    '可先停止其他实例、启用同机 seed 复制跳过 Steam 下载，或设 GSH_HOST_MIN_AVAILABLE_MB=0 关闭守卫（小内存机慎用）。',
-    '小内存机可在 panel.env 设置 GSH_STEAMCMD_CONTAINER_MEMORY_MB 上限；高配机保持不设置即可。',
-  ].join('')
-  return { ok: false, availableMb, requiredMb, message }
+  return buildHostMemoryPressureFailure(availableMb, requiredMb, totalMb, capMb)
 }

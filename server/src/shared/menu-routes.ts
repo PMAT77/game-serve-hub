@@ -88,6 +88,7 @@ export const menuRouteList: MenuRouteItem[] = [
               auth: NODE_INSTANCE_MANAGE_PERMISSION,
               activeMenu: FRONTEND_ROUTE_PATHS.nodeInstance,
               menu: false,
+              keepAlive: true,
             },
           },
         ],

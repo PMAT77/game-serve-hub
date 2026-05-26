@@ -289,6 +289,56 @@ function connectStream() {
   }
 }
 
+function startRealtimeJobs() {
+  if (!pollTimer) {
+    pollTimer = setInterval(() => {
+      void refreshLogs()
+    }, 5000)
+  }
+  if (!connectInfoTimer) {
+    connectInfoTimer = setInterval(() => {
+      void loadConnectInfo()
+    }, 30000)
+  }
+}
+
+function stopRealtimeJobs() {
+  eventSource?.close()
+  eventSource = null
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = undefined
+  }
+  if (connectInfoTimer) {
+    clearInterval(connectInfoTimer)
+    connectInfoTimer = undefined
+  }
+}
+
+function resetInstanceRuntimeState() {
+  instanceName.value = ''
+  instanceStatus.value = null
+  logs.value = []
+  connectInfo.value = null
+  running.value = false
+  maintenanceMessage.value = ''
+  maintenanceDraftUpdatedAt.value = null
+  maintenancePushLogs.value = []
+  commandInput.value = ''
+  commandShard.value = 'master'
+}
+
+async function initInstanceConsole() {
+  if (!instanceId.value) {
+    goBack()
+    return
+  }
+  await loadInstanceMeta()
+  await loadConnectInfo()
+  await loadMaintenanceAnnounce()
+  await refreshLogs()
+}
+
 async function sendCommand(command?: string) {
   const text = (command ?? commandInput.value).trim()
   if (!text || commandSending.value) {
@@ -449,33 +499,25 @@ watch(running, (value) => {
   }
 })
 
-onMounted(async () => {
-  if (!instanceId.value) {
-    goBack()
+watch(instanceId, async (nextId, prevId) => {
+  if (!nextId || nextId === prevId) {
     return
   }
-  await loadInstanceMeta()
-  await loadConnectInfo()
-  await loadMaintenanceAnnounce()
-  await refreshLogs()
+  stopRealtimeJobs()
+  resetInstanceRuntimeState()
+  await initInstanceConsole()
   connectStream()
-  pollTimer = setInterval(() => {
-    void refreshLogs()
-  }, 5000)
-  connectInfoTimer = setInterval(() => {
-    void loadConnectInfo()
-  }, 30000)
+  startRealtimeJobs()
+})
+
+onMounted(async () => {
+  await initInstanceConsole()
+  connectStream()
+  startRealtimeJobs()
 })
 
 onBeforeUnmount(() => {
-  eventSource?.close()
-  eventSource = null
-  if (pollTimer) {
-    clearInterval(pollTimer)
-  }
-  if (connectInfoTimer) {
-    clearInterval(connectInfoTimer)
-  }
+  stopRealtimeJobs()
 })
 </script>
 

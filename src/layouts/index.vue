@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useElementSize, useScroll } from '@vueuse/core'
+import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import { useHotkeyBindings } from '@/hotkeys/useHotkeys'
 import { useSlots } from '@/slots'
 import { cn } from '@/utils'
@@ -132,6 +133,14 @@ eventBus.on('topbar-scroll-visible-or-hidden', (val) => {
   topbarScrollVisibleOrHidden.value = val
 })
 
+function resolveRouterViewKey(route: RouteLocationNormalizedLoaded) {
+  if (route.name === 'nodeInstanceConsole') {
+    // 控制台页按路由名复用实例：同实例回到页面不重复建连，切换实例由页面内部处理重连。
+    return String(route.name)
+  }
+  return route.fullPath
+}
+
 const enableAppSetting = import.meta.env.VITE_APP_SETTING
 </script>
 
@@ -177,7 +186,7 @@ const enableAppSetting = import.meta.env.VITE_APP_SETTING
           <RouterView v-slot="{ Component, route }">
             <Transition :name="!appSettingsStore.isReloading ? 'fade' : ''" mode="out-in">
               <KeepAlive :include="appKeepAliveStore.list">
-                <Component :is="Component" v-show="!isLink" :key="route.fullPath" />
+                <Component :is="Component" v-show="!isLink" :key="resolveRouterViewKey(route)" />
               </KeepAlive>
             </Transition>
           </RouterView>

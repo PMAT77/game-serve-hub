@@ -15,6 +15,8 @@ export interface MenuRouteItem {
 }
 
 export const NODE_INSTANCE_MANAGE_PERMISSION = 'pages.node.instance:manage'
+export const SYSTEM_READ_PERMISSION = 'system:read'
+export const SYSTEM_MANAGE_PERMISSION = 'system:manage'
 
 /**
  * 后端驱动的动态菜单与路由（component 为 views/ 下相对路径）。
@@ -172,6 +174,7 @@ export const menuRouteList: MenuRouteItem[] = [
         meta: {
           title: '系统管理',
           icon: 'ri:computer-line',
+          auth: SYSTEM_MANAGE_PERMISSION,
         },
         children: [
           {
@@ -181,6 +184,7 @@ export const menuRouteList: MenuRouteItem[] = [
             meta: {
               title: '系统设置',
               icon: 'ri:settings-4-line',
+              auth: SYSTEM_MANAGE_PERMISSION,
             },
           },
         ],

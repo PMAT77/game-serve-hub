@@ -16,7 +16,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   }
 
   function clearAccountStorage() {
-    const keys = ['token', 'account', 'avatar', 'email']
+    const keys = ['token', 'refreshToken', 'account', 'avatar', 'email']
     keys.forEach((key) => {
       localStorage.removeItem(key)
       sessionStorage.removeItem(key)
@@ -25,6 +25,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
 
   // 账号信息
   const token = ref(readAccountStorageValue('token'))
+  const refreshToken = ref(readAccountStorageValue('refreshToken'))
   const account = ref(readAccountStorageValue('account'))
   const avatar = ref(readAccountStorageValue('avatar'))
   const email = ref(readAccountStorageValue('email'))
@@ -36,7 +37,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
 
   // 登录状态
   const isLogin = computed(() => {
-    if (token.value) {
+    if (token.value && refreshToken.value) {
       return true
     }
     return false
@@ -47,24 +48,53 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     account: string
     password: string
     remember?: boolean
+    challengeToken?: string
+    challengeAnswer?: string
   }) {
     const remember = data.remember === true
     const res = await apiApp.login({
       account: data.account,
       password: data.password,
       remember,
+      challengeToken: data.challengeToken,
+      challengeAnswer: data.challengeAnswer,
     })
     const targetStorage = getPersistentStorage(remember)
     clearAccountStorage()
     targetStorage.setItem('account', res.data.account)
     targetStorage.setItem('token', res.data.token)
+    targetStorage.setItem('refreshToken', res.data.refreshToken)
     targetStorage.setItem('avatar', res.data.avatar)
     targetStorage.setItem('email', res.data.email)
     account.value = res.data.account
     token.value = res.data.token
+    refreshToken.value = res.data.refreshToken
     avatar.value = res.data.avatar
     email.value = res.data.email
     suggestPasswordChangeOnFirstLogin.value = res.data.mustChangePassword === true
+  }
+
+  function applySessionTokens(payload: {
+    token: string
+    refreshToken: string
+  }) {
+    const refresh = payload.refreshToken?.trim() ?? ''
+    token.value = payload.token
+    refreshToken.value = refresh
+    if (!payload.token || !refresh) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('refreshToken')
+      sessionStorage.removeItem('token')
+      sessionStorage.removeItem('refreshToken')
+      return
+    }
+    if (localStorage.getItem('account')) {
+      localStorage.setItem('token', payload.token)
+      localStorage.setItem('refreshToken', refresh)
+      return
+    }
+    sessionStorage.setItem('token', payload.token)
+    sessionStorage.setItem('refreshToken', refresh)
   }
 
   function clearSuggestPasswordChangeOnFirstLogin() {
@@ -74,10 +104,13 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   // 手动登出
   async function logout(redirect = router.currentRoute.value.fullPath) {
     if (token.value) {
-      await apiApp.logout().catch(() => {})
+      await apiApp.logout({
+        refreshToken: refreshToken.value || undefined,
+      }).catch(() => {})
     }
     clearAccountStorage()
     token.value = ''
+    refreshToken.value = ''
     router.push({
       name: 'login',
       query: {
@@ -90,6 +123,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   function requestLogout() {
     clearAccountStorage()
     token.value = ''
+    refreshToken.value = ''
     router.push({
       name: 'login',
       query: {
@@ -108,6 +142,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   function logoutCleanStatus() {
     clearAccountStorage()
     account.value = ''
+    refreshToken.value = ''
     avatar.value = ''
     email.value = ''
     permissions.value = []
@@ -136,20 +171,25 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   // 锁屏
   function lock() {
     localStorage.removeItem('token')
+    localStorage.removeItem('refreshToken')
     sessionStorage.removeItem('token')
+    sessionStorage.removeItem('refreshToken')
   }
 
   // 解锁
   function unlock() {
     if (localStorage.getItem('account')) {
       localStorage.setItem('token', token.value)
+      localStorage.setItem('refreshToken', refreshToken.value)
       return
     }
     sessionStorage.setItem('token', token.value)
+    sessionStorage.setItem('refreshToken', refreshToken.value)
   }
 
   return {
     token,
+    refreshToken,
     account,
     avatar,
     email,
@@ -157,6 +197,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     suggestPasswordChangeOnFirstLogin,
     isLogin,
     login,
+    applySessionTokens,
     logout,
     requestLogout,
     getPermissions,

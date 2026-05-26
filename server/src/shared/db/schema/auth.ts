@@ -22,8 +22,15 @@ export const userPermissions = sqliteTable('user_permissions', {
 
 export const authSessions = sqliteTable('auth_sessions', {
   token: text('token').primaryKey(),
+  tokenHash: text('token_hash'),
+  refreshTokenHash: text('refresh_token_hash'),
   userId: text('user_id').notNull(),
   createdAt: text('created_at').notNull(),
   lastSeenAt: text('last_seen_at').notNull(),
+  expiresAt: text('expires_at'),
+  refreshExpiresAt: text('refresh_expires_at'),
+  rotatedAt: text('rotated_at'),
+  lastSeenIp: text('last_seen_ip'),
+  userAgent: text('user_agent'),
   revokedAt: text('revoked_at'),
 })

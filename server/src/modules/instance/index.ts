@@ -4,10 +4,10 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import {
   createGameInstance,
   deleteGameInstanceById,
-  findUserByToken,
   getGameInstanceById,
   getServerNodeById,
   getSystemSteamcmdConfig,
@@ -55,7 +55,7 @@ import {
   startInstallJob,
 } from './install-service'
 import { prepareInstallPathForRuntime, prepareInstallPathForSteamcmd } from './install-path'
-import { businessError, success, unauthorized } from '../../shared/http/response'
+import { businessError, success } from '../../shared/http/response'
 import { hostMemoryPressureError } from '../../shared/http/host-memory-pressure-error'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
 import { registerInstanceMetricsRoute } from './metrics'
@@ -70,6 +70,7 @@ import {
   resolveSteamcmdCommandForUpdateCheck,
   scheduleInstanceUpdateChecks,
 } from './update-check'
+import { requirePermission } from '../system/auth'
 
 interface InstanceListQuery {
   nodeId?: string
@@ -137,23 +138,8 @@ function normalizeToken(tokenHeader: string | string[] | undefined): string {
   return tokenHeader ?? ''
 }
 
-function getTokenByRequest(request: FastifyRequest): string | undefined {
-  const token = normalizeToken(request.headers.token)
-  if (!token) {
-    return undefined
-  }
-  return token
-}
-
 async function verifyAuthorized(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
-  const token = getTokenByRequest(request)
-  if (!token) {
-    return unauthorized(request)
-  }
-  const user = await findUserByToken(token)
-  if (!user) {
-    return unauthorized(request)
-  }
+  return requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
 }
 
 function normalizeInstanceId(value: string | undefined) {

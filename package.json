@@ -18,6 +18,7 @@
     "dev:compose:prepare": "tsx server/scripts/ensure-steamcmd-image.ts",
     "dev:compose": "tsx scripts/dev-compose.ts",
     "dev:compose:down": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down",
+    "auth:repair-permissions": "tsx server/scripts/repair-user-permissions.ts",
     "install:linux": "bash ./scripts/install.linux.sh",
     "db:generate": "drizzle-kit generate --config server/drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config server/drizzle.config.ts",

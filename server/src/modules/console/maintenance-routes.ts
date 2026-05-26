@@ -5,25 +5,26 @@ import type {
   InstanceMaintenancePushResultDto,
 } from '../../../../shared/contracts/maintenance'
 import {
-  findUserByToken,
   getGameInstanceById,
   getMaintenanceDraft,
   insertMaintenancePushLog,
   listMaintenancePushLogs,
   upsertMaintenanceDraft,
 } from '../../shared/db/index'
+import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import {
   ensureContainerRuntimeReady,
   isInstanceContainerRunning,
   sendInstanceContainerCommand,
 } from '../instance/container-lifecycle'
-import { businessError, success, unauthorized } from '../../shared/http/response'
+import { businessError, success } from '../../shared/http/response'
 import {
   buildMaintenanceAnnounceCommand,
   normalizeMaintenanceMessage,
   validateMaintenanceMessage,
 } from './maintenance-announce'
 import { toMaintenanceAnnounceStateDto, toMaintenancePushLogDto } from './maintenance-mapper'
+import { resolveAuthorizedContext } from '../system/auth'
 
 const LOCAL_NODE_ID = 'local-node'
 
@@ -41,32 +42,15 @@ interface MaintenancePushBody {
   message?: string
 }
 
-function normalizeToken(value: string | string[] | undefined): string {
-  if (Array.isArray(value)) {
-    return value[0] ?? ''
-  }
-  return value?.trim() ?? ''
-}
-
-function getTokenByRequest(request: FastifyRequest): string | undefined {
-  const headerToken = normalizeToken(request.headers.token)
-  if (headerToken) {
-    return headerToken
-  }
-  const query = request.query as { token?: string }
-  return query.token?.trim() || undefined
-}
-
 async function verifyAuthorizedUser(request: FastifyRequest) {
-  const token = getTokenByRequest(request)
-  if (!token) {
-    return { error: unauthorized(request) as ApiErrorResponse }
+  const auth = await resolveAuthorizedContext(request, {
+    permissions: NODE_INSTANCE_MANAGE_PERMISSION,
+    allowQueryToken: true,
+  })
+  if (auth.error || !auth.context) {
+    return { error: auth.error as ApiErrorResponse }
   }
-  const user = await findUserByToken(token)
-  if (!user) {
-    return { error: unauthorized(request) as ApiErrorResponse }
-  }
-  return { user }
+  return { user: auth.context.user }
 }
 
 function normalizeInstanceId(value: string | undefined) {

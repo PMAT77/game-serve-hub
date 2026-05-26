@@ -1,11 +1,13 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { findUserByToken, listServerNodes, saveServerNode } from '../../shared/db/index'
-import { success, unauthorized } from '../../shared/http/response'
+import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
+import { listServerNodes, saveServerNode } from '../../shared/db/index'
+import { success } from '../../shared/http/response'
+import { requirePermission } from '../system/auth'
 
 interface LocalNodeResourceSnapshot {
   cpu: {
@@ -42,32 +44,6 @@ interface NodeViewItem {
 const LOCAL_NODE_ID = 'local-node'
 let previousCpuTotal = 0
 let previousCpuIdle = 0
-
-function normalizeToken(tokenHeader: string | string[] | undefined): string {
-  if (Array.isArray(tokenHeader)) {
-    return tokenHeader[0] ?? ''
-  }
-  return tokenHeader ?? ''
-}
-
-function getTokenByRequest(request: FastifyRequest): string | undefined {
-  const token = normalizeToken(request.headers.token)
-  if (!token) {
-    return undefined
-  }
-  return token
-}
-
-async function verifyAuthorized(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
-  const token = getTokenByRequest(request)
-  if (!token) {
-    return unauthorized(request)
-  }
-  const user = await findUserByToken(token)
-  if (!user) {
-    return unauthorized(request)
-  }
-}
 
 function toGb(value: number) {
   return Number((value / 1024 / 1024 / 1024).toFixed(2))
@@ -218,7 +194,7 @@ export function registerNodeModule(app: FastifyInstance) {
   })
 
   app.post('/app/node/local/register', async (request): Promise<ApiSuccessResponse<NodeViewItem> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }
@@ -226,7 +202,7 @@ export function registerNodeModule(app: FastifyInstance) {
   })
 
   app.post('/app/node/list', async (request): Promise<ApiSuccessResponse<NodeViewItem[]> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }

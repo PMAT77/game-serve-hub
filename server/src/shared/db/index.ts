@@ -1,13 +1,14 @@
 import { Buffer } from 'node:buffer'
-import { randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { DatabaseSync } from 'node:sqlite'
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, or } from 'drizzle-orm'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { drizzle } from 'drizzle-orm/sqlite-proxy'
 import { migrate } from 'drizzle-orm/sqlite-proxy/migrator'
+import { SYSTEM_MANAGE_PERMISSION, SYSTEM_READ_PERMISSION } from '../menu-routes'
 import {
   authSessions,
   gameInstances,
@@ -42,12 +43,17 @@ interface AuthForcePasswordChangeState {
 }
 
 const AUTH_FORCE_PASSWORD_CHANGE_KEY = 'auth.force_password_change'
+const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const REFRESH_TOKEN_REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const ADMIN_DEFAULT_PERMISSIONS = [
   'pages.general:browse',
   'pages.form:browse',
   'pages.list:browse',
   'pages.shop:browse',
   'pages.node.instance:manage',
+  SYSTEM_READ_PERMISSION,
+  SYSTEM_MANAGE_PERMISSION,
 ]
 
 interface DbDefaultUserSeed {
@@ -56,6 +62,15 @@ interface DbDefaultUserSeed {
   email: string
   avatar: string
   permissions: string[]
+}
+
+export interface SessionTokenBundle {
+  accessToken: string
+  refreshToken: string
+  accessExpiresAt: string
+  refreshExpiresAt: string
+  accessExpiresInSec: number
+  refreshExpiresInSec: number
 }
 
 export interface DbSystemNetworkConfig {
@@ -188,6 +203,8 @@ const defaultUserSeeds: DbDefaultUserSeed[] = [
       'pages.list:browse',
       'pages.shop:browse',
       'pages.node.instance:manage',
+      SYSTEM_READ_PERMISSION,
+      SYSTEM_MANAGE_PERMISSION,
     ],
   },
   {
@@ -209,6 +226,29 @@ function nowIso() {
 function hashPassword(password: string, salt = randomUUID()) {
   const derivedKey = scryptSync(password, salt, 64).toString('hex')
   return `${salt}:${derivedKey}`
+}
+
+function hashSessionToken(token: string) {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function generateSessionToken(prefix: 'atk' | 'rtk') {
+  return `${prefix}_${randomBytes(32).toString('hex')}`
+}
+
+function toIsoFromMs(valueMs: number) {
+  return new Date(valueMs).toISOString()
+}
+
+function isExpiredAt(iso: string | null | undefined, nowMs = Date.now()) {
+  if (!iso) {
+    return false
+  }
+  const expiresMs = Date.parse(iso)
+  if (Number.isNaN(expiresMs)) {
+    return false
+  }
+  return expiresMs <= nowMs
 }
 
 export function verifyPassword(password: string, storedHash: string) {
@@ -258,6 +298,24 @@ function ensureSchemaCompatibility(database: DatabaseSync) {
   }
 
   ensureColumn(database, 'users', 'must_change_password', 'integer DEFAULT 0 NOT NULL')
+
+  const authSessionsTableExists = database.prepare(`
+    SELECT 1 AS ok
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'auth_sessions'
+    LIMIT 1
+  `).get() as { ok: number } | undefined
+  if (authSessionsTableExists) {
+    ensureColumn(database, 'auth_sessions', 'token_hash', 'text')
+    ensureColumn(database, 'auth_sessions', 'refresh_token_hash', 'text')
+    ensureColumn(database, 'auth_sessions', 'expires_at', 'text')
+    ensureColumn(database, 'auth_sessions', 'refresh_expires_at', 'text')
+    ensureColumn(database, 'auth_sessions', 'rotated_at', 'text')
+    ensureColumn(database, 'auth_sessions', 'last_seen_ip', 'text')
+    ensureColumn(database, 'auth_sessions', 'user_agent', 'text')
+    database.exec('CREATE INDEX IF NOT EXISTS auth_sessions_token_hash_idx ON auth_sessions(token_hash)')
+    database.exec('CREATE INDEX IF NOT EXISTS auth_sessions_refresh_token_hash_idx ON auth_sessions(refresh_token_hash)')
+  }
 
   const gameInstancesTableExists = database.prepare(`
     SELECT 1 AS ok
@@ -637,14 +695,84 @@ export async function createSession(token: string, userId: string) {
   const now = nowIso()
   await drizzleDb.insert(authSessions).values({
     token,
+    tokenHash: null,
+    refreshTokenHash: null,
     userId,
     createdAt: now,
     lastSeenAt: now,
+    expiresAt: null,
+    refreshExpiresAt: null,
+    rotatedAt: null,
+    lastSeenIp: null,
+    userAgent: null,
     revokedAt: null,
   })
 }
 
+export async function createSessionTokens(
+  userId: string,
+  options: {
+    remember?: boolean
+    ip?: string
+    userAgent?: string
+  } = {},
+): Promise<SessionTokenBundle> {
+  const { drizzleDb } = ensureDb()
+  const nowMs = Date.now()
+  const now = toIsoFromMs(nowMs)
+  const accessExpiresInMs = ACCESS_TOKEN_TTL_MS
+  const refreshExpiresInMs = options.remember ? REFRESH_TOKEN_REMEMBER_TTL_MS : REFRESH_TOKEN_TTL_MS
+  const accessExpiresAt = toIsoFromMs(nowMs + accessExpiresInMs)
+  const refreshExpiresAt = toIsoFromMs(nowMs + refreshExpiresInMs)
+  const accessToken = generateSessionToken('atk')
+  const refreshToken = generateSessionToken('rtk')
+
+  await drizzleDb.insert(authSessions).values({
+    token: randomUUID(),
+    tokenHash: hashSessionToken(accessToken),
+    refreshTokenHash: hashSessionToken(refreshToken),
+    userId,
+    createdAt: now,
+    lastSeenAt: now,
+    expiresAt: accessExpiresAt,
+    refreshExpiresAt,
+    rotatedAt: null,
+    lastSeenIp: options.ip ?? null,
+    userAgent: options.userAgent ?? null,
+    revokedAt: null,
+  })
+
+  return {
+    accessToken,
+    refreshToken,
+    accessExpiresAt,
+    refreshExpiresAt,
+    accessExpiresInSec: Math.floor(accessExpiresInMs / 1000),
+    refreshExpiresInSec: Math.floor(refreshExpiresInMs / 1000),
+  }
+}
+
 export async function revokeSession(token: string) {
+  const { drizzleDb } = ensureDb()
+  const tokenHash = hashSessionToken(token)
+  await drizzleDb
+    .update(authSessions)
+    .set({
+      revokedAt: nowIso(),
+    })
+    .where(
+      and(
+        or(
+          eq(authSessions.token, token),
+          eq(authSessions.tokenHash, tokenHash),
+          eq(authSessions.refreshTokenHash, tokenHash),
+        ),
+        isNull(authSessions.revokedAt),
+      ),
+    )
+}
+
+export async function revokeSessionsByUserId(userId: string) {
   const { drizzleDb } = ensureDb()
   await drizzleDb
     .update(authSessions)
@@ -653,7 +781,7 @@ export async function revokeSession(token: string) {
     })
     .where(
       and(
-        eq(authSessions.token, token),
+        eq(authSessions.userId, userId),
         isNull(authSessions.revokedAt),
       ),
     )
@@ -661,16 +789,12 @@ export async function revokeSession(token: string) {
 
 export async function findUserByToken(token: string): Promise<DbUserRow | undefined> {
   const { drizzleDb } = ensureDb()
+  const tokenHash = hashSessionToken(token)
   const now = nowIso()
-  await drizzleDb
-    .update(authSessions)
-    .set({
-      lastSeenAt: now,
-    })
-    .where(eq(authSessions.token, token))
-
   const result = await drizzleDb
     .select({
+      sessionToken: authSessions.token,
+      expiresAt: authSessions.expiresAt,
       id: users.id,
       account: users.account,
       password_hash: users.passwordHash,
@@ -684,13 +808,110 @@ export async function findUserByToken(token: string): Promise<DbUserRow | undefi
     .innerJoin(users, eq(authSessions.userId, users.id))
     .where(
       and(
-        eq(authSessions.token, token),
+        or(
+          eq(authSessions.tokenHash, tokenHash),
+          eq(authSessions.token, token),
+        ),
         isNull(authSessions.revokedAt),
         eq(users.status, 1),
       ),
     )
     .limit(1)
-  return result[0]
+  const row = result[0]
+  if (!row) {
+    return undefined
+  }
+  if (isExpiredAt(row.expiresAt)) {
+    await revokeSession(token)
+    return undefined
+  }
+  await drizzleDb
+    .update(authSessions)
+    .set({
+      lastSeenAt: now,
+    })
+    .where(eq(authSessions.token, row.sessionToken))
+  return {
+    id: row.id,
+    account: row.account,
+    password_hash: row.password_hash,
+    email: row.email,
+    avatar: row.avatar,
+    status: row.status,
+    must_change_password: row.must_change_password,
+    updated_at: row.updated_at,
+  }
+}
+
+export async function rotateSessionByRefreshToken(
+  refreshToken: string,
+  options: {
+    ip?: string
+    userAgent?: string
+  } = {},
+): Promise<{ user: Pick<DbUserRow, 'id' | 'account' | 'email' | 'avatar'>, tokens: SessionTokenBundle } | undefined> {
+  const { drizzleDb } = ensureDb()
+  const nowMs = Date.now()
+  const now = toIsoFromMs(nowMs)
+  const refreshTokenHash = hashSessionToken(refreshToken)
+  const row = (await drizzleDb
+    .select({
+      sessionToken: authSessions.token,
+      refreshExpiresAt: authSessions.refreshExpiresAt,
+      createdAt: authSessions.createdAt,
+      userId: users.id,
+      account: users.account,
+      email: users.email,
+      avatar: users.avatar,
+    })
+    .from(authSessions)
+    .innerJoin(users, eq(authSessions.userId, users.id))
+    .where(
+      and(
+        eq(authSessions.refreshTokenHash, refreshTokenHash),
+        isNull(authSessions.revokedAt),
+        eq(users.status, 1),
+      ),
+    )
+    .limit(1))[0]
+
+  if (!row) {
+    return undefined
+  }
+  if (isExpiredAt(row.refreshExpiresAt, nowMs)) {
+    await revokeSession(refreshToken)
+    return undefined
+  }
+
+  await drizzleDb
+    .update(authSessions)
+    .set({
+      revokedAt: now,
+      rotatedAt: now,
+    })
+    .where(eq(authSessions.token, row.sessionToken))
+
+  const createdAtMs = Date.parse(row.createdAt)
+  const refreshExpiresAtMs = row.refreshExpiresAt ? Date.parse(row.refreshExpiresAt) : Number.NaN
+  const remember = !Number.isNaN(createdAtMs)
+    && !Number.isNaN(refreshExpiresAtMs)
+    && refreshExpiresAtMs - createdAtMs > REFRESH_TOKEN_TTL_MS
+
+  const tokens = await createSessionTokens(row.userId, {
+    remember,
+    ip: options.ip,
+    userAgent: options.userAgent,
+  })
+
+  return {
+    user: {
+      id: row.userId,
+      account: row.account,
+      email: row.email,
+      avatar: row.avatar,
+    },
+    tokens,
+  }
 }
 
 export async function findPermissionsByUserId(userId: string): Promise<string[]> {
@@ -716,6 +937,8 @@ export async function updateUserPassword(userId: string, newPassword: string) {
       updatedAt: now,
     })
     .where(eq(users.id, userId))
+
+  await revokeSessionsByUserId(userId)
 
   const state = await getAuthForcePasswordChangeState()
   if (state?.pending) {

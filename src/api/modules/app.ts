@@ -9,10 +9,17 @@ export default {
     account: string
     password: string
     remember?: boolean
+    challengeToken?: string
+    challengeAnswer?: string
   }) => api.post('app/account/login', data),
 
   // 登出
-  logout: () => api.post('app/account/logout'),
+  logout: (data?: { refreshToken?: string }) => api.post('app/account/logout', data ?? {}),
+
+  // 刷新 token
+  refreshToken: (data: { refreshToken: string }) => api.post('app/account/token/refresh', data, {
+    skipAuthRefresh: true,
+  }),
 
   // 获取权限
   permission: () => api.get('app/account/permission'),

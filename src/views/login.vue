@@ -30,9 +30,12 @@ async function handleLogin() {
   try {
     await ensureDynamicRoutes(router)
   }
-  catch {
+  catch (error) {
+    const message = error instanceof Error && error.message
+      ? `无法加载菜单与路由：${error.message}`
+      : '无法加载菜单与路由，请稍后重试'
     faToast.error('登录失败', {
-      description: '无法加载菜单与路由，请稍后重试',
+      description: message,
     })
     return
   }

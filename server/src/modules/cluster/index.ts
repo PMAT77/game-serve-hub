@@ -7,7 +7,8 @@ import type {
   ClusterSavePayload,
   ClusterSaveResult,
 } from '../../../../shared/contracts/cluster'
-import { findUserByToken, getGameInstanceById } from '../../shared/db/index'
+import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
+import { getGameInstanceById } from '../../shared/db/index'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import {
   ensureClusterDirectory,
@@ -18,35 +19,13 @@ import {
 import { queryDstOnlinePlayerCount } from '../../infra/game-adapter/dst/online-players'
 import { isInstanceContainerRunning } from '../instance/container-lifecycle'
 import { injectRestartInstance } from '../instance/inject-restart'
-import { businessError, success, unauthorized } from '../../shared/http/response'
+import { businessError, success } from '../../shared/http/response'
+import { requirePermission } from '../system/auth'
 
 const LOCAL_NODE_ID = 'local-node'
 
 interface ClusterQuery {
   instanceId?: string
-}
-
-function normalizeToken(tokenHeader: string | string[] | undefined): string {
-  if (Array.isArray(tokenHeader)) {
-    return tokenHeader[0] ?? ''
-  }
-  return tokenHeader ?? ''
-}
-
-function getTokenByRequest(request: FastifyRequest): string | undefined {
-  const token = normalizeToken(request.headers.token)
-  return token || undefined
-}
-
-async function verifyAuthorized(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
-  const token = getTokenByRequest(request)
-  if (!token) {
-    return unauthorized(request)
-  }
-  const user = await findUserByToken(token)
-  if (!user) {
-    return unauthorized(request)
-  }
 }
 
 function normalizeInstanceId(value: string | undefined) {
@@ -100,7 +79,7 @@ async function restartInstance(
  */
 export function registerClusterModule(app: FastifyInstance) {
   app.get('/app/instance/cluster', async (request): Promise<ApiSuccessResponse<ClusterConfigDto> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }
@@ -121,7 +100,7 @@ export function registerClusterModule(app: FastifyInstance) {
   })
 
   app.get('/app/instance/cluster/online-players', async (request): Promise<ApiSuccessResponse<ClusterOnlinePlayersDto> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }
@@ -151,7 +130,7 @@ export function registerClusterModule(app: FastifyInstance) {
   })
 
   app.put('/app/instance/cluster', async (request): Promise<ApiSuccessResponse<ClusterSaveResult> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }

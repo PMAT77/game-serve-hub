@@ -10,8 +10,11 @@ declare module 'axios' {
     retry?: boolean
     retryCount?: number
     fake?: boolean
+    skipAuthRefresh?: boolean
   }
 }
+
+let refreshingAuthPromise: Promise<boolean> | null = null
 
 const api = axios.create({
   baseURL: (import.meta.env.DEV && import.meta.env.VITE_ENABLE_PROXY) ? '/proxy/' : import.meta.env.VITE_APP_API_BASEURL,
@@ -62,8 +65,38 @@ function handleError(error: any) {
   return Promise.reject(error)
 }
 
+async function tryRefreshAuthSession(): Promise<boolean> {
+  if (refreshingAuthPromise) {
+    return refreshingAuthPromise
+  }
+  refreshingAuthPromise = (async () => {
+    const appAccountStore = useAppAccountStore()
+    const refreshToken = appAccountStore.refreshToken?.trim()
+    if (!refreshToken) {
+      return false
+    }
+    try {
+      const res = await api.post('app/account/token/refresh', { refreshToken }, {
+        skipAuthRefresh: true,
+      })
+      appAccountStore.applySessionTokens({
+        token: String(res.data.token ?? ''),
+        refreshToken: String(res.data.refreshToken ?? ''),
+      })
+      return Boolean(res.data.token && res.data.refreshToken)
+    }
+    catch {
+      return false
+    }
+    finally {
+      refreshingAuthPromise = null
+    }
+  })()
+  return refreshingAuthPromise
+}
+
 api.interceptors.response.use(
-  (response) => {
+  async (response) => {
     /**
      * 全局拦截请求发送后返回的数据，如果数据有报错则在这做全局的错误提示
      * 约定的数据格式：{ status: 1 | 0, error: string, data: object }
@@ -86,7 +119,19 @@ api.interceptors.response.use(
         }
       }
       else {
+        const requestConfig = response.config
+        const canRetryAuth = response.data.code === 'AUTH_UNAUTHORIZED' && requestConfig.skipAuthRefresh !== true
+        if (canRetryAuth) {
+          const refreshed = await tryRefreshAuthSession()
+          if (refreshed) {
+            return api({
+              ...requestConfig,
+              skipAuthRefresh: true,
+            })
+          }
+        }
         useAppAccountStore().requestLogout()
+        return Promise.reject(response.data)
       }
       return Promise.resolve(response.data)
     }

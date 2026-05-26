@@ -23,6 +23,9 @@ const appAccountStore = useAppAccountStore()
 
 const title = APP_TITLE
 const loading = ref(false)
+const captchaRequired = ref(false)
+const challengeToken = ref('')
+const challengeQuestion = ref('')
 
 // 登录方式，default 账号密码登录，qrcode 扫码登录
 const type = ref<'default' | 'qrcode'>('default')
@@ -33,12 +36,53 @@ function resolveLoginInitialValues() {
       account: String(import.meta.env.VITE_DEV_LOGIN_ACCOUNT ?? '').trim() || 'superadmin',
       password: String(import.meta.env.VITE_DEV_LOGIN_PASSWORD ?? '') || '123456',
       remember: false,
+      challengeAnswer: '',
     }
   }
   return {
     account: props.account ?? localStorage.getItem('login_account') ?? '',
     password: '',
     remember: localStorage.getItem('login_remember') === '1',
+    challengeAnswer: '',
+  }
+}
+
+interface LoginErrorPayload {
+  code?: string
+  data?: Record<string, unknown>
+}
+
+function updateCaptchaState(data?: Record<string, unknown>) {
+  captchaRequired.value = true
+  challengeToken.value = String(data?.challengeToken ?? '')
+  challengeQuestion.value = String(data?.challengeQuestion ?? '')
+  form.setFieldValue('challengeAnswer', '')
+}
+
+async function refreshCaptchaChallenge() {
+  const values = form.values
+  if (!values.account?.trim() || !values.password?.trim()) {
+    faToast.warning('请先输入账号和密码')
+    return
+  }
+  loading.value = true
+  try {
+    await appAccountStore.login({
+      account: values.account,
+      password: values.password,
+      remember: values.remember === true,
+      challengeToken: challengeToken.value || undefined,
+      challengeAnswer: '__refresh__',
+    })
+  }
+  catch (error) {
+    const payload = error as LoginErrorPayload
+    if (payload.code === 'AUTH_CAPTCHA_REQUIRED') {
+      updateCaptchaState(payload.data)
+    }
+  }
+  finally {
+    loading.value = false
   }
 }
 
@@ -47,12 +91,22 @@ const form = useForm({
     account: z.string().min(1, '请输入用户名'),
     password: z.string().min(1, '请输入密码'),
     remember: z.boolean(),
+    challengeAnswer: z.string().optional(),
   })),
   initialValues: resolveLoginInitialValues(),
 })
-const onSubmit = form.handleSubmit((values) => {
+const onSubmit = form.handleSubmit(async (values) => {
+  if (captchaRequired.value && !values.challengeAnswer?.trim()) {
+    form.setFieldError('challengeAnswer', '请输入验证码结果')
+    return
+  }
   loading.value = true
-  appAccountStore.login(values).then(() => {
+  try {
+    await appAccountStore.login({
+      ...values,
+      challengeToken: challengeToken.value || undefined,
+      challengeAnswer: values.challengeAnswer?.trim() || undefined,
+    })
     if (values.remember) {
       localStorage.setItem('login_account', values.account)
       localStorage.setItem('login_remember', '1')
@@ -61,10 +115,21 @@ const onSubmit = form.handleSubmit((values) => {
       localStorage.removeItem('login_account')
       localStorage.removeItem('login_remember')
     }
+    captchaRequired.value = false
+    challengeToken.value = ''
+    challengeQuestion.value = ''
+    form.setFieldValue('challengeAnswer', '')
     emits('onLogin', values.account)
-  }).finally(() => {
+  }
+  catch (error) {
+    const payload = error as LoginErrorPayload
+    if (payload.code === 'AUTH_CAPTCHA_REQUIRED') {
+      updateCaptchaState(payload.data)
+    }
+  }
+  finally {
     loading.value = false
-  })
+  }
 })
 
 function testAccount(account: string) {
@@ -114,6 +179,31 @@ function testAccount(account: string) {
               <FaInput type="password" placeholder="密码" class="w-full" :class="{ 'border-destructive': errors.length }" v-bind="componentField">
                 <template #start>
                   <FaIcon name="i-lucide:lock" />
+                </template>
+              </FaInput>
+            </FormControl>
+            <Transition enter-active-class="transition-opacity" enter-from-class="opacity-0" leave-active-class="transition-opacity" leave-to-class="opacity-0">
+              <FormMessage class="text-xs bottom-1 absolute" />
+            </Transition>
+          </FormItem>
+        </FormField>
+        <FormField v-if="captchaRequired" v-slot="{ componentField, errors }" name="challengeAnswer">
+          <FormItem class="pb-6 relative space-y-0">
+            <FormControl>
+              <FaInput
+                type="text"
+                :placeholder="challengeQuestion || '请输入验证码'"
+                class="w-full"
+                :class="{ 'border-destructive': errors.length }"
+                v-bind="componentField"
+              >
+                <template #start>
+                  <FaIcon name="i-lucide:shield-check" />
+                </template>
+                <template #end>
+                  <FaButton variant="link" class="h-auto p-0 text-xs" type="button" @click="refreshCaptchaChallenge">
+                    刷新
+                  </FaButton>
                 </template>
               </FaInput>
             </FormControl>

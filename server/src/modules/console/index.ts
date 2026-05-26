@@ -3,7 +3,8 @@ import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/co
 import type { InstanceConnectInfoDto, InstanceConsoleCommandShard } from '../../../../shared/contracts/console'
 import type { ConsoleLogLine } from '../../shared/instance-runtime/console-log-store'
 import type { DbGameInstance } from '../../shared/db/index'
-import { findUserByToken, getGameInstanceById } from '../../shared/db/index'
+import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
+import { getGameInstanceById } from '../../shared/db/index'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { buildDstConnectInfo } from '../../infra/game-adapter/dst/direct-connect'
 import { resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
@@ -15,7 +16,8 @@ import {
   sendInstanceContainerCommand,
 } from '../instance/container-lifecycle'
 import { isCavesShardConfigured, readClusterShardEnabledFromInstall } from '../../infra/game-adapter/dst/shard-service'
-import { businessError, success, unauthorized } from '../../shared/http/response'
+import { businessError, success } from '../../shared/http/response'
+import { requirePermission } from '../system/auth'
 
 const LOCAL_NODE_ID = 'local-node'
 
@@ -44,33 +46,6 @@ interface ConsoleCommandBody {
 interface ConsoleStreamQuery {
   instanceId?: string
   token?: string
-}
-
-function normalizeToken(value: string | string[] | undefined): string {
-  if (Array.isArray(value)) {
-    return value[0] ?? ''
-  }
-  return value?.trim() ?? ''
-}
-
-function getTokenByRequest(request: FastifyRequest): string | undefined {
-  const headerToken = normalizeToken(request.headers.token)
-  if (headerToken) {
-    return headerToken
-  }
-  const query = request.query as { token?: string }
-  return query.token?.trim() || undefined
-}
-
-async function verifyAuthorized(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
-  const token = getTokenByRequest(request)
-  if (!token) {
-    return unauthorized(request)
-  }
-  const user = await findUserByToken(token)
-  if (!user) {
-    return unauthorized(request)
-  }
 }
 
 function normalizeInstanceId(value: string | undefined) {
@@ -140,7 +115,7 @@ import { registerMaintenanceAnnounceRoutes } from './maintenance-routes'
  */
 export function registerConsoleModule(app: FastifyInstance) {
   app.get('/app/instance/connect-info', async (request): Promise<ApiSuccessResponse<InstanceConnectInfoDto> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }
@@ -177,7 +152,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     lines: ReturnType<typeof instanceConsoleLogStore.listLogs>
     running: boolean
   }> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }
@@ -201,7 +176,7 @@ export function registerConsoleModule(app: FastifyInstance) {
   })
 
   app.post('/app/instance/console/logs/clear', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }
@@ -216,7 +191,7 @@ export function registerConsoleModule(app: FastifyInstance) {
   })
 
   app.post('/app/instance/console/command', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }
@@ -246,7 +221,7 @@ export function registerConsoleModule(app: FastifyInstance) {
   })
 
   app.get('/app/instance/console/stream', async (request, reply) => {
-    const authError = await verifyAuthorized(request)
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION, { allowQueryToken: true })
     if (authError) {
       reply.status(401).send(authError)
       return

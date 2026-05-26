@@ -1,13 +1,14 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import type { DbGameInstance } from '../../shared/db/index'
 import {
-  findUserByToken,
   listGameInstances,
 } from '../../shared/db/index'
 import { getContainerRuntime } from '../../infra/container'
-import { businessError, success, unauthorized } from '../../shared/http/response'
+import { businessError, success } from '../../shared/http/response'
 import { ensureContainerRuntimeReady, isInstanceContainerRunning, resolveInstanceContainerRef } from './container-lifecycle'
+import { requirePermission } from '../system/auth'
 
 const LOCAL_NODE_ID = 'local-node'
 
@@ -24,24 +25,6 @@ export interface InstanceMetricsResponse {
 
 interface InstanceMetricsBody {
   ids?: string[]
-}
-
-function normalizeToken(tokenHeader: string | string[] | undefined): string {
-  if (Array.isArray(tokenHeader)) {
-    return tokenHeader[0] ?? ''
-  }
-  return tokenHeader ?? ''
-}
-
-async function verifyAuthorized(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
-  const token = normalizeToken(request.headers.token)
-  if (!token) {
-    return unauthorized(request)
-  }
-  const user = await findUserByToken(token)
-  if (!user) {
-    return unauthorized(request)
-  }
 }
 
 function computeUptimeSeconds(startedAt: string | null | undefined): number | null {
@@ -88,7 +71,7 @@ export async function handleInstanceMetrics(
   request: FastifyRequest,
   body: InstanceMetricsBody,
 ): Promise<ApiSuccessResponse<InstanceMetricsResponse> | ApiErrorResponse> {
-  const authError = await verifyAuthorized(request)
+  const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
   if (authError) {
     return authError
   }

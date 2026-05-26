@@ -6,7 +6,8 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-https://raw.githubusercontent.com/GameServerHub/game-server-hub/main}"
+INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
+INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@main,https://ghproxy.com/https://raw.githubusercontent.com/GameServerHub/game-server-hub/main,https://raw.githubusercontent.com/GameServerHub/game-server-hub/main}" # 安装资源镜像池（按顺序回退）。
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
 HOST_MEMORY_WARN_MIN_MB=3800 # 总内存低于此值（约 4GiB）时输出 WARN。
 HOST_MEMORY_TIER_SMALL_MAX_MB=5120 # < 此值视为 small 预设。
@@ -14,6 +15,9 @@ HOST_MEMORY_TIER_MEDIUM_MAX_MB=8192 # < 此值视为 medium 预设。
 GSH_PANEL_ENV_PRESET="${GSH_PANEL_ENV_PRESET:-auto}" # auto | small | medium | large | none
 RETRY_MAX=3 # 可重试操作的最大重试次数。
 RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
+REPO_DOWNLOAD_MAX_ATTEMPTS="${REPO_DOWNLOAD_MAX_ATTEMPTS:-2}" # 每个安装资源源最大下载重试次数。
+REPO_DOWNLOAD_TIMEOUT_SECONDS="${REPO_DOWNLOAD_TIMEOUT_SECONDS:-45}" # 安装资源单次下载超时时间（秒）。
+REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS="${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS:-10}" # 安装资源连接超时时间（秒）。
 OPEN_DST_PORTS=0 # 是否在安装时开放 DST 默认 UDP 游戏端口。
 GHCR_CHECK_TIMEOUT_SECONDS="${GHCR_CHECK_TIMEOUT_SECONDS:-20}" # ghcr.io 连通性预检查超时时间（秒）。
 STRICT_GHCR_CHECK="${STRICT_GHCR_CHECK:-0}" # 是否要求 ghcr.io 预检查必须通过（1=失败即终止，0=失败仅告警）。
@@ -74,8 +78,11 @@ DISTRO_CODENAME="" # 发行版代号（如 jammy/bookworm）。
 PANEL_HOST="${PANEL_HOST:-}" # 面板访问主机地址（为空时自动探测）。
 PANEL_ACCESS_URL="" # 最终拼装出的访问 URL。
 ADMIN_USERNAME="${ADMIN_USERNAME:-superadmin}" # 初始管理员用户名。
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}" # 初始管理员密码（为空时使用预设值）。
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" # 初始管理员密码（为空时自动生成随机密码）。
+EXPOSE_ADMIN_PASSWORD="${EXPOSE_ADMIN_PASSWORD:-0}" # 是否在安装摘要中明文输出管理员密码（1=输出，0=仅提示凭据文件）。
 ROLLBACK_ENABLED=0 # 是否允许回滚（部署开始后置为 1）。
+INSTALLER_REPO_POOL_INITIALIZED=0
+declare -a INSTALLER_REPO_POOL=()
 
 # 基础日志函数，统一输出格式。
 log_info() {
@@ -114,12 +121,13 @@ run_as_root() {
 
 # 将安装进度写入状态文件，便于审计和排障。
 write_status() {
-  local stage status message
+  local stage status message timestamp
   stage="$1"
   status="$2"
   message="$3"
+  timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
   run_as_root mkdir -p "${PANEL_LOG_DIR}"
-  run_as_root bash -c "printf '%s [%s] [%s] %s\n' \"$(date '+%Y-%m-%d %H:%M:%S')\" \"${stage}\" \"${status}\" \"${message}\" | tee -a \"${STATUS_FILE}\" >/dev/null"
+  printf '%s [%s] [%s] %s\n' "${timestamp}" "${stage}" "${status}" "${message}" | run_as_root tee -a "${STATUS_FILE}" >/dev/null
 }
 
 # 为网络/包管理等易受瞬时故障影响的操作提供重试能力。
@@ -143,6 +151,178 @@ run_with_retry() {
     sleep "${RETRY_DELAY_SECONDS}"
     attempt=$((attempt + 1))
   done
+}
+
+# 将资源源追加到镜像池（自动去重）。
+append_installer_repo_source() {
+  local source="$1"
+  local existing
+
+  source="${source#"${source%%[![:space:]]*}"}"
+  source="${source%"${source##*[![:space:]]}"}"
+  source="${source%/}"
+  if [[ -z "${source}" ]]; then
+    return
+  fi
+
+  for existing in "${INSTALLER_REPO_POOL[@]}"; do
+    if [[ "${existing}" == "${source}" ]]; then
+      return
+    fi
+  done
+  INSTALLER_REPO_POOL+=("${source}")
+}
+
+# 初始化安装资源镜像池（INSTALLER_REPO_RAW 优先，其次 INSTALLER_REPO_MIRRORS）。
+init_installer_repo_pool() {
+  local item
+  local raw_sources
+
+  if [[ "${INSTALLER_REPO_POOL_INITIALIZED}" -eq 1 ]]; then
+    return
+  fi
+
+  if [[ -n "${INSTALLER_REPO_RAW}" ]]; then
+    append_installer_repo_source "${INSTALLER_REPO_RAW}"
+  fi
+
+  IFS=',' read -r -a raw_sources <<< "${INSTALLER_REPO_MIRRORS}"
+  for item in "${raw_sources[@]}"; do
+    append_installer_repo_source "${item}"
+  done
+
+  if [[ "${#INSTALLER_REPO_POOL[@]}" -eq 0 ]]; then
+    abort "Installer mirrors are empty. Please set INSTALLER_REPO_MIRRORS or INSTALLER_REPO_RAW."
+  fi
+
+  INSTALLER_REPO_POOL_INITIALIZED=1
+  log_info "Installer asset mirrors: ${INSTALLER_REPO_POOL[*]}"
+}
+
+# 从安装资源镜像池下载文件到目标路径（自动多源回退 + 重试）。
+download_installer_asset() {
+  local relative_path="$1"
+  local dest_path="$2"
+  local source url attempt tmp_file
+
+  init_installer_repo_pool
+  for source in "${INSTALLER_REPO_POOL[@]}"; do
+    for ((attempt = 1; attempt <= REPO_DOWNLOAD_MAX_ATTEMPTS; attempt++)); do
+      url="${source}/${relative_path}"
+      tmp_file="$(mktemp)"
+      if curl -fL --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" --max-time "${REPO_DOWNLOAD_TIMEOUT_SECONDS}" -o "${tmp_file}" "${url}" >/dev/null 2>&1; then
+        run_as_root install -m 0644 "${tmp_file}" "${dest_path}"
+        rm -f "${tmp_file}"
+        log_info "Downloaded ${relative_path} from ${source} (attempt ${attempt}/${REPO_DOWNLOAD_MAX_ATTEMPTS})"
+        return 0
+      fi
+
+      rm -f "${tmp_file}"
+      log_warn "Download failed: ${url} (attempt ${attempt}/${REPO_DOWNLOAD_MAX_ATTEMPTS})"
+      if (( attempt < REPO_DOWNLOAD_MAX_ATTEMPTS )); then
+        sleep "${RETRY_DELAY_SECONDS}"
+      fi
+    done
+  done
+
+  return 1
+}
+
+# 写入脚本内置的 panel.env 预设资源，避免弱网环境拉取 preset 失败。
+write_builtin_panel_env_preset_asset() {
+  local item="$1"
+  local dest_path="$2"
+
+  case "${item}" in
+    small.env)
+      run_as_root bash -c "cat > \"${dest_path}\" <<'EOF'
+# GSH 内存预设：small（总内存约 4 GiB，< 5 GiB）
+# 合并到 panel.env 后重启 panel。勿与 dev 压力测试用的大上限（如 5120）混用。
+GSH_STEAMCMD_CONTAINER_MEMORY_MB=1536
+GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB=1536
+GSH_DST_CONTAINER_MEMORY_MB=768
+GSH_HOST_STEAMCMD_PLANNING_MB=1280
+GSH_HOST_MEMORY_HEADROOM_MB=384
+GSH_HOST_DST_PLANNING_MB=512
+EOF"
+      ;;
+    medium.env)
+      run_as_root bash -c "cat > \"${dest_path}\" <<'EOF'
+# GSH 内存预设：medium（总内存约 6 GiB，5 GiB–8 GiB）
+GSH_STEAMCMD_CONTAINER_MEMORY_MB=2048
+GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB=2048
+GSH_DST_CONTAINER_MEMORY_MB=1536
+GSH_HOST_STEAMCMD_PLANNING_MB=1280
+GSH_HOST_MEMORY_HEADROOM_MB=512
+GSH_HOST_DST_PLANNING_MB=768
+EOF"
+      ;;
+    large.env)
+      run_as_root bash -c "cat > \"${dest_path}\" <<'EOF'
+# GSH 内存预设：large（总内存 ≥ 8 GiB）
+# 高配默认不设子容器硬上限，由 DST/SteamCMD 按需使用；若需防止单容器失控可取消注释：
+# GSH_STEAMCMD_CONTAINER_MEMORY_MB=4096
+# GSH_DST_CONTAINER_MEMORY_MB=8192
+GSH_HOST_MEMORY_HEADROOM_MB=512
+EOF"
+      ;;
+    README.md)
+      run_as_root bash -c "cat > \"${dest_path}\" <<'EOF'
+# panel.env 内存预设
+
+按宿主机 **总内存（MemTotal）** 选用预设，写入 `panel.env` 中的 **可选** 子容器内存上限与安装守卫参数。  
+默认生产安装**不强制**上限（高配可跑满 Mod）；小内存机建议显式启用预设，避免误设过大上限（如压力测试用的 5120 MiB）。
+
+| 预设文件 | 适用总内存 | 说明 |
+|----------|------------|------|
+| `small.env` | 约 4 GiB（< 5 GiB） | 单实例地上、少 Mod；不建议洞穴 |
+| `medium.env` | 约 6 GiB（5–8 GiB） | 单实例 + 洞穴 + 中等 Mod |
+| `large.env` | ≥ 8 GiB | 默认不设硬上限；可按需取消注释 |
+
+## 用法
+
+**安装脚本自动档位**（默认 `GSH_PANEL_ENV_PRESET=auto`）：
+
+```bash
+sudo bash ./scripts/install.linux.sh
+# 显式指定：sudo GSH_PANEL_ENV_PRESET=small bash ./scripts/install.linux.sh
+```
+
+**已安装后手动合并**（保留现有 `panel.env`，追加预设行）：
+
+```bash
+sudo bash -c 'cat /opt/game-server-hub/config/panel.env.presets/small.env >> /opt/game-server-hub/panel.env'
+# 安装脚本会将预设同步到 PANEL_INSTALL_DIR/config/panel.env.presets/
+cd /opt/game-server-hub
+sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d
+```
+
+完整说明见 [docs/MEMORY.md](../../docs/MEMORY.md)。
+EOF"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+# GHCR 连通性预检：优先探测 registry v2（200/401 视为可达），避免 HEAD / 405 误报。
+check_ghcr_reachability() {
+  local status_code
+
+  status_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" --max-time "${GHCR_CHECK_TIMEOUT_SECONDS}" "https://ghcr.io/v2/")" || return 1
+  case "${status_code}" in
+    200|401|403|404|405|30[0-9])
+      log_info "GHCR preflight check passed via https://ghcr.io/v2/ (HTTP ${status_code})."
+      return 0
+      ;;
+    *)
+      log_warn "GHCR preflight returned HTTP ${status_code} on https://ghcr.io/v2/."
+      return 1
+      ;;
+  esac
 }
 
 # 校验系统是否提供 apt-get（仅支持 Debian/Ubuntu 体系）。
@@ -310,7 +490,24 @@ check_port_conflict() {
     if ss -ltn "( sport = :${PANEL_PORT} )" | awk 'NR > 1 { found = 1 } END { exit(found ? 0 : 1) }'; then
       abort "Port ${PANEL_PORT} is already in use. Set PANEL_PORT to an unused port and retry."
     fi
+    return
   fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof -iTCP:"${PANEL_PORT}" -sTCP:LISTEN -n -P >/dev/null 2>&1; then
+      abort "Port ${PANEL_PORT} is already in use. Set PANEL_PORT to an unused port and retry."
+    fi
+    return
+  fi
+
+  if command -v netstat >/dev/null 2>&1; then
+    if netstat -ltn 2>/dev/null | awk -v port=":${PANEL_PORT}" '$4 ~ port"$" { found = 1 } END { exit(found ? 0 : 1) }'; then
+      abort "Port ${PANEL_PORT} is already in use. Set PANEL_PORT to an unused port and retry."
+    fi
+    return
+  fi
+
+  log_warn "Port conflict check skipped: ss/lsof/netstat not found."
 }
 
 # 优先使用现有防火墙工具开放端口；若不可用则给出手动提示。
@@ -319,17 +516,30 @@ open_firewall_port() {
   rule_desc="tcp/${PANEL_PORT}"
 
   if command -v ufw >/dev/null 2>&1; then
+    if ! run_as_root ufw status >/dev/null 2>&1; then
+      log_warn "ufw detected but not active/initialized. Skipping automatic firewall rule."
+      return
+    fi
     log_info "Configuring firewall via ufw: allow ${rule_desc}"
-    run_as_root ufw allow "${PANEL_PORT}/tcp" >/dev/null || true
-    log_warn "Firewall note: panel port ${PANEL_PORT} is exposed externally. Restrict source IPs if needed."
+    if run_as_root ufw allow "${PANEL_PORT}/tcp" >/dev/null; then
+      log_warn "Firewall note: panel port ${PANEL_PORT} is exposed externally. Restrict source IPs if needed."
+    else
+      log_warn "Failed to apply ufw rule for ${rule_desc}. Please allow it manually."
+    fi
     return
   fi
 
   if command -v firewall-cmd >/dev/null 2>&1; then
-    log_info "Configuring firewall via firewalld: allow ${rule_desc}"
-    run_as_root firewall-cmd --add-port="${PANEL_PORT}/tcp" --permanent >/dev/null || true
-    run_as_root firewall-cmd --reload >/dev/null || true
-    log_warn "Firewall note: panel port ${PANEL_PORT} is exposed externally. Restrict source IPs if needed."
+    if run_as_root systemctl is-active --quiet firewalld; then
+      log_info "Configuring firewall via firewalld: allow ${rule_desc}"
+      if run_as_root firewall-cmd --add-port="${PANEL_PORT}/tcp" --permanent >/dev/null && run_as_root firewall-cmd --reload >/dev/null; then
+        log_warn "Firewall note: panel port ${PANEL_PORT} is exposed externally. Restrict source IPs if needed."
+      else
+        log_warn "Failed to apply firewalld rule for ${rule_desc}. Please allow it manually."
+      fi
+      return
+    fi
+    log_warn "firewall-cmd detected but firewalld is not active. Skipping automatic firewall rule."
     return
   fi
 
@@ -461,7 +671,7 @@ warn_host_memory_tier() {
   fi
 }
 
-# 同步 panel.env 预设到安装目录（本地克隆或从 INSTALLER_REPO_RAW 拉取）。
+# 同步 panel.env 预设到安装目录（优先本地仓库，其次脚本内置，最后镜像池下载）。
 sync_panel_env_presets() {
   local script_dir src_dir dest_dir item
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -472,7 +682,9 @@ sync_panel_env_presets() {
   for item in small.env medium.env large.env README.md; do
     if [[ -f "${src_dir}/${item}" ]]; then
       run_as_root cp "${src_dir}/${item}" "${dest_dir}/${item}"
-    elif curl -fsSL "${INSTALLER_REPO_RAW}/config/panel.env.presets/${item}" 2>/dev/null | run_as_root tee "${dest_dir}/${item}" >/dev/null; then
+    elif write_builtin_panel_env_preset_asset "${item}" "${dest_dir}/${item}"; then
+      log_info "Synced panel.env preset from built-in asset: ${item}"
+    elif download_installer_asset "config/panel.env.presets/${item}" "${dest_dir}/${item}"; then
       log_info "Downloaded panel.env preset asset: ${item}"
     else
       log_warn "Could not sync preset asset: ${item}"
@@ -538,11 +750,11 @@ preflight_checks() {
     log_info "Docker already installed, skipping download.docker.com preflight check."
   fi
 
-  if ! curl -fsSI --max-time "${GHCR_CHECK_TIMEOUT_SECONDS}" "https://ghcr.io" >/dev/null; then
+  if ! check_ghcr_reachability; then
     if [[ "${STRICT_GHCR_CHECK}" == "1" ]]; then
-      abort "Cannot reach https://ghcr.io within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Please check outbound network."
+      abort "Cannot reach GHCR registry endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Please check outbound network."
     fi
-    log_warn "Cannot reach https://ghcr.io within ${GHCR_CHECK_TIMEOUT_SECONDS}s during preflight. Continue and rely on docker pull retries."
+    log_warn "Cannot reach GHCR registry endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s during preflight. Continue and rely on docker pull retries."
   fi
 
   write_status "preflight" "ok" "Host checks passed"
@@ -550,7 +762,7 @@ preflight_checks() {
 
 # 生成运行目录、环境变量文件与 compose 配置。
 prepare_panel_files() {
-  local script_dir repo_compose compose_source
+  local script_dir repo_compose compose_source bind_compose
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   repo_compose="${script_dir}/../docker-compose.yml"
   compose_source="${COMPOSE_SOURCE:-${repo_compose}}"
@@ -568,14 +780,14 @@ prepare_panel_files() {
   if [[ -f "${compose_source}" ]]; then
     run_as_root cp "${compose_source}" "${PANEL_COMPOSE_FILE}"
   else
-    log_info "Local compose not found, downloading from ${INSTALLER_REPO_RAW}/docker-compose.yml"
-    curl -fsSL "${INSTALLER_REPO_RAW}/docker-compose.yml" | run_as_root tee "${PANEL_COMPOSE_FILE}" >/dev/null
+    log_info "Local compose not found, downloading docker-compose.yml from installer mirrors."
+    download_installer_asset "docker-compose.yml" "${PANEL_COMPOSE_FILE}" || abort "Failed to download docker-compose.yml from installer mirrors."
   fi
   bind_compose="${script_dir}/../docker-compose.bind.yml"
   if [[ -f "${bind_compose}" ]]; then
     run_as_root cp "${bind_compose}" "${PANEL_BIND_COMPOSE_FILE}"
   else
-    curl -fsSL "${INSTALLER_REPO_RAW}/docker-compose.bind.yml" | run_as_root tee "${PANEL_BIND_COMPOSE_FILE}" >/dev/null
+    download_installer_asset "docker-compose.bind.yml" "${PANEL_BIND_COMPOSE_FILE}" || abort "Failed to download docker-compose.bind.yml from installer mirrors."
   fi
 
   run_as_root bash -c "cat > \"${PANEL_ENV_FILE}\" <<EOF
@@ -672,7 +884,11 @@ print_summary() {
   log_info "DST image: ${GSH_GAME_DST_IMAGE}"
   log_info "Panel URL: ${PANEL_ACCESS_URL}"
   log_info "Admin username: ${ADMIN_USERNAME}"
-  log_info "Admin password: ${ADMIN_PASSWORD}"
+  if [[ "${EXPOSE_ADMIN_PASSWORD}" == "1" ]]; then
+    log_info "Admin password: ${ADMIN_PASSWORD}"
+  else
+    log_warn "Admin password is hidden by default. Set EXPOSE_ADMIN_PASSWORD=1 to print it in summary."
+  fi
   log_warn "Security note: change the admin password immediately after first login."
   log_info "First-login force password change flag: FORCE_PASSWORD_CHANGE=1"
   log_info "Install status file: ${STATUS_FILE}"

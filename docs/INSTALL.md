@@ -12,7 +12,7 @@
 | 架构 | x86_64 / aarch64 |
 | 内存 | **推荐 ≥ 6 GB**（单实例 + 洞穴 + 中等 Mod）；约 4 GB 仅适合单实例地上、少 Mod（见 [MEMORY.md](MEMORY.md)） |
 | 磁盘 | 根分区可用空间 ≥ 4 GB（仅面板；游戏与存档另计） |
-| 网络 | 可访问 Docker 仓库与镜像仓库（默认 ACR，GHCR 作为回退） |
+| 网络 | 可访问 Docker 仓库与镜像仓库（默认 GHCR，可切换 ACR 优先） |
 | 权限 | root 或 sudo |
 
 宿主机 **无需** 安装 Node.js、pnpm、SteamCMD；安装脚本仅安装 Docker。
@@ -56,7 +56,7 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 ### 安装脚本做了什么
 
 1. 安装 Docker Engine 与 Compose 插件  
-2. 预检架构、磁盘、**内存档位提示**、网络（需能访问 `download.docker.com`；镜像拉取默认走 ACR，失败自动回退 `ghcr.io`）  
+2. 预检架构、磁盘、**内存档位提示**、网络（需能访问 `download.docker.com`；镜像拉取默认走 GHCR，启用 ACR 优先时失败自动回退 `ghcr.io`）  
 3. 检查面板端口并尝试配置防火墙（ufw / firewalld）  
 4. 生成 `/opt/game-server-hub/panel.env`（可按总内存自动合并 `config/panel.env.presets/` 预设）与 Compose 文件  
 5. 拉取面板镜像并 `docker compose up -d`  
@@ -72,17 +72,18 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 | `PANEL_INSTALL_DIR` | `/opt/game-server-hub` | Compose 与 `panel.env` |
 | `PANEL_DATA_DIR` | `/var/lib/game-server-hub` | SQLite、实例、备份 |
 | `PANEL_LOG_DIR` | `/var/log/game-server-hub` | 日志与安装状态 |
-| `PANEL_IMAGE` | `registry.cn-hangzhou.aliyuncs.com/game-server-hub/game-server-hub:latest` | 面板镜像（默认 ACR） |
+| `PANEL_IMAGE` | `ghcr.io/gameserverhub/game-server-hub:latest` | 面板镜像（默认 GHCR） |
 | `PANEL_IMAGE_TAG` | `latest` | 与 DST 运行镜像 tag 联动 |
-| `USE_ACR_MIRROR` | `1` | 是否优先使用 ACR 镜像（`0` 时默认走 GHCR） |
+| `USE_ACR_MIRROR` | `0` | 是否优先使用 ACR 镜像（`0` 时默认走 GHCR） |
 | `INSTALLER_REPO_MIRRORS` | `https://cdn.jsdelivr.net/gh/...@main,https://ghproxy.com/https://raw.githubusercontent.com/.../main,https://raw.githubusercontent.com/.../main` | 安装资源镜像池（逗号分隔，按顺序回退） |
 | `INSTALLER_REPO_RAW` | 空 | 兼容旧变量；设置后会作为首选单源 |
 
 安装状态文件：`/var/log/game-server-hub/install.status`
 
-### 镜像分发策略（默认 ACR 优先）
+### 镜像分发策略（默认 GHCR）
 
-- 默认 `USE_ACR_MIRROR=1`：优先拉取 `registry.cn-hangzhou.aliyuncs.com/game-server-hub/*`  
+- 默认 `USE_ACR_MIRROR=0`：优先拉取官方 `ghcr.io/gameserverhub/*`  
+- 设置 `USE_ACR_MIRROR=1`：优先拉取 `registry.cn-hangzhou.aliyuncs.com/game-server-hub/*`  
 - 若 ACR 拉取失败，安装脚本会自动回退到官方 `ghcr.io/gameserverhub/*`  
 - 需要固定仓库时可显式指定 `PANEL_IMAGE_REPOSITORY` 与 `GSH_GAME_DST_IMAGE_REPOSITORY`  
 - 若希望 ghcr 连通性预检失败即终止安装，可设置 `STRICT_GHCR_CHECK=1`

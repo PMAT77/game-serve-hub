@@ -36,7 +36,7 @@ DST_MASTER_PORT="${DST_MASTER_PORT:-12346}"
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
 PANEL_PORT="${PANEL_PORT:-9527}" # 面板对外暴露端口（默认使用高位端口以降低备案拦截影响）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
-USE_ACR_MIRROR="${USE_ACR_MIRROR:-${USE_CN_GHCR_MIRROR:-1}}" # 是否优先使用 ACR 镜像（1=启用，0=关闭）；兼容历史 USE_CN_GHCR_MIRROR。
+USE_ACR_MIRROR="${USE_ACR_MIRROR:-${USE_CN_GHCR_MIRROR:-0}}" # 是否优先使用 ACR 镜像（1=启用，0=关闭）；兼容历史 USE_CN_GHCR_MIRROR。
 PANEL_IMAGE_REPOSITORY_OVERRIDE="${PANEL_IMAGE_REPOSITORY:-}" # 兼容旧变量：显式指定面板镜像仓库时优先使用。
 PANEL_IMAGE_OFFICIAL_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub}" # 面板官方镜像仓库。
 ACR_REGISTRY="${ACR_REGISTRY:-registry.cn-hangzhou.aliyuncs.com}" # ACR Registry 域名。

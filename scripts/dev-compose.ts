@@ -34,7 +34,7 @@ function readEnvFileVar(key: string): string | undefined {
 }
 
 const panelPort = process.env.PANEL_PORT?.trim() || readEnvFileVar('PANEL_PORT') || '3000'
-const webPort = process.env.VITE_DEV_WEB_PORT?.trim() || readEnvFileVar('VITE_DEV_WEB_PORT') || '9000'
+const webPort = process.env.VITE_DEV_WEB_PORT?.trim() || readEnvFileVar('VITE_DEV_WEB_PORT') || '9527'
 const panelUrl = `http://127.0.0.1:${panelPort}`
 const webUrl = `http://127.0.0.1:${webPort}`
 const steamcmdImage = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'cm2network/steamcmd:steam-bookworm'

@@ -1,11 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 
 const DEV_WEB_PORT_KEY = 'VITE_DEV_WEB_PORT'
 
 function resolvePanelEnvPath() {
-  return path.resolve(process.cwd(), 'panel.env')
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+  return path.resolve(moduleDir, '../../../../panel.env')
 }
 
 function upsertEnvVar(content: string, key: string, value: string) {

@@ -251,6 +251,9 @@ function maintenancePushStatusTagType(status: InstanceMaintenancePushLog['status
 }
 
 async function refreshLogs() {
+  if (!instanceId.value) {
+    return
+  }
   const lastId = logs.value.at(-1)?.id ?? 0
   const stream = activeTab.value === 'panel' ? 'panel' : 'game'
   const res = await apiInstance.getInstanceConsoleLogs(instanceId.value, lastId, stream)
@@ -259,7 +262,7 @@ async function refreshLogs() {
 }
 
 function connectStream() {
-  if (!appAccountStore.token) {
+  if (!appAccountStore.token || !instanceId.value) {
     return
   }
   eventSource?.close()
@@ -514,6 +517,10 @@ onMounted(async () => {
   await initInstanceConsole()
   connectStream()
   startRealtimeJobs()
+})
+
+onDeactivated(() => {
+  stopRealtimeJobs()
 })
 
 onBeforeUnmount(() => {

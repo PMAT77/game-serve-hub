@@ -7,6 +7,18 @@ import { parseLoadedEnv } from 'vite-plugin-env-parse'
 import pkg from './package.json'
 import createVitePlugins from './vite/plugins'
 
+function resolveDevPort(defaultPort: number): number {
+  const raw = process.env.VITE_DEV_WEB_PORT?.trim()
+  if (!raw) {
+    return defaultPort
+  }
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+    return defaultPort
+  }
+  return parsed
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode, command }) => {
   const env = parseLoadedEnv(loadEnv(mode, process.cwd()))
@@ -22,7 +34,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       open: false,
       host: true,
-      port: 9000,
+      port: resolveDevPort(9000),
       strictPort: true,
       clearScreen: false,
       ...(process.env.GSH_DEV_COMPOSE_QUIET === '1' ? { logLevel: 'warn' as const } : {}),

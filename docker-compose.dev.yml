@@ -50,17 +50,17 @@ services:
   web:
     image: node:22-bookworm-slim
     working_dir: /app
-    command: ["sh", "-c", "corepack enable && if [ ! -f node_modules/.modules.yaml ]; then pnpm install; fi && pnpm run dev:web -- --host 0.0.0.0 --port ${VITE_DEV_WEB_PORT:-9000}"]
+    command: ["sh", "-c", "corepack enable && if [ ! -f node_modules/.modules.yaml ]; then pnpm install; fi && pnpm run dev:web"]
     environment:
       VITE_APP_API_BASEURL: http://panel:3000
       VITE_ENABLE_PROXY: "true"
-      VITE_DEV_WEB_PORT: ${VITE_DEV_WEB_PORT:-9000}
+      VITE_DEV_WEB_PORT: ${VITE_DEV_WEB_PORT:-9527}
       GSH_DEV_COMPOSE_QUIET: "1"
     volumes:
       - .:/app
       - web-node-modules:/app/node_modules
     ports:
-      - "${VITE_DEV_WEB_PORT:-9000}:${VITE_DEV_WEB_PORT:-9000}"
+      - "${VITE_DEV_WEB_PORT:-9527}:${VITE_DEV_WEB_PORT:-9527}"
     depends_on:
       - panel
     deploy:

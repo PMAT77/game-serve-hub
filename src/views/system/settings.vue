@@ -79,6 +79,53 @@ const canApplyUpdate = computed(() => {
   return hasHubUpdate.value && updateStatus.value.applySupported
 })
 
+const formattedLastCheckedAt = computed(() => formatDisplayDateTime(updateStatus.value?.lastCheckedAt ?? null))
+const normalizedCheckError = computed(() => normalizeCheckError(updateStatus.value?.checkError ?? null))
+const normalizedApplyHint = computed(() => normalizeApplyHint(updateStatus.value?.applyHint ?? null))
+
+function formatDisplayDateTime(value: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(parsed)
+}
+
+function normalizeCheckError(value: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  const parts = value
+    .split(/[；;\n]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+  if (parts.length === 0) {
+    return null
+  }
+  return [...new Set(parts)].join('；')
+}
+
+function normalizeApplyHint(value: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  if (/缺少 compose 文件|缺少环境文件|未配置 GSH_STACK_DIR|GSH_STACK_DIR 必须是绝对路径/.test(value)) {
+    return '当前环境不支持一键更新，请使用下方命令手动更新。'
+  }
+  return value
+}
+
 function formatImageLine(
   label: string,
   info: NonNullable<typeof updateStatus.value>['panel'],
@@ -231,16 +278,16 @@ onActivated(async () => {
           <p>{{ formatImageLine('DST 运行镜像', updateStatus.dst) }}</p>
           <p v-if="updateStatus.release" class="text-muted-foreground">
             最新 Release：{{ updateStatus.release.tagName }}
-            <span v-if="updateStatus.lastCheckedAt"> · 上次检查 {{ updateStatus.lastCheckedAt }}</span>
+            <span v-if="formattedLastCheckedAt"> · 上次检查 {{ formattedLastCheckedAt }}</span>
           </p>
-          <p v-else-if="updateStatus.lastCheckedAt" class="text-xs text-muted-foreground">
-            上次检查：{{ updateStatus.lastCheckedAt }}
+          <p v-else-if="formattedLastCheckedAt" class="text-xs text-muted-foreground">
+            上次检查：{{ formattedLastCheckedAt }}
           </p>
-          <p v-if="updateStatus.checkError" class="text-xs text-amber-600 dark:text-amber-400">
-            检查提示：{{ updateStatus.checkError }}
+          <p v-if="normalizedCheckError" class="text-xs text-amber-600 dark:text-amber-400">
+            检查提示：{{ normalizedCheckError }}
           </p>
-          <p v-if="updateStatus.applyHint" class="text-xs text-muted-foreground">
-            {{ updateStatus.applyHint }}
+          <p v-if="normalizedApplyHint && hasHubUpdate" class="text-xs text-muted-foreground">
+            {{ normalizedApplyHint }}
           </p>
           <pre
             v-if="updateStatus.manualUpdateCommand && !updateStatus.applySupported"
@@ -269,7 +316,7 @@ onActivated(async () => {
           </FaButton>
         </div>
         <p class="text-xs text-muted-foreground">
-          仅会更新检测到新版本的镜像。面板更新会导致服务短暂中断（约 30 秒）；DST 运行镜像更新后，需重启实例才生效。
+          仅更新检测到新版本的镜像。面板更新会短暂重启管理面板（约 30 秒），通常不会中断已运行游戏实例；DST 运行镜像更新后需重启实例才生效。
         </p>
       </section>
 

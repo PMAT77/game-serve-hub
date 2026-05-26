@@ -58,6 +58,20 @@ let updating = false
 let schedulerStarted = false
 let schedulerTimer: NodeJS.Timeout | null = null
 
+function normalizeErrorMessages(messages: Array<string | null | undefined>): string | null {
+  const normalized = messages
+    .flatMap((message) => {
+      return String(message ?? '')
+        .split(/[；;\n]+/)
+        .map(item => item.trim())
+        .filter(Boolean)
+    })
+  if (normalized.length === 0) {
+    return null
+  }
+  return [...new Set(normalized)].join('；')
+}
+
 function resolveDocker() {
   const { dockerHost } = loadServerConfig()
   return new DockerClient(resolveDockerConnectOptions(dockerHost))
@@ -227,16 +241,20 @@ async function buildImageUpdateInfo(
     releaseVersion = local.releaseVersion || releaseVersion
   }
   catch (error) {
-    checkError = error instanceof Error ? error.message : String(error)
+    checkError = normalizeErrorMessages([
+      checkError,
+      error instanceof Error ? error.message : String(error),
+    ])
   }
 
   try {
     remoteDigest = await fetchRemoteImageDigest(image)
   }
   catch (error) {
-    checkError = checkError
-      ? `${checkError}; ${error instanceof Error ? error.message : String(error)}`
-      : (error instanceof Error ? error.message : String(error))
+    checkError = normalizeErrorMessages([
+      checkError,
+      error instanceof Error ? error.message : String(error),
+    ])
   }
 
   const updateAvailable = Boolean(
@@ -306,7 +324,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       fetchLatestGitHubRelease(config.githubRepo),
     ])
 
-    const checkErrors = [panel.checkError, dst.checkError].filter(Boolean)
+    const checkErrors = normalizeErrorMessages([panel.checkError, dst.checkError])
     const nextStatus: PanelUpdateStatus = {
       panel,
       dst,
@@ -317,7 +335,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       applySupported: applySupport.supported,
       applyHint: applySupport.hint,
       manualUpdateCommand: buildManualUpdateCommand(),
-      checkError: checkErrors.length > 0 ? checkErrors.join('；') : null,
+      checkError: checkErrors,
     }
     cachedStatus = nextStatus
     return nextStatus

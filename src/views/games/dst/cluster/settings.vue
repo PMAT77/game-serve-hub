@@ -29,6 +29,7 @@ import apiCluster from '@/api/modules/cluster'
 import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
 import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
 import { routeToDstRoomList } from '@/navigation/game-routes'
+import { isInstanceInstallingStatus } from '@/views/node/instance/instanceDisplay'
 
 defineOptions({
   name: 'DstRoomSettings',
@@ -52,6 +53,7 @@ const cavesMemoryAlert = computed(() => {
 const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
 const saving = ref(false)
+const savingAndRestart = ref(false)
 const formRef = ref<FormInst | null>(null)
 const serverConfig = ref<ClusterConfigDto | null>(null)
 
@@ -91,6 +93,14 @@ const pageTitle = computed(() => serverConfig.value
   : '房间设置')
 
 const showPublicTokenSection = computed(() => formModel.networkMode === 'public')
+
+const saveAndRestartDisabled = computed(() =>
+  isInstanceInstallingStatus(serverConfig.value?.instanceStatus),
+)
+
+const saveAndRestartDisabledTitle = computed(() =>
+  saveAndRestartDisabled.value ? '实例安装完成后才可保存并重启' : undefined,
+)
 
 const clusterTokenPlaceholder = computed(() => {
   if (serverConfig.value?.clusterTokenConfigured && serverConfig.value.clusterTokenMasked) {
@@ -269,7 +279,8 @@ function buildSavePayload(restart = false): ClusterSavePayload {
 
 async function saveConfig(restart = false) {
   await formRef.value?.validate()
-  saving.value = true
+  const savingFlag = restart ? savingAndRestart : saving
+  savingFlag.value = true
   try {
     await apiCluster.saveClusterConfig(buildSavePayload(restart))
     message.success(restart ? '房间配置已保存并触发重启' : '房间配置已保存')
@@ -277,7 +288,7 @@ async function saveConfig(restart = false) {
     await loadConfig()
   }
   finally {
-    saving.value = false
+    savingFlag.value = false
   }
 }
 
@@ -586,9 +597,18 @@ onActivated(() => {
           <NButton type="primary" :loading="saving" @click="saveConfig(false)">
             保存
           </NButton>
-          <NButton :loading="saving" @click="confirmSaveAndRestart">
-            保存并重启
-          </NButton>
+          <NTooltip :disabled="!saveAndRestartDisabled">
+            <template #trigger>
+              <NButton
+                :loading="savingAndRestart"
+                :disabled="saveAndRestartDisabled"
+                @click="confirmSaveAndRestart"
+              >
+                保存并重启
+              </NButton>
+            </template>
+            {{ saveAndRestartDisabledTitle }}
+          </NTooltip>
         </div>
       </div>
     </NSpin>

@@ -34,6 +34,8 @@ export interface ClusterConfigDto {
   clusterTokenConfigured: boolean
   /** 已配置时令牌掩码（如 pds-****abcd）；GET 禁止返回明文 */
   clusterTokenMasked: string | null
+  /** 用户曾在面板保存过房间设置（含安装期间预设） */
+  panelRoomSaved: boolean
   configDirty: boolean
   effectiveHints: string[]
   warnings: string[]

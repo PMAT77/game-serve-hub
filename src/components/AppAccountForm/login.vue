@@ -20,6 +20,8 @@ const emits = defineEmits<{
 }>()
 
 const appAccountStore = useAppAccountStore()
+const SHOW_REGISTER_ENTRY = false
+const SHOW_DEMO_ACCOUNT_ENTRY = false
 
 const title = APP_TITLE
 const loading = ref(false)
@@ -41,7 +43,7 @@ function resolveLoginInitialValues() {
   }
   return {
     account: props.account ?? localStorage.getItem('login_account') ?? '',
-    password: '',
+    password: localStorage.getItem('login_remember') === '1' ? (localStorage.getItem('login_password') ?? '') : '',
     remember: localStorage.getItem('login_remember') === '1',
     challengeAnswer: '',
   }
@@ -109,10 +111,12 @@ const onSubmit = form.handleSubmit(async (values) => {
     })
     if (values.remember) {
       localStorage.setItem('login_account', values.account)
+      localStorage.setItem('login_password', values.password)
       localStorage.setItem('login_remember', '1')
     }
     else {
       localStorage.removeItem('login_account')
+      localStorage.removeItem('login_password')
       localStorage.removeItem('login_remember')
     }
     captchaRequired.value = false
@@ -231,14 +235,14 @@ function testAccount(account: string) {
         <FaButton :loading="loading" size="lg" class="w-full" type="submit">
           登录
         </FaButton>
-        <div class="text-sm mt-4 flex-center gap-2">
+        <div v-if="SHOW_REGISTER_ENTRY" class="text-sm mt-4 flex-center gap-2">
           <span class="text-secondary-foreground op-50">还没有帐号?</span>
           <FaButton variant="link" class="p-0 h-auto" type="button" @click="emits('onRegister', form.values.account)">
             注册新帐号
           </FaButton>
         </div>
       </form>
-      <div class="mt-4 text-center -mb-4">
+      <div v-if="SHOW_DEMO_ACCOUNT_ENTRY" class="mt-4 text-center -mb-4">
         <FaDivider>演示账号一键登录</FaDivider>
         <div class="space-x-2">
           <FaButton variant="default" size="sm" plain @click="testAccount('superadmin')">

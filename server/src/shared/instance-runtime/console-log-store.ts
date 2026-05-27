@@ -1,10 +1,14 @@
 export type ConsoleLogStream = 'stdout' | 'stderr' | 'system'
 
+export type ConsoleLogShard = 'master' | 'caves'
+
 export interface ConsoleLogLine {
   id: number
   stream: ConsoleLogStream
   text: string
   at: string
+  /** 游戏容器日志来源分片；系统消息在可识别时也会标注 */
+  shard?: ConsoleLogShard | null
 }
 
 type LogListener = (line: ConsoleLogLine) => void
@@ -50,20 +54,26 @@ class InstanceConsoleLogStore {
     }
   }
 
-  appendSystem(instanceId: string, text: string) {
-    this.pushLine(instanceId, 'system', text)
+  appendSystem(instanceId: string, text: string, shard?: ConsoleLogShard | null) {
+    this.pushLine(instanceId, 'system', text, shard ?? null)
   }
 
-  appendDockerLine(instanceId: string, text: string) {
-    this.pushLine(instanceId, 'stdout', text)
+  appendDockerLine(instanceId: string, text: string, shard: ConsoleLogShard) {
+    this.pushLine(instanceId, 'stdout', text, shard)
   }
 
-  private pushLine(instanceId: string, stream: ConsoleLogStream, text: string) {
+  private pushLine(
+    instanceId: string,
+    stream: ConsoleLogStream,
+    text: string,
+    shard: ConsoleLogShard | null,
+  ) {
     const line: ConsoleLogLine = {
       id: ++this.seq,
       stream,
       text,
       at: new Date().toISOString(),
+      shard,
     }
     let rows = this.logs.get(instanceId)
     if (!rows) {

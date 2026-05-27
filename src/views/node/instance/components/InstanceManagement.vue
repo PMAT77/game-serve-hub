@@ -49,6 +49,10 @@ import {
   isInstanceInstallingStatus,
   shouldShowInstallDetail,
 } from '../instanceDisplay'
+import {
+  buildInstallResultNotification,
+  shouldShowPostCreateInstallGuide,
+} from '../instanceInstallGuide'
 import { formatInstallLogForDisplay } from '../installLogFormat'
 import { formatDateTime } from '../utils'
 
@@ -87,8 +91,10 @@ const keywordFilter = ref('')
 const statusFilter = ref<'all' | InstanceStatus>('all')
 const selectedNodeId = ref<string>('all')
 const createModalVisible = ref(false)
+const createGuideVisible = ref(false)
 const createFormRef = ref<FormInst | null>(null)
 const installableGames = ref<InstallableGameItem[]>([])
+const createGuideTarget = ref<{ id: string, name: string } | null>(null)
 const installLogVisible = ref(false)
 const installLogLoading = ref(false)
 const installLogContent = ref('')
@@ -591,11 +597,11 @@ function getUptimeSecondsForRow(row: InstanceItem) {
   if (row.status !== 'running') {
     return null
   }
-  const fromStarted = computeUptimeSecondsFromStartedAt(row.runtimeStartedAt, uptimeNowMs.value)
-  if (fromStarted !== null) {
-    return fromStarted
+  const metricsUptime = getMetricsForInstance(row.id)?.uptimeSeconds ?? null
+  if (metricsUptime !== null) {
+    return metricsUptime
   }
-  return getMetricsForInstance(row.id)?.uptimeSeconds ?? null
+  return computeUptimeSecondsFromStartedAt(row.runtimeStartedAt, uptimeNowMs.value)
 }
 
 function renderInstanceUptimeColumn(row: InstanceItem) {
@@ -840,6 +846,36 @@ function openCreateModal() {
 function closeCreateModal() {
   createModalVisible.value = false
   createFormRef.value?.restoreValidation()
+}
+
+function closeCreateGuideModal() {
+  createGuideVisible.value = false
+}
+
+function openPostCreateGuide(instance: Pick<InstanceItem, 'id' | 'name' | 'gameCode' | 'status'>) {
+  if (!shouldShowPostCreateInstallGuide(instance)) {
+    return
+  }
+  createGuideTarget.value = { id: instance.id, name: instance.name }
+  createGuideVisible.value = true
+}
+
+function goToRoomSettingsFromCreateGuide() {
+  const target = createGuideTarget.value
+  if (!target) {
+    return
+  }
+  createGuideVisible.value = false
+  router.push(routeToDstRoomSettings(target.id))
+}
+
+function goToWorldSettingsFromCreateGuide() {
+  const target = createGuideTarget.value
+  if (!target) {
+    return
+  }
+  createGuideVisible.value = false
+  router.push(routeToDstWorldSettings(target.id))
 }
 
 async function fetchInstallableGames() {
@@ -1110,11 +1146,23 @@ function syncInstallTerminalNotifications(list: InstanceItem[]) {
       continue
     }
     installNotifyPendingIds.delete(id)
-    if (row.status === 'stopped') {
-      faToast.success(`「${row.name}」安装完成，可以启动实例`)
+    const notifyPayload = buildInstallResultNotification(row)
+    if (!notifyPayload) {
+      continue
     }
-    else if (row.status === 'error') {
-      faToast.error(`「${row.name}」安装失败，请查看安装日志`)
+    if (notifyPayload.type === 'success') {
+      notification.success({
+        title: notifyPayload.title,
+        content: notifyPayload.content,
+        duration: notifyPayload.durationMs,
+      })
+    }
+    else {
+      notification.error({
+        title: notifyPayload.title,
+        content: notifyPayload.content,
+        duration: notifyPayload.durationMs,
+      })
     }
   }
 }
@@ -1197,7 +1245,7 @@ async function createInstance() {
 
   createLoading.value = true
   try {
-    await apiInstance.createInstance({
+    const created = await apiInstance.createInstance({
       nodeId: createForm.nodeId,
       name: createForm.name.trim(),
       gameCode: createForm.gameCode,
@@ -1208,6 +1256,7 @@ async function createInstance() {
     createModalVisible.value = false
     resetCreateForm()
     await fetchInstances()
+    openPostCreateGuide(created.data as InstanceItem)
   }
   catch (error) {
     if (tryNotifyHostMemoryPressure(notification, error)) {
@@ -1603,6 +1652,36 @@ onBeforeUnmount(() => {
           </NButton>
           <NButton type="primary" :loading="createLoading" @click="createInstance">
             确定
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <NModal
+      v-model:show="createGuideVisible"
+      preset="card"
+      title="安装进行中"
+      :style="{ width: '560px' }"
+      :mask-closable="false"
+    >
+      <div class="space-y-3 text-sm leading-relaxed text-foreground">
+        <p>
+          实例「{{ createGuideTarget?.name || 'DST 实例' }}」正在后台安装，首次安装可能需要较长时间。
+        </p>
+        <p>
+          你可以先去配置房间和世界参数，安装会在后台静默继续；安装完成后会在右上角提醒。
+        </p>
+      </div>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="closeCreateGuideModal">
+            稍后再说
+          </NButton>
+          <NButton @click="goToWorldSettingsFromCreateGuide">
+            去配置世界
+          </NButton>
+          <NButton type="primary" @click="goToRoomSettingsFromCreateGuide">
+            去配置房间
           </NButton>
         </NSpace>
       </template>

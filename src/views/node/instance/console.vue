@@ -3,6 +3,7 @@ import type { InstanceConnectInfo, InstanceConsoleLogLine, InstanceItem, Instanc
 import apiInstance from '@/api/modules/instance'
 import { routeToNodeInstance } from '@/navigation/game-routes'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
+import { consoleLogShardLabel, formatConsoleLogLineForCopy } from './consoleLogDisplay'
 import { formatDateTime } from './utils'
 import type { InstanceConsoleCommandShard } from '@/api/modules/instance'
 import {
@@ -92,7 +93,7 @@ const emptyLogHint = computed(() => {
   if (activeTab.value === 'panel') {
     return '暂无面板消息。命令回显与运行状态会显示在此。'
   }
-  return '暂无运行日志。请先启动实例；DST 进程输出将在此显示。'
+  return '暂无运行日志。请先启动实例；地上与洞穴（若已开启）的输出将合并显示并带分片标签。'
 })
 
 function streamClass(stream: InstanceConsoleLogLine['stream']) {
@@ -384,7 +385,7 @@ async function clearLogs() {
 
 async function copyLogs() {
   const source = activeTab.value === 'panel' ? panelLogs.value : gameLogs.value
-  const text = source.map(line => line.text).join('\n')
+  const text = source.map(line => formatConsoleLogLineForCopy(line)).join('\n')
   if (!text) {
     faToast.warning('暂无日志可复制')
     return
@@ -648,6 +649,10 @@ onBeforeUnmount(() => {
             </p>
             <div v-for="line in displayedLogs" :key="line.id" class="whitespace-pre-wrap break-all">
               <span class="text-zinc-500 mr-2">{{ formatDateTime(line.at) }}</span>
+              <span
+                v-if="line.shard"
+                class="text-amber-400/90 mr-1.5"
+              >[{{ consoleLogShardLabel(line.shard) }}]</span>
               <span :class="streamClass(line.stream)">{{ line.text }}</span>
             </div>
           </div>
@@ -733,6 +738,10 @@ onBeforeUnmount(() => {
             </p>
             <div v-for="line in displayedLogs" :key="line.id" class="whitespace-pre-wrap break-all">
               <span class="text-zinc-500 mr-2">{{ formatDateTime(line.at) }}</span>
+              <span
+                v-if="line.shard"
+                class="text-amber-400/90 mr-1.5"
+              >[{{ consoleLogShardLabel(line.shard) }}]</span>
               <span :class="streamClass(line.stream)">{{ line.text }}</span>
             </div>
           </div>

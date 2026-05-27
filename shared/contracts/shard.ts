@@ -24,6 +24,8 @@ export interface ShardSummaryDto {
   /** save 目录已有存档：地图生成详细参数与预设不可再改 */
   worldGenerated: boolean
   isMaster: boolean
+  /** 用户曾在面板保存过该分片世界设置（含安装期间预设） */
+  panelSaved: boolean
   configDirty: boolean
   warnings: string[]
 }

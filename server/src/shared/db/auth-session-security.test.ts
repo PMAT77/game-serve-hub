@@ -59,6 +59,27 @@ describe('auth session security', () => {
     assert.equal(rotated, undefined, 'expired refresh token must be rejected')
   })
 
+  it('allows refresh token rotation after access token expires', async () => {
+    const user = await findUserByAccount('superadmin')
+    assert.ok(user, 'superadmin should exist')
+    const tokens = await createSessionTokens(user.id, { remember: true })
+
+    const sqliteDb = new DatabaseSync(dbFilePath)
+    sqliteDb.prepare(`
+      UPDATE auth_sessions
+      SET expires_at = ?
+      WHERE token_hash = ?
+    `).run('1970-01-01T00:00:00.000Z', hashToken(tokens.accessToken))
+    sqliteDb.close()
+
+    const expiredAccessUser = await findUserByToken(tokens.accessToken)
+    assert.equal(expiredAccessUser, undefined, 'expired access token should be invalid')
+
+    const rotated = await rotateSessionByRefreshToken(tokens.refreshToken)
+    assert.ok(rotated, 'refresh token should still be usable after access token expiry')
+    assert.ok(await findUserByToken(rotated.tokens.accessToken), 'rotated access token should be valid')
+  })
+
   it('revokes all active sessions after password update', async () => {
     const user = await findUserByAccount('superadmin')
     assert.ok(user, 'superadmin should exist')

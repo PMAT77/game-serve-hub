@@ -11,6 +11,10 @@ import {
   isRoomSettingsCustomized,
   isWorldSettingsCustomized,
 } from './instanceStartGuide.ts'
+import {
+  buildInstallResultNotification,
+  shouldShowPostCreateInstallGuide,
+} from './instanceInstallGuide.ts'
 
 function baseCluster(overrides: Partial<ClusterConfigDto> = {}): ClusterConfigDto {
   return {
@@ -39,6 +43,7 @@ function baseCluster(overrides: Partial<ClusterConfigDto> = {}): ClusterConfigDt
     steamGroupAdmins: false,
     clusterTokenConfigured: false,
     clusterTokenMasked: null,
+    panelRoomSaved: false,
     configDirty: false,
     effectiveHints: [],
     warnings: [],
@@ -65,6 +70,7 @@ function baseShardList(overrides: Partial<ShardListDto> = {}): ShardListDto {
         leveldataOverrides: null,
         worldGenerated: false,
         isMaster: true,
+        panelSaved: false,
         configDirty: false,
         warnings: [],
       },
@@ -128,5 +134,57 @@ describe('instanceStartGuide', () => {
       baseShardList(),
     )
     assert.equal(buildStartGuidePositiveText(ctx), '去配置房间')
+  })
+
+  it('panel save flags detect install-time presets with default values', () => {
+    const ctx = buildInstanceStartGuideContext(
+      { id: 'inst-1', name: '饥荒联机' },
+      baseCluster({ instanceName: '饥荒联机', panelRoomSaved: true }),
+      baseShardList({
+        shards: [
+          {
+            ...baseShardList().shards[0]!,
+            panelSaved: true,
+          },
+        ],
+      }),
+    )
+    assert.equal(ctx.roomCustomized, true)
+    assert.equal(ctx.worldCustomized, true)
+    assert.equal(buildStartGuidePositiveText(ctx), '按当前配置启动')
+    const paragraphs = buildStartGuideParagraphs(ctx)
+    assert.ok(paragraphs.some(p => p.includes('已保存房间与地上世界设置')))
+    assert.ok(!paragraphs.some(p => p.includes('还没在面板里设置过「房间」和「地上世界」')))
+  })
+})
+
+describe('instanceInstallGuide', () => {
+  it('shows post-create guide only for DST during install statuses', () => {
+    assert.equal(shouldShowPostCreateInstallGuide({ gameCode: '343050', status: 'pending_install' }), true)
+    assert.equal(shouldShowPostCreateInstallGuide({ gameCode: '343050', status: 'installing' }), true)
+    assert.equal(shouldShowPostCreateInstallGuide({ gameCode: '343050', status: 'stopped' }), false)
+    assert.equal(shouldShowPostCreateInstallGuide({ gameCode: '570', status: 'installing' }), false)
+  })
+
+  it('builds top-right install terminal notifications with 5s duration', () => {
+    assert.deepEqual(
+      buildInstallResultNotification({ name: 'My DST', status: 'stopped' }),
+      {
+        type: 'success',
+        title: '实例安装完成',
+        content: '「My DST」安装完成，可以启动实例',
+        durationMs: 5000,
+      },
+    )
+    assert.deepEqual(
+      buildInstallResultNotification({ name: 'My DST', status: 'error' }),
+      {
+        type: 'error',
+        title: '实例安装失败',
+        content: '「My DST」安装失败，请查看安装日志',
+        durationMs: 5000,
+      },
+    )
+    assert.equal(buildInstallResultNotification({ name: 'My DST', status: 'installing' }), null)
   })
 })

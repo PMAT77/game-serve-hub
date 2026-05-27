@@ -20,6 +20,11 @@ import {
 } from './cluster-token'
 import { ensureDstCavesShardConfig } from './cluster-config'
 import { isCavesShardConfigured } from './shard-layout'
+import {
+  isPanelRoomSaved,
+  markPanelRoomSaved,
+  readPanelConfigMeta,
+} from './panel-config-meta'
 
 export interface ClusterPaths {
   clusterRoot: string
@@ -87,7 +92,7 @@ function readClusterIniFields(clusterIniPath: string, instanceName: string) {
     const fields = defaultClusterIniFields(instanceName)
     const content = buildClusterIni(fields)
     writeFileAtomic(clusterIniPath, content)
-    return { fields, warnings: ['cluster.ini 缺失，已按默认模板重建'] as string[] }
+    return { fields, warnings: [] }
   }
   const content = fs.readFileSync(clusterIniPath, 'utf8')
   return parseClusterIni(content)
@@ -110,6 +115,7 @@ export function getClusterConfig(instance: DbGameInstance): ClusterConfigDto {
   }
 
   const instanceStatus = instance.status
+  const panelMeta = readPanelConfigMeta(installPath)
   return {
     instanceId: instance.id,
     instanceName: instance.name,
@@ -136,6 +142,7 @@ export function getClusterConfig(instance: DbGameInstance): ClusterConfigDto {
     steamGroupAdmins: fields.steamGroupAdmins,
     clusterTokenConfigured: tokenConfigured,
     clusterTokenMasked: tokenConfigured && token ? maskClusterToken(token) : null,
+    panelRoomSaved: isPanelRoomSaved(panelMeta),
     configDirty: instanceStatus === 'running',
     effectiveHints: buildEffectiveHints(
       fields.networkMode,
@@ -188,6 +195,8 @@ export function saveClusterConfig(instance: DbGameInstance, payload: ClusterSave
   if (payload.shardEnabled) {
     ensureDstCavesShardConfig(installPath, instance.gamePort ?? undefined)
   }
+
+  markPanelRoomSaved(installPath)
 
   return {
     saved: true,

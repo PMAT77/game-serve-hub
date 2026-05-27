@@ -37,7 +37,18 @@ import { getServerContainerConfig } from '../../shared/config/container'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
 import { getGameInstanceById, updateGameInstanceRuntime } from '../../shared/db/index'
 
+export type ConsoleCommandShard = 'master' | 'caves'
+
+const CONSOLE_SHARD_LABEL: Record<ConsoleCommandShard, string> = {
+  master: '地上',
+  caves: '洞穴',
+}
+
 const logFollowAbortControllers = new Map<string, AbortController>()
+
+function logFollowKey(instanceId: string, shard: ConsoleCommandShard) {
+  return `${instanceId}:${shard}`
+}
 
 export async function ensureContainerRuntimeReady(): Promise<{ ok: boolean, message?: string }> {
   if ((await resolveDockerStatus()) !== 'running') {
@@ -86,15 +97,27 @@ export async function isInstanceContainerRunning(instanceId: string): Promise<bo
 }
 
 function stopLogFollow(instanceId: string) {
-  logFollowAbortControllers.get(instanceId)?.abort()
-  logFollowAbortControllers.delete(instanceId)
+  for (const [key, controller] of logFollowAbortControllers.entries()) {
+    if (key === instanceId || key.startsWith(`${instanceId}:`)) {
+      controller.abort()
+      logFollowAbortControllers.delete(key)
+    }
+  }
 }
 
-export function startContainerLogFollow(instanceId: string, ref: ContainerRef) {
-  stopLogFollow(instanceId)
+function stopShardLogFollow(instanceId: string, shard: ConsoleCommandShard) {
+  const key = logFollowKey(instanceId, shard)
+  logFollowAbortControllers.get(key)?.abort()
+  logFollowAbortControllers.delete(key)
+}
+
+function startShardLogFollow(instanceId: string, ref: ContainerRef, shard: ConsoleCommandShard) {
+  stopShardLogFollow(instanceId, shard)
+  const key = logFollowKey(instanceId, shard)
   const controller = new AbortController()
-  logFollowAbortControllers.set(instanceId, controller)
-  instanceConsoleLogStore.appendSystem(instanceId, '已连接主世界容器，开始采集控制台输出')
+  logFollowAbortControllers.set(key, controller)
+  const label = CONSOLE_SHARD_LABEL[shard]
+  instanceConsoleLogStore.appendSystem(instanceId, `已连接${label}容器，开始采集控制台输出`, shard)
   void (async () => {
     const runtime = getContainerRuntime()
     try {
@@ -102,16 +125,20 @@ export function startContainerLogFollow(instanceId: string, ref: ContainerRef) {
         if (controller.signal.aborted) {
           break
         }
-        instanceConsoleLogStore.appendDockerLine(instanceId, line.text)
+        instanceConsoleLogStore.appendDockerLine(instanceId, line.text, shard)
       }
     }
     catch (error) {
       if (!controller.signal.aborted) {
         const message = error instanceof Error ? error.message : String(error)
-        instanceConsoleLogStore.appendSystem(instanceId, `日志流中断: ${message}`)
+        instanceConsoleLogStore.appendSystem(instanceId, `${label}日志流中断: ${message}`, shard)
       }
     }
   })()
+}
+
+export function startContainerLogFollow(instanceId: string, ref: ContainerRef) {
+  startShardLogFollow(instanceId, ref, 'master')
 }
 
 async function readRecentContainerLogLines(runtime: ContainerRuntime, ref: ContainerRef, tail = 20): Promise<string[]> {
@@ -147,19 +174,21 @@ export async function readRecentInstanceContainerLogLines(instanceId: string, ta
 
 /** 面板重启后，为仍在运行的实例重新挂载 Docker 日志流 */
 export async function ensureInstanceContainerLogFollow(instanceId: string): Promise<void> {
-  if (logFollowAbortControllers.has(instanceId)) {
-    return
-  }
-  const ref = await resolveInstanceContainerRef(instanceId)
-  if (!ref) {
-    return
-  }
   const runtime = getContainerRuntime()
-  const inspect = await runtime.inspect(ref)
-  if (!inspect.running) {
-    return
+  const masterRef = await resolveInstanceContainerRef(instanceId)
+  if (masterRef) {
+    const inspect = await runtime.inspect(masterRef)
+    if (inspect.running && !logFollowAbortControllers.has(logFollowKey(instanceId, 'master'))) {
+      startShardLogFollow(instanceId, masterRef, 'master')
+    }
   }
-  startContainerLogFollow(instanceId, ref)
+  const cavesRef = await resolveCavesContainerRef(instanceId)
+  if (cavesRef) {
+    const inspect = await runtime.inspect(cavesRef)
+    if (inspect.running && !logFollowAbortControllers.has(logFollowKey(instanceId, 'caves'))) {
+      startShardLogFollow(instanceId, cavesRef, 'caves')
+    }
+  }
 }
 
 async function startSingleShardContainer(
@@ -335,7 +364,8 @@ export async function startInstanceContainer(
       }
       return { ok: false, message: cavesStart.message }
     }
-    instanceConsoleLogStore.appendSystem(input.instanceId, '洞穴分片容器已启动')
+    instanceConsoleLogStore.appendSystem(input.instanceId, '洞穴分片容器已启动', 'caves')
+    startShardLogFollow(input.instanceId, cavesStart.ref, 'caves')
   }
   const ref = masterStart.ref
   const displayCommand = masterSpec.cmd.join(' ')
@@ -346,7 +376,7 @@ export async function startInstanceContainer(
     command: displayCommand,
     shardEnabled,
   }, '实例容器已启动')
-  startContainerLogFollow(input.instanceId, ref)
+  startShardLogFollow(input.instanceId, ref, 'master')
   return { ok: true, ref, displayCommand }
 }
 
@@ -402,13 +432,6 @@ export async function removeInstanceContainer(instanceId: string): Promise<void>
   await runtime.removeShardNetwork(instanceId)
 }
 
-export type ConsoleCommandShard = 'master' | 'caves'
-
-const CONSOLE_SHARD_LABEL: Record<ConsoleCommandShard, string> = {
-  master: '主世界',
-  caves: '洞穴',
-}
-
 export async function isCavesContainerRunning(instanceId: string): Promise<boolean> {
   const ref = await resolveCavesContainerRef(instanceId)
   if (!ref) {
@@ -439,7 +462,6 @@ export async function sendInstanceContainerCommand(
     return { ok: false, message: '命令不能为空' }
   }
   const ref = await resolveConsoleCommandContainerRef(instanceId, shard)
-  const shardLabel = CONSOLE_SHARD_LABEL[shard]
   if (!ref) {
     return {
       ok: false,
@@ -455,7 +477,7 @@ export async function sendInstanceContainerCommand(
     }
   }
   const result = await runtime.execStdin(ref, trimmed)
-  instanceConsoleLogStore.appendSystem(instanceId, `> [${shardLabel}] ${trimmed}`)
+  instanceConsoleLogStore.appendSystem(instanceId, `> ${trimmed}`, shard)
   if (result.exitCode !== 0) {
     return { ok: false, message: result.output || '命令发送失败' }
   }

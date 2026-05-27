@@ -17,6 +17,7 @@ import {
   NTabPane,
   NTabs,
   NTag,
+  NTooltip,
   useDialog,
   useMessage,
 } from 'naive-ui'
@@ -29,6 +30,7 @@ import {
   routeToDstRoomSettings,
   routeToDstWorldList,
 } from '@/navigation/game-routes'
+import { isInstanceInstallingStatus } from '@/views/node/instance/instanceDisplay'
 import {
   formatPortConflictDetail,
   getPortConflictDialogLabels,
@@ -58,8 +60,19 @@ const { guidance: hostMemoryGuidance } = useHostMemoryGuidance()
 
 const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
-const saving = ref(false)
+const savingMaster = ref(false)
+const savingMasterRestart = ref(false)
+const savingCaves = ref(false)
+const savingCavesRestart = ref(false)
 const shardList = ref<ShardListDto | null>(null)
+
+const saveAndRestartDisabled = computed(() =>
+  isInstanceInstallingStatus(shardList.value?.instanceStatus),
+)
+
+const saveAndRestartDisabledTitle = computed(() =>
+  saveAndRestartDisabled.value ? '实例安装完成后才可保存并重启' : undefined,
+)
 
 const mainTab = ref<'surface' | 'caves' | 'mods'>('surface')
 const surfaceSubTab = ref<ShardSubTab>('rules')
@@ -216,6 +229,13 @@ function buildSavePayload(shard: ShardId, restart: boolean): ShardSavePayload {
   return payload
 }
 
+function shardSavingFlags(shard: ShardId, restart: boolean) {
+  if (shard === 'master') {
+    return restart ? savingMasterRestart : savingMaster
+  }
+  return restart ? savingCavesRestart : savingCaves
+}
+
 async function saveShard(shard: ShardId, restart: boolean) {
   const formRef = shard === 'master' ? masterFormRef.value : cavesFormRef.value
   try {
@@ -224,7 +244,8 @@ async function saveShard(shard: ShardId, restart: boolean) {
   catch {
     return
   }
-  saving.value = true
+  const savingFlag = shardSavingFlags(shard, restart)
+  savingFlag.value = true
   try {
     await apiShard.saveShardConfig(buildSavePayload(shard, restart))
     message.success(restart ? '世界配置已保存并触发重启' : '世界配置已保存')
@@ -270,7 +291,7 @@ async function saveShard(shard: ShardId, restart: boolean) {
     message.error(msg)
   }
   finally {
-    saving.value = false
+    savingFlag.value = false
   }
 }
 
@@ -457,12 +478,22 @@ onActivated(() => {
             </NForm>
 
             <div class="flex flex-wrap justify-center gap-2 mt-4 pt-4 border-t border-border">
-              <NButton type="primary" size="small" :loading="saving" @click="saveShard('master', false)">
+              <NButton type="primary" size="small" :loading="savingMaster" @click="saveShard('master', false)">
                 保存地上
               </NButton>
-              <NButton size="small" :loading="saving" @click="confirmSaveAndRestart('master')">
-                保存并重启
-              </NButton>
+              <NTooltip :disabled="!saveAndRestartDisabled">
+                <template #trigger>
+                  <NButton
+                    size="small"
+                    :loading="savingMasterRestart"
+                    :disabled="saveAndRestartDisabled"
+                    @click="confirmSaveAndRestart('master')"
+                  >
+                    保存并重启
+                  </NButton>
+                </template>
+                {{ saveAndRestartDisabledTitle }}
+              </NTooltip>
             </div>
           </NTabPane>
 
@@ -532,12 +563,22 @@ onActivated(() => {
               </NForm>
 
               <div class="flex flex-wrap justify-center gap-2 mt-4 pt-4 border-t border-border">
-                <NButton type="primary" size="small" :loading="saving" @click="saveShard('caves', false)">
+                <NButton type="primary" size="small" :loading="savingCaves" @click="saveShard('caves', false)">
                   保存洞穴
                 </NButton>
-                <NButton size="small" :loading="saving" @click="confirmSaveAndRestart('caves')">
-                  保存并重启
-                </NButton>
+                <NTooltip :disabled="!saveAndRestartDisabled">
+                  <template #trigger>
+                    <NButton
+                      size="small"
+                      :loading="savingCavesRestart"
+                      :disabled="saveAndRestartDisabled"
+                      @click="confirmSaveAndRestart('caves')"
+                    >
+                      保存并重启
+                    </NButton>
+                  </template>
+                  {{ saveAndRestartDisabledTitle }}
+                </NTooltip>
               </div>
             </template>
           </NTabPane>
@@ -555,10 +596,6 @@ onActivated(() => {
             </NAlert>
           </NTabPane>
         </NTabs>
-
-        <p class="text-xs text-muted-foreground text-center">
-          实例控制台（v1）仅连接地上容器；洞穴日志分流为后续能力。
-        </p>
       </div>
     </NSpin>
   </FaPageMain>

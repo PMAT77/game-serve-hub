@@ -57,6 +57,9 @@ export function shouldOfferStartGuide(
 }
 
 export function isRoomSettingsCustomized(cluster: ClusterConfigDto): boolean {
+  if (cluster.panelRoomSaved) {
+    return true
+  }
   if (cluster.clusterDescription !== INSTALL_DEFAULT_CLUSTER_DESCRIPTION) {
     return true
   }
@@ -76,6 +79,9 @@ export function isWorldSettingsCustomized(shardList: ShardListDto): boolean {
   const master = shardList.shards.find(s => s.id === 'master')
   if (!master) {
     return false
+  }
+  if (master.panelSaved) {
+    return true
   }
   const overrides = master.leveldataOverrides
   if (overrides && Object.keys(overrides).length > 0) {

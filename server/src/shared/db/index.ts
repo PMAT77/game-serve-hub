@@ -822,7 +822,8 @@ export async function findUserByToken(token: string): Promise<DbUserRow | undefi
     return undefined
   }
   if (isExpiredAt(row.expiresAt)) {
-    await revokeSession(token)
+    // access token 过期后应允许客户端使用 refresh token 续期，
+    // 这里不能直接撤销整条会话记录（否则会连带使 refresh token 失效）。
     return undefined
   }
   await drizzleDb

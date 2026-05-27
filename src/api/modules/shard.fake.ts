@@ -22,6 +22,7 @@ function defaultShardList(instanceId: string): ShardListDto {
         leveldataOverrides: { day: 'default', krampus: 'default', world_size: 'default' },
         worldGenerated: false,
         isMaster: true,
+        panelSaved: false,
         configDirty: false,
         warnings: [],
       },
@@ -37,6 +38,7 @@ function defaultShardList(instanceId: string): ShardListDto {
         leveldataOverrides: null,
         worldGenerated: false,
         isMaster: false,
+        panelSaved: false,
         configDirty: false,
         warnings: ['洞穴世界尚未初始化'],
       },
@@ -108,6 +110,9 @@ export default defineFakeRoute([
           shard.worldGenerated = false
         }
         shard.configured = true
+        if (payload.shard === 'master') {
+          shard.panelSaved = true
+        }
       }
       shardStore.set(payload.instanceId, list)
       return { error: '', status: 1, data: { saved: true, restarted: Boolean(payload.restart) } }

@@ -20,4 +20,16 @@ describe('instanceConsoleLogStore', () => {
     assert.equal(notified, false)
     instanceConsoleLogStore.removeInstance(instanceId)
   })
+
+  it('stores shard tag on docker and system lines', () => {
+    const instanceId = `test-shard-${Date.now()}`
+    instanceConsoleLogStore.appendDockerLine(instanceId, 'surface line', 'master')
+    instanceConsoleLogStore.appendDockerLine(instanceId, 'cave line', 'caves')
+    instanceConsoleLogStore.appendSystem(instanceId, 'connected', 'caves')
+    const rows = instanceConsoleLogStore.listLogs(instanceId)
+    assert.equal(rows[0]?.shard, 'master')
+    assert.equal(rows[1]?.shard, 'caves')
+    assert.equal(rows[2]?.shard, 'caves')
+    instanceConsoleLogStore.removeInstance(instanceId)
+  })
 })

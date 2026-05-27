@@ -94,11 +94,14 @@ export interface InstanceInstallLogPayload {
 
 export type InstanceConsoleLogStream = 'stdout' | 'stderr' | 'system'
 
+export type InstanceConsoleLogShard = 'master' | 'caves'
+
 export interface InstanceConsoleLogLine {
   id: number
   stream: InstanceConsoleLogStream
   text: string
   at: string
+  shard?: InstanceConsoleLogShard | null
 }
 
 export interface InstanceConsoleLogsPayload {

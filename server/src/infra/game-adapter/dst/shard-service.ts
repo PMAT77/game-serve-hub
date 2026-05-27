@@ -46,6 +46,11 @@ import {
   parseWorldgenOverride,
   validateWorldgenPreset,
 } from './worldgen-override'
+import {
+  isPanelMasterWorldSaved,
+  markPanelMasterWorldSaved,
+  readPanelConfigMeta,
+} from './panel-config-meta'
 import type { ServerIniFields } from './server-ini'
 
 const SHARD_DISPLAY: Record<ShardId, string> = {
@@ -119,6 +124,7 @@ function buildShardSummary(
   instanceStatus: DbGameInstance['status'],
   containerStatus: ShardContainerStatus,
   clusterShardEnabled: boolean,
+  panelMeta: ReturnType<typeof readPanelConfigMeta>,
 ): ShardSummaryDto {
   const configured = shardId === 'master'
     ? isMasterShardConfigured(installPath)
@@ -159,6 +165,7 @@ function buildShardSummary(
     leveldataOverrides,
     worldGenerated,
     isMaster: shardId === 'master',
+    panelSaved: shardId === 'master' && isPanelMasterWorldSaved(panelMeta),
     configDirty: instanceStatus === 'running',
     warnings,
   }
@@ -198,14 +205,15 @@ export async function getShardList(instance: DbGameInstance): Promise<ShardListD
   if (!clusterShardEnabled) {
     warnings.push('洞穴已关闭：配置文件仍保留，启动时不会运行洞穴服务器')
   }
+  const panelMeta = readPanelConfigMeta(installPath)
   return {
     instanceId: instance.id,
     instanceName: instance.name,
     instanceStatus: instance.status,
     clusterShardEnabled,
     shards: [
-      buildShardSummary('master', installPath, instance.status, masterStatus, clusterShardEnabled),
-      buildShardSummary('caves', installPath, instance.status, cavesStatus, clusterShardEnabled),
+      buildShardSummary('master', installPath, instance.status, masterStatus, clusterShardEnabled, panelMeta),
+      buildShardSummary('caves', installPath, instance.status, cavesStatus, clusterShardEnabled, panelMeta),
     ],
     effectiveHints: buildEffectiveHints(
       clusterShardEnabled,
@@ -308,6 +316,9 @@ export function saveShardConfig(instance: DbGameInstance, payload: ShardSavePayl
       leveldataPath,
       mergeLeveldataOverrides(existing, leveldataPatch, shardId),
     )
+  }
+  if (shardId === 'master') {
+    markPanelMasterWorldSaved(installPath)
   }
   return { saved: true, restarted: false }
 }

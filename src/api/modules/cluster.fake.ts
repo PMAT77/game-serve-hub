@@ -30,6 +30,7 @@ function defaultClusterConfig(instanceId: string, instanceName: string): Cluster
     steamGroupAdmins: false,
     clusterTokenConfigured: false,
     clusterTokenMasked: null,
+    panelRoomSaved: false,
     configDirty: false,
     effectiveHints: ['离线模式：不向 Klei 注册，不会出现在游戏浏览列表'],
     warnings: [],
@@ -117,6 +118,7 @@ export default defineFakeRoute([
         steamGroupAdmins: payload.steamGroupAdmins,
         clusterTokenConfigured: tokenConfigured,
         clusterTokenMasked,
+        panelRoomSaved: true,
         configDirty: previous.instanceStatus === 'running',
         effectiveHints: previous.instanceStatus === 'running'
           ? ['实例运行中，配置变更需重启实例后生效']

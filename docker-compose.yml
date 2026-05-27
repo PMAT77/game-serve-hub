@@ -22,7 +22,7 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
       PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/gameserverhub/game-server-hub:latest}
       GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/gameserverhub/game-server-hub-dst:latest}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:steam-bookworm}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/gameserverhub/steamcmd-base:latest}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB:-}
       GSH_STEAMCMD_APP_INFO_MEMORY_MB: ${GSH_STEAMCMD_APP_INFO_MEMORY_MB:-}
@@ -54,7 +54,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   steamcmd:
-    image: ${GSH_STEAMCMD_IMAGE:-cm2network/steamcmd:root}
+    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/gameserverhub/steamcmd-base:latest}
     profiles:
       - tools
     entrypoint: ["/bin/true"]

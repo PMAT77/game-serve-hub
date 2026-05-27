@@ -18,12 +18,13 @@ RETRY_DELAY_SECONDS=3 # 每次重试之间的等待秒数。
 REPO_DOWNLOAD_MAX_ATTEMPTS="${REPO_DOWNLOAD_MAX_ATTEMPTS:-2}" # 每个安装资源源最大下载重试次数。
 REPO_DOWNLOAD_TIMEOUT_SECONDS="${REPO_DOWNLOAD_TIMEOUT_SECONDS:-45}" # 安装资源单次下载超时时间（秒）。
 REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS="${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS:-10}" # 安装资源连接超时时间（秒）。
+OPEN_PANEL_PORT=0 # 是否在安装时开放面板 TCP 端口。
 OPEN_DST_PORTS=0 # 是否在安装时开放 DST 默认 UDP 游戏端口。
 GHCR_CHECK_TIMEOUT_SECONDS="${GHCR_CHECK_TIMEOUT_SECONDS:-20}" # ghcr.io 连通性预检查超时时间（秒）。
 STRICT_GHCR_CHECK="${STRICT_GHCR_CHECK:-0}" # 是否要求 ghcr.io 预检查必须通过（1=失败即终止，0=失败仅告警）。
 DOCKER_REPO_CHECK_TIMEOUT_SECONDS="${DOCKER_REPO_CHECK_TIMEOUT_SECONDS:-8}" # download.docker.com 连通性预检查超时时间（秒）。
 STRICT_DOCKER_REPO_CHECK="${STRICT_DOCKER_REPO_CHECK:-1}" # 是否要求 download.docker.com 预检查必须通过（1=失败即终止，0=失败仅告警）。
-USE_CN_DEBIAN_MIRROR="${USE_CN_DEBIAN_MIRROR:-1}" # Debian 是否优先尝试国内镜像（1=启用，0=关闭）。
+USE_CN_DEBIAN_MIRROR="${USE_CN_DEBIAN_MIRROR:-0}" # Debian 是否优先尝试国内镜像（1=启用，0=关闭）。
 DEBIAN_MIRROR_URL="${DEBIAN_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}" # Debian 主仓库镜像。
 DEBIAN_SECURITY_MIRROR_URL="${DEBIAN_SECURITY_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}" # Debian 安全仓库镜像。
 APT_SOURCES_BACKUP_DIR="/tmp/gsh-apt-sources-backup"
@@ -37,6 +38,7 @@ PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境�
 PANEL_PORT="${PANEL_PORT:-9527}" # 面板对外暴露端口（默认使用高位端口以降低备案拦截影响）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
 USE_ACR_MIRROR="${USE_ACR_MIRROR:-${USE_CN_GHCR_MIRROR:-0}}" # 是否优先使用 ACR 镜像（1=启用，0=关闭）；兼容历史 USE_CN_GHCR_MIRROR。
+INSTALL_STEAMCMD_IMAGE="${INSTALL_STEAMCMD_IMAGE:-0}" # 安装阶段是否预拉 SteamCMD 镜像（1=拉取，0=仅写入 panel.env，由面板内安装）。
 PANEL_IMAGE_REPOSITORY_OVERRIDE="${PANEL_IMAGE_REPOSITORY:-}" # 兼容旧变量：显式指定面板镜像仓库时优先使用。
 PANEL_IMAGE_OFFICIAL_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub}" # 面板官方镜像仓库。
 ACR_REGISTRY="${ACR_REGISTRY:-registry.cn-hangzhou.aliyuncs.com}" # ACR Registry 域名。
@@ -46,6 +48,9 @@ PANEL_IMAGE_CN_REPOSITORY="${PANEL_IMAGE_CN_REPOSITORY:-${PANEL_IMAGE_ACR_REPOSI
 GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub-dst}" # DST 官方镜像仓库。
 GSH_GAME_DST_IMAGE_ACR_REPOSITORY="${GSH_GAME_DST_IMAGE_ACR_REPOSITORY:-${ACR_REGISTRY}/${ACR_NAMESPACE}/game-server-hub-dst}" # DST ACR 镜像仓库。
 GSH_GAME_DST_IMAGE_CN_REPOSITORY="${GSH_GAME_DST_IMAGE_CN_REPOSITORY:-${GSH_GAME_DST_IMAGE_ACR_REPOSITORY}}" # 兼容历史变量名：默认等价 ACR 仓库。
+GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY="${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/steamcmd-base}" # SteamCMD 官方镜像仓库（与 CI 同步 GHCR 名一致）。
+GSH_STEAMCMD_IMAGE_ACR_REPOSITORY="${GSH_STEAMCMD_IMAGE_ACR_REPOSITORY:-${ACR_REGISTRY}/${ACR_NAMESPACE}/steamcmd-base}" # SteamCMD ACR 镜像仓库（与 sync-to-acr 推送名一致）。
+GSH_STEAMCMD_IMAGE_CN_REPOSITORY="${GSH_STEAMCMD_IMAGE_CN_REPOSITORY:-${GSH_STEAMCMD_IMAGE_ACR_REPOSITORY}}" # 兼容历史变量名：默认等价 ACR 仓库。
 PANEL_INSTALL_DIR="${PANEL_INSTALL_DIR:-/opt/game-server-hub}" # 安装目录（放置 env/compose）。
 PANEL_DATA_DIR="${PANEL_DATA_DIR:-/var/lib/game-server-hub}" # 面板持久化数据目录。
 PANEL_LOG_DIR="${PANEL_LOG_DIR:-/var/log/game-server-hub}" # 面板日志与安装状态目录。
@@ -69,6 +74,13 @@ PANEL_IMAGE="${PANEL_IMAGE_REPOSITORY}:${PANEL_IMAGE_TAG}" # 完整镜像引用�
 PANEL_IMAGE_FALLBACK="${PANEL_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}" # 回退镜像引用。
 GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_REPOSITORY}:${PANEL_IMAGE_TAG}" # DST 镜像引用。
 GSH_GAME_DST_IMAGE_FALLBACK="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}" # DST 回退镜像引用。
+# panel.env 中 SteamCMD 固定为 GHCR（面板内安装默认走 GHCR）；安装阶段可选预拉 ACR 同名镜像。
+GSH_STEAMCMD_IMAGE="${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}"
+if [[ "${USE_ACR_MIRROR}" == "1" ]]; then
+  INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE_ACR_REPOSITORY}:${PANEL_IMAGE_TAG}"
+else
+  INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE}"
+fi
 PANEL_ENV_FILE="${PANEL_INSTALL_DIR}/panel.env" # 运行时环境变量文件路径。
 PANEL_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.yml" # Docker Compose 文件路径。
 STATUS_FILE="${PANEL_LOG_DIR}/install.status" # 安装状态追踪文件路径。
@@ -83,6 +95,8 @@ EXPOSE_ADMIN_PASSWORD="${EXPOSE_ADMIN_PASSWORD:-0}" # 是否在安装摘要中�
 ROLLBACK_ENABLED=0 # 是否允许回滚（部署开始后置为 1）。
 INSTALLER_REPO_POOL_INITIALIZED=0
 declare -a INSTALLER_REPO_POOL=()
+INSTALLER_CANONICAL_REPO_BASE="${INSTALLER_CANONICAL_REPO_BASE:-https://raw.githubusercontent.com/GameServerHub/game-server-hub/main}" # 用于安装资源完整性校验的权威源。
+STRICT_INSTALLER_ASSET_CHECKSUM="${STRICT_INSTALLER_ASSET_CHECKSUM:-1}" # 安装资源校验是否强制（1=校验失败即中止，0=仅告警）。
 
 # 基础日志函数，统一输出格式。
 log_info() {
@@ -211,6 +225,14 @@ download_installer_asset() {
       url="${source}/${relative_path}"
       tmp_file="$(mktemp)"
       if curl -fL --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" --max-time "${REPO_DOWNLOAD_TIMEOUT_SECONDS}" -o "${tmp_file}" "${url}" >/dev/null 2>&1; then
+        if ! verify_installer_asset_checksum "${relative_path}" "${tmp_file}"; then
+          rm -f "${tmp_file}"
+          log_warn "Checksum verify failed: ${url} (attempt ${attempt}/${REPO_DOWNLOAD_MAX_ATTEMPTS})"
+          if (( attempt < REPO_DOWNLOAD_MAX_ATTEMPTS )); then
+            sleep "${RETRY_DELAY_SECONDS}"
+          fi
+          continue
+        fi
         run_as_root install -m 0644 "${tmp_file}" "${dest_path}"
         rm -f "${tmp_file}"
         log_info "Downloaded ${relative_path} from ${source} (attempt ${attempt}/${REPO_DOWNLOAD_MAX_ATTEMPTS})"
@@ -226,6 +248,37 @@ download_installer_asset() {
   done
 
   return 1
+}
+
+# 对镜像源下载的安装资源做完整性校验（与权威源同路径内容对比）。
+verify_installer_asset_checksum() {
+  local relative_path="$1"
+  local downloaded_file="$2"
+  local canonical_url canonical_tmp expected_sum actual_sum
+
+  if [[ "${STRICT_INSTALLER_ASSET_CHECKSUM}" != "1" ]]; then
+    return 0
+  fi
+
+  canonical_url="${INSTALLER_CANONICAL_REPO_BASE}/${relative_path}"
+  canonical_tmp="$(mktemp)"
+
+  if ! curl -fL --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" --max-time "${REPO_DOWNLOAD_TIMEOUT_SECONDS}" -o "${canonical_tmp}" "${canonical_url}" >/dev/null 2>&1; then
+    rm -f "${canonical_tmp}"
+    log_warn "Cannot fetch canonical asset for checksum verification: ${canonical_url}"
+    return 1
+  fi
+
+  expected_sum="$(sha256sum "${canonical_tmp}" | awk '{print $1}')"
+  actual_sum="$(sha256sum "${downloaded_file}" | awk '{print $1}')"
+  rm -f "${canonical_tmp}"
+
+  if [[ "${expected_sum}" != "${actual_sum}" ]]; then
+    log_warn "Checksum mismatch for ${relative_path}: expected ${expected_sum}, got ${actual_sum}"
+    return 1
+  fi
+
+  return 0
 }
 
 # 写入脚本内置的 panel.env 预设资源，避免弱网环境拉取 preset 失败。
@@ -578,8 +631,17 @@ print_usage() {
 Usage: ${SCRIPT_NAME} [options]
 
 Options:
+  --open-panel-port  Open panel TCP port (${PANEL_PORT}) via ufw/firewalld
   --open-dst-ports   Open default DST UDP ports (${DST_GAME_PORT}, ${DST_AUTH_PORT}, ${DST_MASTER_PORT}) via ufw/firewalld
   -h, --help         Show this help
+
+Environment (optional):
+  USE_ACR_MIRROR=1              Prefer ACR for panel/DST images (default 0 = GHCR)
+  INSTALL_STEAMCMD_IMAGE=1      Pre-pull steamcmd-base during install (default 0; panel UI installs by default)
+  ACR_REGISTRY / ACR_NAMESPACE  ACR endpoint when USE_ACR_MIRROR=1
+  USE_CN_DEBIAN_MIRROR=1        Enable CN Debian mirror (default 0 for community-safe baseline)
+  STRICT_INSTALLER_ASSET_CHECKSUM=0  Skip canonical checksum verification (not recommended)
+  With INSTALL_STEAMCMD_IMAGE=1, SteamCMD follows USE_ACR_MIRROR (ACR first, fallback GHCR); panel.env always records GHCR steamcmd-base.
 EOF
 }
 
@@ -804,7 +866,7 @@ FORCE_PASSWORD_CHANGE=1
 GSH_EDITION=community
 DOCKER_HOST=unix:///var/run/docker.sock
 GSH_GAME_DST_IMAGE=${GSH_GAME_DST_IMAGE}
-GSH_STEAMCMD_IMAGE=cm2network/steamcmd:steam-bookworm
+GSH_STEAMCMD_IMAGE=${GSH_STEAMCMD_IMAGE}
 # 国内服务器建议取消注释以下 SteamCMD 优化项：
 # GSH_STEAMCMD_DOWNLOAD_REGION=cn
 # GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8
@@ -836,10 +898,30 @@ rollback_install() {
   write_status "rollback" "ok" "Rollback finished"
 }
 
-# 拉取运行时镜像（面板 + DST），用于在 compose 启动前尽早暴露网络问题。
+# 安装阶段可选预拉 SteamCMD（默认不拉，由面板内触发）；USE_ACR_MIRROR=1 时优先 ACR，失败回退 GHCR。
+pull_install_steamcmd_image() {
+  if [[ "${INSTALL_STEAMCMD_IMAGE}" != "1" ]]; then
+    return 0
+  fi
+
+  if run_with_retry "docker pull ${INSTALL_STEAMCMD_PULL_IMAGE}" run_as_root docker pull "${INSTALL_STEAMCMD_PULL_IMAGE}"; then
+    return 0
+  fi
+
+  if [[ "${USE_ACR_MIRROR}" == "1" && "${INSTALL_STEAMCMD_PULL_IMAGE}" != "${GSH_STEAMCMD_IMAGE}" ]]; then
+    log_warn "ACR SteamCMD pull failed, falling back to GHCR steamcmd-base..."
+    run_with_retry "docker pull ${GSH_STEAMCMD_IMAGE}" run_as_root docker pull "${GSH_STEAMCMD_IMAGE}" || return 1
+    return 0
+  fi
+
+  return 1
+}
+
+# 拉取运行时镜像（面板 + DST；SteamCMD 仅 INSTALL_STEAMCMD_IMAGE=1 时预拉）。
 pull_runtime_images() {
   run_with_retry "docker pull ${PANEL_IMAGE}" run_as_root docker pull "${PANEL_IMAGE}" || return 1
   run_with_retry "docker pull ${GSH_GAME_DST_IMAGE}" run_as_root docker pull "${GSH_GAME_DST_IMAGE}" || return 1
+  pull_install_steamcmd_image || return 1
 }
 
 # 切换为官方 GHCR 镜像并同步更新 panel.env，供后续 compose 使用。
@@ -848,6 +930,7 @@ switch_to_official_images() {
   GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}"
   PANEL_IMAGE="${PANEL_IMAGE_FALLBACK}"
   GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_FALLBACK}"
+  INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE}"
 
   if run_as_root test -f "${PANEL_ENV_FILE}"; then
     run_as_root sed -i "s|^PANEL_IMAGE=.*$|PANEL_IMAGE=${PANEL_IMAGE}|g" "${PANEL_ENV_FILE}"
@@ -882,6 +965,12 @@ print_summary() {
   log_info "Installation completed."
   log_info "Panel image: ${PANEL_IMAGE}"
   log_info "DST image: ${GSH_GAME_DST_IMAGE}"
+  log_info "SteamCMD image (panel.env): ${GSH_STEAMCMD_IMAGE}"
+  if [[ "${INSTALL_STEAMCMD_IMAGE}" == "1" ]]; then
+    log_info "SteamCMD pre-pull during install: enabled"
+  else
+    log_info "SteamCMD pre-pull during install: disabled (pull from panel UI)"
+  fi
   log_info "Panel URL: ${PANEL_ACCESS_URL}"
   log_info "Admin username: ${ADMIN_USERNAME}"
   if [[ "${EXPOSE_ADMIN_PASSWORD}" == "1" ]]; then
@@ -899,6 +988,10 @@ print_summary() {
 main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --open-panel-port)
+        OPEN_PANEL_PORT=1
+        shift
+        ;;
       --open-dst-ports)
         OPEN_DST_PORTS=1
         shift
@@ -932,7 +1025,11 @@ main() {
 
   write_status "network" "start" "Checking panel port and firewall"
   check_port_conflict
-  open_firewall_port
+  if [[ "${OPEN_PANEL_PORT}" -eq 1 ]]; then
+    open_firewall_port
+  else
+    log_info "Panel TCP port not opened automatically. Use --open-panel-port or configure firewall/security-group manually."
+  fi
   if [[ "${OPEN_DST_PORTS}" -eq 1 ]]; then
     open_firewall_dst_ports
   else

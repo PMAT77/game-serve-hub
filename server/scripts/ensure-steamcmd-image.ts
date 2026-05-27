@@ -33,8 +33,8 @@ function loadPanelEnvFile() {
 
 loadPanelEnvFile()
 
-const image = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'cm2network/steamcmd:steam-bookworm'
-const FALLBACK_IMAGE = 'cm2network/steamcmd:root-bookworm'
+const image = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'ghcr.io/gameserverhub/steamcmd-base:latest'
+const FALLBACK_IMAGE = 'cm2network/steamcmd:steam-bookworm'
 
 function imageExists(target: string): boolean {
   try {

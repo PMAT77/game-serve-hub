@@ -57,12 +57,12 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 
 1. 安装 Docker Engine 与 Compose 插件  
 2. 预检架构、磁盘、**内存档位提示**、网络（需能访问 `download.docker.com`；镜像拉取默认走 GHCR，启用 ACR 优先时失败自动回退 `ghcr.io`）  
-3. 检查面板端口并尝试配置防火墙（ufw / firewalld）  
+3. 检查面板端口；仅在显式参数下配置防火墙（`--open-panel-port` / `--open-dst-ports`）  
 4. 生成 `/opt/game-server-hub/panel.env`（可按总内存自动合并 `config/panel.env.presets/` 预设）与 Compose 文件  
 5. 拉取面板镜像并 `docker compose up -d`  
 6. 在终端输出 **面板 URL**、**管理员账号** 与 **初始密码**
 
-> 安装资源（Compose、preset）下载支持多源镜像池自动回退，默认顺序：`jsdelivr` → `ghproxy` → `raw.githubusercontent.com`。
+> 安装资源（Compose、preset）下载支持多源镜像池自动回退，默认顺序：`jsdelivr` → `ghproxy` → `raw.githubusercontent.com`。脚本默认会与官方 `raw.githubusercontent.com` 同路径文件做校验；如在受限网络中无法访问官方源，可临时设置 `STRICT_INSTALLER_ASSET_CHECKSUM=0` 跳过校验（不推荐）。
 
 ### 默认路径与变量
 
@@ -73,8 +73,12 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 | `PANEL_DATA_DIR` | `/var/lib/game-server-hub` | SQLite、实例、备份 |
 | `PANEL_LOG_DIR` | `/var/log/game-server-hub` | 日志与安装状态 |
 | `PANEL_IMAGE` | `ghcr.io/gameserverhub/game-server-hub:latest` | 面板镜像（默认 GHCR） |
-| `PANEL_IMAGE_TAG` | `latest` | 与 DST 运行镜像 tag 联动 |
-| `USE_ACR_MIRROR` | `0` | 是否优先使用 ACR 镜像（`0` 时默认走 GHCR） |
+| `PANEL_IMAGE_TAG` | `latest` | 与 DST / SteamCMD 镜像 tag 联动 |
+| `GSH_STEAMCMD_IMAGE` | `ghcr.io/gameserverhub/steamcmd-base:latest` | 游戏安装镜像（安装脚本写入 `panel.env`，面板内拉取固定走 GHCR） |
+| `INSTALL_STEAMCMD_IMAGE` | `0` | 安装阶段是否预拉 SteamCMD（`1` 时随 `USE_ACR_MIRROR` 选 ACR/GHCR；默认由面板内安装） |
+| `USE_ACR_MIRROR` | `0` | 是否优先使用 ACR 拉取面板/DST（及 `INSTALL_STEAMCMD_IMAGE=1` 时的 SteamCMD） |
+| `USE_CN_DEBIAN_MIRROR` | `0` | Debian 是否启用国内 apt 镜像（社区默认关闭；国内可手动开启） |
+| `STRICT_INSTALLER_ASSET_CHECKSUM` | `1` | 是否强制校验安装资源完整性（`0` 为兼容受限网络，不推荐） |
 | `INSTALLER_REPO_MIRRORS` | `https://cdn.jsdelivr.net/gh/...@main,https://ghproxy.com/https://raw.githubusercontent.com/.../main,https://raw.githubusercontent.com/.../main` | 安装资源镜像池（逗号分隔，按顺序回退） |
 | `INSTALLER_REPO_RAW` | 空 | 兼容旧变量；设置后会作为首选单源 |
 
@@ -85,8 +89,14 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 - 默认 `USE_ACR_MIRROR=0`：优先拉取官方 `ghcr.io/gameserverhub/*`  
 - 设置 `USE_ACR_MIRROR=1`：优先拉取 `registry.cn-hangzhou.aliyuncs.com/game-server-hub/*`  
 - 若 ACR 拉取失败，安装脚本会自动回退到官方 `ghcr.io/gameserverhub/*`  
-- 需要固定仓库时可显式指定 `PANEL_IMAGE_REPOSITORY` 与 `GSH_GAME_DST_IMAGE_REPOSITORY`  
+- 需要固定仓库时可显式指定 `PANEL_IMAGE_REPOSITORY`、`GSH_GAME_DST_IMAGE_REPOSITORY`、`GSH_STEAMCMD_IMAGE_REPOSITORY`（或安装后直接改 `panel.env` 中的完整镜像引用）  
 - 若希望 ghcr 连通性预检失败即终止安装，可设置 `STRICT_GHCR_CHECK=1`
+
+### 防火墙策略（默认不自动开面板端口）
+
+- 默认仅检查端口冲突，不自动放行 `9527/tcp`
+- 若确认需要自动放行面板端口：`sudo bash ./scripts/install.linux.sh --open-panel-port`
+- DST UDP 端口仍需显式参数：`--open-dst-ports`
 
 ### 安装资源拉取策略（多源回退）
 
@@ -154,7 +164,7 @@ docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind
 | Steam 认证 | UDP | `8766` |
 | 主服务器 | UDP | `12346` |
 
-云服务器还需在 **安全组** 中放行对应 UDP 端口。安装脚本 `--open-dst-ports` 仅处理本机防火墙（ufw / firewalld）；未使用该参数时请手动放行上述 UDP 端口。
+云服务器还需在 **安全组** 中放行对应端口。安装脚本 `--open-panel-port` / `--open-dst-ports` 仅处理本机防火墙（ufw / firewalld）；未使用这些参数时请手动放行。
 
 ---
 
@@ -167,10 +177,10 @@ GSH_STEAMCMD_DOWNLOAD_REGION=cn
 GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8
 ```
 
-如 Docker Hub 访问不稳定，可额外配置 SteamCMD 镜像候选 registry（按顺序自动回退）：
+默认拉取 GHCR 的 `gameserverhub/steamcmd-base`。如网络环境需要，可自行配置 SteamCMD 镜像候选 registry（按顺序优先，最后回退 GHCR）：
 
 ```bash
-GSH_STEAMCMD_IMAGE_MIRRORS=docker.m.daocloud.io,hub-mirror.c.163.com
+GSH_STEAMCMD_IMAGE_MIRRORS=your-mirror-1.example.com,your-mirror-2.example.com
 ```
 
 修改后重新拉起栈：

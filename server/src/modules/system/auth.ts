@@ -3,16 +3,10 @@ import type { ApiErrorResponse } from '../../../../shared/contracts/api'
 import { ErrorCode } from '../../../../shared/constants/error-code'
 import { findPermissionsByUserId, findUserByToken } from '../../shared/db/index'
 import { businessError, unauthorized } from '../../shared/http/response'
-
-function normalizeToken(tokenHeader: string | string[] | undefined): string {
-  if (Array.isArray(tokenHeader)) {
-    return tokenHeader[0] ?? ''
-  }
-  return tokenHeader ?? ''
-}
+import { normalizeRequestToken } from '../../shared/http/token'
 
 function getTokenByRequest(request: FastifyRequest): string | undefined {
-  const token = normalizeToken(request.headers.token)
+  const token = normalizeRequestToken(request.headers.token)
   if (!token) {
     return undefined
   }

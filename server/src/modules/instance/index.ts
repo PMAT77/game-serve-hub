@@ -27,7 +27,9 @@ import {
 } from '../../infra/game-adapter/dst/install-readiness'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { ensureDstLayout } from '../../infra/game-adapter/dst/cluster-config'
-import { allocateDstGamePort } from '../../infra/game-adapter/dst/port-allocation'
+import { syncInstanceModFilesFromDb } from '../mod/mod-file-sync-service'
+import { allocateDstGamePort } from './dst-port-service'
+import { registerDstContainerCommandPort } from '../../shared/instance/dst-container-command-port'
 import { applyDstPortAutoAllocate, probeDstPortConflictForStart, resolveDstGamePortForStart } from './dst-port-sync'
 import { ErrorCode } from '../../../../shared/constants/error-code'
 import {
@@ -37,6 +39,8 @@ import {
   removeInstanceContainer,
   resolveDefaultInstanceInstallPath,
   resolveInstanceContainerRef,
+  readRecentInstanceContainerLogLines,
+  sendInstanceContainerCommand,
   startInstanceContainer,
   stopInstanceContainer,
 } from './container-lifecycle'
@@ -130,13 +134,6 @@ const INSTALLABLE_GAMES: InstallableGameItem[] = [
     steamcmdLoginMode: 'anonymous',
   },
 ]
-
-function normalizeToken(tokenHeader: string | string[] | undefined): string {
-  if (Array.isArray(tokenHeader)) {
-    return tokenHeader[0] ?? ''
-  }
-  return tokenHeader ?? ''
-}
 
 async function verifyAuthorized(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
   return requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
@@ -305,6 +302,11 @@ async function handleListInstances(
  * 负责游戏实例生命周期管理（创建、启动、停止、重启、删除）。
  */
 export function registerInstanceModule(app: FastifyInstance) {
+  registerDstContainerCommandPort({
+    isInstanceContainerRunning,
+    readRecentInstanceContainerLogLines,
+    sendInstanceContainerCommand,
+  })
   registerInstanceMetricsRoute(app)
   app.post('/app/instance/list', async request => handleListInstances(app, request, (request.body ?? {}) as InstanceListQuery))
 
@@ -831,6 +833,19 @@ export function registerInstanceModule(app: FastifyInstance) {
       })
       return businessError(errorMessage, request)
     }
+    if (current.gameCode.trim() === DST_APP_ID) {
+      try {
+        await syncInstanceModFilesFromDb(id, installPath)
+      }
+      catch (error) {
+        const message = error instanceof Error ? error.message : '同步 Mod 配置失败'
+        await updateGameInstanceRuntime(id, {
+          status: 'error',
+          lastError: message,
+        })
+        return businessError(message, request)
+      }
+    }
     const updateBlockMessage = await resolveStartBlockedByPendingUpdate(current)
     if (updateBlockMessage) {
       return businessError(updateBlockMessage, request)
@@ -943,60 +958,9 @@ export function registerInstanceModule(app: FastifyInstance) {
     }
     const body = (request.body ?? {}) as InstanceActionBody
     const id = normalizeInstanceId(body.id)
-    if (!id) {
-      return businessError('实例 ID 不能为空', request)
-    }
-    const current = await getGameInstanceById(id)
-    if (!current) {
-      return businessError('实例不存在', request)
-    }
-    if (current.nodeId !== LOCAL_NODE_ID) {
-      return businessError('当前仅支持本地节点执行实例命令', request)
-    }
-    const runtimeError = await requireContainerRuntime(request)
-    if (runtimeError) {
-      return runtimeError
-    }
-    if (current.status === 'pending_install' || current.status === 'installing' || isInstallJobActive(id)) {
-      return businessError('实例正在安装中，请稍后再试', request)
-    }
-    if (current.status === 'running' || current.containerId) {
-      try {
-        await stopInstanceContainer(id)
-      }
-      catch (error) {
-        const message = error instanceof Error ? error.message : '重启时停止实例失败'
-        await updateGameInstanceRuntime(id, {
-          status: 'error',
-          lastError: message,
-        })
-        return businessError(message, request)
-      }
-    }
-    return app.inject({
-      method: 'POST',
-      url: '/app/instance/start',
-      headers: {
-        token: normalizeToken(request.headers.token),
-      },
-      payload: {
-        id,
-        autoAllocatePorts: body.autoAllocatePorts === true,
-      },
-    }).then((response) => {
-      if (response.statusCode >= 400) {
-        return businessError('实例重启失败', request)
-      }
-      const payload = JSON.parse(response.body) as ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse
-      if ('error' in payload && payload.error) {
-        return businessError(
-          payload.error,
-          request,
-          payload.code ?? ErrorCode.BUSINESS_RULE_VIOLATION,
-          payload.data ?? {},
-        )
-      }
-      return success({ isSuccess: true }, request)
+    const { restartInstanceCore } = await import('./restart-instance-core.ts')
+    return restartInstanceCore(app, request, id, {
+      autoAllocatePorts: body.autoAllocatePorts === true,
     })
   })
 

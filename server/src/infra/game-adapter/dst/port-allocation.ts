@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { listGameInstances } from '../../../shared/db/index'
 import { DST_DEFAULT_GAME_PORT } from './constants'
 import { isCavesShardConfigured, resolveCavesServerIniPath, resolveMasterServerIniPath } from './shard-layout'
 import {
@@ -29,6 +28,12 @@ function collectPortsFromIniFile(iniPath: string, shardId: 'master' | 'caves'): 
   }
 }
 
+export interface DstPortReservationInstance {
+  id: string
+  status: string
+  installPath: string | null
+}
+
 export interface CollectReservedDstPortsOptions {
   /**
    * 为 true 时仅统计运行中实例（启动前探测用）；
@@ -47,13 +52,12 @@ export function shouldReserveInstanceDstPorts(
   return status === 'running'
 }
 
-/** 读取同节点其它实例已占用的 UDP 端口（来自各实例 server.ini） */
-export async function collectReservedDstPortsOnNode(
-  nodeId: string,
+/** 读取给定实例列表已占用的 UDP 端口（来自各实例 server.ini，纯函数无 DB） */
+export function collectReservedDstPortsFromInstances(
+  instances: DstPortReservationInstance[],
   excludeInstanceId?: string,
   options?: CollectReservedDstPortsOptions,
-): Promise<Set<number>> {
-  const instances = await listGameInstances({ nodeId })
+): Set<number> {
   const used = new Set<number>()
   for (const instance of instances) {
     if (excludeInstanceId && instance.id === excludeInstanceId) {
@@ -86,12 +90,8 @@ function portBlockIsFree(gamePort: number, reserved: Set<number>): boolean {
   return ports.every(port => !reserved.has(port))
 }
 
-/** 为新建实例分配未占用的主世界游戏端口（同节点多实例必用不同端口块） */
-export async function allocateDstGamePort(
-  nodeId: string,
-  excludeInstanceId?: string,
-): Promise<number> {
-  const reserved = await collectReservedDstPortsOnNode(nodeId, excludeInstanceId)
+/** 在已收集的占用端口集合上分配未占用的主世界游戏端口块 */
+export function allocateDstGamePortFromReserved(reserved: Set<number>): number {
   for (let block = 0; block < 200; block++) {
     const gamePort = DST_DEFAULT_GAME_PORT + block * DST_PORT_BLOCK_STRIDE
     if (portBlockIsFree(gamePort, reserved)) {

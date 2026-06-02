@@ -1,11 +1,10 @@
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { findHostUdpPortConflicts, formatPortConflictMessage } from '../../infra/game-adapter/dst/port-conflict'
 import {
-  allocateDstGamePort,
   applyDstPortBlockToInstall,
-  collectReservedDstPortsOnNode,
   findPortOverlapWithReserved,
 } from '../../infra/game-adapter/dst/port-allocation'
+import { allocateDstGamePort, collectReservedDstPortsOnNode } from './dst-port-service'
 import { collectPortSet } from '../../infra/game-adapter/dst/server-ini'
 import { isCavesShardConfigured } from '../../infra/game-adapter/dst/shard-layout'
 import { defaultCavesServerIniFields } from '../../infra/game-adapter/dst/server-ini'

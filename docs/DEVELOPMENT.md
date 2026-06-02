@@ -103,6 +103,18 @@ pnpm test:server
 pnpm run lint
 ```
 
+### Steam / Mod 相关环境变量（开发排查）
+
+| 变量 | 用途 |
+|------|------|
+| `GSH_STEAM_WEBAPI_KEY` | Mod 市场走 Steam 官方 Web API（推荐，比 HTML 抓取稳定） |
+| `GSH_STEAM_RELAY_URL` / `GSH_STEAM_RELAY_TOKEN` | 无法直连 Steam 时的中继 |
+| `GSH_STEAMCMD_DOWNLOAD_REGION` | SteamCMD 下载区域（如 `cn`），影响实例安装与 Mod 订阅下载 |
+| `GSH_STEAM_WORKSHOP_FETCH_TIMEOUT_MS` | Mod 市场 live 拉取超时，默认 12s |
+| `GSH_STEAM_WORKSHOP_WARM_CACHE=0` | 关闭面板启动时 Mod 市场列表后台预热 |
+
+完整示例见 [`panel.env.example`](../panel.env.example)。
+
 ---
 
 ## 从源码构建生产镜像

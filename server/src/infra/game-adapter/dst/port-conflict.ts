@@ -1,8 +1,5 @@
 import dgram from 'node:dgram'
-import {
-  collectReservedDstPortsOnNode,
-  findPortOverlapWithReserved,
-} from './port-allocation'
+import { findPortOverlapWithReserved } from './port-allocation'
 import type { ServerIniFields } from './server-ini'
 import { collectPortSet } from './server-ini'
 
@@ -64,13 +61,10 @@ export function formatCrossInstancePortConflictMessage(conflicts: number[]): str
 export async function validateShardPortsForStart(
   master: ServerIniFields,
   caves: ServerIniFields | null,
-  options?: { excludeInstanceId?: string, nodeId?: string },
+  options?: { reservedPorts?: Set<number> },
 ): Promise<string | undefined> {
-  if (options?.nodeId) {
-    const reserved = await collectReservedDstPortsOnNode(options.nodeId, options.excludeInstanceId, {
-      onlyRunning: true,
-    })
-    const overlap = findPortOverlapWithReserved(master, caves, reserved)
+  if (options?.reservedPorts && options.reservedPorts.size > 0) {
+    const overlap = findPortOverlapWithReserved(master, caves, options.reservedPorts)
     if (overlap.length > 0) {
       return formatCrossInstancePortConflictMessage(overlap)
     }

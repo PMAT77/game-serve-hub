@@ -1,4 +1,3 @@
-import fs from 'node:fs'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import type {
@@ -8,9 +7,7 @@ import type {
   ShardSaveResult,
 } from '../../../../shared/contracts/shard'
 import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
-import { getGameInstanceById } from '../../shared/db/index'
-import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
-import { ensureClusterDirectory, resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
+import { resolveLocalDstInstance } from '../../shared/dst/local-dst-instance'
 import {
   getShardList,
   initCavesShard,
@@ -20,7 +17,12 @@ import { injectRestartInstance } from '../instance/inject-restart'
 import { businessError, success } from '../../shared/http/response'
 import { requirePermission } from '../system/auth'
 
-const LOCAL_NODE_ID = 'local-node'
+const SHARD_RESOLVE_MESSAGES = {
+  wrongNode: '当前仅支持本地节点实例世界配置',
+  wrongGame: '当前仅支持 DST 实例世界配置',
+  missingInstallPath: '实例安装目录不存在，请先在实例管理中完成安装',
+  clusterDirFailed: '无法创建房间配置目录',
+}
 
 interface ShardQuery {
   instanceId?: string
@@ -28,39 +30,6 @@ interface ShardQuery {
 
 function normalizeInstanceId(value: string | undefined) {
   return value?.trim() ?? ''
-}
-
-async function resolveDstInstance(instanceId: string, request: FastifyRequest) {
-  if (!instanceId) {
-    return { ok: false as const, error: businessError('实例 ID 不能为空', request) }
-  }
-  const instance = await getGameInstanceById(instanceId)
-  if (!instance) {
-    return { ok: false as const, error: businessError('实例不存在', request) }
-  }
-  if (instance.nodeId !== LOCAL_NODE_ID) {
-    return { ok: false as const, error: businessError('当前仅支持本地节点实例世界配置', request) }
-  }
-  if (instance.gameCode !== DST_APP_ID) {
-    return { ok: false as const, error: businessError('当前仅支持 DST 实例世界配置', request) }
-  }
-  const installPath = resolveInstanceInstallPath(instance)
-  if (!fs.existsSync(installPath)) {
-    return { ok: false as const, error: businessError('实例安装目录不存在，请先在实例管理中完成安装', request) }
-  }
-  try {
-    ensureClusterDirectory(installPath)
-  }
-  catch {
-    return { ok: false as const, error: businessError('无法创建房间配置目录', request) }
-  }
-  return {
-    ok: true as const,
-    instance: {
-      ...instance,
-      installPath,
-    },
-  }
 }
 
 async function restartInstance(
@@ -83,7 +52,7 @@ export function registerShardModule(app: FastifyInstance) {
     }
     const query = request.query as ShardQuery
     const instanceId = normalizeInstanceId(query.instanceId)
-    const resolved = await resolveDstInstance(instanceId, request)
+    const resolved = await resolveLocalDstInstance(instanceId, request, { messages: SHARD_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
     }
@@ -104,7 +73,7 @@ export function registerShardModule(app: FastifyInstance) {
     }
     const query = request.query as ShardQuery
     const instanceId = normalizeInstanceId(query.instanceId)
-    const resolved = await resolveDstInstance(instanceId, request)
+    const resolved = await resolveLocalDstInstance(instanceId, request, { messages: SHARD_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
     }
@@ -125,7 +94,7 @@ export function registerShardModule(app: FastifyInstance) {
     }
     const body = (request.body ?? {}) as ShardSavePayload
     const instanceId = normalizeInstanceId(body.instanceId)
-    const resolved = await resolveDstInstance(instanceId, request)
+    const resolved = await resolveLocalDstInstance(instanceId, request, { messages: SHARD_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
     }

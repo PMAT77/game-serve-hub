@@ -34,7 +34,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       open: false,
       host: true,
-      port: resolveDevPort(9000),
+      port: resolveDevPort(9527),
       strictPort: true,
       clearScreen: false,
       ...(process.env.GSH_DEV_COMPOSE_QUIET === '1' ? { logLevel: 'warn' as const } : {}),

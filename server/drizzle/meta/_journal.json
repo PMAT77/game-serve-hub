@@ -50,6 +50,27 @@
       "when": 1779292800000,
       "tag": "0006_instance_maintenance",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779379200000,
+      "tag": "0007_instance_mod_preview",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779465600000,
+      "tag": "0008_instance_mod_disabled_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779552000000,
+      "tag": "0009_instance_mod_install_status",
+      "breakpoints": true
     }
   ]
 }

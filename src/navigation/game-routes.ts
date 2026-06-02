@@ -9,6 +9,8 @@ export const ROUTE_NAMES = {
   dstRoomSettings: 'dstRoomSettings',
   dstWorldList: 'dstWorldList',
   dstWorldSettings: 'dstWorldSettings',
+  dstModList: 'dstModList',
+  dstModDetail: 'dstModDetail',
 } as const
 
 export { FRONTEND_ROUTE_PATHS }
@@ -38,4 +40,16 @@ export function routeToDstWorldSettings(
   query?: Record<string, string>,
 ): RouteLocationRaw {
   return { name: ROUTE_NAMES.dstWorldSettings, params: { instanceId }, query }
+}
+
+export function routeToDstModList(): RouteLocationRaw {
+  return { name: ROUTE_NAMES.dstModList }
+}
+
+export function routeToDstModDetail(workshopId: string, instanceId: string): RouteLocationRaw {
+  return {
+    name: ROUTE_NAMES.dstModDetail,
+    params: { workshopId },
+    query: { instanceId },
+  }
 }

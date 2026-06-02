@@ -2,7 +2,7 @@ import DockerClient from 'dockerode'
 import { resolveDockerConnectOptions } from '../docker-connect'
 import { getServerContainerConfig } from '../../shared/config/container'
 import { runSteamcmdJob } from './steamcmd-job'
-import { buildSteamcmdAppUpdateArgs } from './steamcmd-args'
+import { buildSteamcmdAppUpdateArgs, buildSteamcmdWorkshopDownloadArgs } from './steamcmd-args'
 import { resolveSteamcmdInstallBind } from './steamcmd-install-bind'
 import { appendSteamcmdBindMountOptions, resolveSteamcmdContainerUser } from './steamcmd-container-user'
 import { withSteamcmdAppUpdateLock } from './steamcmd-app-update-queue'
@@ -11,12 +11,14 @@ import { loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
 import { appendInstallResourceSnapshot } from './install-resource-monitor'
 import { formatSteamcmdMemoryLimitForLog, resolveSteamcmdContainerMemoryLimits } from './steamcmd-container-resources'
 import { parseImageRef } from './image-ref'
+import { DST_WORKSHOP_APP_ID } from '../game-adapter/dst/constants'
 
 /** 面板内「拉取游戏安装镜像」固定使用 GHCR（与 CI / install 写入 panel.env 一致） */
 export const STEAMCMD_OFFICIAL_REPOSITORY = 'ghcr.io/gameserverhub/steamcmd-base'
 
 const STEAMCMD_APP_UPDATE_TIMEOUT_MS = 30 * 60 * 1000
 const STEAMCMD_APP_INFO_TIMEOUT_MS = 90_000
+const DEFAULT_STEAMCMD_WORKSHOP_DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
 
 function resolveDocker() {
   const { dockerHost } = getServerContainerConfig()
@@ -176,6 +178,97 @@ async function runSteamcmdAppUpdateInContainerUnlocked(input: {
     catch {
       // ignore snapshot errors
     }
+  }
+
+  return {
+    ok: result.ok,
+    output: result.output || logLines.slice(-20).join('\n'),
+    cancelled: result.cancelled,
+  }
+}
+
+export async function runSteamcmdWorkshopDownloadInContainer(input: {
+  hostInstallPath: string
+  workshopIds: string[]
+  cancelKey?: string
+  onLogLine?: (line: string) => void
+  onAwaitingSteamcmdLock?: () => void | Promise<void>
+  onDownloadStart?: () => void | Promise<void>
+  timeoutMs?: number
+}): Promise<{ ok: boolean, output: string, cancelled?: boolean }> {
+  const jobId = input.cancelKey?.trim() || 'anonymous'
+  return withSteamcmdAppUpdateLock(
+    jobId,
+    () => runSteamcmdWorkshopDownloadInContainerUnlocked(input),
+    { onQueued: input.onAwaitingSteamcmdLock },
+  )
+}
+
+async function runSteamcmdWorkshopDownloadInContainerUnlocked(input: {
+  hostInstallPath: string
+  workshopIds: string[]
+  cancelKey?: string
+  onLogLine?: (line: string) => void
+  onDownloadStart?: () => void | Promise<void>
+  timeoutMs?: number
+}): Promise<{ ok: boolean, output: string, cancelled?: boolean }> {
+  const { steamcmdImage, instancesRoot } = getServerContainerConfig()
+  const docker = resolveDocker()
+  const bindPlan = await resolveSteamcmdInstallBind(docker, input.hostInstallPath, instancesRoot)
+  const logLines: string[] = []
+  const pushLine = (line: string) => {
+    logLines.push(line)
+    input.onLogLine?.(line)
+  }
+
+  const workshopIds = [...new Set(input.workshopIds.map(id => id.trim()).filter(Boolean))]
+  if (workshopIds.length === 0) {
+    return { ok: true, output: '' }
+  }
+
+  pushLine(`准备启动 SteamCMD 容器下载 Mod（镜像 ${steamcmdImage}）`)
+  pushLine(`安装目录（面板侧）: ${input.hostInstallPath}`)
+  pushLine(`Workshop AppID: ${DST_WORKSHOP_APP_ID}`)
+  pushLine(`待下载 Mod 数量: ${workshopIds.length}`)
+  pushLine(`SteamCMD bind 模式: ${bindPlan.mode}`)
+  if (bindPlan.error) {
+    pushLine(bindPlan.error)
+    return {
+      ok: false,
+      output: logLines.slice(-20).join('\n') || bindPlan.error,
+    }
+  }
+
+  const steamcmdConfig = loadSteamcmdRuntimeConfig()
+  const steamcmdArgs = buildSteamcmdWorkshopDownloadArgs(
+    bindPlan.containerInstallPath,
+    DST_WORKSHOP_APP_ID,
+    workshopIds,
+    ['+login', 'anonymous'],
+    { downloadRegion: steamcmdConfig.downloadRegion || undefined },
+  )
+
+  const memoryLimits = resolveSteamcmdContainerMemoryLimits('app-update')
+  pushLine(`SteamCMD 容器内存上限: ${formatSteamcmdMemoryLimitForLog(memoryLimits)}`)
+
+  await input.onDownloadStart?.()
+
+  const result = await runSteamcmdJob({
+    image: steamcmdImage,
+    cmd: [
+      '/home/steam/steamcmd/steamcmd.sh',
+      ...steamcmdArgs,
+    ],
+    hostBinds: bindPlan.hostBinds.map(appendSteamcmdBindMountOptions),
+    user: resolveSteamcmdContainerUser(),
+    jobId: input.cancelKey,
+    kind: 'app-update',
+    timeoutMs: input.timeoutMs ?? DEFAULT_STEAMCMD_WORKSHOP_DOWNLOAD_TIMEOUT_MS,
+    onLogLine: input.onLogLine,
+  })
+
+  if (result.ok) {
+    pushLine('SteamCMD workshop_download_item 已完成')
   }
 
   return {

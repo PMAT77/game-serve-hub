@@ -37,6 +37,7 @@ import {
   isInstancePortConflictError,
 } from '@/utils/instancePortConflict'
 import ShardNetworkSection from './components/ShardNetworkSection.vue'
+import ShardModsSection from './components/ShardModsSection.vue'
 import ShardWorldRulesSection from './components/ShardWorldRulesSection.vue'
 import ShardWorldgenSection from './components/ShardWorldgenSection.vue'
 import {
@@ -584,16 +585,10 @@ onActivated(() => {
           </NTabPane>
 
           <NTabPane name="mods" tab="模组">
-            <AppHostMemoryAlert
-              v-if="hostMemoryGuidance?.modsWarning"
-              title="内存与模组"
-              :message="hostMemoryGuidance.modsWarning"
+            <ShardModsSection
+              :instance-id="instanceId"
+              :memory-warning="hostMemoryGuidance?.modsWarning ?? null"
             />
-            <NAlert type="info" class="mt-2" title="模组配置（规划中）">
-              <p class="text-sm">
-                v1 世界设置页暂不编辑模组。模组管理将在后续版本提供；当前请通过 Klei 官方工具或手动维护。
-              </p>
-            </NAlert>
           </NTabPane>
         </NTabs>
       </div>

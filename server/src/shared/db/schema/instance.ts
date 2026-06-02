@@ -33,9 +33,12 @@ export const instanceMods = sqliteTable('instance_mods', {
   instanceId: text('instance_id').notNull(),
   workshopId: text('workshop_id').notNull(),
   name: text('name').notNull(),
-  enabled: integer('enabled').notNull().default(1),
+  enabled: integer('enabled').notNull().default(0),
   loadOrder: integer('load_order').notNull().default(0),
   version: text('version'),
+  previewImage: text('preview_image'),
+  installStatus: text('install_status').notNull().default('ready'),
+  installError: text('install_error'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

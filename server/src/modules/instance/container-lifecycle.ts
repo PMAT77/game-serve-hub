@@ -26,6 +26,9 @@ import {
   buildDstMasterShardContainerSpec,
 } from '../../infra/game-adapter/dst/runtime-spec'
 import { ensureDstCavesShardConfig } from '../../infra/game-adapter/dst/cluster-config'
+import { syncInstanceModFilesFromDb } from '../mod/mod-file-sync-service'
+import { collectReservedDstPortsOnNode } from './dst-port-service'
+import { LOCAL_NODE_ID } from '../../shared/dst/local-dst-instance'
 import { ensureDockerShardInterconnectConfig } from '../../infra/game-adapter/dst/shard-network-config'
 import {
   isCavesShardConfigured,
@@ -290,6 +293,14 @@ export async function startInstanceContainer(
   const shardEnabled = readClusterShardEnabledFromInstall(input.installPath)
   if (shardEnabled && !isCavesShardConfigured(input.installPath)) {
     ensureDstCavesShardConfig(input.installPath, input.gamePort ?? undefined)
+    try {
+      // 洞穴目录新建后需重写 Caves modoverrides（与启动前全量 sync 条件不同）
+      await syncInstanceModFilesFromDb(input.instanceId, input.installPath)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '同步 Mod 配置失败'
+      return { ok: false, message }
+    }
   }
   const cavesConfigured = shardEnabled && isCavesShardConfigured(input.installPath)
   if (shardEnabled && !cavesConfigured) {
@@ -299,9 +310,11 @@ export async function startInstanceContainer(
   const cavesFields = shardEnabled && cavesConfigured
     ? readCavesServerIniFields(input.installPath)
     : null
+  const reservedPorts = await collectReservedDstPortsOnNode(LOCAL_NODE_ID, input.instanceId, {
+    onlyRunning: true,
+  })
   const portError = await validateShardPortsForStart(masterFields, cavesFields, {
-    excludeInstanceId: input.instanceId,
-    nodeId: 'local-node',
+    reservedPorts,
   })
   if (portError) {
     return { ok: false, message: portError }

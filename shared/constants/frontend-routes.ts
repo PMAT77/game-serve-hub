@@ -3,4 +3,6 @@ export const FRONTEND_ROUTE_PATHS = {
   nodeInstance: '/node/instance',
   dstRooms: '/games/dst/rooms',
   dstWorlds: '/games/dst/worlds',
+  dstMods: '/games/dst/mods',
+  dstModDetail: '/games/dst/mods/:workshopId/detail',
 } as const

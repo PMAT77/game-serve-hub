@@ -89,7 +89,9 @@ declare global {
   const useFaModal: typeof import('@fantastic-admin/components').useFaModal
   const useHostMemoryGuidance: typeof import('../composables/useHostMemoryGuidance').useHostMemoryGuidance
   const useId: typeof import('vue').useId
+  const useInstanceModState: typeof import('../composables/useInstanceModState').useInstanceModState
   const useLink: typeof import('vue-router').useLink
+  const useModContentLocale: typeof import('../composables/useModContentLocale').useModContentLocale
   const useModel: typeof import('vue').useModel
   const useNarrowFormLayout: typeof import('../composables/useNarrowFormLayout').useNarrowFormLayout
   const usePanelUpdateNotifier: typeof import('../composables/usePanelUpdateNotifier').usePanelUpdateNotifier
@@ -107,4 +109,7 @@ declare global {
   // @ts-ignore
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
+  // @ts-ignore
+  export type { ModInstallHandlers } from '../composables/useInstanceModState'
+  import('../composables/useInstanceModState')
 }

@@ -1,9 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import {
-  readRecentInstanceContainerLogLines,
-  isInstanceContainerRunning,
-  sendInstanceContainerCommand,
-} from '../../../modules/instance/container-lifecycle'
+import { getDstContainerCommandPort } from '../../../shared/instance/dst-container-command-port'
 import { instanceConsoleLogStore } from '../../../shared/instance-runtime/console-log-store'
 
 export const DST_ONLINE_PLAYER_COUNT_MARKER = 'GSH_PLAYER_COUNT:'
@@ -52,7 +48,8 @@ export async function queryDstOnlinePlayerCount(
   instanceId: string,
   options?: { timeoutMs?: number, pollIntervalMs?: number },
 ): Promise<number | null> {
-  const running = await isInstanceContainerRunning(instanceId)
+  const port = getDstContainerCommandPort()
+  const running = await port.isInstanceContainerRunning(instanceId)
   if (!running) {
     return null
   }
@@ -63,16 +60,16 @@ export async function queryDstOnlinePlayerCount(
   const pollIntervalMs = options?.pollIntervalMs ?? 150
   const logsBefore = instanceConsoleLogStore.listLogs(instanceId)
   const lastId = logsBefore.length > 0 ? logsBefore[logsBefore.length - 1].id : 0
-  const dockerSnapshot = await readRecentInstanceContainerLogLines(instanceId, 120)
+  const dockerSnapshot = await port.readRecentInstanceContainerLogLines(instanceId, 120)
 
-  const result = await sendInstanceContainerCommand(instanceId, command, 'master')
+  const result = await port.sendInstanceContainerCommand(instanceId, command, 'master')
   if (!result.ok) {
     return null
   }
 
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const dockerLines = await readRecentInstanceContainerLogLines(instanceId, 120)
+    const dockerLines = await port.readRecentInstanceContainerLogLines(instanceId, 120)
     const freshDockerLines = dockerLines.filter(line => !dockerSnapshot.includes(line))
     const dockerCount = findOnlinePlayerCountInLines(freshDockerLines, queryToken)
     if (dockerCount !== null) {

@@ -8,6 +8,7 @@ import fastifyStatic from '@fastify/static'
 import { registerAuthModule } from './modules/auth'
 import { registerClusterModule } from './modules/cluster'
 import { registerShardModule } from './modules/shard'
+import { registerModModule } from './modules/mod'
 import { registerConsoleModule } from './modules/console'
 import { registerInstanceModule } from './modules/instance'
 import { registerNodeModule } from './modules/node'
@@ -105,6 +106,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
   registerInstanceModule(app)
   registerClusterModule(app)
   registerShardModule(app)
+  registerModModule(app)
   registerConsoleModule(app)
 
   if (config.mode === 'production') {

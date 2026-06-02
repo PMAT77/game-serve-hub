@@ -704,7 +704,7 @@ onBeforeUnmount(() => {
                 size="small"
                 type="warning"
                 :disabled="!running || commandSending"
-                @click="confirmDangerousCommand('c_reset()', '重置世界', '将重置当前世界进度，所有玩家将受影响。确认执行？')"
+                @click="confirmDangerousCommand('c_reset()', '重置世界', '确认执行？')"
               >
                 重置世界
               </NButton>

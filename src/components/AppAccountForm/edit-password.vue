@@ -8,6 +8,14 @@ defineOptions({
   name: 'EditPasswordForm',
 })
 
+const props = defineProps<{
+  forceMode?: boolean
+}>()
+
+const emit = defineEmits<{
+  onSuccess: []
+}>()
+
 const appAccountStore = useAppAccountStore()
 
 const loading = ref(false)
@@ -32,6 +40,11 @@ const form = useForm({
 const onSubmit = form.handleSubmit((values) => {
   loading.value = true
   appAccountStore.editPassword(values).then(async () => {
+    if (props.forceMode) {
+      faToast.success('密码已更新，即将进入系统')
+      emit('onSuccess')
+      return
+    }
     faToast.success('修改成功，请重新登录')
     appAccountStore.logout()
   }).finally(() => {

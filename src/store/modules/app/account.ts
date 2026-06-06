@@ -16,11 +16,20 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   }
 
   function clearAccountStorage() {
-    const keys = ['token', 'refreshToken', 'account', 'avatar', 'email']
+    const keys = ['token', 'refreshToken', 'account', 'avatar', 'email', 'mustChangePassword']
     keys.forEach((key) => {
       localStorage.removeItem(key)
       sessionStorage.removeItem(key)
     })
+  }
+
+  function writeMustChangePasswordFlag(value: boolean, remember?: boolean) {
+    const storage = getPersistentStorage(remember ?? Boolean(localStorage.getItem('account')))
+    storage.setItem('mustChangePassword', value ? '1' : '0')
+  }
+
+  function readMustChangePasswordFlag(): boolean {
+    return readAccountStorageValue('mustChangePassword') === '1'
   }
 
   // 账号信息
@@ -32,6 +41,8 @@ export const useAppAccountStore = defineStore('appAccount', () => {
 
   // 权限信息
   const permissions = ref<string[]>([])
+  /** 服务端要求强制改密：未完成前仅可访问改密页 */
+  const mustChangePassword = ref(readMustChangePasswordFlag())
   /** 仅本次登录：服务端在「首次登录」时返回 true，用于右上角改密建议（与 DB 长期标记无关） */
   const suggestPasswordChangeOnFirstLogin = ref(false)
 
@@ -71,7 +82,9 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     refreshToken.value = res.data.refreshToken
     avatar.value = res.data.avatar
     email.value = res.data.email
-    suggestPasswordChangeOnFirstLogin.value = res.data.mustChangePassword === true
+    mustChangePassword.value = res.data.mustChangePassword === true
+    writeMustChangePasswordFlag(mustChangePassword.value, remember)
+    suggestPasswordChangeOnFirstLogin.value = false
   }
 
   function applySessionTokens(payload: {
@@ -99,6 +112,11 @@ export const useAppAccountStore = defineStore('appAccount', () => {
 
   function clearSuggestPasswordChangeOnFirstLogin() {
     suggestPasswordChangeOnFirstLogin.value = false
+  }
+
+  function setMustChangePassword(value: boolean) {
+    mustChangePassword.value = value
+    writeMustChangePasswordFlag(value)
   }
 
   // 手动登出
@@ -146,6 +164,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     avatar.value = ''
     email.value = ''
     permissions.value = []
+    mustChangePassword.value = false
     suggestPasswordChangeOnFirstLogin.value = false
     appSettingsStore.updateSettings({}, true)
     appTabbarStore.clean()
@@ -157,6 +176,8 @@ export const useAppAccountStore = defineStore('appAccount', () => {
   async function getPermissions() {
     const res = await apiApp.permission()
     permissions.value = res.data.permissions
+    mustChangePassword.value = res.data.mustChangePassword === true
+    writeMustChangePasswordFlag(mustChangePassword.value)
   }
 
   // 修改密码
@@ -165,6 +186,8 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     newPassword: string
   }) {
     await apiApp.passwordEdit(data)
+    mustChangePassword.value = false
+    writeMustChangePasswordFlag(false)
     clearSuggestPasswordChangeOnFirstLogin()
   }
 
@@ -194,6 +217,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     avatar,
     email,
     permissions,
+    mustChangePassword,
     suggestPasswordChangeOnFirstLogin,
     isLogin,
     login,
@@ -203,6 +227,7 @@ export const useAppAccountStore = defineStore('appAccount', () => {
     getPermissions,
     editPassword,
     clearSuggestPasswordChangeOnFirstLogin,
+    setMustChangePassword,
     lock,
     unlock,
   }

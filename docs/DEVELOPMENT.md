@@ -103,6 +103,14 @@ pnpm test:server
 pnpm run lint
 ```
 
+### 面板后端环境变量（`server/.env.*`）
+
+| 变量 | 用途 |
+|------|------|
+| `CORS_ORIGIN` | 跨域：`true`/`false` 或逗号分隔白名单；开发默认可跨域，生产默认同源 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 初始化管理员；生产未设密码时自动生成并写日志 |
+| `FORCE_PASSWORD_CHANGE` | `1` 时首次登录进入强制改密页 |
+
 ### Steam / Mod 相关环境变量（开发排查）
 
 | 变量 | 用途 |
@@ -179,15 +187,15 @@ Standalone 副本与上游 fantastic-admin 母仓的同步说明见根目录 [MI
 
 ## 参与贡献
 
-欢迎 [Issue](https://github.com/GameServerHub/game-server-hub/issues) 与 [Pull Request](https://github.com/GameServerHub/game-server-hub/pulls)。
+详见 **[CONTRIBUTING.md](../CONTRIBUTING.md)**（PR 流程、CHANGELOG、行为准则）。
 
-提交前建议：
+CI 与本地检查保持一致：
 
 ```bash
 pnpm run lint
-pnpm test:server
+pnpm test:unit
 ```
 
-提交说明采用 Conventional Commits 风格（中文）。
+发布与版本号约定见 **[RELEASE.md](RELEASE.md)**。
 
 **请勿提交**：`panel.env`、本地 SQLite、`docs_local/`、`.env` 凭据或任何密钥文件。

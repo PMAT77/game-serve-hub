@@ -6,7 +6,17 @@
 |------|------|
 | [INSTALL.md](INSTALL.md) | Linux 生产安装、升级、DST 使用、运维与故障排查 |
 | [MEMORY.md](MEMORY.md) | 宿主机内存档位（4G/6G/8G）、洞穴/Mod 建议与 `panel.env` 预设 |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | 本地开发环境、测试、构建镜像与参与贡献 |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | 本地开发环境、测试、构建镜像 |
+| [RELEASE.md](RELEASE.md) | 版本策略、发布检查清单与 tag 流程 |
+
+## 社区与治理
+
+| 文档 | 说明 |
+|------|------|
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | 贡献流程、PR 与提交规范 |
+| [SECURITY.md](../SECURITY.md) | 漏洞报告方式与安全实践 |
+| [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | 社区行为准则 |
+| [CHANGELOG.md](../CHANGELOG.md) | 版本变更记录 |
 
 ## 内部文档说明
 

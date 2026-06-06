@@ -1,0 +1,48 @@
+# Changelog
+
+本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [Unreleased]
+
+（暂无）
+
+## [0.1.0] - 2026-06-06
+
+首个带版本号与 CI 门禁的公测发行版。
+
+### Added
+
+- **CI 质量门禁**：PR / `main` 推送自动执行 `lint`、`test:unit` 与生产构建（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）
+- **社区基础设施**：`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、`docs/RELEASE.md`
+- **Issue / PR 模板**：Bug、功能建议、使用提问
+- **Dependabot**：npm 与 GitHub Actions 每周依赖更新检查
+- 强制改密页 `/force-change-password` 与完整拦截流程
+- 共享宿主机指标模块 `server/src/shared/host-metrics.ts`
+- 实例管理页拆分：`InstanceInstallLogModal`、`useInstanceRuntimeObservability`
+- 安全与配置相关单测（强制改密、CORS、生产密码、宿主机指标）
+
+### Changed
+
+- `FORCE_PASSWORD_CHANGE=1` 时首次登录须完成改密后方可进入面板（不再仅 toast 提示）
+- 生产环境 CORS 默认同源（`false`）；开发环境默认允许跨域，可通过 `CORS_ORIGIN` 配置白名单
+- `node` 与 `system` 模块共用宿主机 CPU/磁盘采样状态
+- README / INSTALL / 模块文档与 Mod、占位模块实现状态对齐
+
+### Security
+
+- 生产环境未配置 `ADMIN_PASSWORD` 时自动生成强随机密码并写入启动日志
+- 生产初始化不再种子化 `superadmin/123456` 弱密码演示账号
+- 未改密用户访问受保护 API 返回 `AUTH_FORCE_PASSWORD_CHANGE`
+
+## [0.0.0] - 公测基线
+
+首个公开仓库版本，核心能力：
+
+- Linux 一键安装与 Docker Compose 部署
+- DST 实例生命周期、监控台、控制台
+- DST 房间 / 世界 / Mod 管理
+- 面板与 DST 镜像 GHCR 发布（`v*` tag）
+
+[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/GameServerHub/game-server-hub/compare/v0.0.0...v0.1.0
+[0.0.0]: https://github.com/GameServerHub/game-server-hub/releases

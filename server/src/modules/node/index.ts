@@ -1,33 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
-import fs from 'node:fs'
 import os from 'node:os'
-import path from 'node:path'
-import process from 'node:process'
+import { collectHostResourceSnapshot } from '../../shared/host-metrics'
+import type { HostResourceSnapshot } from '../../shared/host-metrics'
 import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import { listServerNodes, saveServerNode } from '../../shared/db/index'
 import { success } from '../../shared/http/response'
 import { requirePermission } from '../system/auth'
-
-interface LocalNodeResourceSnapshot {
-  cpu: {
-    cores: number
-    usageRate: number
-    availableRate: number
-  }
-  memory: {
-    totalGb: number
-    usedGb: number
-    freeGb: number
-    usageRate: number
-  }
-  disk: {
-    totalGb: number
-    usedGb: number
-    freeGb: number
-    usageRate: number
-  }
-}
 
 interface NodeViewItem {
   id: string
@@ -35,100 +14,17 @@ interface NodeViewItem {
   host: string
   sshPort: number
   status: 'online' | 'offline'
-  resources: LocalNodeResourceSnapshot
+  resources: HostResourceSnapshot
   lastHeartbeatAt: string | null
   createdAt: string
   updatedAt: string
 }
 
 const LOCAL_NODE_ID = 'local-node'
-let previousCpuTotal = 0
-let previousCpuIdle = 0
-
-function toGb(value: number) {
-  return Number((value / 1024 / 1024 / 1024).toFixed(2))
-}
-
-function clampPercent(value: number) {
-  return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0))
-}
-
-function getCpuUsageRate() {
-  const cpuInfo = os.cpus()
-  const total = cpuInfo.reduce((sum, core) => {
-    return sum + core.times.user + core.times.nice + core.times.sys + core.times.idle + core.times.irq
-  }, 0)
-  const idle = cpuInfo.reduce((sum, core) => sum + core.times.idle, 0)
-
-  let usageRate = 0
-  if (previousCpuTotal > 0 && total > previousCpuTotal) {
-    const totalDelta = total - previousCpuTotal
-    const idleDelta = idle - previousCpuIdle
-    usageRate = totalDelta > 0
-      ? ((totalDelta - idleDelta) / totalDelta) * 100
-      : 0
-  }
-  else {
-    usageRate = total > 0
-      ? ((total - idle) / total) * 100
-      : 0
-  }
-
-  previousCpuTotal = total
-  previousCpuIdle = idle
-  return Number(clampPercent(usageRate).toFixed(2))
-}
-
-function getDiskUsage() {
-  const rootPath = path.parse(process.cwd()).root || process.cwd()
-  const stats = fs.statfsSync(rootPath)
-  const total = stats.blocks * stats.bsize
-  const available = stats.bavail * stats.bsize
-  const used = total - available
-  return {
-    totalGb: toGb(total),
-    usedGb: toGb(used),
-    freeGb: toGb(available),
-  }
-}
-
-function collectLocalNodeSnapshot(): LocalNodeResourceSnapshot {
-  const cpuUsageRate = getCpuUsageRate()
-  const totalMem = os.totalmem()
-  const freeMem = os.freemem()
-  const usedMem = totalMem - freeMem
-  const memoryUsageRate = totalMem > 0
-    ? Number(clampPercent((usedMem / totalMem) * 100).toFixed(2))
-    : 0
-  const disk = getDiskUsage()
-  const diskUsageRate = disk.totalGb > 0
-    ? Number(clampPercent((disk.usedGb / disk.totalGb) * 100).toFixed(2))
-    : 0
-
-  return {
-    cpu: {
-      cores: Math.max(1, os.cpus().length),
-      usageRate: cpuUsageRate,
-      availableRate: Number((100 - cpuUsageRate).toFixed(2)),
-    },
-    memory: {
-      totalGb: toGb(totalMem),
-      usedGb: toGb(usedMem),
-      freeGb: toGb(freeMem),
-      usageRate: memoryUsageRate,
-    },
-    disk: {
-      totalGb: disk.totalGb,
-      usedGb: disk.usedGb,
-      freeGb: disk.freeGb,
-      usageRate: diskUsageRate,
-    },
-  }
-}
 
 async function upsertLocalNode() {
   const now = new Date().toISOString()
-  const snapshot = collectLocalNodeSnapshot()
+  const snapshot = collectHostResourceSnapshot()
   const saved = await saveServerNode({
     id: LOCAL_NODE_ID,
     name: '本地节点',

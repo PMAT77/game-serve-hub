@@ -33,6 +33,14 @@ const constantRoutes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/force-change-password',
+    name: 'forceChangePassword',
+    component: () => import('@/views/force-change-password.vue'),
+    meta: {
+      title: '修改初始密码',
+    },
+  },
+  {
     path: '/:all(.*)*',
     name: 'notFound',
     component: () => import('@/views/[...all].vue'),

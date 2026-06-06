@@ -1,4 +1,5 @@
 import axios from 'axios'
+import router from '@/router'
 
 // 请求重试配置
 const MAX_RETRY_COUNT = 3 // 最大重试次数
@@ -52,6 +53,10 @@ api.interceptors.request.use(
 function handleError(error: any) {
   const responseData = error.response?.data
   if (responseData?.code === 'AUTH_FORCE_PASSWORD_CHANGE') {
+    useAppAccountStore().setMustChangePassword(true)
+    if (router.currentRoute.value.name !== 'forceChangePassword') {
+      void router.replace('/force-change-password')
+    }
     return Promise.reject(error)
   }
   if (error.status === 401) {
@@ -120,6 +125,13 @@ api.interceptors.response.use(
       }
       else {
         const requestConfig = response.config
+        if (response.data.code === 'AUTH_FORCE_PASSWORD_CHANGE') {
+          useAppAccountStore().setMustChangePassword(true)
+          if (router.currentRoute.value.name !== 'forceChangePassword') {
+            void router.replace('/force-change-password')
+          }
+          return Promise.reject(response.data)
+        }
         const canRetryAuth = response.data.code === 'AUTH_UNAUTHORIZED' && requestConfig.skipAuthRefresh !== true
         if (canRetryAuth) {
           const refreshed = await tryRefreshAuthSession()

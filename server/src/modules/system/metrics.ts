@@ -1,9 +1,24 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { getCachedDockerStatus, startDockerStatusRefreshLoop } from '../../infra/docker'
 import { execPowerShellAsync } from '../../infra/powershell'
+import {
+  clampPercent,
+  collectHostResourceSnapshot,
+  getCpuUsageRate,
+  getDiskUsage,
+  toGb,
+} from '../../shared/host-metrics'
+
+export {
+  clampPercent,
+  collectHostResourceSnapshot,
+  getCpuUsageRate,
+  getDiskUsage,
+  toGb,
+}
+export type { HostResourceSnapshot } from '../../shared/host-metrics'
 
 const WINDOWS_QUEUE_CACHE_MS = 8_000
 const NETWORK_SAMPLER_INTERVAL_MS = process.platform === 'win32' ? 4_000 : 2_000
@@ -43,8 +58,6 @@ let networkRefreshInFlight = false
 let slowMetricsRefreshLoopsStarted = false
 
 let cachedPanelVersion: string | null = null
-let previousCpuTotal = 0
-let previousCpuIdle = 0
 let previousNetworkSnapshotAt = 0
 const previousNetworkSnapshot = new Map<string, {
   sentBytes: number
@@ -90,40 +103,6 @@ export function getCachedPanelVersion() {
     cachedPanelVersion = getPanelVersion()
   }
   return cachedPanelVersion
-}
-
-function toGb(value: number) {
-  return Number((value / 1024 / 1024 / 1024).toFixed(2))
-}
-
-function clampPercent(value: number) {
-  return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0))
-}
-
-export function getCpuUsageRate() {
-  const cpuInfo = os.cpus()
-  const total = cpuInfo.reduce((sum, core) => {
-    return sum + core.times.user + core.times.nice + core.times.sys + core.times.idle + core.times.irq
-  }, 0)
-  const idle = cpuInfo.reduce((sum, core) => sum + core.times.idle, 0)
-
-  let usageRate = 0
-  if (previousCpuTotal > 0 && total > previousCpuTotal) {
-    const totalDelta = total - previousCpuTotal
-    const idleDelta = idle - previousCpuIdle
-    usageRate = totalDelta > 0
-      ? ((totalDelta - idleDelta) / totalDelta) * 100
-      : 0
-  }
-  else {
-    usageRate = total > 0
-      ? ((total - idle) / total) * 100
-      : 0
-  }
-
-  previousCpuTotal = total
-  previousCpuIdle = idle
-  return Number(clampPercent(usageRate).toFixed(2))
 }
 
 function normalizeCounterValue(value: unknown): number | null {
@@ -183,21 +162,6 @@ export function getCachedWindowsQueueMetrics() {
   scheduleWindowsQueueRefresh()
   return windowsQueueCache.entry?.value ?? EMPTY_WINDOWS_QUEUE
 }
-
-export function getDiskUsage() {
-  const rootPath = path.parse(process.cwd()).root || process.cwd()
-  const stats = fs.statfsSync(rootPath)
-  const total = stats.blocks * stats.bsize
-  const available = stats.bavail * stats.bsize
-  const used = total - available
-  return {
-    totalGb: toGb(total),
-    usedGb: toGb(used),
-    freeGb: toGb(available),
-  }
-}
-
-export { clampPercent, toGb }
 
 export function getCachedDockerStatusForSystem() {
   return getCachedDockerStatus()

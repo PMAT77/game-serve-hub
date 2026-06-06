@@ -1,9 +1,15 @@
 import type { FastifyRequest } from 'fastify'
 import type { ApiErrorResponse } from '../../../../shared/contracts/api'
 import { ErrorCode } from '../../../../shared/constants/error-code'
-import { findPermissionsByUserId, findUserByToken } from '../../shared/db/index'
+import { findPermissionsByUserId, findUserByToken, userMustChangePassword } from '../../shared/db/index'
 import { businessError, unauthorized } from '../../shared/http/response'
 import { normalizeRequestToken } from '../../shared/http/token'
+
+const FORCE_PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
+  '/app/account/password/edit',
+  '/app/account/logout',
+  '/app/account/permission',
+])
 
 function getTokenByRequest(request: FastifyRequest): string | undefined {
   const token = normalizeRequestToken(request.headers.token)
@@ -66,6 +72,20 @@ export async function resolveAuthorizedContext(
   const user = await findUserByToken(token)
   if (!user) {
     return { error: unauthorized(request) }
+  }
+
+  if (
+    userMustChangePassword(user)
+    && !FORCE_PASSWORD_CHANGE_ALLOWED_PATHS.has(request.url.split('?')[0] ?? '')
+  ) {
+    return {
+      error: businessError(
+        '首次登录须修改初始密码',
+        request,
+        ErrorCode.FORCE_PASSWORD_CHANGE,
+        { mustChangePassword: true },
+      ),
+    }
   }
 
   const requiredPermissions = normalizeRequiredPermissions(options?.permissions)

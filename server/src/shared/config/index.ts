@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
@@ -27,6 +28,7 @@ const envSchema = z.object({
   GSH_GITHUB_REPO: z.string().trim().optional(),
   GSH_RELEASE_VERSION: z.string().trim().optional(),
   GSH_BUILD_SHA: z.string().trim().optional(),
+  CORS_ORIGIN: z.string().trim().optional(),
 })
 
 function resolveMode() {
@@ -52,6 +54,8 @@ export interface ServerConfig {
   forcePasswordChange: boolean
   adminUsername: string
   adminPassword: string
+  /** 生产环境未配置 ADMIN_PASSWORD 时自动生成 */
+  adminPasswordGenerated: boolean
   dockerHost: string
   instancesRoot: string
   backupsRoot: string
@@ -65,6 +69,8 @@ export interface ServerConfig {
   githubRepo: string
   releaseVersion: string
   buildSha: string
+  /** Fastify @fastify/cors origin 选项；生产默认同源（false） */
+  corsOrigin: boolean | string | string[]
 }
 
 export function loadServerConfig(): ServerConfig {
@@ -93,8 +99,10 @@ export function loadServerConfig(): ServerConfig {
     GSH_GITHUB_REPO: process.env.GSH_GITHUB_REPO ?? env.GSH_GITHUB_REPO,
     GSH_RELEASE_VERSION: process.env.GSH_RELEASE_VERSION ?? env.GSH_RELEASE_VERSION,
     GSH_BUILD_SHA: process.env.GSH_BUILD_SHA ?? env.GSH_BUILD_SHA,
+    CORS_ORIGIN: process.env.CORS_ORIGIN ?? env.CORS_ORIGIN,
   }
   const parsed = envSchema.parse(merged)
+  const adminCredentials = resolveAdminCredentials(mode, parsed.ADMIN_USERNAME, parsed.ADMIN_PASSWORD)
   const defaultInstancesRoot = process.platform === 'win32'
     ? path.resolve(serverRootDir, 'data', 'instances')
     : '/var/lib/game-server-hub/instances'
@@ -110,8 +118,9 @@ export function loadServerConfig(): ServerConfig {
     logLevel: parsed.LOG_LEVEL,
     envFile: path.resolve(serverRootDir, `.env.${mode}`),
     forcePasswordChange: isTruthyEnv(parsed.FORCE_PASSWORD_CHANGE),
-    adminUsername: parsed.ADMIN_USERNAME || 'superadmin',
-    adminPassword: parsed.ADMIN_PASSWORD ?? '123456',
+    adminUsername: adminCredentials.username,
+    adminPassword: adminCredentials.password,
+    adminPasswordGenerated: adminCredentials.generated,
     dockerHost: parsed.DOCKER_HOST || (process.platform === 'win32'
       ? 'npipe:////./pipe/docker_engine'
       : 'unix:///var/run/docker.sock'),
@@ -130,12 +139,63 @@ export function loadServerConfig(): ServerConfig {
     githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'GameServerHub/game-server-hub',
     releaseVersion: parsed.GSH_RELEASE_VERSION?.trim() || '',
     buildSha: parsed.GSH_BUILD_SHA?.trim() || '',
+    corsOrigin: resolveCorsOrigin(mode, parsed.CORS_ORIGIN),
   }
+}
+
+export function resolveCorsOrigin(
+  mode: ServerConfig['mode'],
+  raw: string | undefined,
+): boolean | string | string[] {
+  const normalized = raw?.trim()
+  if (normalized) {
+    if (normalized === 'true' || normalized === '*') {
+      return true
+    }
+    if (normalized === 'false') {
+      return false
+    }
+    return normalized.split(',').map(item => item.trim()).filter(Boolean)
+  }
+  return mode === 'development'
 }
 
 function isTruthyEnv(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase() ?? ''
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
+}
+
+function generateAdminPassword() {
+  const entropy = randomBytes(12).toString('base64url')
+  return `GsH!${entropy}9a`
+}
+
+function resolveAdminCredentials(
+  mode: ServerConfig['mode'],
+  envUsername: string | undefined,
+  envPassword: string | undefined,
+) {
+  const username = envUsername?.trim() || 'superadmin'
+  const password = envPassword?.trim()
+  if (password) {
+    return {
+      username,
+      password,
+      generated: false,
+    }
+  }
+  if (mode === 'production') {
+    return {
+      username,
+      password: generateAdminPassword(),
+      generated: true,
+    }
+  }
+  return {
+    username,
+    password: '123456',
+    generated: false,
+  }
 }
 
 export function resolveInstallLogsDir(dbPath: string) {

@@ -21,7 +21,7 @@ import { success } from './shared/http/response'
  * 创建 Fastify 服务实例。
  * 当前只提供最小可运行能力，后续在此处扩展模块注册与插件。
  */
-export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLevel' | 'port'>): Promise<FastifyInstance> {
+export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLevel' | 'port' | 'corsOrigin'>): Promise<FastifyInstance> {
   const logHttpRequests = config.logLevel === 'debug' || config.logLevel === 'trace'
 
   const app = Fastify({
@@ -37,7 +37,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
   })
 
   await app.register(cors, {
-    origin: true,
+    origin: config.corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'token', 'Token', 'Accept-Language'],
     credentials: true,
@@ -99,7 +99,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
     })
   })
 
-  // 注册业务模块路由（逐步替换 mock 接口）
+  // 注册业务模块路由（config / backup / file 仍为占位，待实现后再注册）
   registerAuthModule(app)
   registerSystemModule(app)
   registerNodeModule(app)

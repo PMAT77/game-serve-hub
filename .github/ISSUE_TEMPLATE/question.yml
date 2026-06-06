@@ -1,0 +1,25 @@
+name: 使用提问
+description: 安装、配置、升级方面的疑问
+title: "[Question] "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先查阅 [INSTALL.md](https://github.com/GameServerHub/game-server-hub/blob/main/docs/INSTALL.md) 与 [DEVELOPMENT.md](https://github.com/GameServerHub/game-server-hub/blob/main/docs/DEVELOPMENT.md)。
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 你的问题
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已尝试的步骤
+      placeholder: 已读文档、已执行的命令、观察到的现象
+    validations:
+      required: false

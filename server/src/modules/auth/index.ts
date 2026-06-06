@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import { ErrorCode } from '../../../../shared/constants/error-code'
-import { consumeFirstLoginPasswordChangePrompt, createSessionTokens, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, rotateSessionByRefreshToken, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
+import { createSessionTokens, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, rotateSessionByRefreshToken, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 import type { MenuRouteItem } from '../../shared/menu-routes'
 import { menuRouteList } from '../../shared/menu-routes'
@@ -226,10 +226,7 @@ export function registerAuthModule(app: FastifyInstance) {
       userAgent: String(request.headers['user-agent'] ?? ''),
     })
 
-    const suggestPasswordChangeOnFirstLogin = userMustChangePassword(user)
-    if (suggestPasswordChangeOnFirstLogin) {
-      await consumeFirstLoginPasswordChangePrompt(user.id)
-    }
+    const mustChangePassword = userMustChangePassword(user)
 
     return success({
       account: user.account,
@@ -240,7 +237,7 @@ export function registerAuthModule(app: FastifyInstance) {
       remember,
       accessExpiresInSec: tokens.accessExpiresInSec,
       refreshExpiresInSec: tokens.refreshExpiresInSec,
-      mustChangePassword: suggestPasswordChangeOnFirstLogin,
+      mustChangePassword,
     }, request)
   })
 
@@ -309,7 +306,7 @@ export function registerAuthModule(app: FastifyInstance) {
 
     return success({
       permissions: await findPermissionsByUserId(user.id),
-      mustChangePassword: false,
+      mustChangePassword: userMustChangePassword(user),
     }, request)
   })
 
@@ -347,12 +344,19 @@ export function registerAuthModule(app: FastifyInstance) {
       recordPasswordChangeFailure(user.id)
       return businessError('原密码错误', request)
     }
+    const forcingPasswordChange = userMustChangePassword(user)
     const lastUpdatedMs = Date.parse(user.updated_at)
-    if (!Number.isNaN(lastUpdatedMs) && Date.now() - lastUpdatedMs < PASSWORD_CHANGE_MIN_INTERVAL_MS) {
+    if (
+      !forcingPasswordChange
+      && !Number.isNaN(lastUpdatedMs)
+      && Date.now() - lastUpdatedMs < PASSWORD_CHANGE_MIN_INTERVAL_MS
+    ) {
       return businessError('密码修改过于频繁，请稍后再试', request)
     }
 
-    await updateUserPassword(user.id, newPassword)
+    await updateUserPassword(user.id, newPassword, {
+      keepSessions: forcingPasswordChange,
+    })
     clearPasswordChangeFailures(user.id)
 
     return success({

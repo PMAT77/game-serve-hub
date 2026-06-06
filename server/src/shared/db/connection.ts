@@ -18,6 +18,8 @@ interface InitDatabaseOptions {
   forcePasswordChange?: boolean
   adminUsername?: string
   adminPassword?: string
+  /** 开发/测试环境种子账号（superadmin/test）；生产环境应关闭 */
+  seedDevelopmentUsers?: boolean
 }
 
 interface AuthForcePasswordChangeState {
@@ -516,7 +518,9 @@ export async function initDatabase(
     }
   })
   await applyMigrations(path.resolve(migrationsFolder))
-  await seedDefaultUsers()
+  if (options.seedDevelopmentUsers !== false) {
+    await seedDefaultUsers()
+  }
   await seedAdminUserFromEnv(options)
   await applyForcePasswordChangePolicy(options)
   return absolutePath

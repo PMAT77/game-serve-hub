@@ -124,7 +124,7 @@ docker logs --tail 50 game-server-hub-panel
 | `ADMIN_USERNAME` | `superadmin` | 可在安装前通过环境变量覆盖 |
 | `ADMIN_PASSWORD` | `123456` | 可在安装前通过环境变量覆盖 |
 
-> **安全提示：首次部署务必改密。** 默认密码仅用于快速上手，公网或多人可访问的环境必须在首次登录后立即修改为强密码。安装脚本默认写入 `FORCE_PASSWORD_CHANGE=1`，首次登录会弹出改密建议。
+> **安全提示：首次部署务必改密。** 默认密码仅用于快速上手，公网或多人可访问的环境必须在首次登录后立即修改为强密码。安装脚本默认写入 `FORCE_PASSWORD_CHANGE=1`，首次登录会跳转至强制改密页，完成改密后方可进入面板。
 
 生产环境推荐在安装前显式指定强密码，例如：
 
@@ -147,7 +147,7 @@ docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind
 ## 使用流程（DST）
 
 1. 浏览器打开面板 URL，使用默认账号 `superadmin` / `123456`（或安装脚本输出的自定义凭证）登录。  
-2. **首次登录后立即修改密码**（`FORCE_PASSWORD_CHANGE=1` 时会弹出改密提示）。  
+2. **首次登录后立即修改密码**（`FORCE_PASSWORD_CHANGE=1` 时会进入强制改密页）。  
 3. 打开 **监控台**，确认 Docker 与主机资源正常（`docker: running`）。  
 4. **节点 → 实例管理** → 创建饥荒实例，等待 SteamCMD 安装完成。  
 5. 启动实例，进入 **实例控制台** 查看日志、下发游戏内命令。  

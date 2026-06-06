@@ -73,7 +73,14 @@ jobs:
         with:
           generate_release_notes: true
           body: |
-            面板镜像：`ghcr.io/gameserverhub/game-server-hub:${{ github.ref_name }}`
-            DST 运行镜像：`ghcr.io/gameserverhub/game-server-hub-dst:${{ github.ref_name }}`
+            完整变更见 [CHANGELOG.md](https://github.com/GameServerHub/game-server-hub/blob/${{ github.ref_name }}/CHANGELOG.md)。
 
-            升级：在 Hub「系统设置 → Hub 版本」检查更新，或执行 `docker compose pull && docker compose up -d`。
+            **镜像**
+            - 面板：`ghcr.io/gameserverhub/game-server-hub:${{ github.ref_name }}`
+            - DST：`ghcr.io/gameserverhub/game-server-hub-dst:${{ github.ref_name }}`
+
+            **升级**
+            - 面板内：「系统设置 → Hub 版本」检查更新
+            - 命令行：`docker compose pull && docker compose up -d`
+
+            发布检查清单见 [docs/RELEASE.md](https://github.com/GameServerHub/game-server-hub/blob/main/docs/RELEASE.md)。

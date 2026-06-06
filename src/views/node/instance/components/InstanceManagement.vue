@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DataTableColumns, FormInst, FormRules } from 'naive-ui'
-import type { CreateInstancePayload, InstallableGameItem, InstanceInstallLogPayload, InstanceItem, InstanceRuntimeMetrics, InstanceStatus, InstanceUpdateCheckJobPayload } from '@/api/modules/instance'
+import type { CreateInstancePayload, InstallableGameItem, InstanceItem, InstanceStatus, InstanceUpdateCheckJobPayload } from '@/api/modules/instance'
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
@@ -40,10 +40,7 @@ import {
   computeUptimeSecondsFromStartedAt,
   extractInstallProgressPercent,
   formatMemoryMb,
-  formatPollIntervalHint,
   formatUptime,
-  getInstallLogSourceLabel,
-  getInstallLogStatusLabel,
   getStatusBadgeClass,
   getStatusLabel,
   isInstanceInstallingStatus,
@@ -53,8 +50,9 @@ import {
   buildInstallResultNotification,
   shouldShowPostCreateInstallGuide,
 } from '../instanceInstallGuide'
-import { formatInstallLogForDisplay } from '../installLogFormat'
+import { useInstanceRuntimeObservability } from '../composables/useInstanceRuntimeObservability'
 import { formatDateTime } from '../utils'
+import InstanceInstallLogModal from './InstanceInstallLogModal.vue'
 
 defineOptions({
   name: 'NodeInstanceManagementPanel',
@@ -84,8 +82,12 @@ const UPDATE_CHECK_POLL_MAX_ATTEMPTS = 45
 const createLoading = ref(false)
 const actionLoadingId = ref('')
 const instances = ref<InstanceItem[]>([])
-const instanceMetrics = ref<Record<string, InstanceRuntimeMetrics | null>>({})
-const uptimeNowMs = ref(Date.now())
+const {
+  uptimeNowMs,
+  syncRuntimeObservabilityPolling,
+  stopRuntimeObservability,
+  getMetricsForInstance,
+} = useInstanceRuntimeObservability(instances)
 
 const keywordFilter = ref('')
 const statusFilter = ref<'all' | InstanceStatus>('all')
@@ -96,16 +98,8 @@ const createFormRef = ref<FormInst | null>(null)
 const installableGames = ref<InstallableGameItem[]>([])
 const createGuideTarget = ref<{ id: string, name: string } | null>(null)
 const installLogVisible = ref(false)
-const installLogLoading = ref(false)
-const installLogContent = ref('')
-const installLogMeta = ref<InstanceInstallLogPayload | null>(null)
 const installLogInstanceName = ref('')
 const installLogTargetId = ref('')
-const installLogViewportRef = ref<HTMLElement | null>(null)
-const formattedInstallLogContent = computed(() => formatInstallLogForDisplay(installLogContent.value))
-let installLogPollTimer: ReturnType<typeof setInterval> | undefined
-let metricsPollingTimer: ReturnType<typeof setInterval> | undefined
-let uptimeTickTimer: ReturnType<typeof setInterval> | undefined
 /** 安装结束后的列表/版本刷新去重，避免 watch、日志轮询与列表边沿重复触发 */
 let installTerminalRefreshInFlight: Promise<void> | null = null
 /** 曾处于安装中的实例，用于在列表刷新后补发完成/失败提示 */
@@ -115,8 +109,6 @@ const installNotifyPendingIds = new Set<string>()
 /** 列宽总和，启用横向滚动，避免中间列被挤压为 0（操作列移动端收拢为「更多」） */
 const INSTANCE_TABLE_SCROLL_X = computed(() => (isMobileMode.value ? 1210 : 1542))
 const INSTANCE_INSTALL_POLL_MS = 1000
-const INSTANCE_INSTALL_LOG_POLL_MS = 1000
-const INSTANCE_METRICS_POLL_MS = 5000
 /** 用户手动关闭通知后记录签名，避免同一批更新反复弹出 */
 const UPDATE_NOTIFY_DISMISSED_KEY = 'gsh-instance-update-dismissed'
 /** @deprecated 旧版在弹出 toast 时即写入，会阻止通知显示，挂载时清理 */
@@ -238,24 +230,6 @@ const statusCount = computed(() => {
 const instancesWithUpdate = computed(() =>
   instances.value.filter(item => item.updateAvailable),
 )
-
-/** 安装日志弹窗顶部辅助提示 */
-const installLogHint = computed(() => {
-  if (installLogMeta.value?.source === 'status_summary') {
-    return {
-      class: 'text-amber-600 dark:text-amber-400',
-      text: '以下为最近状态摘要，不是完整安装日志；安装进行中请保持弹窗打开以自动刷新。',
-    }
-  }
-  if (shouldPollInstallLog()) {
-    const interval = formatPollIntervalHint(INSTANCE_INSTALL_LOG_POLL_MS)
-    return {
-      class: 'text-sky-600 dark:text-sky-400',
-      text: `安装进行中，${interval}自动刷新日志。`,
-    }
-  }
-  return null
-})
 
 const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
   return [
@@ -552,10 +526,6 @@ function formatCpuPercent(rate: number | null | undefined) {
   return `${rate.toFixed(1)}%`
 }
 
-function getMetricsForInstance(instanceId: string) {
-  return instanceMetrics.value[instanceId] ?? null
-}
-
 function renderRuntimePlaceholder() {
   return h('span', { class: 'text-sm text-muted-foreground' }, '—')
 }
@@ -616,68 +586,6 @@ function renderInstanceUptimeColumn(row: InstanceItem) {
     },
     formatUptime(getUptimeSecondsForRow(row)),
   )
-}
-
-function stopMetricsPolling() {
-  if (metricsPollingTimer) {
-    clearInterval(metricsPollingTimer)
-    metricsPollingTimer = undefined
-  }
-}
-
-function stopUptimeTick() {
-  if (uptimeTickTimer) {
-    clearInterval(uptimeTickTimer)
-    uptimeTickTimer = undefined
-  }
-}
-
-function syncRuntimeObservabilityPolling() {
-  const hasRunning = instances.value.some(item => item.status === 'running')
-  if (!hasRunning) {
-    stopMetricsPolling()
-    stopUptimeTick()
-    instanceMetrics.value = {}
-    return
-  }
-  uptimeNowMs.value = Date.now()
-  if (!metricsPollingTimer) {
-    void fetchInstanceMetrics({ silent: true })
-    metricsPollingTimer = setInterval(() => {
-      if (!instances.value.some(item => item.status === 'running')) {
-        syncRuntimeObservabilityPolling()
-        return
-      }
-      void fetchInstanceMetrics({ silent: true })
-    }, INSTANCE_METRICS_POLL_MS)
-  }
-  if (!uptimeTickTimer) {
-    uptimeTickTimer = setInterval(() => {
-      uptimeNowMs.value = Date.now()
-      if (!instances.value.some(item => item.status === 'running')) {
-        syncRuntimeObservabilityPolling()
-      }
-    }, 1000)
-  }
-}
-
-async function fetchInstanceMetrics(options?: { silent?: boolean }) {
-  const runningIds = instances.value
-    .filter(item => item.status === 'running')
-    .map(item => item.id)
-  if (runningIds.length === 0) {
-    instanceMetrics.value = {}
-    return
-  }
-  try {
-    const res = await apiInstance.getInstanceMetrics(runningIds)
-    instanceMetrics.value = res.data.items
-  }
-  catch {
-    if (!options?.silent) {
-      faToast.error('实例资源指标刷新失败')
-    }
-  }
 }
 
 /** 是否已检查且为最新版本 */
@@ -883,74 +791,15 @@ async function fetchInstallableGames() {
   installableGames.value = res.data
 }
 
-function stopInstallLogPolling() {
-  if (installLogPollTimer) {
-    clearInterval(installLogPollTimer)
-    installLogPollTimer = undefined
-  }
-}
-
-/** 安装日志视口是否已贴底（用于判断是否跟随新日志自动滚动） */
-const INSTALL_LOG_AT_BOTTOM_THRESHOLD_PX = 24
-
-function isInstallLogViewportAtBottom(el: HTMLElement) {
-  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-  return distanceFromBottom <= INSTALL_LOG_AT_BOTTOM_THRESHOLD_PX
-}
-
-/** 更新前已贴底时，写入新内容后滚动到底部 */
-function scrollInstallLogToBottomIfNeeded(wasAtBottom: boolean) {
-  if (!installLogVisible.value || !wasAtBottom) {
-    return
-  }
-  nextTick(() => {
-    const el = installLogViewportRef.value
-    if (el) {
-      el.scrollTop = el.scrollHeight
-    }
-  })
-}
-
-/** 当前目标实例是否仍需轮询安装日志 */
-function shouldPollInstallLog() {
-  if (!installLogTargetId.value) {
-    return false
-  }
-  const row = instances.value.find(item => item.id === installLogTargetId.value)
-  return isInstanceInstallingStatus(row?.status)
-}
-
-async function fetchInstallLogContent(options?: { silent?: boolean }) {
-  if (!installLogTargetId.value) {
-    return
-  }
-  if (!options?.silent) {
-    installLogLoading.value = true
-  }
-  try {
-    const res = await apiInstance.getInstanceInstallLog(installLogTargetId.value)
-    const viewport = installLogViewportRef.value
-    const wasAtBottom = !viewport || isInstallLogViewportAtBottom(viewport)
-    installLogMeta.value = res.data
-    installLogContent.value = res.data.content || '暂无安装日志'
-    scrollInstallLogToBottomIfNeeded(wasAtBottom)
-  }
-  finally {
-    if (!options?.silent) {
-      installLogLoading.value = false
-    }
-  }
-}
-
 /** 安装/更新结束后是否应检查 Steam 远端版本（仅成功且已停止） */
 function shouldCheckVersionAfterInstall(instanceId: string) {
   if (!steamcmdInstalled.value) {
     return false
   }
-  if (installLogTargetId.value === instanceId && installLogMeta.value?.status === 'failed') {
+  const row = instances.value.find(item => item.id === instanceId)
+  if (row?.status === 'error') {
     return false
   }
-  const row = instances.value.find(item => item.id === instanceId)
   return row?.status === 'stopped'
 }
 
@@ -1025,42 +874,11 @@ function handleInstallTerminal(preferredInstanceId?: string) {
   return installTerminalRefreshInFlight
 }
 
-/** 在弹窗打开且实例安装中时启动日志轮询 */
-function startInstallLogPolling() {
-  stopInstallLogPolling()
-  if (!shouldPollInstallLog()) {
-    return
-  }
-  installLogPollTimer = setInterval(() => {
-    if (!installLogVisible.value) {
-      stopInstallLogPolling()
-      return
-    }
-    if (shouldPollInstallLog()) {
-      void fetchInstallLogContent({ silent: true })
-    }
-    else {
-      stopInstallLogPolling()
-      void handleInstallTerminal(installLogTargetId.value)
-    }
-  }, INSTANCE_INSTALL_LOG_POLL_MS)
-}
-
 async function openInstallLogModal(instance: InstanceItem) {
   blurFocusedElement()
   installLogTargetId.value = instance.id
   installLogInstanceName.value = instance.name
   installLogVisible.value = true
-  installLogContent.value = ''
-  installLogMeta.value = null
-  await fetchInstallLogContent()
-  startInstallLogPolling()
-}
-
-/** 关闭安装日志弹窗并停止轮询 */
-function closeInstallLogModal() {
-  installLogVisible.value = false
-  stopInstallLogPolling()
 }
 
 function buildUpdateNotifySignature(list: InstanceItem[]) {
@@ -1118,15 +936,6 @@ watch(
   instancesWithUpdate,
   pending => syncInstanceUpdateNotification(pending),
   { deep: true, immediate: true },
-)
-
-watch(
-  () => installLogMeta.value?.status,
-  (status, previous) => {
-    if (previous === 'running' && (status === 'success' || status === 'failed')) {
-      void handleInstallTerminal(installLogTargetId.value)
-    }
-  },
 )
 
 /** 记录安装中实例，并在其离开安装态后提示结果 */
@@ -1484,7 +1293,7 @@ onMounted(async () => {
     fetchInstallableGames(),
     fetchInstances(),
   ])
-  void fetchInstanceMetrics({ silent: true })
+  syncRuntimeObservabilityPolling()
 })
 
 let hadInstallingInstance = false
@@ -1503,9 +1312,7 @@ const instancePollingTimer = setInterval(() => {
 
 onBeforeUnmount(() => {
   clearInterval(instancePollingTimer)
-  stopInstallLogPolling()
-  stopMetricsPolling()
-  stopUptimeTick()
+  stopRuntimeObservability()
   dismissInstanceUpdateNotification()
 })
 </script>
@@ -1687,42 +1494,12 @@ onBeforeUnmount(() => {
       </template>
     </NModal>
 
-    <NModal
+    <InstanceInstallLogModal
       v-model:show="installLogVisible"
-      preset="card"
-      :title="`安装日志 - ${installLogInstanceName || '实例'}`"
-      :style="{ width: '760px' }"
-      @after-leave="stopInstallLogPolling"
-    >
-      <div class="space-y-3">
-        <div class="text-xs text-muted-foreground space-y-1">
-          <p>
-            <span>来源：{{ getInstallLogSourceLabel(installLogMeta?.source) }}</span>
-            <span class="ml-4">状态：{{ getInstallLogStatusLabel(installLogMeta?.status) }}</span>
-            <span class="ml-4">更新时间：{{ formatDateTime(installLogMeta?.updatedAt || null) }}</span>
-          </p>
-          <p v-if="installLogHint" :class="installLogHint.class">
-            {{ installLogHint.text }}
-          </p>
-        </div>
-        <NSpin :show="installLogLoading">
-          <pre
-            ref="installLogViewportRef"
-            class="max-h-96 overflow-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-foreground"
-          >{{ formattedInstallLogContent || '暂无安装日志' }}</pre>
-        </NSpin>
-      </div>
-      <template #footer>
-        <NSpace justify="end">
-          <NButton :loading="installLogLoading" @click="fetchInstallLogContent()">
-            刷新
-          </NButton>
-          <NButton @click="closeInstallLogModal">
-            关闭
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
+      :instance-id="installLogTargetId"
+      :instance-name="installLogInstanceName"
+      @terminal="handleInstallTerminal"
+    />
   </FaPageMain>
 </template>
 

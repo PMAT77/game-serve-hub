@@ -17,6 +17,8 @@ docs/*
 !docs/README.md
 !docs/INSTALL.md
 !docs/DEVELOPMENT.md
+!docs/RELEASE.md
+!docs/MEMORY.md
 !docs/assets/
 !docs/assets/**
 !docs/images/

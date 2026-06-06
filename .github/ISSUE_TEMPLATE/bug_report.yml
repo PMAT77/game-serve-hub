@@ -1,0 +1,85 @@
+name: Bug 报告
+description: 报告可复现的缺陷或异常行为
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请搜索 [已有 Issue](https://github.com/GameServerHub/game-server-hub/issues)。
+        安全漏洞请走 [Security Advisories](https://github.com/GameServerHub/game-server-hub/security/advisories/new)。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题摘要
+      description: 一句话说明发生了什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 尽量写清从安装/登录到出错的完整路径
+      placeholder: |
+        1. ...
+        2. ...
+        3. 看到错误
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: 部署方式
+      options:
+        - Linux 安装脚本
+        - Docker Compose（生产）
+        - 本地 pnpm dev
+        - 本地 dev:compose
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 镜像 tag
+      placeholder: "例如 v0.1.0 或 main-abc1234"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境信息
+      description: OS、Docker 版本、Node 版本等
+      placeholder: |
+        OS: Ubuntu 22.04
+        Docker: 27.x
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 请脱敏（密码、Token、内网 IP）
+    validations:
+      required: false

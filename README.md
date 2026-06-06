@@ -2,12 +2,13 @@
 
 [License: MIT](LICENSE)
 [GitHub](https://github.com/GameServerHub/game-server-hub)
+![CI](https://github.com/GameServerHub/game-server-hub/actions/workflows/ci.yml/badge.svg)
 ![Public Beta](https://img.shields.io/badge/status-Public%20Beta%20(Pre--1.0)-orange)
 
 开源 **Steam 专用服务器** 运维面板，把部署、运行和日常管理收进同一套界面。  
 v1 先从 **饥荒联机版（Don't Starve Together）** 做起，支持一键开服。
 
-> **当前版本：v0.x 公测（Pre-1.0 / Public Beta）** — 核心链路（安装、实例、DST 开服）可用；v1 完整能力仍在开发中，升级前请关注 [Release](https://github.com/GameServerHub/game-server-hub/releases) 说明。
+> **当前版本：v0.1.0 公测（Pre-1.0 / Public Beta）** — 核心链路（安装、实例、DST 开服）可用；v1 完整能力仍在开发中。升级前请阅读 [CHANGELOG](CHANGELOG.md) 与 [Release](https://github.com/GameServerHub/game-server-hub/releases)。
 
 ## 界面预览
 
@@ -63,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/main/
 | 密码  | `123456`     |
 
 
-安装脚本会写入上述初始凭证（可通过环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 覆盖）。**首次部署上线后务必立即修改密码**；默认启用 `FORCE_PASSWORD_CHANGE=1`，首次登录会提示改密。详见 [INSTALL.md](docs/INSTALL.md#默认管理员账号与安全)。
+安装脚本会写入上述初始凭证（可通过环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 覆盖）。**首次部署上线后务必立即修改密码**；默认启用 `FORCE_PASSWORD_CHANGE=1`，首次登录会进入强制改密页。生产环境若未设置 `ADMIN_PASSWORD`，后端将自动生成随机密码并写入启动日志。详见 [INSTALL.md](docs/INSTALL.md#默认管理员账号与安全)。
 
 ---
 
@@ -74,7 +75,11 @@ curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/main/
 | ------------------------------------------ | -------------- |
 | [docs/README.md](docs/README.md)           | 公开文档索引         |
 | [docs/INSTALL.md](docs/INSTALL.md)         | 生产安装、DST 使用、运维 |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 本地开发、测试与贡献     |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 本地开发、测试        |
+| [docs/RELEASE.md](docs/RELEASE.md)         | 版本与发布流程        |
+| [CHANGELOG.md](CHANGELOG.md)               | 版本变更记录         |
+| [CONTRIBUTING.md](CONTRIBUTING.md)         | 参与贡献           |
+| [SECURITY.md](SECURITY.md)                 | 安全报告           |
 
 
 ---
@@ -90,17 +95,17 @@ curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/main/
 | 监控台 | 主机 CPU / 内存 / 磁盘、Docker 概况、网卡实时流量 |
 | DST 房间 | Cluster 配置与可视化管理 |
 | DST 世界 | Master / Caves 分片与世界生成规则配置 |
-| 实例控制台 | 日志流（SSE）、游戏内命令下发、连接信息 |
-| 系统与认证 | 管理员账号、首次改密与基础系统设置 |
+| DST Mod | Steam 工坊浏览、订阅安装、启停与加载顺序 |
+| 实例控制台 | 日志流（SSE）、游戏内命令下发、连接信息、维护公告 |
+| 系统与认证 | 管理员账号、强制首次改密与基础系统设置 |
 
 ### 即将上线
 
 v1 仍在补齐以下能力，将按规划陆续发布：
 
-- **Mod 管理**：订阅 Mod 列表、依赖提示与启停
 - **游戏大厅与玩家**：大厅展示配置、访问名单与在线玩家视图
-- **存档备份**：手动备份与一键恢复
-- **运维工具**：文件管理、配置中心、维护公告推送、通知与操作审计等 
+- **存档备份**：手动备份与一键恢复（`backup` 模块占位，尚未接线）
+- **运维工具**：文件管理、配置中心、通知与操作审计等（`file` / `config` 模块占位，尚未接线）
 
 ---
 
@@ -122,7 +127,7 @@ v1 仍在补齐以下能力，将按规划陆续发布：
 
 ## 参与贡献
 
-欢迎 [Issue](https://github.com/GameServerHub/game-server-hub/issues) 与 [Pull Request](https://github.com/GameServerHub/game-server-hub/pulls)。开发环境搭建与提交规范见 **[开发指南](docs/DEVELOPMENT.md)**。
+欢迎 [Issue](https://github.com/GameServerHub/game-server-hub/issues) 与 [Pull Request](https://github.com/GameServerHub/game-server-hub/pulls)。请阅读 **[CONTRIBUTING.md](CONTRIBUTING.md)**；PR 合并前需通过 **[CI](.github/workflows/ci.yml)**（`lint` + `test:unit` + 构建）。版本发布见 **[docs/RELEASE.md](docs/RELEASE.md)** 与 **[CHANGELOG.md](CHANGELOG.md)**。
 
 ---
 

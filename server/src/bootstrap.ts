@@ -46,7 +46,13 @@ export async function bootstrap() {
     forcePasswordChange: config.forcePasswordChange,
     adminUsername: config.adminUsername,
     adminPassword: config.adminPassword,
+    seedDevelopmentUsers: config.mode !== 'production',
   })
+  if (config.adminPasswordGenerated) {
+    app.log.warn(
+      `生产环境未配置 ADMIN_PASSWORD，已为管理员「${config.adminUsername}」自动生成初始密码（仅此一次日志，请立即保存）: ${config.adminPassword}`,
+    )
+  }
   await syncPanelPortSettingIfStale(config.port)
 
   try {

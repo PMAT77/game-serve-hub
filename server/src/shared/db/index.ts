@@ -53,7 +53,7 @@ export function userMustChangePassword(user: Pick<DbUserRow, 'must_change_passwo
   return user.must_change_password === 1
 }
 
-/** 首次登录改密提示已展示：清除用户标记，并结束安装阶段的 FORCE_PASSWORD_CHANGE 待办 */
+/** 清除强制改密标记，并结束安装阶段的 FORCE_PASSWORD_CHANGE 待办（改密成功时由 updateUserPassword 处理） */
 export async function consumeFirstLoginPasswordChangePrompt(userId: string) {
   const { drizzleDb } = ensureDb()
   const now = nowIso()
@@ -340,7 +340,11 @@ export async function findPermissionsByUserId(userId: string): Promise<string[]>
   return rows.map(row => row.permission)
 }
 
-export async function updateUserPassword(userId: string, newPassword: string) {
+export async function updateUserPassword(
+  userId: string,
+  newPassword: string,
+  options: { keepSessions?: boolean } = {},
+) {
   const { drizzleDb } = ensureDb()
   const now = nowIso()
   await drizzleDb
@@ -352,7 +356,9 @@ export async function updateUserPassword(userId: string, newPassword: string) {
     })
     .where(eq(users.id, userId))
 
-  await revokeSessionsByUserId(userId)
+  if (!options.keepSessions) {
+    await revokeSessionsByUserId(userId)
+  }
 
   const state = await getAuthForcePasswordChangeState()
   if (state?.pending) {

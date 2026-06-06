@@ -12,14 +12,28 @@ function setupRoutes(router: Router) {
     const appMenuStore = useAppMenuStore()
     // 是否已登录
     if (appAccountStore.isLogin) {
+      if (appAccountStore.mustChangePassword && to.name !== 'forceChangePassword') {
+        return {
+          name: 'forceChangePassword',
+          replace: true,
+        }
+      }
+      if (to.name === 'forceChangePassword' && !appAccountStore.mustChangePassword) {
+        return {
+          path: appSettingsStore.settings.app.home.fullPath,
+          replace: true,
+        }
+      }
       // 是否已根据权限动态生成并注册路由
       if (appRouteStore.isGenerate) {
         // 导航菜单如果不是 single 模式，则需要根据 path 定位主导航菜单的选中状态
         appSettingsStore.settings.menu.mode !== 'single' && appMenuStore.setActived(appMenuStore.resolveActivedPathFromRoute(to))
-        // 如果已登录状态下，进入登录页会强制跳转到主页
+        // 如果已登录状态下，进入登录页会强制跳转到主页（强制改密流程除外）
         if (to.name === 'login') {
           return {
-            path: appSettingsStore.settings.app.home.fullPath,
+            path: appAccountStore.mustChangePassword
+              ? '/force-change-password'
+              : appSettingsStore.settings.app.home.fullPath,
             replace: true,
           }
         }

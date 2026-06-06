@@ -4,7 +4,6 @@ import Login from '@/components/AppAccountForm/login.vue'
 import Register from '@/components/AppAccountForm/register.vue'
 import ResetPassword from '@/components/AppAccountForm/reset-password.vue'
 import ColorScheme from '@/layouts/components/Topbar/Toolbar/ColorScheme/index.vue'
-import { promptPasswordChangeIfNeeded } from '@/composables/app/password-change-prompt'
 import { ensureDynamicRoutes } from '@/router/ensure-dynamic-routes'
 import settingsDefault from '@/settings'
 
@@ -26,6 +25,12 @@ const formType = ref<'login' | 'register' | 'resetPassword'>('login')
 
 async function handleLogin() {
   const data = diffTwoObj(settingsDefault, appSettingsStore.settings)
+  const appAccountStore = useAppAccountStore()
+
+  if (appAccountStore.mustChangePassword) {
+    await router.replace('/force-change-password')
+    return
+  }
 
   try {
     await ensureDynamicRoutes(router)
@@ -44,8 +49,6 @@ async function handleLogin() {
   if (Object.keys(data).length > 0) {
     appSettingsStore.updateSettings(data)
   }
-  await nextTick()
-  promptPasswordChangeIfNeeded()
 }
 </script>
 

@@ -1,0 +1,47 @@
+name: 功能建议
+description: 提议新功能或改进现有能力
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        v0.x 阶段优先 DST 核心链路。大范围新游戏支持请先开 Issue 讨论范围。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题？
+      description: 从用户场景出发，而非直接说实现方案
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案（可选）
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 影响范围
+      options:
+        - DST 游戏域
+        - 实例 / 节点
+        - 安装与部署
+        - 监控 / 运维
+        - 面板框架 / UI
+        - 其他
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: 参与意愿
+      options:
+        - label: 我愿意提交 PR 实现（或协助验证）
+          required: false

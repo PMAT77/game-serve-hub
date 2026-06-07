@@ -65,18 +65,32 @@ const updateIntervalInput = computed({
   },
 })
 
-const hasHubUpdate = computed(() => {
+const canApplyPanelUpdate = computed(() => {
   if (!updateStatus.value) {
     return false
   }
-  return updateStatus.value.panel.updateAvailable || updateStatus.value.dst.updateAvailable
+  return updateStatus.value.panel.updateAvailable && updateStatus.value.panelApplySupported
+})
+
+const canApplyDstUpdate = computed(() => {
+  if (!updateStatus.value) {
+    return false
+  }
+  return updateStatus.value.dst.updateAvailable && updateStatus.value.dstApplySupported
 })
 
 const canApplyUpdate = computed(() => {
   if (!updateStatus.value || updateStatus.value.updating) {
     return false
   }
-  return hasHubUpdate.value && updateStatus.value.applySupported
+  return canApplyPanelUpdate.value || canApplyDstUpdate.value
+})
+
+const showPanelApplyHint = computed(() => {
+  if (!updateStatus.value) {
+    return false
+  }
+  return updateStatus.value.panel.updateAvailable && !updateStatus.value.panelApplySupported
 })
 
 const formattedLastCheckedAt = computed(() => formatDisplayDateTime(updateStatus.value?.lastCheckedAt ?? null))
@@ -120,8 +134,8 @@ function normalizeApplyHint(value: string | null): string | null {
   if (!value) {
     return null
   }
-  if (/缺少 compose 文件|缺少环境文件|未配置 GSH_STACK_DIR|GSH_STACK_DIR 必须是绝对路径/.test(value)) {
-    return '当前环境不支持一键更新，请使用下方命令手动更新。'
+  if (/无法在容器内访问 compose|未配置 GSH_STACK_DIR|GSH_STACK_DIR 必须是绝对路径/.test(value)) {
+    return '面板镜像无法一键更新，请使用下方命令手动更新；DST 运行镜像仍可点击「立即更新」。'
   }
   return value
 }
@@ -193,7 +207,14 @@ async function applyHubUpdate() {
   }
   applyLoading.value = true
   try {
-    const res = await apiSystem.applyPanelUpdate()
+    const targets: Array<'panel' | 'dst'> = []
+    if (canApplyPanelUpdate.value) {
+      targets.push('panel')
+    }
+    if (canApplyDstUpdate.value) {
+      targets.push('dst')
+    }
+    const res = await apiSystem.applyPanelUpdate({ targets })
     faToast.success(res.data.message)
     if (res.data.status === 'updating') {
       updateStatus.value = updateStatus.value
@@ -203,6 +224,10 @@ async function applyHubUpdate() {
     else {
       await loadUpdateStatus()
     }
+  }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'Hub 镜像更新失败'
+    faToast.error(message)
   }
   finally {
     applyLoading.value = false
@@ -240,7 +265,7 @@ onMounted(async () => {
 })
 
 onActivated(async () => {
-  await loadSettings({ silent: true })
+  await Promise.all([loadSettings({ silent: true }), loadUpdateStatus()])
 })
 </script>
 
@@ -289,11 +314,11 @@ onActivated(async () => {
           <p v-if="normalizedCheckError" class="text-xs text-amber-600 dark:text-amber-400">
             检查提示：{{ normalizedCheckError }}
           </p>
-          <p v-if="normalizedApplyHint && hasHubUpdate" class="text-xs text-muted-foreground">
+          <p v-if="normalizedApplyHint && showPanelApplyHint" class="text-xs text-muted-foreground">
             {{ normalizedApplyHint }}
           </p>
           <pre
-            v-if="updateStatus.manualUpdateCommand && !updateStatus.applySupported"
+            v-if="updateStatus.manualUpdateCommand && showPanelApplyHint"
             class="text-xs bg-muted overflow-x-auto p-3 rounded-md"
           >{{ updateStatus.manualUpdateCommand }}</pre>
           <div
@@ -319,7 +344,7 @@ onActivated(async () => {
           </FaButton>
         </div>
         <p class="text-xs text-muted-foreground">
-          仅更新检测到新版本的镜像。面板更新会短暂重启管理面板（约 30 秒），通常不会中断已运行游戏实例；DST 运行镜像更新后需重启实例才生效。
+          仅更新检测到新版本的镜像。面板更新会短暂重启管理面板（约 30 秒），通常不会中断已运行游戏实例；DST 运行镜像可单独一键拉取，更新后需重启实例才生效。
         </p>
       </section>
 

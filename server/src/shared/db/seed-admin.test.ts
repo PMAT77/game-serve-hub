@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { after, before, describe, it } from 'node:test'
+import { after, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { closeDatabase, findUserByAccount, initDatabase, updateUserPassword, verifyPassword } from '../../shared/db/index'
 

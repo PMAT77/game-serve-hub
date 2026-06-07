@@ -42,10 +42,30 @@ export interface PanelUpdateStatus {
   lastCheckedAt: string | null
   checking: boolean
   updating: boolean
+  /** 至少有一种镜像支持一键更新（面板或 DST） */
   applySupported: boolean
+  panelApplySupported: boolean
+  dstApplySupported: boolean
   applyHint: string | null
   manualUpdateCommand: string | null
   checkError: string | null
+}
+
+export const STACK_CONTAINER_MOUNT = '/stack'
+
+export interface StackPaths {
+  /** 宿主机路径，用于 Docker bind 挂载与手动更新命令 */
+  hostDir: string
+  /** 面板进程内可访问的路径（容器内通常为 /stack） */
+  localDir: string
+}
+
+export interface ApplySupport {
+  panelSupported: boolean
+  dstSupported: boolean
+  supported: boolean
+  hint: string | null
+  stackPaths: StackPaths | null
 }
 
 const DEFAULT_CHECK_INTERVAL_HOURS = 1
@@ -155,49 +175,89 @@ async function fetchLatestGitHubRelease(repo: string): Promise<GitHubReleaseSumm
   }
 }
 
-function buildManualUpdateCommand(): string {
+export function hasStackRequiredFiles(baseDir: string, composeFiles: string[]): boolean {
+  const envPath = path.join(baseDir, 'panel.env')
+  if (!fs.existsSync(envPath)) {
+    return false
+  }
+  return composeFiles.every(file => fs.existsSync(path.join(baseDir, file)))
+}
+
+export function resolveStackPaths(
+  stackDir: string,
+  composeFiles: string[],
+  mountPath = STACK_CONTAINER_MOUNT,
+): StackPaths | null {
+  const hostDir = stackDir.trim()
+  if (!hostDir || !path.isAbsolute(hostDir)) {
+    return null
+  }
+  if (hasStackRequiredFiles(hostDir, composeFiles)) {
+    return { hostDir, localDir: hostDir }
+  }
+  if (hasStackRequiredFiles(mountPath, composeFiles)) {
+    return { hostDir, localDir: mountPath }
+  }
+  return null
+}
+
+function buildManualUpdateCommand(stackPaths: StackPaths | null): string {
   const config = loadServerConfig()
+  const hostDir = stackPaths?.hostDir || config.stackDir || '/opt/game-server-hub'
   const composeArgs = config.composeFiles.map(file => `-f ${file}`).join(' ')
   return [
-    `cd ${config.stackDir || '/opt/game-server-hub'}`,
+    `cd ${hostDir}`,
     `docker compose --env-file panel.env ${composeArgs} pull`,
+    `docker pull ${config.gameDstImage}`,
     `docker compose --env-file panel.env ${composeArgs} up -d`,
   ].join(' && ')
 }
 
-function resolveApplySupport(): { supported: boolean, hint: string | null } {
-  const config = loadServerConfig()
+export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   if (!config.stackDir) {
     return {
-      supported: false,
+      panelSupported: false,
+      dstSupported: true,
+      supported: true,
       hint: '未配置 GSH_STACK_DIR，无法一键更新面板。请在 panel.env 中设置后重启面板，或使用下方手动命令。',
+      stackPaths: null,
     }
   }
   if (!path.isAbsolute(config.stackDir)) {
     return {
-      supported: false,
+      panelSupported: false,
+      dstSupported: true,
+      supported: true,
       hint: 'GSH_STACK_DIR 必须是绝对路径。',
+      stackPaths: null,
     }
   }
-  for (const composeFile of config.composeFiles) {
-    const composePath = path.join(config.stackDir, composeFile)
-    if (!fs.existsSync(composePath)) {
-      return {
-        supported: false,
-        hint: `缺少 compose 文件：${composePath}`,
-      }
-    }
-  }
-  const envPath = path.join(config.stackDir, 'panel.env')
-  if (!fs.existsSync(envPath)) {
+  const stackPaths = resolveStackPaths(config.stackDir, config.composeFiles)
+  if (!stackPaths) {
     return {
-      supported: false,
-      hint: `缺少环境文件：${envPath}`,
+      panelSupported: false,
+      dstSupported: true,
+      supported: true,
+      hint: '面板无法在容器内访问 compose 目录，无法一键更新面板。请使用下方手动命令。',
+      stackPaths: null,
     }
   }
   return {
+    panelSupported: true,
+    dstSupported: true,
     supported: true,
     hint: null,
+    stackPaths,
+  }
+}
+
+function buildApplyFields(applySupport: ApplySupport) {
+  return {
+    applySupported: applySupport.supported,
+    panelApplySupported: applySupport.panelSupported,
+    dstApplySupported: applySupport.dstSupported,
+    applyHint: applySupport.hint,
+    manualUpdateCommand: buildManualUpdateCommand(applySupport.stackPaths),
   }
 }
 
@@ -256,7 +316,7 @@ async function buildImageUpdateInfo(
 
 function buildEmptyStatus(): PanelUpdateStatus {
   const config = loadServerConfig()
-  const applySupport = resolveApplySupport()
+  const applySupport = resolveApplySupport(config)
   const emptyImage = (image: string): HubImageUpdateInfo => ({
     image,
     tag: parseImageRef(image).tag,
@@ -276,9 +336,7 @@ function buildEmptyStatus(): PanelUpdateStatus {
     lastCheckedAt: null,
     checking: false,
     updating,
-    applySupported: applySupport.supported,
-    applyHint: applySupport.hint,
-    manualUpdateCommand: buildManualUpdateCommand(),
+    ...buildApplyFields(applySupport),
     checkError: null,
   }
 }
@@ -294,7 +352,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
 
   checkInFlight = (async () => {
     const config = loadServerConfig()
-    const applySupport = resolveApplySupport()
+    const applySupport = resolveApplySupport(config)
     const envReleaseVersion = resolveReleaseVersionFromEnv()
     const [panel, dst, release] = await Promise.all([
       buildImageUpdateInfo(config.panelImage, envReleaseVersion),
@@ -310,9 +368,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       lastCheckedAt: new Date().toISOString(),
       checking: false,
       updating,
-      applySupported: applySupport.supported,
-      applyHint: applySupport.hint,
-      manualUpdateCommand: buildManualUpdateCommand(),
+      ...buildApplyFields(applySupport),
       checkError: checkErrors,
     }
     cachedStatus = nextStatus
@@ -342,8 +398,8 @@ function buildComposeCommand(action: 'pull' | 'up'): string {
 
 async function startPanelComposeUpdater(): Promise<void> {
   const config = loadServerConfig()
-  const applySupport = resolveApplySupport()
-  if (!applySupport.supported || !config.stackDir) {
+  const applySupport = resolveApplySupport(config)
+  if (!applySupport.panelSupported || !applySupport.stackPaths) {
     throw new Error(applySupport.hint || '当前环境不支持一键更新面板')
   }
 
@@ -370,7 +426,7 @@ async function startPanelComposeUpdater(): Promise<void> {
       AutoRemove: true,
       Binds: [
         '/var/run/docker.sock:/var/run/docker.sock',
-        `${config.stackDir}:/stack:ro`,
+        `${applySupport.stackPaths.hostDir}:/stack:ro`,
       ],
     },
   }).then(container => container.start())
@@ -384,10 +440,14 @@ export async function applyPanelUpdates(
   }
 
   const status = cachedStatus ?? await refreshPanelUpdateStatus()
+  const applySupport = resolveApplySupport()
   const requested = targets?.length
     ? targets
     : (['panel', 'dst'] as Array<'panel' | 'dst'>).filter((target) => {
-      return target === 'panel' ? status.panel.updateAvailable : status.dst.updateAvailable
+      if (target === 'panel') {
+        return status.panel.updateAvailable && applySupport.panelSupported
+      }
+      return status.dst.updateAvailable && applySupport.dstSupported
     })
 
   if (requested.length === 0) {

@@ -43,9 +43,11 @@ const panelUpdateStatus = {
   lastCheckedAt: new Date().toISOString(),
   checking: false,
   updating: false,
-  applySupported: false,
+  applySupported: true,
+  panelApplySupported: false,
+  dstApplySupported: true,
   applyHint: '开发环境未配置 GSH_STACK_DIR',
-  manualUpdateCommand: 'cd /opt/game-server-hub && docker compose pull && docker compose up -d',
+  manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull && docker pull ghcr.io/gameserverhub/game-server-hub-dst:latest && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d',
   checkError: null,
 }
 

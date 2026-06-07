@@ -42,6 +42,8 @@ export interface PanelUpdateStatusPayload {
   checking: boolean
   updating: boolean
   applySupported: boolean
+  panelApplySupported: boolean
+  dstApplySupported: boolean
   applyHint: string | null
   manualUpdateCommand: string | null
   checkError: string | null

@@ -41,7 +41,7 @@ jobs:
 
       - name: Unit tests
         env:
-          NODE_ENV: test
+          GSH_UNIT_TEST: '1'
         run: pnpm test:unit
 
   build:

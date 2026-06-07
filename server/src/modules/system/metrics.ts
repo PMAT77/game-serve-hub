@@ -343,7 +343,7 @@ function startSlowMetricsRefreshLoops() {
 }
 
 export function warmSystemMetricsCaches() {
-  if (process.env.NODE_ENV === 'test') {
+  if (process.env.GSH_UNIT_TEST === '1') {
     return
   }
   getCachedPanelVersion()

@@ -71,6 +71,7 @@ function createSsrWorkshopHtml(): string {
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+  __steamWorkshopTestUtils.resetRuntimeForTests()
 })
 
 describe('steam workshop parser', () => {

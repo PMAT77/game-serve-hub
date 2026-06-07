@@ -32,7 +32,7 @@
     "webp:to-png": "tsx ./scripts/webp-to-png.ts",
     "lint": "vue-tsc -b",
     "test:server": "tsx --test server/src/**/*.test.ts",
-    "test:unit": "tsx --test --test-force-exit --test-concurrency=1 server/src/**/*.test.ts scripts/**/*.test.ts src/views/node/instance/instanceStartGuide.test.ts",
+    "test:unit": "node scripts/run-unit-tests.mjs",
     "release:check": "pnpm run lint && pnpm test:unit && pnpm run build"
   },
   "dependencies": {

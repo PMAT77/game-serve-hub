@@ -40,6 +40,8 @@ jobs:
         run: pnpm run lint
 
       - name: Unit tests
+        env:
+          NODE_ENV: test
         run: pnpm test:unit
 
   build:

@@ -343,6 +343,9 @@ function startSlowMetricsRefreshLoops() {
 }
 
 export function warmSystemMetricsCaches() {
+  if (process.env.NODE_ENV === 'test') {
+    return
+  }
   getCachedPanelVersion()
   startSlowMetricsRefreshLoops()
   startNetworkRealtimeSampler()

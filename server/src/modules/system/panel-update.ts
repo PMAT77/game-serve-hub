@@ -489,6 +489,9 @@ async function scheduleNextCheck(app: FastifyInstance) {
 }
 
 export function schedulePanelUpdateChecks(app: FastifyInstance) {
+  if (process.env.NODE_ENV === 'test') {
+    return
+  }
   if (schedulerStarted) {
     return
   }

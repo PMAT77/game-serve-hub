@@ -30,7 +30,7 @@ import type {
 } from './types'
 
 export * from './types'
-export { initDatabase, verifyPassword } from './connection'
+export { closeDatabase, initDatabase, verifyPassword } from './connection'
 export * from './instance-repository'
 
 interface DbUserRow {

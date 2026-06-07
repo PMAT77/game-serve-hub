@@ -8,7 +8,7 @@ import Fastify from 'fastify'
 import type { FastifyInstance } from 'fastify'
 import { registerAuthModule } from './index'
 import { registerSystemModule } from '../system/index'
-import { initDatabase } from '../../shared/db/index'
+import { initDatabase, closeDatabase } from '../../shared/db/index'
 
 interface ApiEnvelope<T> {
   status: 0 | 1
@@ -48,6 +48,7 @@ describe('force password change flow', () => {
 
   after(async () => {
     await app.close()
+    closeDatabase()
   })
 
   it('login returns mustChangePassword and blocks protected routes until password edit', async () => {

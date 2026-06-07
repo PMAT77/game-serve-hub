@@ -46,6 +46,7 @@ export async function bootstrap() {
     forcePasswordChange: config.forcePasswordChange,
     adminUsername: config.adminUsername,
     adminPassword: config.adminPassword,
+    syncAdminPasswordFromEnv: config.syncAdminPasswordFromEnv,
     seedDevelopmentUsers: config.mode !== 'production',
   })
   if (config.adminPasswordGenerated) {

@@ -3,6 +3,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import * as z from 'zod'
 import { APP_TITLE } from '@/utils/app-title'
+import { readSavedLoginCredentials, saveLoginCredentials } from '@/utils/login-credentials'
 import { FormControl, FormField, FormItem, FormMessage } from '@/ui/shadcn/ui/form'
 
 defineOptions({
@@ -41,12 +42,28 @@ function resolveLoginInitialValues() {
       challengeAnswer: '',
     }
   }
+  const saved = readSavedLoginCredentials()
   return {
-    account: props.account ?? localStorage.getItem('login_account') ?? '',
-    password: localStorage.getItem('login_remember') === '1' ? (localStorage.getItem('login_password') ?? '') : '',
-    remember: localStorage.getItem('login_remember') === '1',
+    account: props.account ?? saved.account,
+    password: saved.password,
+    remember: saved.remember,
     challengeAnswer: '',
   }
+}
+
+function restoreSavedCredentials() {
+  if (import.meta.env.DEV) {
+    return
+  }
+  const saved = readSavedLoginCredentials()
+  form.resetForm({
+    values: {
+      ...form.values,
+      account: props.account ?? saved.account,
+      password: saved.password,
+      remember: saved.remember,
+    },
+  })
 }
 
 interface LoginErrorPayload {
@@ -97,6 +114,15 @@ const form = useForm({
   })),
   initialValues: resolveLoginInitialValues(),
 })
+
+onMounted(() => {
+  restoreSavedCredentials()
+})
+
+onActivated(() => {
+  restoreSavedCredentials()
+})
+
 const onSubmit = form.handleSubmit(async (values) => {
   if (captchaRequired.value && !values.challengeAnswer?.trim()) {
     form.setFieldError('challengeAnswer', '请输入验证码结果')
@@ -106,19 +132,15 @@ const onSubmit = form.handleSubmit(async (values) => {
   try {
     await appAccountStore.login({
       ...values,
+      remember: values.remember === true,
       challengeToken: challengeToken.value || undefined,
       challengeAnswer: values.challengeAnswer?.trim() || undefined,
     })
-    if (values.remember) {
-      localStorage.setItem('login_account', values.account)
-      localStorage.setItem('login_password', values.password)
-      localStorage.setItem('login_remember', '1')
-    }
-    else {
-      localStorage.removeItem('login_account')
-      localStorage.removeItem('login_password')
-      localStorage.removeItem('login_remember')
-    }
+    saveLoginCredentials({
+      account: values.account,
+      password: values.password,
+      remember: values.remember === true,
+    })
     captchaRequired.value = false
     challengeToken.value = ''
     challengeQuestion.value = ''
@@ -218,11 +240,20 @@ function testAccount(account: string) {
         </FormField>
         <div class="mb-4 flex-center-between">
           <div class="flex-center-start">
-            <FormField v-slot="{ componentField }" type="checkbox" name="remember">
+            <FormField
+              v-slot="{ value, handleChange }"
+              name="remember"
+              type="checkbox"
+              :value="true"
+              :unchecked-value="false"
+            >
               <FormItem>
                 <FormControl>
-                  <FaCheckbox v-bind="componentField">
-                    记住我
+                  <FaCheckbox
+                    :model-value="value === true"
+                    @update:model-value="handleChange"
+                  >
+                    记住账号和密码
                   </FaCheckbox>
                 </FormControl>
               </FormItem>

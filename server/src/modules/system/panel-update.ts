@@ -4,11 +4,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pullGameDstImage } from '../../infra/container'
 import {
-  buildRegistryManifestUrl,
   normalizeDigest,
   parseImageRef,
   shortDigest,
 } from '../../infra/container/image-ref'
+import { fetchRemoteImageDigest } from '../../infra/container/registry-manifest'
 import { resolveDockerConnectOptions } from '../../infra/docker-connect'
 import { loadServerConfig } from '../../shared/config'
 import { getSystemPanelSettings } from '../../shared/db/index'
@@ -115,28 +115,6 @@ async function inspectLocalImageDigest(image: string): Promise<{
       releaseVersion: null,
     }
   }
-}
-
-async function fetchRemoteImageDigest(image: string): Promise<string | null> {
-  const parsed = parseImageRef(image)
-  const response = await fetch(buildRegistryManifestUrl(parsed), {
-    method: 'HEAD',
-    headers: {
-      Accept: [
-        'application/vnd.oci.image.index.v1+json',
-        'application/vnd.docker.distribution.manifest.list.v2+json',
-        'application/vnd.oci.image.manifest.v1+json',
-        'application/vnd.docker.distribution.manifest.v2+json',
-      ].join(', '),
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!response.ok) {
-    throw new Error(`Registry 返回 ${response.status}`)
-  }
-  const digest = response.headers.get('docker-content-digest')
-    ?? response.headers.get('Docker-Content-Digest')
-  return normalizeDigest(digest)
 }
 
 async function fetchLatestGitHubRelease(repo: string): Promise<GitHubReleaseSummary | null> {

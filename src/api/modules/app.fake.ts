@@ -88,4 +88,31 @@ export default defineFakeRoute([
       }
     },
   },
+  {
+    url: '/fake/app/account/password/recovery-status',
+    method: 'get',
+    response: () => {
+      return {
+        error: '',
+        status: 1,
+        data: {
+          enabled: false,
+          hint: null,
+        },
+      }
+    },
+  },
+  {
+    url: '/fake/app/account/password/recover',
+    method: 'post',
+    response: () => {
+      return {
+        error: '',
+        status: 1,
+        data: {
+          isSuccess: true,
+        },
+      }
+    },
+  },
 ])

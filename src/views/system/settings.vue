@@ -172,7 +172,10 @@ async function checkHubUpdate() {
   try {
     const res = await apiSystem.checkPanelUpdate()
     updateStatus.value = res.data
-    if (res.data.panel.updateAvailable || res.data.dst.updateAvailable) {
+    if (normalizeCheckError(res.data.checkError)) {
+      faToast.warning('无法完成远端版本检查，请查看下方检查提示')
+    }
+    else if (res.data.panel.updateAvailable || res.data.dst.updateAvailable) {
       faToast.info('检测到 Hub 镜像有新版本')
     }
     else {

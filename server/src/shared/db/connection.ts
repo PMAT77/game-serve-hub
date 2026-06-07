@@ -18,6 +18,8 @@ interface InitDatabaseOptions {
   forcePasswordChange?: boolean
   adminUsername?: string
   adminPassword?: string
+  /** 为 true 时，每次启动用 env 中的 ADMIN_PASSWORD 覆盖已有管理员密码（用于 panel.env 找回） */
+  syncAdminPasswordFromEnv?: boolean
   /** 开发/测试环境种子账号（superadmin/test）；生产环境应关闭 */
   seedDevelopmentUsers?: boolean
 }
@@ -444,7 +446,7 @@ async function seedAdminUserFromEnv(options: InitDatabaseOptions) {
       updatedAt: now,
     })
   }
-  else {
+  else if (options.syncAdminPasswordFromEnv) {
     await drizzleDb
       .update(users)
       .set({

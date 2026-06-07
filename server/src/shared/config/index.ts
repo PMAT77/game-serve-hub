@@ -29,6 +29,8 @@ const envSchema = z.object({
   GSH_RELEASE_VERSION: z.string().trim().optional(),
   GSH_BUILD_SHA: z.string().trim().optional(),
   CORS_ORIGIN: z.string().trim().optional(),
+  GSH_SYNC_ADMIN_PASSWORD_FROM_ENV: z.string().trim().optional(),
+  GSH_PASSWORD_RECOVERY_TOKEN: z.string().trim().optional(),
 })
 
 function resolveMode() {
@@ -69,6 +71,8 @@ export interface ServerConfig {
   githubRepo: string
   releaseVersion: string
   buildSha: string
+  syncAdminPasswordFromEnv: boolean
+  passwordRecoveryToken: string
   /** Fastify @fastify/cors origin 选项；生产默认同源（false） */
   corsOrigin: boolean | string | string[]
 }
@@ -100,6 +104,8 @@ export function loadServerConfig(): ServerConfig {
     GSH_RELEASE_VERSION: process.env.GSH_RELEASE_VERSION ?? env.GSH_RELEASE_VERSION,
     GSH_BUILD_SHA: process.env.GSH_BUILD_SHA ?? env.GSH_BUILD_SHA,
     CORS_ORIGIN: process.env.CORS_ORIGIN ?? env.CORS_ORIGIN,
+    GSH_SYNC_ADMIN_PASSWORD_FROM_ENV: process.env.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV ?? env.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV,
+    GSH_PASSWORD_RECOVERY_TOKEN: process.env.GSH_PASSWORD_RECOVERY_TOKEN ?? env.GSH_PASSWORD_RECOVERY_TOKEN,
   }
   const parsed = envSchema.parse(merged)
   const adminCredentials = resolveAdminCredentials(mode, parsed.ADMIN_USERNAME, parsed.ADMIN_PASSWORD)
@@ -139,6 +145,8 @@ export function loadServerConfig(): ServerConfig {
     githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'GameServerHub/game-server-hub',
     releaseVersion: parsed.GSH_RELEASE_VERSION?.trim() || '',
     buildSha: parsed.GSH_BUILD_SHA?.trim() || '',
+    syncAdminPasswordFromEnv: isTruthyEnv(parsed.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV),
+    passwordRecoveryToken: parsed.GSH_PASSWORD_RECOVERY_TOKEN?.trim() || '',
     corsOrigin: resolveCorsOrigin(mode, parsed.CORS_ORIGIN),
   }
 }

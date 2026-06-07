@@ -30,4 +30,19 @@ export default {
     newPassword: string
   }) => api.post('app/account/password/edit', data),
 
+  passwordRecoveryStatus: () => api.get('app/account/password/recovery-status') as Promise<{
+    data: {
+      enabled: boolean
+      hint: string | null
+    }
+  }>,
+
+  passwordRecover: (data: {
+    account: string
+    recoveryToken: string
+    newPassword: string
+  }) => api.post('app/account/password/recover', data, {
+    skipAuthRefresh: true,
+  }) as Promise<{ data: { isSuccess: boolean } }>,
+
 }

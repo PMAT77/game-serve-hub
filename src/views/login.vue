@@ -84,6 +84,7 @@ async function handleLogin() {
       <div class="w-full">
         <Login
           v-if="formType === 'login'"
+          :key="`login-${account ?? ''}`"
           :account
           @on-login="handleLogin"
           @on-register="(val) => { formType = 'register'; account = val }"
@@ -98,8 +99,7 @@ async function handleLogin() {
         <ResetPassword
           v-else
           :account
-          @on-reset-password="(val) => { formType = 'login'; account = val }"
-          @on-login="formType = 'login'"
+          @on-login="(val) => { formType = 'login'; account = val }"
         />
       </div>
     </div>

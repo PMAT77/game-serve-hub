@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
+import { timingSafeEqual } from 'node:crypto'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import { ErrorCode } from '../../../../shared/constants/error-code'
+import { loadServerConfig } from '../../shared/config'
 import { createSessionTokens, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, rotateSessionByRefreshToken, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 import type { MenuRouteItem } from '../../shared/menu-routes'
@@ -37,6 +39,12 @@ interface LogoutBody {
   refreshToken?: string
 }
 
+interface PasswordRecoverBody {
+  account: string
+  recoveryToken: string
+  newPassword: string
+}
+
 interface PasswordChangeRateState {
   count: number
   windowStart: number
@@ -48,6 +56,9 @@ const PASSWORD_CHANGE_WINDOW_MS = 10 * 60 * 1000
 const PASSWORD_CHANGE_BLOCK_MS = 15 * 60 * 1000
 const PASSWORD_CHANGE_MIN_INTERVAL_MS = 60 * 1000
 const passwordChangeRateMap = new Map<string, PasswordChangeRateState>()
+const PASSWORD_RECOVERY_ATTEMPT_LIMIT = 5
+const PASSWORD_RECOVERY_WINDOW_MS = 15 * 60 * 1000
+const passwordRecoveryRateMap = new Map<string, { count: number, windowStart: number }>()
 const LOGIN_GUARD_OPTIONS = {
   maxFailures: 5,
   captchaThreshold: 3,
@@ -115,6 +126,29 @@ function buildCaptchaRequiredResponse(
 function isStrongPassword(password: string): boolean {
   // 至少 8 位，且包含大小写字母、数字与特殊字符。
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,64}$/.test(password)
+}
+
+function verifyRecoveryToken(expected: string, provided: string): boolean {
+  const expectedBuffer = Buffer.from(expected)
+  const providedBuffer = Buffer.from(provided)
+  if (expectedBuffer.length !== providedBuffer.length) {
+    return false
+  }
+  return timingSafeEqual(expectedBuffer, providedBuffer)
+}
+
+function checkPasswordRecoveryRateLimit(clientKey: string): string | undefined {
+  const now = Date.now()
+  const state = passwordRecoveryRateMap.get(clientKey)
+  if (!state || now - state.windowStart > PASSWORD_RECOVERY_WINDOW_MS) {
+    passwordRecoveryRateMap.set(clientKey, { count: 1, windowStart: now })
+    return undefined
+  }
+  state.count += 1
+  if (state.count > PASSWORD_RECOVERY_ATTEMPT_LIMIT) {
+    return '找回密码尝试过于频繁，请稍后再试'
+  }
+  return undefined
 }
 
 function checkPasswordChangeRateLimit(userId: string): string | undefined {
@@ -363,5 +397,56 @@ export function registerAuthModule(app: FastifyInstance) {
       isSuccess: true,
       mustChangePassword: false,
     }, request)
+  })
+
+  app.get('/app/account/password/recovery-status', async (request): Promise<ApiSuccessResponse<{
+    enabled: boolean
+    hint: string | null
+  }> | ApiErrorResponse> => {
+    const configuredToken = loadServerConfig().passwordRecoveryToken
+    return success({
+      enabled: configuredToken.length >= 16,
+      hint: configuredToken.length >= 16
+        ? '已在服务器配置找回口令，请输入后设置新密码。'
+        : null,
+    }, request)
+  })
+
+  app.post('/app/account/password/recover', async (request): Promise<ApiSuccessResponse<{
+    isSuccess: boolean
+  }> | ApiErrorResponse> => {
+    const configuredToken = loadServerConfig().passwordRecoveryToken
+    if (configuredToken.length < 16) {
+      return businessError('当前未启用在线找回密码，请通过服务器命令行重置', request)
+    }
+
+    const body = (request.body ?? {}) as Partial<PasswordRecoverBody>
+    const account = body.account?.trim() ?? ''
+    const recoveryToken = body.recoveryToken?.trim() ?? ''
+    const newPassword = body.newPassword ?? ''
+    const clientKey = `recover:${getClientIp(request)}`
+
+    const rateLimitError = checkPasswordRecoveryRateLimit(clientKey)
+    if (rateLimitError) {
+      return businessError(rateLimitError, request)
+    }
+
+    if (!account || !recoveryToken || !newPassword) {
+      return businessError('账号、找回口令和新密码不能为空', request)
+    }
+    if (!isStrongPassword(newPassword)) {
+      return businessError('新密码必须为 8-64 位，且包含大小写字母、数字和特殊字符', request)
+    }
+    if (!verifyRecoveryToken(configuredToken, recoveryToken)) {
+      return businessError('找回口令错误', request)
+    }
+
+    const user = await findUserByAccount(account)
+    if (!user) {
+      return businessError('账号不存在', request)
+    }
+
+    await updateUserPassword(user.id, newPassword)
+    return success({ isSuccess: true }, request)
   })
 }

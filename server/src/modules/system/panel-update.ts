@@ -489,6 +489,9 @@ async function scheduleNextCheck(app: FastifyInstance) {
 }
 
 export function schedulePanelUpdateChecks(app: FastifyInstance) {
+  if (process.env.GSH_UNIT_TEST === '1') {
+    return
+  }
   if (schedulerStarted) {
     return
   }

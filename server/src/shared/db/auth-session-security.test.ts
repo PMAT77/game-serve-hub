@@ -3,10 +3,11 @@ import { createHash, randomUUID } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { before, describe, it } from 'node:test'
+import { after, before, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
   createSessionTokens,
+  closeDatabase,
   findUserByAccount,
   findUserByToken,
   initDatabase,
@@ -24,6 +25,10 @@ function hashToken(token: string) {
 describe('auth session security', () => {
   before(async () => {
     await initDatabase(dbFilePath, migrationsFolder)
+  })
+
+  after(() => {
+    closeDatabase()
   })
 
   it('rotates refresh token and revokes old session tokens', async () => {

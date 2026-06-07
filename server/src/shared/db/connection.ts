@@ -485,11 +485,20 @@ async function applyForcePasswordChangePolicy(options: InitDatabaseOptions) {
   })
 }
 
+export function closeDatabase() {
+  if (sqliteDb) {
+    sqliteDb.close()
+    sqliteDb = undefined
+    drizzleDb = undefined
+  }
+}
+
 export async function initDatabase(
   dbPath: string,
   migrationsFolder: string,
   options: InitDatabaseOptions = {},
 ) {
+  closeDatabase()
   const absolutePath = path.resolve(dbPath)
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true })
   sqliteDb = new DatabaseSync(absolutePath)

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import Fastify from 'fastify'
 import type { FastifyInstance } from 'fastify'
 import { registerAuthModule } from './index'
-import { initDatabase } from '../../shared/db/index'
+import { initDatabase, closeDatabase } from '../../shared/db/index'
 
 interface ApiEnvelope<T> {
   status: 0 | 1
@@ -43,6 +43,7 @@ describe('auth api token lifecycle', () => {
 
   after(async () => {
     await app.close()
+    closeDatabase()
   })
 
   it('supports login -> refresh -> old refresh invalid', async () => {

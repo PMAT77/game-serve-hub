@@ -40,6 +40,8 @@ jobs:
         run: pnpm run lint
 
       - name: Unit tests
+        env:
+          GSH_UNIT_TEST: '1'
         run: pnpm test:unit
 
   build:

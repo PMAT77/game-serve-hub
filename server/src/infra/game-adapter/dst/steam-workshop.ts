@@ -25,6 +25,7 @@ const STEAM_API_BASE_URL = process.env.GSH_STEAM_WEBAPI_BASE_URL?.trim() || 'htt
 const STEAM_WEBAPI_KEY = process.env.GSH_STEAM_WEBAPI_KEY?.trim() || ''
 const STEAM_RELAY_URL = process.env.GSH_STEAM_RELAY_URL?.trim() || ''
 const STEAM_RELAY_TOKEN = process.env.GSH_STEAM_RELAY_TOKEN?.trim() || ''
+const IS_UNIT_TEST = process.env.GSH_UNIT_TEST === '1'
 const FETCH_TIMEOUT_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_FETCH_TIMEOUT_MS', 12_000)
 const FETCH_RETRY_TIMES = readPositiveIntEnv('GSH_STEAM_WORKSHOP_FETCH_RETRY_TIMES', 2)
 const FETCH_RETRY_BASE_DELAY_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_FETCH_RETRY_BASE_DELAY_MS', 300)
@@ -36,9 +37,15 @@ const CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_CACHE_TTL_MS', 2 * 6
 const STALE_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_STALE_TTL_MS', 30 * 60 * 1000)
 const WORKSHOP_DETAIL_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_DETAIL_CACHE_TTL_MS', 5 * 60 * 1000)
 const RATE_LIMIT_WINDOW_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATE_LIMIT_WINDOW_MS', 1000)
-const RATE_LIMIT_PER_KEY = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATE_LIMIT_PER_KEY', 2)
-const RATE_LIMIT_GLOBAL = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATE_LIMIT_GLOBAL', 8)
-const CIRCUIT_BREAKER_FAIL_THRESHOLD = readPositiveIntEnv('GSH_STEAM_WORKSHOP_CIRCUIT_FAIL_THRESHOLD', 6)
+const RATE_LIMIT_PER_KEY = IS_UNIT_TEST
+  ? 100_000
+  : readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATE_LIMIT_PER_KEY', 2)
+const RATE_LIMIT_GLOBAL = IS_UNIT_TEST
+  ? 100_000
+  : readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATE_LIMIT_GLOBAL', 8)
+const CIRCUIT_BREAKER_FAIL_THRESHOLD = IS_UNIT_TEST
+  ? 100_000
+  : readPositiveIntEnv('GSH_STEAM_WORKSHOP_CIRCUIT_FAIL_THRESHOLD', 6)
 const CIRCUIT_BREAKER_OPEN_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_CIRCUIT_OPEN_MS', 30 * 1000)
 const SHOULD_DISABLE_DISK_CACHE = process.env.GSH_STEAM_WORKSHOP_DISABLE_DISK_CACHE === '1'
   || process.env.NODE_ENV === 'test'
@@ -1995,6 +2002,21 @@ export function getSteamWorkshopMetricsSnapshot(): Readonly<SteamFetchMetrics> {
   }
 }
 
+function resetSteamWorkshopRuntimeForTests() {
+  steamModCache.clear()
+  steamModInFlight.clear()
+  steamBackgroundRefreshing.clear()
+  workshopDetailCache.clear()
+  perKeyRequestBuckets.clear()
+  globalRequestBucket.length = 0
+  steamCircuitState.failedCount = 0
+  steamCircuitState.openUntil = 0
+  if (diskPersistTimer) {
+    clearTimeout(diskPersistTimer)
+    diskPersistTimer = null
+  }
+}
+
 export const __steamWorkshopTestUtils = {
   parseWorkshopItems,
   detectHasMoreFromHtml,
@@ -2024,4 +2046,5 @@ export const __steamWorkshopTestUtils = {
     steamModInFlight.clear()
     steamBackgroundRefreshing.clear()
   },
+  resetRuntimeForTests: resetSteamWorkshopRuntimeForTests,
 }

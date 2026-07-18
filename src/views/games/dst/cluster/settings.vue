@@ -17,13 +17,14 @@ import {
   NRadio,
   NRadioGroup,
   NSelect,
+  NSkeleton,
   NSpace,
-  NSpin,
   NSwitch,
   NTooltip,
   useDialog,
   useMessage,
 } from 'naive-ui'
+import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
 import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
@@ -344,7 +345,14 @@ onActivated(() => {
       </div>
     </template>
 
-    <NSpin :show="loading">
+    <div v-if="loading && !serverConfig" class="space-y-3" aria-busy="true">
+      <NSkeleton v-for="i in 8" :key="i" text />
+    </div>
+    <div v-else class="space-y-4">
+      <AdminSettingsSection
+        title="房间配置"
+        description="设置联网方式、房间信息与洞穴开关。保存后写入实例配置目录。"
+      />
       <div class="space-y-4">
         <NAlert
           v-for="(warning, index) in configAlerts.warnings"
@@ -595,7 +603,7 @@ onActivated(() => {
 
         <div class="flex flex-wrap items-center justify-center gap-3">
           <NButton type="primary" :loading="saving" @click="saveConfig(false)">
-            保存
+            保存配置
           </NButton>
           <NTooltip :disabled="!saveAndRestartDisabled">
             <template #trigger>
@@ -611,6 +619,6 @@ onActivated(() => {
           </NTooltip>
         </div>
       </div>
-    </NSpin>
+    </div>
   </FaPageMain>
 </template>

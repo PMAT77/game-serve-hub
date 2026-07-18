@@ -1,6 +1,7 @@
 import type { ModInstallJobDto, ModInstallJobPhase, ModInstallJobStatus, ModInstallPayload } from '../../../../shared/contracts/mod'
 import {
   downloadDstWorkshopMods,
+  formatMissingWorkshopModError,
   isDstWorkshopModPresent,
 } from '../../infra/game-adapter/dst/mod-download'
 import {
@@ -206,9 +207,10 @@ async function runModDownloadJob(input: ModDownloadJobInput, record: ModInstallJ
   }
   const allPresent = downloadIds.every(id => isDstWorkshopModPresent(input.installPath, id))
   if (!allPresent) {
+    const missingIds = downloadIds.filter(id => !isDstWorkshopModPresent(input.installPath, id))
     record.status = 'failed'
     record.phase = null
-    record.error = `Mod 下载未完成，缺少文件：${workshopId}`
+    record.error = formatMissingWorkshopModError(input.installPath, missingIds)
     record.finishedAt = new Date().toISOString()
     await markModInstallFailed(input.instanceId, workshopId, record.error)
     return
@@ -270,6 +272,85 @@ export function getModInstallJob(instanceId: string, workshopId: string): ModIns
     }
   }
   return toJobDto(record)
+}
+
+export async function resolveModInstallJob(instanceId: string, workshopId: string): Promise<ModInstallJobDto> {
+  const normalizedId = workshopId.trim()
+  const key = buildJobKey(instanceId, normalizedId)
+  const memoryJob = getModInstallJob(instanceId, normalizedId)
+  if (memoryJob.status !== 'not_found') {
+    return memoryJob
+  }
+  if (modInstallJobsInFlight.has(key)) {
+    const inFlightRecord = modInstallJobs.get(key)
+    if (inFlightRecord) {
+      return toJobDto(inFlightRecord)
+    }
+    return {
+      instanceId,
+      workshopId: normalizedId,
+      status: 'downloading',
+      phase: 'downloading',
+      error: null,
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+    }
+  }
+  const mod = await getInstanceModByWorkshopIdFn(instanceId, normalizedId)
+  if (!mod) {
+    return memoryJob
+  }
+  if (mod.installStatus === 'ready') {
+    return {
+      instanceId,
+      workshopId: normalizedId,
+      status: 'success',
+      phase: null,
+      error: null,
+      startedAt: mod.updatedAt,
+      finishedAt: mod.updatedAt,
+    }
+  }
+  if (mod.installStatus === 'failed') {
+    return {
+      instanceId,
+      workshopId: normalizedId,
+      status: 'failed',
+      phase: null,
+      error: mod.installError,
+      startedAt: mod.updatedAt,
+      finishedAt: mod.updatedAt,
+    }
+  }
+  const record = modInstallJobs.get(key)
+  if (record && (record.status === 'downloading' || modInstallJobsInFlight.has(key))) {
+    return toJobDto(record)
+  }
+  if (modInstallJobsInFlight.has(key)) {
+    return {
+      instanceId,
+      workshopId: normalizedId,
+      status: 'downloading',
+      phase: 'downloading',
+      error: null,
+      startedAt: mod.updatedAt,
+      finishedAt: null,
+    }
+  }
+  const interruptedError = mod.installError || '下载任务已中断，请点击重试'
+  await updateInstanceModByWorkshopIdFn(instanceId, normalizedId, {
+    installStatus: 'failed',
+    installError: interruptedError,
+  })
+  return {
+    instanceId,
+    workshopId: normalizedId,
+    status: 'failed',
+    phase: null,
+    error: interruptedError,
+    startedAt: mod.updatedAt,
+    finishedAt: new Date().toISOString(),
+  }
 }
 
 export function listModInstallJobs(instanceId: string, workshopIds?: string[]): ModInstallJobDto[] {
@@ -347,6 +428,13 @@ export async function enqueueModDownload(input: ModDownloadJobInput): Promise<Mo
     const current = modInstallJobs.get(key)
     if (current?.status === 'downloading' && (modInstallJobsInFlight.has(key) || isRecentDownloadingRecord(current))) {
       return toJobDto(current)
+    }
+
+    if (existingMod?.installStatus === 'failed') {
+      await updateInstanceModByWorkshopIdFn(input.instanceId, workshopId, {
+        installStatus: 'pending',
+        installError: null,
+      })
     }
 
     await upsertPendingModRecord(input)

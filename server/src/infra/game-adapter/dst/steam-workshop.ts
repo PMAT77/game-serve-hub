@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import type {
   ModContentLocale,
+  ModInstallStatus,
   ModLocalizedTextMap,
   SteamModDetailDto,
   SteamModFetchErrorCode,
@@ -16,11 +17,12 @@ import type {
 } from '../../../../../shared/contracts/mod'
 import {
   DEFAULT_MOD_CONTENT_LOCALE,
-  MOD_CONTENT_LOCALES,
   resolveModLocalizedText,
 } from '../../../../../shared/contracts/mod'
 
 const WORKSHOP_BROWSE_URL = 'https://steamcommunity.com/workshop/browse/'
+/** DST 专用服务器 Mod 标签，与 Steam 创意工坊「server_only_mod」筛选一致 */
+const DST_SERVER_ONLY_MOD_TAG = 'server_only_mod'
 const STEAM_API_BASE_URL = process.env.GSH_STEAM_WEBAPI_BASE_URL?.trim() || 'https://api.steampowered.com'
 const STEAM_WEBAPI_KEY = process.env.GSH_STEAM_WEBAPI_KEY?.trim() || ''
 const STEAM_RELAY_URL = process.env.GSH_STEAM_RELAY_URL?.trim() || ''
@@ -36,6 +38,7 @@ const DEFAULT_TREND_DAYS: SteamModTrendDays = 7
 const CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_CACHE_TTL_MS', 2 * 60 * 1000)
 const STALE_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_STALE_TTL_MS', 30 * 60 * 1000)
 const WORKSHOP_DETAIL_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_DETAIL_CACHE_TTL_MS', 5 * 60 * 1000)
+const WORKSHOP_RATING_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATING_CACHE_TTL_MS', 10 * 60 * 1000)
 const RATE_LIMIT_WINDOW_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATE_LIMIT_WINDOW_MS', 1000)
 const RATE_LIMIT_PER_KEY = IS_UNIT_TEST
   ? 100_000
@@ -142,7 +145,7 @@ interface SteamFetchMetrics {
   steam_last_success_at: number | null
 }
 
-const CACHE_SCHEMA_VERSION = 8
+const CACHE_SCHEMA_VERSION = 9
 const steamModCache = new Map<string, SteamModCacheEntry>()
 const WORKSHOP_DETAIL_CACHE_SCHEMA = 3
 
@@ -160,6 +163,7 @@ interface WorkshopDetailCacheData {
 }
 
 const workshopDetailCache = new Map<string, { fetchedAt: number, schemaVersion: number, data: WorkshopDetailCacheData }>()
+const workshopRatingCache = new Map<string, { rating: number | null, expiresAt: number }>()
 const steamModInFlight = new Map<string, Promise<SteamModRawResult>>()
 const steamBackgroundRefreshing = new Set<string>()
 const execFileAsync = promisify(execFile)
@@ -282,7 +286,7 @@ function buildBrowseUrl(
   const browseSort = resolveBrowseSort(sort)
   const url = new URL(WORKSHOP_BROWSE_URL)
   url.searchParams.set('appid', '322330')
-  // 与 Steam 创意工坊默认“Special Filters: None”保持一致，不注入 requiredtags
+  url.searchParams.append('requiredtags[]', DST_SERVER_ONLY_MOD_TAG)
   url.searchParams.set('section', 'readytouseitems')
   url.searchParams.set('browsesort', browseSort)
   url.searchParams.set('actualsort', browseSort)
@@ -585,17 +589,8 @@ async function fetchWorkshopHtmlByPowerShell(sourceUrl: string): Promise<string>
   if (process.platform !== 'win32') {
     throw new Error('native fetch failed')
   }
-  const script = [
-    'param([string]$Url)',
-    '$ProgressPreference=\'SilentlyContinue\'',
-    '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
-    '$headers = @{',
-    '\'Accept-Language\' = \'zh-CN,zh;q=0.9,en;q=0.8\'',
-    '\'User-Agent\' = \'game-server-hub-mod-fetcher/1.0\'',
-    '}',
-    '(Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 12 -Headers $headers).Content',
-  ].join('; ')
-  const result = await execFileAsync('powershell', ['-NoProfile', '-Command', script, sourceUrl], {
+  const script = buildPowerShellWorkshopFetchScript(sourceUrl)
+  const result = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
     timeout: FETCH_TIMEOUT_MS + 3000,
     maxBuffer: 20 * 1024 * 1024,
   })
@@ -658,6 +653,45 @@ function isRetryableSteamError(error: SteamWorkshopFetchError): boolean {
     || error.code === 'STEAM_UPSTREAM_UNAVAILABLE'
 }
 
+const STEAM_UPSTREAM_USER_MESSAGE = '无法连接 Steam 创意工坊'
+
+const TECHNICAL_STEAM_ERROR_PATTERNS = [
+  /^Command failed:/i,
+  /powershell/i,
+  /ParserError/i,
+  /CategoryInfo/i,
+  /FullyQualifiedErrorId/i,
+  /At line:\d+/i,
+  /Invoke-WebRequest/i,
+  /IncompleteHashLiteral/i,
+  /Unexpected token/i,
+]
+
+function escapePowerShellSingleQuotedString(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+function sanitizeSteamUserFacingMessage(message: string, fallback = STEAM_UPSTREAM_USER_MESSAGE): string {
+  const normalized = message.trim()
+  if (!normalized) {
+    return fallback
+  }
+  if (TECHNICAL_STEAM_ERROR_PATTERNS.some(pattern => pattern.test(normalized))) {
+    return fallback
+  }
+  return normalized
+}
+
+function buildPowerShellWorkshopFetchScript(sourceUrl: string): string {
+  const escapedUrl = escapePowerShellSingleQuotedString(sourceUrl)
+  return [
+    '$ProgressPreference = \'SilentlyContinue\'',
+    '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
+    '$headers = @{ \'Accept-Language\' = \'zh-CN,zh;q=0.9,en;q=0.8\'; \'User-Agent\' = \'game-server-hub-mod-fetcher/1.0\' }',
+    `(Invoke-WebRequest -UseBasicParsing -Uri '${escapedUrl}' -TimeoutSec 12 -Headers $headers).Content`,
+  ].join('; ')
+}
+
 function mapUnknownToSteamError(error: unknown): SteamWorkshopFetchError {
   if (isSteamWorkshopFetchError(error)) {
     return error
@@ -667,11 +701,14 @@ function mapUnknownToSteamError(error: unknown): SteamWorkshopFetchError {
       return new SteamWorkshopFetchError('STEAM_TIMEOUT', '请求 Steam 超时')
     }
     if (error.message.includes('fetch failed')) {
-      return new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', '无法连接 Steam 创意工坊')
+      return new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', STEAM_UPSTREAM_USER_MESSAGE)
     }
-    return new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', error.message || 'Steam 上游不可用')
+    return new SteamWorkshopFetchError(
+      'STEAM_UPSTREAM_UNAVAILABLE',
+      sanitizeSteamUserFacingMessage(error.message),
+    )
   }
-  return new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', 'Steam 上游不可用')
+  return new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', STEAM_UPSTREAM_USER_MESSAGE)
 }
 
 function pruneTimestampBucket(bucket: number[], now: number): number[] {
@@ -802,7 +839,7 @@ function loadDiskCacheOnce() {
 
 function toSteamResult(
   raw: SteamModRawResult,
-  installedWorkshopIds: Set<string>,
+  subscribedModStatusByWorkshopId: Map<string, ModInstallStatus>,
   pendingWorkshopIds: Set<string>,
   meta: SteamModListMeta,
 ): SteamModListQueryResult {
@@ -812,12 +849,20 @@ function toSteamResult(
     totalPages: raw.totalPages ?? null,
     meta,
     pendingWorkshopIds: [...pendingWorkshopIds],
-    items: raw.items.map(item => ({
-      ...item,
-      rating: item.rating ?? null,
-      installed: installedWorkshopIds.has(item.workshopId),
-      pendingDownload: pendingWorkshopIds.has(item.workshopId),
-    })),
+    items: raw.items.map((item) => {
+      const subscribeStatus = subscribedModStatusByWorkshopId.get(item.workshopId) ?? null
+      const subscribed = subscribeStatus !== null
+      const isPending = pendingWorkshopIds.has(item.workshopId)
+        || subscribeStatus === 'pending'
+      return {
+        ...item,
+        rating: item.rating ?? null,
+        subscribed,
+        subscribeStatus,
+        installed: subscribeStatus === 'ready',
+        pendingDownload: isPending,
+      }
+    }),
   }
 }
 
@@ -888,7 +933,7 @@ function mergeLocalizedText(
 function buildWorkshopDetailFromCache(
   data: WorkshopDetailCacheData,
   preferredLocale: ModContentLocale,
-): Omit<SteamModDetailDto, 'installed'> {
+): Omit<SteamModDetailDto, 'subscribed' | 'subscribeStatus' | 'installed'> {
   const titleResolved = resolveModLocalizedText(data.titles, preferredLocale)
   const descriptionResolved = resolveModLocalizedText(data.descriptions, preferredLocale)
   const contentLocale = titleResolved.contentLocale === descriptionResolved.contentLocale
@@ -929,7 +974,7 @@ function mapPublishedFileDetailBase(item: PublishedFileDetailItem): Omit<Worksho
   }
 }
 
-function mapPublishedFileDetailToDto(item: PublishedFileDetailItem): Omit<SteamModDetailDto, 'installed'> {
+function mapPublishedFileDetailToDto(item: PublishedFileDetailItem): Omit<SteamModDetailDto, 'subscribed' | 'subscribeStatus' | 'installed'> {
   const base = mapPublishedFileDetailBase(item)
   const titles: ModLocalizedTextMap = {}
   const descriptions: ModLocalizedTextMap = {}
@@ -943,20 +988,36 @@ function mapPublishedFileDetailToDto(item: PublishedFileDetailItem): Omit<SteamM
   }, DEFAULT_MOD_CONTENT_LOCALE)
 }
 
-async function fetchWorkshopLocalizedContent(workshopId: string): Promise<{
+async function fetchWorkshopLocalizedContent(
+  workshopId: string,
+  preferredLocale: ModContentLocale = DEFAULT_MOD_CONTENT_LOCALE,
+): Promise<{
   base: Omit<WorkshopDetailCacheData, 'creatorName'>
   creatorSteamId: string | null
 }> {
   const normalizedId = workshopId.trim()
-  const localeResults = await Promise.all(
-    MOD_CONTENT_LOCALES.map(async (locale) => {
-      const items = await requestPublishedFileDetails([normalizedId], { locale })
-      const item = items.find(row => row.publishedfileid?.trim() === normalizedId) ?? items[0]
-      return { locale, item }
-    }),
-  )
+  const fallbackLocale: ModContentLocale = preferredLocale === 'zh-CN' ? 'en-US' : 'zh-CN'
+
+  async function fetchLocale(locale: ModContentLocale) {
+    const items = await requestPublishedFileDetails([normalizedId], { locale })
+    const item = items.find(row => row.publishedfileid?.trim() === normalizedId) ?? items[0]
+    return { locale, item }
+  }
+
+  const primaryResult = await fetchLocale(preferredLocale)
+  const localeResults: Array<{ locale: ModContentLocale, item: PublishedFileDetailItem | undefined }> = []
+  if (primaryResult.item?.result === 1) {
+    localeResults.push(primaryResult)
+  }
+  if (primaryResult.item?.result !== 1 || preferredLocale !== fallbackLocale) {
+    const fallbackResult = await fetchLocale(fallbackLocale)
+    if (fallbackResult.item?.result === 1 && !localeResults.some(entry => entry.locale === fallbackLocale)) {
+      localeResults.push(fallbackResult)
+    }
+  }
   const validItems = localeResults.filter(entry => entry.item?.result === 1)
-  const primary = validItems.find(entry => entry.locale === DEFAULT_MOD_CONTENT_LOCALE)?.item
+  const primary = validItems.find(entry => entry.locale === preferredLocale)?.item
+    ?? validItems.find(entry => entry.locale === DEFAULT_MOD_CONTENT_LOCALE)?.item
     ?? validItems[0]?.item
   if (!primary) {
     throw new SteamWorkshopFetchError('STEAM_PARSE_FAILED', 'Mod 不存在或无法读取')
@@ -1100,7 +1161,7 @@ async function requestPublishedFileDetails(
 export async function fetchWorkshopFileDetail(
   workshopId: string,
   preferredLocale: ModContentLocale = DEFAULT_MOD_CONTENT_LOCALE,
-): Promise<Omit<SteamModDetailDto, 'installed'>> {
+): Promise<Omit<SteamModDetailDto, 'subscribed' | 'subscribeStatus' | 'installed'>> {
   const normalizedId = workshopId.trim()
   if (!normalizedId) {
     throw new SteamWorkshopFetchError('STEAM_PARSE_FAILED', '创意工坊 ID 不能为空')
@@ -1113,7 +1174,7 @@ export async function fetchWorkshopFileDetail(
   ) {
     return buildWorkshopDetailFromCache(cached.data, preferredLocale)
   }
-  const { base, creatorSteamId } = await fetchWorkshopLocalizedContent(normalizedId)
+  const { base, creatorSteamId } = await fetchWorkshopLocalizedContent(normalizedId, preferredLocale)
   let creatorName: string | null = null
   if (creatorSteamId) {
     creatorName = await fetchSteamPersonaName(creatorSteamId)
@@ -1140,12 +1201,18 @@ function resolveDegradedUpstreamMessage(error: SteamWorkshopFetchError): string 
   if (error.code === 'STEAM_PARSE_FAILED') {
     return 'Steam 页面解析失败，请稍后点击刷新重试'
   }
-  return error.message || '暂时无法连接 Steam 创意工坊，请稍后点击刷新重试'
+  if (error.code === 'STEAM_UPSTREAM_UNAVAILABLE') {
+    return '暂时无法连接 Steam 创意工坊，请稍后点击刷新重试'
+  }
+  return sanitizeSteamUserFacingMessage(
+    error.message,
+    '暂时无法连接 Steam 创意工坊，请稍后点击刷新重试',
+  )
 }
 
 function buildDegradedEmptySteamResult(
   query: NormalizedSteamQuery,
-  installedWorkshopIds: Set<string>,
+  subscribedModStatusByWorkshopId: Map<string, ModInstallStatus>,
   pendingWorkshopIds: Set<string>,
   steamError: SteamWorkshopFetchError,
   traceId: string,
@@ -1173,7 +1240,7 @@ function buildDegradedEmptySteamResult(
       upstreamSource: 'html',
       items: [],
     },
-    installedWorkshopIds,
+    subscribedModStatusByWorkshopId,
     pendingWorkshopIds,
     enrichMeta({
       cached: false,
@@ -1295,7 +1362,7 @@ async function fetchSteamWorkshopHtml(sourceUrl: string): Promise<string> {
     return await fetchWorkshopHtmlByNative(sourceUrl)
   }
   catch (error) {
-    if (process.platform !== 'win32') {
+    if (process.platform !== 'win32' || process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK === '1') {
       throw error
     }
     if (isSteamWorkshopFetchError(error) && error.code === 'STEAM_RATE_LIMIT') {
@@ -1533,6 +1600,7 @@ async function queryByOfficialApi(query: NormalizedSteamQuery): Promise<SteamMod
     return_short_description: true,
     return_vote_data: true,
     strip_description_bbcode: true,
+    requiredtags: DST_SERVER_ONLY_MOD_TAG,
     cache_max_age_seconds: query.sort === 'relevance' ? 0 : Math.max(30, Math.floor(CACHE_TTL_MS / 1000)),
   }
   if (query.sort === 'relevance') {
@@ -1619,6 +1687,7 @@ async function queryByRelayApi(query: NormalizedSteamQuery): Promise<SteamModRaw
   relayUrl.searchParams.set('pageSize', String(query.requestedPageSize))
   relayUrl.searchParams.set('sort', query.sort)
   relayUrl.searchParams.set('trendDays', String(query.trendDays))
+  relayUrl.searchParams.set('requiredtags', DST_SERVER_ONLY_MOD_TAG)
   const payload = await fetchJsonWithTimeout(relayUrl.toString(), STEAM_RELAY_TOKEN
     ? {
         Authorization: `Bearer ${STEAM_RELAY_TOKEN}`,
@@ -1827,19 +1896,20 @@ export async function fetchDstSteamWorkshopMods(input: {
   pageSize?: number
   sort?: string
   trendDays?: number
-  installedWorkshopIds: Set<string>
+  subscribedModStatusByWorkshopId: Map<string, ModInstallStatus>
   pendingWorkshopIds?: Set<string>
 }): Promise<SteamModListQueryResult> {
   loadDiskCacheOnce()
   const query = normalizeQuery(input)
   const pendingWorkshopIds = input.pendingWorkshopIds ?? new Set<string>()
+  const subscribedModStatusByWorkshopId = input.subscribedModStatusByWorkshopId
   const cacheKey = createCacheKey(query)
   const traceId = randomUUID()
   const now = Date.now()
   const cacheEntry = steamModCache.get(cacheKey)
   if (cacheEntry && cacheEntry.expiresAt > now) {
     steamFetchMetrics.steam_cache_hit_total.fresh += 1
-    return toSteamResult(cacheEntry.data, input.installedWorkshopIds, pendingWorkshopIds, enrichMeta({
+    return toSteamResult(cacheEntry.data, subscribedModStatusByWorkshopId, pendingWorkshopIds, enrichMeta({
       cached: true,
       stale: false,
       cacheAgeMs: now - cacheEntry.fetchedAt,
@@ -1850,7 +1920,7 @@ export async function fetchDstSteamWorkshopMods(input: {
   if (cacheEntry && cacheEntry.staleExpiresAt > now) {
     steamFetchMetrics.steam_cache_hit_total.stale += 1
     scheduleBackgroundRefresh(cacheKey, query)
-    return toSteamResult(cacheEntry.data, input.installedWorkshopIds, pendingWorkshopIds, enrichMeta({
+    return toSteamResult(cacheEntry.data, subscribedModStatusByWorkshopId, pendingWorkshopIds, enrichMeta({
       cached: true,
       stale: true,
       cacheAgeMs: now - cacheEntry.fetchedAt,
@@ -1861,7 +1931,7 @@ export async function fetchDstSteamWorkshopMods(input: {
   steamFetchMetrics.steam_cache_hit_total.miss += 1
   try {
     const liveData = await getOrCreateLiveFetchTask(cacheKey, query, traceId)
-    return toSteamResult(liveData, input.installedWorkshopIds, pendingWorkshopIds, enrichMeta({
+    return toSteamResult(liveData, subscribedModStatusByWorkshopId, pendingWorkshopIds, enrichMeta({
       cached: false,
       stale: false,
       cacheAgeMs: 0,
@@ -1873,7 +1943,7 @@ export async function fetchDstSteamWorkshopMods(input: {
     const stale = steamModCache.get(cacheKey)
     if (stale && stale.staleExpiresAt > Date.now()) {
       const steamError = mapUnknownToSteamError(error)
-      return toSteamResult(stale.data, input.installedWorkshopIds, pendingWorkshopIds, enrichMeta({
+      return toSteamResult(stale.data, subscribedModStatusByWorkshopId, pendingWorkshopIds, enrichMeta({
         cached: true,
         stale: true,
         cacheAgeMs: Date.now() - stale.fetchedAt,
@@ -1884,7 +1954,7 @@ export async function fetchDstSteamWorkshopMods(input: {
     }
     return buildDegradedEmptySteamResult(
       query,
-      input.installedWorkshopIds,
+      subscribedModStatusByWorkshopId,
       pendingWorkshopIds,
       mapUnknownToSteamError(error),
       traceId,
@@ -1947,13 +2017,28 @@ export async function fetchWorkshopRatings(workshopIds: string[]): Promise<Map<s
   if (uniqueIds.length === 0) {
     return result
   }
+  const now = Date.now()
+  const missingIds: string[] = []
+  for (const workshopId of uniqueIds) {
+    const cached = workshopRatingCache.get(workshopId)
+    if (cached && cached.expiresAt > now) {
+      result.set(workshopId, cached.rating)
+    }
+    else {
+      missingIds.push(workshopId)
+    }
+  }
+  if (missingIds.length === 0) {
+    return result
+  }
   const apiKey = process.env.GSH_STEAM_WEBAPI_KEY?.trim() || ''
   if (apiKey) {
     try {
-      const fromGetDetails = await fetchWorkshopRatingsByGetDetails(uniqueIds)
+      const fromGetDetails = await fetchWorkshopRatingsByGetDetails(missingIds)
       for (const [workshopId, rating] of fromGetDetails) {
         if (rating !== null) {
           result.set(workshopId, rating)
+          workshopRatingCache.set(workshopId, { rating, expiresAt: now + WORKSHOP_RATING_CACHE_TTL_MS })
         }
       }
     }
@@ -1961,10 +2046,10 @@ export async function fetchWorkshopRatings(workshopIds: string[]): Promise<Map<s
       // fallback below
     }
   }
-  const missingIds = uniqueIds.filter(workshopId => !result.has(workshopId))
-  if (missingIds.length > 0) {
+  const stillMissingIds = missingIds.filter(workshopId => !result.has(workshopId))
+  if (stillMissingIds.length > 0) {
     try {
-      const items = await requestPublishedFileDetails(missingIds, { locale: DEFAULT_MOD_CONTENT_LOCALE })
+      const items = await requestPublishedFileDetails(stillMissingIds, { locale: DEFAULT_MOD_CONTENT_LOCALE })
       for (const item of items) {
         const workshopId = item.publishedfileid?.trim()
         if (!workshopId) {
@@ -1973,6 +2058,7 @@ export async function fetchWorkshopRatings(workshopIds: string[]): Promise<Map<s
         const rating = resolveItemRating(item)
         if (rating !== null) {
           result.set(workshopId, rating)
+          workshopRatingCache.set(workshopId, { rating, expiresAt: now + WORKSHOP_RATING_CACHE_TTL_MS })
         }
       }
     }
@@ -1983,6 +2069,7 @@ export async function fetchWorkshopRatings(workshopIds: string[]): Promise<Map<s
   for (const workshopId of uniqueIds) {
     if (!result.has(workshopId)) {
       result.set(workshopId, null)
+      workshopRatingCache.set(workshopId, { rating: null, expiresAt: now + WORKSHOP_RATING_CACHE_TTL_MS })
     }
   }
   return result
@@ -2007,6 +2094,7 @@ function resetSteamWorkshopRuntimeForTests() {
   steamModInFlight.clear()
   steamBackgroundRefreshing.clear()
   workshopDetailCache.clear()
+  workshopRatingCache.clear()
   perKeyRequestBuckets.clear()
   globalRequestBucket.length = 0
   steamCircuitState.failedCount = 0
@@ -2018,6 +2106,8 @@ function resetSteamWorkshopRuntimeForTests() {
 }
 
 export const __steamWorkshopTestUtils = {
+  buildPowerShellWorkshopFetchScript,
+  sanitizeSteamUserFacingMessage,
   parseWorkshopItems,
   detectHasMoreFromHtml,
   resolveHtmlPaginationMeta,

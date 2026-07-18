@@ -5,6 +5,7 @@ import type {
   ModDeleteResult,
   ModInstallPayload,
   ModInstallJobDto,
+  ModInstallStatus,
   ModItemDto,
   ModListDto,
   ModMutationResult,
@@ -41,8 +42,8 @@ import { requirePermission } from '../system/auth'
 import {
   enqueueModDownload,
   ensurePendingModDownloadsRecovered,
-  getModInstallJob,
   listModInstallJobs,
+  resolveModInstallJob,
 } from './mod-download-service'
 
 function normalizeInstanceId(value: unknown): string {
@@ -108,6 +109,24 @@ function normalizeTrendDays(value: unknown): SteamModTrendDays {
   return 7
 }
 
+function parseModListEnrich(value: unknown): { enrichRatings: boolean, enrichPreviews: boolean } {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) {
+    return { enrichRatings: false, enrichPreviews: false }
+  }
+  const parts = raw.split(',').map(part => part.trim())
+  return {
+    enrichRatings: parts.includes('ratings'),
+    enrichPreviews: parts.includes('previews'),
+  }
+}
+
+function buildSubscribedModStatusMap(
+  mods: Awaited<ReturnType<typeof listInstanceMods>>,
+): Map<string, ModInstallStatus> {
+  return new Map(mods.map(mod => [mod.workshopId, mod.installStatus]))
+}
+
 function normalizeSteamWorkshopError(error: unknown): {
   message: string
   data: Record<string, unknown>
@@ -153,8 +172,23 @@ function normalizeSteamWorkshopError(error: unknown): {
         data: {},
       }
     }
+    const technicalPatterns = [
+      /^Command failed:/i,
+      /powershell/i,
+      /ParserError/i,
+      /CategoryInfo/i,
+      /FullyQualifiedErrorId/i,
+      /At line:\d+/i,
+    ]
+    const message = error.message.trim()
+    if (!message || technicalPatterns.some(pattern => pattern.test(message))) {
+      return {
+        message: '无法连接 Steam 创意工坊，请检查服务器网络或代理设置后重试',
+        data: {},
+      }
+    }
     return {
-      message: error.message,
+      message,
       data: {},
     }
   }
@@ -257,20 +291,27 @@ async function enrichMissingModPreviewImages(instanceId: string, mods: Awaited<R
   }))
 }
 
-async function buildModListPayload(instanceId: string): Promise<ModListDto> {
+async function buildModListPayload(
+  instanceId: string,
+  options?: { enrichRatings?: boolean, enrichPreviews?: boolean },
+): Promise<ModListDto> {
   const instance = await getGameInstanceById(instanceId)
   if (!instance) {
     throw new Error('实例不存在')
   }
   const installPath = resolveInstanceInstallPath(instance)
   let mods = await listInstanceMods(instanceId)
-  await enrichMissingModPreviewImages(instanceId, mods)
-  mods = await listInstanceMods(instanceId)
+  if (options?.enrichPreviews) {
+    await enrichMissingModPreviewImages(instanceId, mods)
+    mods = await listInstanceMods(instanceId)
+  }
   const dependencyMap = readModDependencyMap(installPath)
   const installedIds = new Set(
     mods.filter(item => item.installStatus === 'ready').map(item => item.workshopId),
   )
-  const ratingMap = await fetchWorkshopRatings(mods.map(item => item.workshopId))
+  const ratingMap = options?.enrichRatings
+    ? await fetchWorkshopRatings(mods.map(item => item.workshopId))
+    : new Map<string, number | null>(mods.map(item => [item.workshopId, null]))
   return {
     instanceId,
     instanceName: instance.name,
@@ -281,12 +322,29 @@ async function buildModListPayload(instanceId: string): Promise<ModListDto> {
   }
 }
 
+async function buildLightweightModDto(instanceId: string, workshopId: string): Promise<ModItemDto | null> {
+  const mod = await getInstanceModByWorkshopId(instanceId, workshopId)
+  if (!mod) {
+    return null
+  }
+  const instance = await getGameInstanceById(instanceId)
+  if (!instance) {
+    return null
+  }
+  const installPath = resolveInstanceInstallPath(instance)
+  const dependencyMap = readModDependencyMap(installPath)
+  const readyMods = await listInstanceMods(instanceId)
+  const installedIds = new Set(
+    readyMods.filter(item => item.installStatus === 'ready').map(item => item.workshopId),
+  )
+  return toDto(mod, dependencyMap, installedIds, new Map([[mod.workshopId, null]]))
+}
+
 async function enrichInstallJobDto(instanceId: string, job: ModInstallJobDto): Promise<ModInstallJobDto> {
   if (job.status !== 'success') {
     return job
   }
-  const payload = await buildModListPayload(instanceId)
-  const mod = payload.mods.find(item => item.workshopId === job.workshopId)
+  const mod = await buildLightweightModDto(instanceId, job.workshopId)
   return mod ? { ...job, mod } : job
 }
 
@@ -325,6 +383,7 @@ export function registerModModule(app: FastifyInstance) {
       return authError
     }
     const params = request.params as { instanceId?: string }
+    const query = request.query as { enrich?: string }
     const instanceId = normalizeInstanceId(params.instanceId)
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
@@ -341,7 +400,8 @@ export function registerModModule(app: FastifyInstance) {
         instanceId,
         installPath: resolved.instance.installPath,
       })
-      const payload = await buildModListPayload(instanceId)
+      const enrich = parseModListEnrich(query.enrich)
+      const payload = await buildModListPayload(instanceId, enrich)
       return success(payload, request)
     }
     catch (error) {
@@ -375,14 +435,8 @@ export function registerModModule(app: FastifyInstance) {
       return resolved.error
     }
     try {
-      await ensurePendingModDownloadsRecovered({
-        instanceId,
-        installPath: resolved.instance.installPath,
-      })
       const installedMods = await listInstanceMods(instanceId)
-      const readyWorkshopIds = new Set(
-        installedMods.filter(item => item.installStatus === 'ready').map(item => item.workshopId),
-      )
+      const subscribedModStatusByWorkshopId = buildSubscribedModStatusMap(installedMods)
       const pendingWorkshopIds = collectPendingWorkshopIds(instanceId, installedMods)
       const payload = await fetchDstSteamWorkshopMods({
         keyword: query.keyword?.trim() ?? '',
@@ -390,7 +444,7 @@ export function registerModModule(app: FastifyInstance) {
         pageSize: normalizePositiveNumber(query.pageSize, 20),
         sort: normalizeSteamSort(query.sort),
         trendDays: normalizeTrendDays(query.trendDays),
-        installedWorkshopIds: readyWorkshopIds,
+        subscribedModStatusByWorkshopId,
         pendingWorkshopIds,
       })
       return success(payload, request)
@@ -428,9 +482,12 @@ export function registerModModule(app: FastifyInstance) {
       const installedMods = await listInstanceMods(instanceId)
       const detail = await fetchWorkshopFileDetail(workshopId, locale)
       const modRecord = installedMods.find(mod => mod.workshopId === workshopId)
+      const subscribeStatus = modRecord?.installStatus ?? null
       const payload: SteamModDetailDto = {
         ...detail,
-        installed: modRecord?.installStatus === 'ready',
+        subscribed: subscribeStatus !== null,
+        subscribeStatus,
+        installed: subscribeStatus === 'ready',
       }
       return success(payload, request)
     }
@@ -491,7 +548,7 @@ export function registerModModule(app: FastifyInstance) {
     if (!workshopId) {
       return businessError('创意工坊 ID 不能为空', request)
     }
-    const job = getModInstallJob(instanceId, workshopId)
+    const job = await resolveModInstallJob(instanceId, workshopId)
     return success(await enrichInstallJobDto(instanceId, job), request)
   })
 

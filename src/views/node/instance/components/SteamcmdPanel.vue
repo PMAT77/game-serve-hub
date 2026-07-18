@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NTag } from 'naive-ui'
 import { onMounted, ref } from 'vue'
 import apiSystem from '@/api/modules/system'
 
@@ -69,33 +70,21 @@ onMounted(() => {
 
 <template>
   <FaPageMain title="容器镜像">
-    <div class="p-4 border border-border/70 rounded-lg bg-muted/20 space-y-4"> 
+    <p class="mb-4 text-sm text-muted-foreground">
+      管理游戏安装与运行所需的 Docker 镜像。创建实例前需先拉取游戏安装镜像。
+    </p>
+    <div class="p-4 border border-border/70 rounded-lg bg-muted/20 space-y-4">
       <div class="flex flex-wrap gap-3 items-start justify-between">
         <div class="flex flex-wrap gap-2">
-          <span
-            class="text-xs px-2 py-0.5 rounded-full"
-            :class="isDockerAvailable
-              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-              : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'"
-          >
+          <NTag size="small" :bordered="false" :type="isDockerAvailable ? 'success' : 'error'">
             {{ isDockerAvailable ? 'Docker 可用' : 'Docker 不可用' }}
-          </span>
-          <span
-            class="text-xs px-2 py-0.5 rounded-full"
-            :class="steamcmdInstalled
-              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-              : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'"
-          >
+          </NTag>
+          <NTag size="small" :bordered="false" :type="steamcmdInstalled ? 'success' : 'default'">
             {{ steamcmdInstalled ? '游戏安装镜像已就绪' : '游戏安装镜像未就绪' }}
-          </span>
-          <span
-            class="text-xs px-2 py-0.5 rounded-full"
-            :class="gameDstInstalled
-              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-              : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'"
-          >
+          </NTag>
+          <NTag size="small" :bordered="false" :type="gameDstInstalled ? 'success' : 'warning'">
             {{ gameDstInstalled ? 'DST 运行镜像已就绪' : '安装实例后自动准备' }}
-          </span>
+          </NTag>
         </div>
         <div class="flex flex-wrap gap-2">
           <NButton

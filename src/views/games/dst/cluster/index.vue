@@ -2,11 +2,14 @@
 import type { DataTableColumns } from 'naive-ui'
 import type { ClusterNetworkMode } from '@/api/modules/cluster'
 import type { InstanceItem } from '@/api/modules/instance'
-import { NButton, NDataTable, NEmpty, NSpin, NTag } from 'naive-ui'
+import { NButton, NDataTable, NTag, NTooltip } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
+import AdminListToolbar from '@/components/AdminListToolbar.vue'
+import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
 import apiCluster from '@/api/modules/cluster'
 import apiShard from '@/api/modules/shard'
 import apiInstance from '@/api/modules/instance'
+import { useAdminPageState } from '@/composables/useAdminPageState'
 import { isInstallableGameInstance } from '@/composables/useGameInstance'
 import { routeToDstRoomSettings, routeToNodeInstance } from '@/navigation/game-routes'
 import { getStatusBadgeClass, getStatusLabel } from '@/views/node/instance/instanceDisplay'
@@ -27,8 +30,19 @@ interface ClusterListRow {
 }
 
 const router = useRouter()
-const loading = ref(false)
 const rows = ref<ClusterListRow[]>([])
+const keywordFilter = ref('')
+
+const {
+  loading,
+  error,
+  showPageSkeleton,
+  showTableLoading,
+  showEmpty,
+  showError,
+  initialLoadDone,
+  runLoad,
+} = useAdminPageState(rows)
 
 const networkModeLabel: Record<ClusterNetworkMode, string> = {
   offline: '离线',
@@ -36,22 +50,38 @@ const networkModeLabel: Record<ClusterNetworkMode, string> = {
   public: '公网',
 }
 
-const hasRows = computed(() => rows.value.length > 0)
+const filteredRows = computed(() => {
+  const keyword = keywordFilter.value.trim().toLowerCase()
+  if (!keyword) {
+    return rows.value
+  }
+  return rows.value.filter((row) => {
+    const haystack = [
+      row.instance.name,
+      row.clusterName ?? '',
+      row.instance.gameCode ?? '',
+    ].join(' ').toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
+
+const hasFilteredRows = computed(() => filteredRows.value.length > 0)
+const showFilteredEmpty = computed(() => initialLoadDone.value && !loading.value && rows.value.length > 0 && !hasFilteredRows.value)
 
 const columns: DataTableColumns<ClusterListRow> = [
   {
     title: '实例名称',
-    key: 'instanceName', 
+    key: 'instanceName',
     render: row => row.instance.name,
   },
   {
     title: '房间名称',
-    key: 'clusterName', 
+    key: 'clusterName',
     render: row => row.clusterName ?? '—',
   },
   {
     title: '运行状态',
-    key: 'status', 
+    key: 'status',
     render: (row) => {
       const status = row.instance.status
       return h(
@@ -65,12 +95,28 @@ const columns: DataTableColumns<ClusterListRow> = [
     title: '在线人数',
     key: 'onlinePlayers',
     width: 100,
+    align: 'right',
     render: row => formatOnlinePlayers(row),
   },
   {
     title: '联网模式',
-    key: 'networkMode', 
-    render: row => row.networkMode ? networkModeLabel[row.networkMode] : (row.loadError ?? '—'),
+    key: 'networkMode',
+    render: (row) => {
+      if (row.networkMode) {
+        return networkModeLabel[row.networkMode]
+      }
+      if (row.loadError) {
+        return h(
+          NTooltip,
+          { trigger: 'hover' },
+          {
+            trigger: () => h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '异常' }),
+            default: () => row.loadError,
+          },
+        )
+      }
+      return '—'
+    },
   },
   {
     title: '洞穴',
@@ -87,7 +133,7 @@ const columns: DataTableColumns<ClusterListRow> = [
       {
         size: 'small',
         type: 'info',
-        text: true, 
+        text: true,
         disabled: row.instance.status === 'pending_install',
         onClick: () => openSettings(row.instance.id),
       },
@@ -98,6 +144,10 @@ const columns: DataTableColumns<ClusterListRow> = [
 
 function openSettings(instanceId: string) {
   router.push(routeToDstRoomSettings(instanceId))
+}
+
+function goToInstanceManagement() {
+  router.push(routeToNodeInstance())
 }
 
 function buildCavesSummary(shardEnabled: boolean, cavesConfigured: boolean): string {
@@ -182,16 +232,20 @@ async function loadClusterSummary(instance: InstanceItem): Promise<ClusterListRo
 }
 
 async function loadRows() {
-  loading.value = true
-  try {
+  await runLoad(async () => {
     const response = await apiInstance.getInstanceList()
     const instances = (response.data ?? []) as InstanceItem[]
     const dstInstances = instances.filter(isInstallableGameInstance)
     rows.value = await Promise.all(dstInstances.map(loadClusterSummary))
-  }
-  finally {
-    loading.value = false
-  }
+  })
+}
+
+function searchRows() {
+  // 客户端筛选，keyword 已绑定 filteredRows
+}
+
+function resetFilters() {
+  keywordFilter.value = ''
 }
 
 onMounted(() => {
@@ -200,40 +254,56 @@ onMounted(() => {
 </script>
 
 <template>
-  <FaPageMain class="space-y-4">
-    <div class="flex items-center justify-between gap-4 mb-4">
-      <div>
-        <h1 class="text-lg font-semibold">
-          房间列表
-        </h1>
-        <p class="mt-1 text-sm text-muted-foreground">
-          每个 DST 实例对应一个房间。在此配置联网模式、房间名称与 Klei 令牌。
-        </p>
-      </div>
-      <NButton :loading="loading" @click="loadRows">
-        刷新
-      </NButton>
+  <FaPageMain main-class="flex flex-col gap-4">
+    <div>
+      <h1 class="text-lg font-semibold">
+        房间列表
+      </h1>
+      <p class="mt-1 text-sm text-muted-foreground">
+        汇总各 DST 实例的房间配置。安装完成后在此进入联网与房间设置。
+      </p>
     </div>
 
-    <NSpin :show="loading">
+    <AdminListToolbar
+      v-model:keyword="keywordFilter"
+      keyword-placeholder="实例名称 / 房间名称"
+      :search-loading="loading"
+      :reset-disabled="!keywordFilter"
+      @search="searchRows"
+      @reset="resetFilters"
+    >
+      <template #actions>
+        <NButton :loading="loading" @click="loadRows">
+          刷新
+        </NButton>
+      </template>
+    </AdminListToolbar>
+
+    <AdminPageFeedback
+      :show-skeleton="showPageSkeleton"
+      :show-error="showError"
+      :error-message="error"
+      :show-empty="showEmpty"
+      empty-description="暂无已安装的 DST 实例"
+      empty-action-label="前往实例管理"
+      @retry="loadRows"
+      @empty-action="goToInstanceManagement"
+    >
       <NDataTable
-        v-if="hasRows" 
+        v-if="hasFilteredRows"
         :bordered="false"
         :single-line="false"
         :columns="columns"
-        :data="rows" 
+        :data="filteredRows"
+        :loading="showTableLoading"
         :scroll-x="1000"
       />
-      <NEmpty
-        v-else-if="!loading"
-        description="暂无已安装的 DST 实例"
+      <div
+        v-else-if="showFilteredEmpty"
+        class="text-muted-foreground py-12 text-center text-sm"
       >
-        <template #extra>
-          <NButton type="primary" @click="router.push(routeToNodeInstance())">
-            前往实例管理
-          </NButton>
-        </template>
-      </NEmpty>
-    </NSpin>
+        没有匹配「{{ keywordFilter }}」的房间，请调整关键词或重置筛选。
+      </div>
+    </AdminPageFeedback>
   </FaPageMain>
 </template>

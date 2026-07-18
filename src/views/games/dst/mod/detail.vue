@@ -2,7 +2,6 @@
 import type { SteamModDetailDto } from '@/api/modules/mod'
 import dayjs from 'dayjs'
 import {
-  NAlert,
   NButton,
   NCard,
   NDescriptions,
@@ -10,16 +9,17 @@ import {
   NEmpty,
   NImage,
   NScrollbar,
-  NSpin,
   NTag,
   useMessage,
 } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { resolveModLocalizedText } from '../../../../../shared/contracts/mod'
+import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import apiMod from '@/api/modules/mod'
 import { useInstanceModState } from '@/composables/useInstanceModState'
 import { useModContentLocale } from '@/composables/useModContentLocale'
-import { routeToDstModList, routeToDstWorldSettings } from '@/navigation/game-routes'
+import { routeToDstModList } from '@/navigation/game-routes'
+import DstModDetailSkeleton from './components/DstModDetailSkeleton.vue'
 
 defineOptions({
   name: 'DstModDetail',
@@ -35,7 +35,7 @@ const router = useRouter()
 const message = useMessage()
 const { locale: contentLocale } = useModContentLocale()
 
-const loading = ref(false)
+const loading = ref(true)
 const detail = ref<SteamModDetailDto | null>(null)
 
 const workshopId = computed(() => String(route.params.workshopId ?? '').trim())
@@ -46,7 +46,6 @@ const instanceId = computed(() => {
 
 const {
   isPendingWorkshop,
-  resolveSubscribeButtonText,
   restoreInstallJobs,
   installMod,
   resetState,
@@ -71,20 +70,34 @@ const displayDescription = computed(() => {
 })
 
 const installButtonText = computed(() => {
-  if (!detail.value || detail.value.installed) {
+  if (!detail.value) {
+    return '订阅'
+  }
+  if (detail.value.installed || detail.value.subscribeStatus === 'ready') {
     return '已订阅'
   }
-  return resolveSubscribeButtonText(workshopId.value, false)
+  if (isDownloading.value || detail.value.subscribeStatus === 'pending') {
+    return '订阅中'
+  }
+  if (detail.value.subscribeStatus === 'failed') {
+    return '重试订阅'
+  }
+  return '订阅'
 })
 
 const installButtonDisabled = computed(() =>
   !detail.value
   || !instanceId.value
   || detail.value.installed
-  || isDownloading.value,
+  || detail.value.subscribeStatus === 'ready'
+  || isDownloading.value
+  || detail.value.subscribeStatus === 'pending',
 )
 
-const installButtonLoading = computed(() => isDownloading.value && !detail.value?.installed)
+const installButtonLoading = computed(() =>
+  (isDownloading.value || detail.value?.subscribeStatus === 'pending')
+  && !detail.value?.installed,
+)
 
 function formatDateTime(value: string | null): string {
   if (!value) {
@@ -126,37 +139,79 @@ function isAuthUnauthorizedError(error: unknown): boolean {
     && (error as BusinessErrorLike).code === 'AUTH_UNAUTHORIZED'
 }
 
-function goToWorldSettings() {
-  if (!instanceId.value) {
-    return
-  }
-  router.push(routeToDstWorldSettings(instanceId.value))
-}
-
 function showSubscribeSuccessGuide() {
   message.success('订阅成功。请到世界设置开启 Mod，并在实例控制台重启实例后生效。', {
     duration: 6000,
   })
 }
 
+function renderSubscribeStatusLabel(): string {
+  if (!detail.value) {
+    return '未订阅'
+  }
+  if (detail.value.subscribeStatus === 'pending' || isDownloading.value) {
+    return '下载中'
+  }
+  if (detail.value.subscribeStatus === 'failed') {
+    return '已订阅 · 下载失败'
+  }
+  if (detail.value.subscribed || detail.value.installed) {
+    return '已订阅'
+  }
+  return '未订阅'
+}
+
+function renderSubscribeStatusType(): 'default' | 'success' | 'warning' | 'error' {
+  if (!detail.value) {
+    return 'default'
+  }
+  if (detail.value.subscribeStatus === 'pending' || isDownloading.value) {
+    return 'warning'
+  }
+  if (detail.value.subscribeStatus === 'failed') {
+    return 'error'
+  }
+  if (detail.value.subscribed || detail.value.installed) {
+    return 'success'
+  }
+  return 'default'
+}
+
 async function handleInstallJobTerminal(job: Awaited<ReturnType<typeof apiMod.pollModInstallJob>>) {
   if (job.status === 'success' && detail.value) {
-    detail.value = { ...detail.value, installed: true }
+    detail.value = {
+      ...detail.value,
+      subscribed: true,
+      subscribeStatus: 'ready',
+      installed: true,
+    }
     showSubscribeSuccessGuide()
     return
   }
-  if (job.status === 'failed') {
+  if (job.status === 'failed' && detail.value) {
+    detail.value = {
+      ...detail.value,
+      subscribed: true,
+      subscribeStatus: 'failed',
+      installed: false,
+    }
     message.error(job.error || '订阅失败，请稍后重试')
+    return
+  }
+  if (job.status === 'not_found') {
+    await loadDetail()
   }
 }
 
 async function loadDetail() {
   if (!workshopId.value) {
     detail.value = null
+    loading.value = false
     return
   }
   if (!instanceId.value) {
     detail.value = null
+    loading.value = false
     return
   }
   loading.value = true
@@ -179,8 +234,16 @@ async function loadDetail() {
 }
 
 async function installModAction() {
-  if (!detail.value || !instanceId.value || detail.value.installed || isDownloading.value) {
+  if (!detail.value || !instanceId.value || installButtonDisabled.value) {
     return
+  }
+  if (detail.value.subscribeStatus !== 'failed') {
+    detail.value = {
+      ...detail.value,
+      subscribed: true,
+      subscribeStatus: 'pending',
+      installed: false,
+    }
   }
   try {
     await installMod({
@@ -203,13 +266,26 @@ function goBack() {
   router.push(routeToDstModList())
 }
 
-onMounted(async () => {
-  if (instanceId.value) {
-    await restoreInstallJobs({
-      onTerminal: job => void handleInstallJobTerminal(job),
-    })
+watch(workshopId, () => {
+  if (!instanceId.value) {
+    loading.value = false
+    return
   }
-  await loadDetail()
+  loading.value = true
+})
+
+onMounted(async () => {
+  if (!instanceId.value) {
+    loading.value = false
+    return
+  }
+  loading.value = true
+  await Promise.all([
+    restoreInstallJobs({
+      onTerminal: job => void handleInstallJobTerminal(job),
+    }),
+    loadDetail(),
+  ])
 })
 
 watch(instanceId, async (value, previousValue) => {
@@ -218,9 +294,13 @@ watch(instanceId, async (value, previousValue) => {
   }
   resetState()
   if (value) {
-    await restoreInstallJobs({
-      onTerminal: job => void handleInstallJobTerminal(job),
-    })
+    loading.value = true
+    await Promise.all([
+      restoreInstallJobs({
+        onTerminal: job => void handleInstallJobTerminal(job),
+      }),
+      loadDetail(),
+    ])
   }
 })
 
@@ -249,174 +329,156 @@ watch(contentLocale, () => {
         </div>
       </template>
 
-      <NSpin
-        :show="loading"
-        class="dst-mod-detail-spin flex min-h-0 flex-1 flex-col"
-        content-class="flex min-h-0 flex-1 flex-col"
+      <DstModDetailSkeleton v-if="loading" class="flex min-h-0 flex-1 flex-col" />
+
+      <NEmpty
+        v-else-if="!instanceId"
+        class="py-16"
+        description="缺少实例信息，请从 Mod 列表进入详情页。"
       >
-        <NEmpty
-          v-if="!loading && !instanceId"
-          class="py-16"
-          description="缺少实例信息，请从 Mod 列表进入详情页。"
-        >
-          <template #extra>
-            <NButton type="primary" @click="goBack">
-              返回 Mod 列表
-            </NButton>
-          </template>
-        </NEmpty>
+        <template #extra>
+          <NButton @click="goBack">
+            返回 Mod 列表
+          </NButton>
+        </template>
+      </NEmpty>
 
-        <NEmpty
-          v-else-if="!loading && !detail"
-          class="py-16"
-          description="未能加载 Mod 详情，请稍后重试。"
-        >
-          <template #extra>
-            <NButton @click="goBack">
-              返回 Mod 列表
-            </NButton>
-            <NButton v-if="instanceId && workshopId" class="ml-2" @click="loadDetail">
-              重试
-            </NButton>
-          </template>
-        </NEmpty>
+      <NEmpty
+        v-else-if="!detail"
+        class="py-16"
+        description="未能加载 Mod 详情，请稍后重试。"
+      >
+        <template #extra>
+          <NButton @click="goBack">
+            返回 Mod 列表
+          </NButton>
+          <NButton v-if="instanceId && workshopId" class="ml-2" @click="loadDetail">
+            重试
+          </NButton>
+        </template>
+      </NEmpty>
 
-        <div v-else-if="detail" class="flex min-h-0 flex-1 flex-col gap-4">
-          <NCard size="small" title="基本信息" class="shrink-0">
-            <div class="flex flex-col gap-4 lg:flex-row">
-              <div class="shrink-0">
-                <NImage
-                  v-if="detail.previewImage"
-                  :src="detail.previewImage"
-                  width="160"
-                  height="160"
-                  object-fit="cover"
-                  lazy
-                  class="rounded"
-                />
-                <div
-                  v-else
-                  class="flex size-40 items-center justify-center rounded bg-muted text-sm text-muted-foreground"
-                >
-                  无缩略图
-                </div>
-              </div>
-
-              <NDescriptions
-                :column="1"
-                label-placement="left"
-                class="min-w-0 flex-1"
+      <div v-else class="flex min-h-0 flex-1 flex-col gap-4">
+        <NCard size="small" class="shrink-0">
+          <AdminSettingsSection
+            title="基本信息"
+            description="创意工坊元数据与当前实例的订阅状态。"
+          />
+          <div class="mt-4 flex flex-col gap-4 lg:flex-row">
+            <div class="shrink-0">
+              <NImage
+                v-if="detail.previewImage"
+                :src="detail.previewImage"
+                width="160"
+                height="160"
+                object-fit="cover"
+                lazy
+                class="rounded"
+              />
+              <div
+                v-else
+                class="flex size-40 items-center justify-center rounded bg-muted text-sm text-muted-foreground"
               >
-                <NDescriptionsItem label="Mod 名称">
-                  {{ displayTitle }}
-                </NDescriptionsItem>
-                <NDescriptionsItem label="创作者">
-                  {{ detail.creatorName ?? '-' }}
-                </NDescriptionsItem>
-                <NDescriptionsItem label="创意工坊 ID">
-                  {{ detail.workshopId }}
-                </NDescriptionsItem>
-                <NDescriptionsItem label="文件大小">
-                  {{ formatFileSize(detail.fileSize) }}
-                </NDescriptionsItem>
-                <NDescriptionsItem label="标签">
-                  <div v-if="detail.tags.length > 0" class="flex flex-wrap gap-1">
-                    <NTag
-                      v-for="tag in detail.tags"
-                      :key="tag"
-                      size="small"
-                      :bordered="false"
-                    >
-                      {{ tag }}
-                    </NTag>
-                  </div>
-                  <span v-else class="text-muted-foreground">-</span>
-                </NDescriptionsItem>
-                <NDescriptionsItem label="发布时间">
-                  {{ formatDateTime(detail.publishedAt) }}
-                </NDescriptionsItem>
-                <NDescriptionsItem label="更新时间">
-                  {{ formatDateTime(detail.updatedAt) }}
-                </NDescriptionsItem>
-                <NDescriptionsItem label="订阅状态">
+                无缩略图
+              </div>
+            </div>
+
+            <NDescriptions
+              :column="1"
+              label-placement="left"
+              class="min-w-0 flex-1"
+            >
+              <NDescriptionsItem label="Mod 名称">
+                {{ displayTitle }}
+              </NDescriptionsItem>
+              <NDescriptionsItem label="创作者">
+                {{ detail.creatorName ?? '-' }}
+              </NDescriptionsItem>
+              <NDescriptionsItem label="创意工坊 ID">
+                {{ detail.workshopId }}
+              </NDescriptionsItem>
+              <NDescriptionsItem label="文件大小">
+                {{ formatFileSize(detail.fileSize) }}
+              </NDescriptionsItem>
+              <NDescriptionsItem label="标签">
+                <div v-if="detail.tags.length > 0" class="flex flex-wrap gap-1">
                   <NTag
+                    v-for="tag in detail.tags"
+                    :key="tag"
                     size="small"
                     :bordered="false"
-                    :type="detail.installed ? 'success' : 'default'"
                   >
-                    {{ detail.installed ? '已订阅' : '未订阅' }}
+                    {{ tag }}
                   </NTag>
-                </NDescriptionsItem>
-              </NDescriptions>
-            </div>
-          </NCard>
-
-          <NCard
-            size="small"
-            title="描述"
-            class="dst-mod-detail-desc-card flex min-h-0 flex-1 flex-col"
-            content-class="flex min-h-0 flex-1 flex-col"
-          >
-            <NScrollbar class="min-h-0 flex-1">
-              <p
-                v-if="displayDescription"
-                class="whitespace-pre-wrap pr-3 text-sm leading-relaxed"
-              >
-                {{ displayDescription }}
-              </p>
-              <p v-else class="text-sm text-muted-foreground">
-                暂无描述
-              </p>
-            </NScrollbar>
-          </NCard>
-
-          <NAlert
-            v-if="detail.installed"
-            type="success"
-            title="订阅成功后"
-            class="shrink-0"
-          >
-            <div class="flex flex-wrap items-center gap-2 text-sm">
-              <span>请到世界设置开启 Mod，并在实例控制台重启实例后生效。</span>
-              <NButton size="tiny" type="primary" @click="goToWorldSettings">
-                前往世界设置
-              </NButton>
-            </div>
-          </NAlert>
-
-          <div class="flex shrink-0 justify-center gap-2">
-            <NButton
-              type="primary"
-              :disabled="installButtonDisabled"
-              :loading="installButtonLoading"
-              @click="installModAction"
-            >
-              {{ installButtonText }}
-            </NButton>
-            <NButton
-              tag="a"
-              :href="detail.detailUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              在 Steam 查看
-            </NButton>
+                </div>
+                <span v-else class="text-muted-foreground">-</span>
+              </NDescriptionsItem>
+              <NDescriptionsItem label="发布时间">
+                {{ formatDateTime(detail.publishedAt) }}
+              </NDescriptionsItem>
+              <NDescriptionsItem label="更新时间">
+                {{ formatDateTime(detail.updatedAt) }}
+              </NDescriptionsItem>
+              <NDescriptionsItem label="订阅状态">
+                <NTag
+                  size="small"
+                  :bordered="false"
+                  :type="renderSubscribeStatusType()"
+                >
+                  {{ renderSubscribeStatusLabel() }}
+                </NTag>
+              </NDescriptionsItem>
+            </NDescriptions>
           </div>
+        </NCard>
+
+        <NCard
+          size="small"
+          class="dst-mod-detail-desc-card flex min-h-0 flex-1 flex-col"
+          content-class="flex min-h-0 flex-1 flex-col"
+        >
+          <AdminSettingsSection
+            title="描述"
+            description="创意工坊原文说明，用于确认 Mod 功能与兼容性。"
+          />
+          <NScrollbar class="mt-4 min-h-0 flex-1">
+            <p
+              v-if="displayDescription"
+              class="whitespace-pre-wrap pr-3 text-sm leading-relaxed"
+            >
+              {{ displayDescription }}
+            </p>
+            <p v-else class="text-sm text-muted-foreground">
+              暂无描述
+            </p>
+          </NScrollbar>
+        </NCard>
+
+        <div class="flex shrink-0 justify-center gap-2">
+          <NButton
+            type="primary"
+            :disabled="installButtonDisabled"
+            :loading="installButtonLoading"
+            @click="installModAction"
+          >
+            {{ installButtonText }}
+          </NButton>
+          <NButton
+            tag="a"
+            :href="detail.detailUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            在 Steam 查看
+          </NButton>
         </div>
-      </NSpin>
+      </div>
     </FaPageMain>
   </div>
 </template>
 
 <style scoped>
 .dst-mod-detail-page :deep(.group\/pagemain) {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.dst-mod-detail-spin :deep(.n-spin-content) {
   display: flex;
   flex-direction: column;
   flex: 1;

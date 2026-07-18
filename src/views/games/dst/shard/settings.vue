@@ -13,7 +13,7 @@ import {
   NCard,
   NEmpty,
   NForm,
-  NSpin,
+  NSkeleton,
   NTabPane,
   NTabs,
   NTag,
@@ -39,6 +39,7 @@ import {
 import ShardNetworkSection from './components/ShardNetworkSection.vue'
 import ShardModsSection from './components/ShardModsSection.vue'
 import ShardWorldRulesSection from './components/ShardWorldRulesSection.vue'
+import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ShardWorldgenSection from './components/ShardWorldgenSection.vue'
 import {
   applyLeveldataOverridesFromServer,
@@ -378,9 +379,12 @@ onActivated(() => {
       </div>
     </template>
 
-    <NSpin :show="loading">
+    <div v-if="loading && !shardList" class="space-y-3" aria-busy="true">
+      <NSkeleton v-for="i in 6" :key="i" text />
+    </div>
+    <template v-else>
       <NEmpty
-        v-if="!loading && !shardList"
+        v-if="!shardList"
         class="py-16"
         description="未能加载世界配置。请确认实例已安装、路由带有实例 ID，且后端服务可用。"
       >
@@ -394,7 +398,11 @@ onActivated(() => {
         </template>
       </NEmpty>
 
-      <div v-else-if="shardList" class="space-y-4">
+      <div v-else class="space-y-4">
+        <AdminSettingsSection
+          title="世界配置"
+          description="分别调整地上与洞穴的地图规则、端口与 Mod。保存后写入分片配置。"
+        />
         <NAlert
           v-for="(w, i) in configAlerts.warnings"
           :key="`w-${i}`"
@@ -592,6 +600,6 @@ onActivated(() => {
           </NTabPane>
         </NTabs>
       </div>
-    </NSpin>
+    </template>
   </FaPageMain>
 </template>

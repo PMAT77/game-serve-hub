@@ -56,6 +56,22 @@ describe('mod-download', () => {
     assert.equal(isDstWorkshopModPresent(installPath, '67890'), true)
   })
 
+  it('detects V2 workshop download via legacy.bin', () => {
+    const installPath = createInstallPath()
+    const modDir = resolveDstSteamWorkshopModDir(installPath, '501385076')
+    fs.mkdirSync(modDir, { recursive: true })
+    fs.writeFileSync(path.join(modDir, '1665728219799633209_legacy.bin'), Buffer.from('legacy'))
+    assert.equal(isDstWorkshopModPresent(installPath, '501385076'), true)
+  })
+
+  it('detects V1 workshop download via mod.manifest', () => {
+    const installPath = createInstallPath()
+    const modDir = resolveDstSteamWorkshopModDir(installPath, '2074508776')
+    fs.mkdirSync(modDir, { recursive: true })
+    fs.writeFileSync(path.join(modDir, 'mod.manifest'), 'manifest')
+    assert.equal(isDstWorkshopModPresent(installPath, '2074508776'), true)
+  })
+
   it('collects only missing workshop ids', () => {
     const installPath = createInstallPath()
     writeModMarker(installPath, '111', 'steamapps')

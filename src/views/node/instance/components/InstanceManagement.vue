@@ -4,7 +4,8 @@ import type { CreateInstancePayload, InstallableGameItem, InstanceItem, Instance
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
-import { NButton, NCheckbox, NDropdown, NProgress, NTag, useDialog, useNotification } from 'naive-ui'
+import { NButton, NCheckbox, NDropdown, NEmpty, NProgress, NStatistic, NTag, useDialog, useNotification } from 'naive-ui'
+import AdminListToolbar from '@/components/AdminListToolbar.vue'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
 import apiInstance from '@/api/modules/instance'
@@ -115,11 +116,11 @@ const UPDATE_NOTIFY_DISMISSED_KEY = 'gsh-instance-update-dismissed'
 const UPDATE_NOTIFY_STORAGE_KEY_LEGACY = 'gsh-instance-update-notified'
 
 const STAT_CARDS = [
-  { key: 'total' as const, label: '实例总数', valueClass: 'text-lg font-semibold' },
-  { key: 'running' as const, label: '运行中', valueClass: 'text-lg font-semibold text-emerald-600 dark:text-emerald-400' },
-  { key: 'stopped' as const, label: '已停止', valueClass: 'text-lg font-semibold text-slate-600 dark:text-slate-300' },
-  { key: 'error' as const, label: '异常', valueClass: 'text-lg font-semibold text-red-600 dark:text-red-400' },
-]
+  { key: 'total' as const, label: '实例总数' },
+  { key: 'running' as const, label: '运行中' },
+  { key: 'stopped' as const, label: '已停止' },
+  { key: 'error' as const, label: '异常' },
+] as const
 
 const instanceUpdateNotificationRef = ref<NotificationReactive | null>(null)
 /** 当前已展示通知对应的签名，避免轮询刷新列表时反复销毁/重建 */
@@ -1326,75 +1327,70 @@ onBeforeUnmount(() => {
           :key="card.key"
           class="p-3 rounded-md bg-muted/40"
         >
-          <p class="text-xs text-muted-foreground">
-            {{ card.label }}
-          </p>
-          <p class="mt-1" :class="card.valueClass">
-            {{ statusCount[card.key] }}
-          </p>
+          <NStatistic :label="card.label" tabular-nums>
+            <template #default>
+              <span
+                class="text-lg font-semibold"
+                :class="{
+                  'text-emerald-600 dark:text-emerald-400': card.key === 'running',
+                  'text-slate-600 dark:text-slate-300': card.key === 'stopped',
+                  'text-red-600 dark:text-red-400': card.key === 'error',
+                }"
+              >
+                {{ statusCount[card.key] }}
+              </span>
+            </template>
+          </NStatistic>
         </div>
       </div>
 
-      <div class="gap-3 grid">
-        <div class="flex gap-2 items-center">
-          <NInput
-            v-model:value="keywordFilter"
-            class="w-64"
-            placeholder="实例名称/Steam AppID"
-            @keydown.enter="searchInstances"
+      <AdminListToolbar
+        v-model:keyword="keywordFilter"
+        keyword-placeholder="实例名称 / Steam AppID"
+        :search-loading="instanceLoading"
+        :reset-disabled="!keywordFilter && selectedNodeId === 'all' && statusFilter === 'all'"
+        @search="searchInstances"
+        @reset="refreshInstancesAndResetKeyword"
+      >
+        <template #filters>
+          <NSelect
+            v-model:value="selectedNodeId"
+            :options="nodeOptions"
+            class="w-full md:w-44"
+            placeholder="节点"
+            @update:value="fetchInstances"
           />
-          <NButton type="primary" strong secondary @click="searchInstances">
-            查询
+          <NSelect
+            v-model:value="statusFilter"
+            :options="statusFilterOptions"
+            class="w-full md:w-44"
+            placeholder="状态"
+            @update:value="fetchInstances"
+          />
+        </template>
+        <template #actions>
+          <NButton
+            class="flex-1 min-w-0 md:flex-none"
+            type="warning"
+            strong
+            secondary
+            :loading="updateCheckLoading"
+            :disabled="!steamcmdInstalled || instances.length === 0"
+            @click="checkAllInstanceUpdates"
+          >
+            <template #icon>
+              <FaIcon name="i-ri:refresh-line" />
+            </template>
+            检查更新
           </NButton>
-          <NButton @click="refreshInstancesAndResetKeyword">
-            重置
+          <NButton class="flex-1 min-w-0 md:flex-none" type="primary" @click="openCreateModal">
+            <template #icon>
+              <FaIcon name="i-ri:add-line" />
+            </template>
+            创建实例
           </NButton>
-        </div>
-        <div class="flex flex-col gap-3 md:flex-row md:flex-nowrap md:items-center">
-          <div class="flex w-full min-w-0 flex-col gap-3 md:w-auto md:flex-row md:shrink md:flex-initial">
-            <div class="flex w-full min-w-0 items-center gap-2 md:w-44 md:flex-none">
-              <label class="shrink-0 text-sm text-muted-foreground">节点：</label>
-              <NSelect
-                v-model:value="selectedNodeId"
-                :options="nodeOptions"
-                class="min-w-0 flex-1 md:w-44 md:flex-none"
-                @update:value="fetchInstances"
-              />
-            </div>
-            <div class="flex w-full min-w-0 items-center gap-2 md:w-44 md:flex-none">
-              <label class="shrink-0 text-sm text-muted-foreground">状态：</label>
-              <NSelect
-                v-model:value="statusFilter"
-                :options="statusFilterOptions"
-                class="min-w-0 flex-1 md:w-44 md:flex-none"
-                @update:value="fetchInstances"
-              />
-            </div>
-          </div>
-          <div class="flex gap-2 w-full md:ml-auto md:shrink-0 md:w-auto">
-            <NButton
-              class="flex-1 min-w-0 md:flex-none"
-              type="warning"
-              strong
-              secondary
-              :loading="updateCheckLoading"
-              :disabled="!steamcmdInstalled || instances.length === 0"
-              @click="checkAllInstanceUpdates"
-            >
-              <template #icon>
-                <FaIcon name="i-ri:refresh-line" />
-              </template>
-              检查更新
-            </NButton>
-            <NButton class="flex-1 min-w-0 md:flex-none" type="primary" @click="openCreateModal">
-              <template #icon>
-                <FaIcon name="i-ri:add-line" />
-              </template>
-              创建实例
-            </NButton>
-          </div>
-        </div>
-      </div>
+        </template>
+      </AdminListToolbar>
 
       <div class="min-h-80 overflow-x-auto">
         <NDataTable
@@ -1409,9 +1405,13 @@ onBeforeUnmount(() => {
           class="w-full"
         >
           <template #empty>
-            <div class="text-muted-foreground py-8 text-center">
-              暂无实例数据
-            </div>
+            <NEmpty description="暂无实例">
+              <template #extra>
+                <NButton type="primary" @click="openCreateModal">
+                  创建实例
+                </NButton>
+              </template>
+            </NEmpty>
           </template>
         </NDataTable>
       </div>

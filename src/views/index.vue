@@ -100,15 +100,15 @@ function goLogin() {
             <span class="text-foreground font-medium">饥荒联机版（DST）</span>，Linux 一键脚本 + Docker Compose 生产部署；面板与游戏容器分离，升级面板时实例可继续运行。
           </p>
           <div class="flex flex-wrap gap-3">
-            <FaButton size="lg" @click="open(LINKS.docs)">
+            <FaButton size="lg" @click="goLogin">
+              进入面板
+            </FaButton>
+            <FaButton variant="outline" size="lg" @click="open(LINKS.docs)">
               项目文档
             </FaButton>
             <FaButton variant="outline" size="lg" @click="open(LINKS.github)">
               <FaIcon name="i-simple-icons:github" class="mr-1" />
               GitHub
-            </FaButton>
-            <FaButton variant="outline" size="lg" @click="goLogin">
-              进入面板
             </FaButton>
           </div>
         </div>

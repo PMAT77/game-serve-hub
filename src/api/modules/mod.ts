@@ -21,6 +21,7 @@ export type {
   ModInstallJobPhase,
   ModInstallJobStatus,
   ModInstallPayload,
+  ModInstallStatus,
   ModItemDto,
   ModListDto,
   ModMutationResult,
@@ -47,7 +48,10 @@ function isModInstallJobTerminal(status: ModInstallJobDto['status']): boolean {
 }
 
 export default {
-  getModList: (instanceId: string) => api.get(`app/instances/${instanceId}/mods`) as Promise<{ data: ModListDto }>,
+  getModList: (instanceId: string, options?: { enrich?: string }) =>
+    api.get(`app/instances/${instanceId}/mods`, {
+      params: options?.enrich ? { enrich: options.enrich } : undefined,
+    }) as Promise<{ data: ModListDto }>,
   getSteamModList: (
     instanceId: string,
     params?: {

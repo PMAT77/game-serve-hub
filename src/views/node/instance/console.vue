@@ -15,7 +15,9 @@ import {
   NInput,
   NRadioButton,
   NRadioGroup,
+  NSkeleton,
   NSpace,
+  NSwitch,
   NTabPane,
   NTabs,
   NTag,
@@ -533,11 +535,11 @@ onBeforeUnmount(() => {
   <FaPageMain :title="pageTitle">
     <div class="space-y-4">
       <p class="text-xs text-muted-foreground max-w-3xl">
-        面向<strong>已启动实例</strong>的饥荒运行时：连接信息、运行日志，以及面板消息与 Lua 控制（同页上下布局）。实例启停与安装请返回
-        <button type="button" class="text-primary underline-offset-2 hover:underline" @click="goBack">
+        面向<strong>已启动实例</strong>的饥荒运行时：连接信息、运行日志，以及面板消息与 Lua 控制。实例启停请返回
+        <NButton text type="primary" size="tiny" class="align-baseline px-0" @click="goBack">
           实例列表
-        </button>
-        ；主机资源请使用监控台（非本页）。
+        </NButton>
+        ；主机资源请使用监控台。
       </p>
 
       <div class="flex flex-wrap gap-2 items-center justify-between">
@@ -554,9 +556,7 @@ onBeforeUnmount(() => {
 
       <NCard title="连接与加入" size="small">
         <template v-if="connectInfoLoading && !connectInfo">
-          <p class="text-sm text-muted-foreground">
-            正在加载连接信息…
-          </p>
+          <NSkeleton text :repeat="4" />
         </template>
         <template v-else-if="connectInfo">
           <NDescriptions :column="1" label-placement="left" size="small" class="mb-3">
@@ -663,10 +663,10 @@ onBeforeUnmount(() => {
             <FaButton size="sm" variant="outline" @click="copyLogs">
               复制日志
             </FaButton>
-            <label class="text-xs text-muted-foreground flex gap-1.5 items-center">
-              <input v-model="autoScroll" type="checkbox" class="accent-primary">
-              自动滚动
-            </label>
+            <NSpace align="center" :size="8">
+              <NSwitch v-model:value="autoScroll" size="small" />
+              <span class="text-xs text-muted-foreground">自动滚动</span>
+            </NSpace>
           </div>
 
           <div class="mt-6 pt-4 border-t border-border">
@@ -752,10 +752,10 @@ onBeforeUnmount(() => {
             <FaButton size="sm" variant="outline" @click="copyLogs">
               复制日志
             </FaButton>
-            <label class="text-xs text-muted-foreground flex gap-1.5 items-center">
-              <input v-model="autoScroll" type="checkbox" class="accent-primary">
-              自动滚动
-            </label>
+            <NSpace align="center" :size="8">
+              <NSwitch v-model:value="autoScroll" size="small" />
+              <span class="text-xs text-muted-foreground">自动滚动</span>
+            </NSpace>
           </div>
         </NTabPane>
 

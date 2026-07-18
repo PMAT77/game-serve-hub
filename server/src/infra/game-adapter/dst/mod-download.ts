@@ -28,16 +28,29 @@ function normalizeWorkshopIds(workshopIds: string[]): string[] {
   return [...unique]
 }
 
-function hasModMarkerFiles(modDir: string): boolean {
+function hasWorkshopDownloadArtifacts(modDir: string): boolean {
   if (!fs.existsSync(modDir)) {
     return false
   }
-  return fs.existsSync(path.join(modDir, 'modinfo.lua'))
+  if (fs.existsSync(path.join(modDir, 'modinfo.lua'))
     || fs.existsSync(path.join(modDir, 'modmain.lua'))
+    || fs.existsSync(path.join(modDir, 'mod.manifest'))) {
+    return true
+  }
+  try {
+    return fs.readdirSync(modDir).some(name => name.endsWith('_legacy.bin'))
+  }
+  catch {
+    return false
+  }
 }
 
 export function resolveDstSteamWorkshopModDir(installPath: string, workshopId: string): string {
   return path.join(installPath, 'steamapps', 'workshop', 'content', DST_WORKSHOP_APP_ID, workshopId)
+}
+
+function resolveDstLegacyModDir(installPath: string, workshopId: string): string {
+  return path.join(installPath, 'mods', `workshop-${workshopId}`)
 }
 
 function resolveDstUgcModDirs(installPath: string, workshopId: string): string[] {
@@ -52,10 +65,34 @@ export function isDstWorkshopModPresent(installPath: string, workshopId: string)
   if (!normalizedId) {
     return false
   }
-  if (hasModMarkerFiles(resolveDstSteamWorkshopModDir(installPath, normalizedId))) {
+  if (hasWorkshopDownloadArtifacts(resolveDstSteamWorkshopModDir(installPath, normalizedId))) {
     return true
   }
-  return resolveDstUgcModDirs(installPath, normalizedId).some(hasModMarkerFiles)
+  if (hasWorkshopDownloadArtifacts(resolveDstLegacyModDir(installPath, normalizedId))) {
+    return true
+  }
+  return resolveDstUgcModDirs(installPath, normalizedId).some(hasWorkshopDownloadArtifacts)
+}
+
+export function formatMissingWorkshopModError(installPath: string, workshopIds: string[]): string {
+  const details = workshopIds.map((workshopId) => {
+    const workshopDir = resolveDstSteamWorkshopModDir(installPath, workshopId)
+    if (!fs.existsSync(workshopDir)) {
+      return `${workshopId}（目录不存在：${workshopDir}）`
+    }
+    let entries: string[] = []
+    try {
+      entries = fs.readdirSync(workshopDir)
+    }
+    catch {
+      entries = []
+    }
+    if (entries.length === 0) {
+      return `${workshopId}（目录为空：${workshopDir}）`
+    }
+    return `${workshopId}（未找到 modinfo.lua / modmain.lua / mod.manifest / *_legacy.bin，现有：${entries.slice(0, 5).join(', ')}）`
+  })
+  return `Mod 下载未完成，缺少文件：${details.join('；')}`
 }
 
 export function collectMissingWorkshopIds(installPath: string, workshopIds: string[]): string[] {
@@ -76,7 +113,7 @@ export function formatModDownloadFailureMessage(output: string): string {
   if (/Missing file permissions/i.test(text)) {
     return 'Mod 下载失败：实例目录权限不足'
   }
-  const tail = text.split(/\r?\n/).slice(-3).join(' ').trim()
+  const tail = text.slice(-500).split(/\r?\n/).slice(-3).join(' ').trim()
   return tail ? `Mod 下载失败：${tail}` : 'Mod 下载失败，请稍后重试'
 }
 
@@ -114,7 +151,7 @@ export async function downloadDstWorkshopMods(input: {
   if (stillMissing.length > 0) {
     return {
       ok: false,
-      error: `Mod 下载未完成，缺少文件：${stillMissing.join(', ')}`,
+      error: formatMissingWorkshopModError(input.hostInstallPath, stillMissing),
     }
   }
 

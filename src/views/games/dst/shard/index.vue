@@ -2,10 +2,13 @@
 import type { DataTableColumns } from 'naive-ui'
 import type { ShardContainerStatus, ShardListDto } from '@/api/modules/shard'
 import type { InstanceItem } from '@/api/modules/instance'
-import { NButton, NDataTable, NEmpty, NSpin, NTag } from 'naive-ui'
+import { NButton, NDataTable, NTag, NTooltip } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
+import AdminListToolbar from '@/components/AdminListToolbar.vue'
+import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
 import apiShard from '@/api/modules/shard'
 import apiInstance from '@/api/modules/instance'
+import { useAdminPageState } from '@/composables/useAdminPageState'
 import { isInstallableGameInstance } from '@/composables/useGameInstance'
 import { routeToDstWorldSettings, routeToNodeInstance } from '@/navigation/game-routes'
 import { getStatusBadgeClass, getStatusLabel } from '@/views/node/instance/instanceDisplay'
@@ -21,8 +24,19 @@ interface ShardListRow {
 }
 
 const router = useRouter()
-const loading = ref(false)
 const rows = ref<ShardListRow[]>([])
+const keywordFilter = ref('')
+
+const {
+  loading,
+  error,
+  showPageSkeleton,
+  showTableLoading,
+  showEmpty,
+  showError,
+  initialLoadDone,
+  runLoad,
+} = useAdminPageState(rows)
 
 const containerStatusLabel: Record<ShardContainerStatus, string> = {
   running: '运行中',
@@ -40,7 +54,18 @@ function renderShardStatusTag(status: ShardContainerStatus) {
   )
 }
 
-const hasRows = computed(() => rows.value.length > 0)
+const filteredRows = computed(() => {
+  const keyword = keywordFilter.value.trim().toLowerCase()
+  if (!keyword) {
+    return rows.value
+  }
+  return rows.value.filter(row =>
+    row.instance.name.toLowerCase().includes(keyword),
+  )
+})
+
+const hasFilteredRows = computed(() => filteredRows.value.length > 0)
+const showFilteredEmpty = computed(() => initialLoadDone.value && !loading.value && rows.value.length > 0 && !hasFilteredRows.value)
 
 const columns: DataTableColumns<ShardListRow> = [
   {
@@ -66,7 +91,17 @@ const columns: DataTableColumns<ShardListRow> = [
     render: (row) => {
       const enabled = row.shardList?.clusterShardEnabled
       if (enabled === undefined) {
-        return row.loadError ?? '—'
+        if (row.loadError) {
+          return h(
+            NTooltip,
+            { trigger: 'hover' },
+            {
+              trigger: () => h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '异常' }),
+              default: () => row.loadError,
+            },
+          )
+        }
+        return '—'
       }
       return h(
         NTag,
@@ -79,23 +114,27 @@ const columns: DataTableColumns<ShardListRow> = [
     title: '主世界',
     key: 'master',
     render: (row) => {
-      const master = row.shardList?.shards.find(s => s.id === 'master')
+      const list = row.shardList
+      if (!list) {
+        return '—'
+      }
+      const master = list.shards.find(s => s.id === 'master')
       if (!master) {
         return '—'
+      }
+      if (!master.configured) {
+        return h(NTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '待修复' })
       }
       return renderShardStatusTag(master.containerStatus)
     },
   },
   {
-    title: '洞穴',
+    title: '洞穴分片',
     key: 'caves',
     render: (row) => {
       const list = row.shardList
       if (!list) {
-        return row.loadError ?? '—'
-      }
-      if (!list.clusterShardEnabled) {
-        return h(NTag, { size: 'small', bordered: false, type: 'default' }, { default: () => '未开启' })
+        return '—'
       }
       const caves = list.shards.find(s => s.id === 'caves')
       if (!caves) {
@@ -130,6 +169,10 @@ function openSettings(instanceId: string) {
   router.push(routeToDstWorldSettings(instanceId))
 }
 
+function goToInstanceManagement() {
+  router.push(routeToNodeInstance())
+}
+
 async function loadShardSummary(instance: InstanceItem): Promise<ShardListRow> {
   if (instance.status === 'pending_install' || !instance.installPath) {
     return {
@@ -156,16 +199,16 @@ async function loadShardSummary(instance: InstanceItem): Promise<ShardListRow> {
 }
 
 async function loadRows() {
-  loading.value = true
-  try {
+  await runLoad(async () => {
     const response = await apiInstance.getInstanceList()
     const instances = (response.data ?? []) as InstanceItem[]
     const dstInstances = instances.filter(isInstallableGameInstance)
     rows.value = await Promise.all(dstInstances.map(loadShardSummary))
-  }
-  finally {
-    loading.value = false
-  }
+  })
+}
+
+function resetFilters() {
+  keywordFilter.value = ''
 }
 
 onMounted(() => {
@@ -174,40 +217,56 @@ onMounted(() => {
 </script>
 
 <template>
-  <FaPageMain class="space-y-4">
-    <div class="flex items-center justify-between gap-4 mb-4">
-      <div>
-        <h1 class="text-lg font-semibold">
-          世界列表
-        </h1>
-        <p class="mt-1 text-sm text-muted-foreground">
-          查看地上与洞穴的运行状态。在房间设置中开启洞穴并保存后，可在此调整端口、地图与世界规则。
-        </p>
-      </div>
-      <NButton :loading="loading" @click="loadRows">
-        刷新
-      </NButton>
+  <FaPageMain main-class="flex flex-col gap-4">
+    <div>
+      <h1 class="text-lg font-semibold">
+        世界列表
+      </h1>
+      <p class="mt-1 text-sm text-muted-foreground">
+        查看地上与洞穴分片状态。洞穴开启后在此调整端口、地图与世界规则。
+      </p>
     </div>
 
-    <NSpin :show="loading">
+    <AdminListToolbar
+      v-model:keyword="keywordFilter"
+      keyword-placeholder="实例名称"
+      :search-loading="loading"
+      :reset-disabled="!keywordFilter"
+      @search="() => {}"
+      @reset="resetFilters"
+    >
+      <template #actions>
+        <NButton :loading="loading" @click="loadRows">
+          刷新
+        </NButton>
+      </template>
+    </AdminListToolbar>
+
+    <AdminPageFeedback
+      :show-skeleton="showPageSkeleton"
+      :show-error="showError"
+      :error-message="error"
+      :show-empty="showEmpty"
+      empty-description="暂无已安装的 DST 实例"
+      empty-action-label="前往实例管理"
+      @retry="loadRows"
+      @empty-action="goToInstanceManagement"
+    >
       <NDataTable
-        v-if="hasRows"
+        v-if="hasFilteredRows"
         :bordered="false"
         :single-line="false"
         :columns="columns"
-        :data="rows"
+        :data="filteredRows"
+        :loading="showTableLoading"
         :scroll-x="860"
       />
-      <NEmpty
-        v-else-if="!loading"
-        description="暂无已安装的 DST 实例"
+      <div
+        v-else-if="showFilteredEmpty"
+        class="text-muted-foreground py-12 text-center text-sm"
       >
-        <template #extra>
-          <NButton type="primary" @click="router.push(routeToNodeInstance())">
-            前往实例管理
-          </NButton>
-        </template>
-      </NEmpty>
-    </NSpin>
+        没有匹配「{{ keywordFilter }}」的世界，请调整关键词或重置筛选。
+      </div>
+    </AdminPageFeedback>
   </FaPageMain>
 </template>

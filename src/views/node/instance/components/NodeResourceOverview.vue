@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { NodeListItem } from '@/api/modules/node'
+import { NButton, NStatistic, NTag } from 'naive-ui'
 import { onMounted, ref } from 'vue'
+import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
 import apiNode from '@/api/modules/node'
+import { useAdminPageState } from '@/composables/useAdminPageState'
 import { formatDateTime, formatPercent } from '../utils'
 
 defineOptions({
@@ -12,20 +15,24 @@ const emit = defineEmits<{
   nodesChange: [nodes: NodeListItem[]]
 }>()
 
-const nodeLoading = ref(false)
 const registerLoading = ref(false)
 const nodes = ref<NodeListItem[]>([])
 
+const {
+  loading,
+  error,
+  showPageSkeleton,
+  showEmpty,
+  showError,
+  runLoad,
+} = useAdminPageState(nodes)
+
 async function fetchNodes() {
-  nodeLoading.value = true
-  try {
+  await runLoad(async () => {
     const res = await apiNode.getNodeList()
     nodes.value = res.data
     emit('nodesChange', nodes.value)
-  }
-  finally {
-    nodeLoading.value = false
-  }
+  })
 }
 
 async function registerLocalNode() {
@@ -47,10 +54,13 @@ onMounted(() => {
 
 <template>
   <FaPageMain title="节点资源概览">
+    <p class="mb-4 text-sm text-muted-foreground">
+      查看各节点 CPU、内存与磁盘占用。节点离线时请先重注册本地节点。
+    </p>
     <section class="p-4 border border-border rounded-xl bg-card space-y-4">
       <div class="flex flex-wrap gap-3 items-center justify-between">
         <div class="flex gap-2">
-          <NButton :loading="nodeLoading" @click="fetchNodes">
+          <NButton :loading="loading" @click="fetchNodes">
             刷新节点
           </NButton>
           <NButton type="error" strong secondary :loading="registerLoading" @click="registerLocalNode">
@@ -59,14 +69,17 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="min-h-46">
-        <div v-if="nodeLoading && !nodes.length" class="node-state-placeholder">
-          节点数据加载中...
-        </div>
-        <div v-else-if="!nodes.length" class="node-state-placeholder">
-          暂无可用节点，请先完成本地节点注册。
-        </div>
-        <div v-else class="gap-3 grid md:grid-cols-2 xl:grid-cols-3">
+      <AdminPageFeedback
+        :show-skeleton="showPageSkeleton"
+        :show-error="showError"
+        :error-message="error"
+        :show-empty="showEmpty"
+        empty-description="暂无可用节点"
+        empty-action-label="重注册本地节点"
+        @retry="fetchNodes"
+        @empty-action="registerLocalNode"
+      >
+        <div class="gap-3 grid md:grid-cols-2 xl:grid-cols-3">
           <article
             v-for="node in nodes"
             :key="node.id"
@@ -81,39 +94,35 @@ onMounted(() => {
                   {{ node.host }}:{{ node.sshPort }}
                 </p>
               </div>
-              <span
-                class="text-xs px-2 py-0.5 rounded-full"
-                :class="node.status === 'online'
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                  : 'bg-red-500/10 text-red-600 dark:text-red-400'"
+              <NTag
+                size="small"
+                :bordered="false"
+                :type="node.status === 'online' ? 'success' : 'error'"
               >
                 {{ node.status === 'online' ? '在线' : '离线' }}
-              </span>
+              </NTag>
             </div>
             <div class="text-xs mt-3 gap-2 grid grid-cols-3">
               <div class="p-2 rounded-md bg-muted/50">
-                <p class="text-muted-foreground">
-                  CPU
-                </p>
-                <p class="font-semibold mt-1">
-                  {{ formatPercent(node.resources.cpu.usageRate) }}
-                </p>
+                <NStatistic label="CPU" tabular-nums>
+                  <template #default>
+                    <span class="text-sm font-semibold">{{ formatPercent(node.resources.cpu.usageRate) }}</span>
+                  </template>
+                </NStatistic>
               </div>
               <div class="p-2 rounded-md bg-muted/50">
-                <p class="text-muted-foreground">
-                  内存
-                </p>
-                <p class="font-semibold mt-1">
-                  {{ formatPercent(node.resources.memory.usageRate) }}
-                </p>
+                <NStatistic label="内存" tabular-nums>
+                  <template #default>
+                    <span class="text-sm font-semibold">{{ formatPercent(node.resources.memory.usageRate) }}</span>
+                  </template>
+                </NStatistic>
               </div>
               <div class="p-2 rounded-md bg-muted/50">
-                <p class="text-muted-foreground">
-                  磁盘
-                </p>
-                <p class="font-semibold mt-1">
-                  {{ formatPercent(node.resources.disk.usageRate) }}
-                </p>
+                <NStatistic label="磁盘" tabular-nums>
+                  <template #default>
+                    <span class="text-sm font-semibold">{{ formatPercent(node.resources.disk.usageRate) }}</span>
+                  </template>
+                </NStatistic>
               </div>
             </div>
             <p class="text-xs text-muted-foreground mt-3">
@@ -121,19 +130,7 @@ onMounted(() => {
             </p>
           </article>
         </div>
-      </div>
+      </AdminPageFeedback>
     </section>
   </FaPageMain>
 </template>
-
-<style scoped>
-.node-state-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 10rem;
-  font-size: 0.875rem;
-  color: hsl(var(--muted-foreground));
-  text-align: center;
-}
-</style>

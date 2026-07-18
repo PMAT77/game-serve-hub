@@ -121,7 +121,7 @@ describe('steam workshop parser', () => {
       trendDays: 7,
     }))
     const parsed = JSON.parse(key) as { schemaVersion?: number, pageSize?: number, page?: number }
-    assert.equal(parsed.schemaVersion, 8)
+    assert.equal(parsed.schemaVersion, 9)
     assert.equal(parsed.pageSize, 20)
     assert.equal(parsed.page, 2)
   })
@@ -141,7 +141,7 @@ describe('steam workshop parser', () => {
     assert.match(url, /browsesort=textsearch/)
     assert.match(url, /actualsort=textsearch/)
     assert.match(url, /searchtext=backpack/)
-    assert.doesNotMatch(url, /requiredtags/)
+    assert.match(url, /requiredtags(%5B%5D|\[\])=server_only_mod/)
   })
 
   it('parses real Steam SSR sample when available', () => {
@@ -222,13 +222,31 @@ describe('fetchDstSteamWorkshopMods', () => {
       pageSize: 20,
       sort: 'trend',
       trendDays: 7,
-      installedWorkshopIds: new Set<string>(),
+      subscribedModStatusByWorkshopId: new Map(),
     })
     assert.ok(requestCount >= 2)
     assert.equal(result.meta.source, 'live')
     assert.equal(result.meta.upstreamSource, 'html')
     assert.equal(result.meta.cached, false)
     assert.equal(result.items.length, 1)
+  })
+
+  it('maps subscribed mod status onto steam list items', async () => {
+    __steamWorkshopTestUtils.clearSteamModListCache()
+    globalThis.fetch = async () => new Response(createSteamWorkshopHtml(1), { status: 200 })
+    const result = await fetchDstSteamWorkshopMods({
+      keyword: `subscribed-${Date.now()}`,
+      page: 1,
+      pageSize: 20,
+      sort: 'trend',
+      trendDays: 7,
+      subscribedModStatusByWorkshopId: new Map([['1234567890', 'failed']]),
+    })
+    assert.equal(result.items.length, 1)
+    assert.equal(result.items[0]?.subscribed, true)
+    assert.equal(result.items[0]?.subscribeStatus, 'failed')
+    assert.equal(result.items[0]?.installed, false)
+    assert.equal(result.items[0]?.pendingDownload, false)
   })
 
   it('exposes metrics snapshot structure', () => {
@@ -239,22 +257,51 @@ describe('fetchDstSteamWorkshopMods', () => {
     assert.equal(typeof snapshot.steam_circuit_open_total, 'number')
   })
 
+  it('builds a valid PowerShell fetch script for workshop URLs', () => {
+    const url = 'https://steamcommunity.com/workshop/browse/?appid=322330&requiredtags%5B%5D=server_only_mod&section=readytouseitems&p=1'
+    const script = __steamWorkshopTestUtils.buildPowerShellWorkshopFetchScript(url)
+    assert.ok(!script.includes('@{;'))
+    assert.ok(script.includes(`'${url}'`))
+    assert.ok(!script.includes('param([string]$Url)'))
+  })
+
+  it('sanitizes technical PowerShell errors for user-facing messages', () => {
+    const technical = 'Command failed: powershell -NoProfile -Command $headers = @{; At line:1 char:156 ParserError'
+    const sanitized = __steamWorkshopTestUtils.sanitizeSteamUserFacingMessage(technical)
+    assert.equal(sanitized, '无法连接 Steam 创意工坊')
+    const mapped = __steamWorkshopTestUtils.mapUnknownToSteamError(new Error(technical))
+    assert.equal(mapped.code, 'STEAM_UPSTREAM_UNAVAILABLE')
+    assert.equal(mapped.message, '无法连接 Steam 创意工坊')
+  })
+
   it('returns degraded empty result when live fetch fails without cache', async () => {
     __steamWorkshopTestUtils.clearSteamModListCache()
     const keyword = `degraded-${Date.now()}`
+    const previousFallbackFlag = process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK
+    process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK = '1'
     globalThis.fetch = async () => new Response('upstream down', { status: 503 })
-    const result = await fetchDstSteamWorkshopMods({
-      keyword,
-      page: 1,
-      pageSize: 20,
-      sort: 'trend',
-      trendDays: 7,
-      installedWorkshopIds: new Set<string>(),
-    })
-    assert.equal(result.items.length, 0)
-    assert.equal(result.meta.upstreamUnavailable, true)
-    assert.ok(result.meta.upstreamMessage)
-    assert.equal(result.meta.steamErrorCode, 'STEAM_UPSTREAM_UNAVAILABLE')
+    try {
+      const result = await fetchDstSteamWorkshopMods({
+        keyword,
+        page: 1,
+        pageSize: 20,
+        sort: 'trend',
+        trendDays: 7,
+        subscribedModStatusByWorkshopId: new Map(),
+      })
+      assert.equal(result.items.length, 0)
+      assert.equal(result.meta.upstreamUnavailable, true)
+      assert.equal(result.meta.upstreamMessage, '暂时无法连接 Steam 创意工坊，请稍后点击刷新重试')
+      assert.equal(result.meta.steamErrorCode, 'STEAM_UPSTREAM_UNAVAILABLE')
+    }
+    finally {
+      if (previousFallbackFlag === undefined) {
+        delete process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK
+      }
+      else {
+        process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK = previousFallbackFlag
+      }
+    }
   })
 })
 

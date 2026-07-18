@@ -71,6 +71,7 @@ declare global {
   const toValue: typeof import('vue').toValue
   const triggerRef: typeof import('vue').triggerRef
   const unref: typeof import('vue').unref
+  const useAdminPageState: typeof import('../composables/useAdminPageState').useAdminPageState
   const useAppAccountStore: typeof import('../store/modules/app/account').useAppAccountStore
   const useAppAuth: typeof import('../composables/app/auth').useAppAuth
   const useAppKeepAliveStore: typeof import('../store/modules/app/keepAlive').useAppKeepAliveStore
@@ -109,6 +110,9 @@ declare global {
   // @ts-ignore
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
+  // @ts-ignore
+  export type { AdminPageStateOptions, AdminEmptyAction } from '../composables/useAdminPageState'
+  import('../composables/useAdminPageState')
   // @ts-ignore
   export type { ModInstallHandlers } from '../composables/useInstanceModState'
   import('../composables/useInstanceModState')

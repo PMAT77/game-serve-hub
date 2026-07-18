@@ -15,6 +15,7 @@ import {
   resetModDownloadDbHooksForTest,
   resetModDownloadExecutorForTest,
   resetModInstallJobsForTest,
+  resolveModInstallJob,
   setModDownloadDbHooksForTest,
   setModDownloadExecutorForTest,
   waitForModInstallJob,
@@ -221,5 +222,43 @@ describe('mod-download-service', () => {
     await waitForModInstallJob('instance-d', '88888')
     assert.equal(getModInstallJob('instance-d', '88888').status, 'success')
     assert.equal(upsertCalls.filter(call => call.installStatus === 'pending').length, 1)
+  })
+
+  it('clears failed status before retrying download', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    listedMods.push(createMockMod({
+      instanceId: 'instance-e',
+      workshopId: '99999',
+      name: 'Retry Mod',
+      installStatus: 'failed',
+      installError: 'previous failure',
+    }))
+    setModDownloadExecutorForTest(async () => ({ ok: false, error: 'retry failed' }))
+
+    await enqueueModDownload({
+      instanceId: 'instance-e',
+      installPath,
+      payload: { workshopId: '99999', name: 'Retry Mod' },
+    })
+    await waitForModInstallJob('instance-e', '99999')
+
+    assert.ok(updateCalls.some(call => call.installStatus === 'pending' && call.installError === null))
+    assert.equal(listedMods[0]?.installStatus, 'failed')
+  })
+
+  it('resolveModInstallJob falls back to failed mod record when memory job is gone', async () => {
+    installDbHooks()
+    listedMods.push(createMockMod({
+      instanceId: 'instance-f',
+      workshopId: '77777',
+      name: 'Failed Memory Mod',
+      installStatus: 'failed',
+      installError: 'mock failure persisted',
+    }))
+
+    const job = await resolveModInstallJob('instance-f', '77777')
+    assert.equal(job.status, 'failed')
+    assert.equal(job.error, 'mock failure persisted')
   })
 })

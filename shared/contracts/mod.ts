@@ -90,6 +90,11 @@ export interface SteamModListQueryResultItem {
   detailUrl: string
   /** Steam 评价 0–5 星；无数据时为 null */
   rating: number | null
+  /** 实例内存在订阅记录（含 pending/failed/ready） */
+  subscribed: boolean
+  /** 未订阅时为 null */
+  subscribeStatus: ModInstallStatus | null
+  /** 文件已就绪（installStatus=ready）；与 subscribeStatus 区分 */
   installed: boolean
   /** 已发起订阅但文件尚未就绪（DB pending 或 job downloading） */
   pendingDownload: boolean
@@ -142,6 +147,11 @@ export interface SteamModDetailDto {
   /** ISO8601；未知时为 null */
   updatedAt: string | null
   detailUrl: string
+  /** 实例内存在订阅记录（含 pending/failed/ready） */
+  subscribed: boolean
+  /** 未订阅时为 null */
+  subscribeStatus: ModInstallStatus | null
+  /** 文件已就绪（installStatus=ready） */
   installed: boolean
   /** 创作者显示名；无法解析时为 null */
   creatorName: string | null

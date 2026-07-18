@@ -94,19 +94,44 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
     subscribingPhases.value = nextPhases
   }
 
+  function finalizeJobState(job: ModInstallJobDto) {
+    clearTracking(job.workshopId)
+    activeInstallJobs.value = activeInstallJobs.value.filter(
+      item => item.workshopId !== job.workshopId,
+    )
+    if (job.status === 'downloading') {
+      activeInstallJobs.value = [...activeInstallJobs.value, job]
+      trackDownloadingJob(job)
+      return
+    }
+    if (job.status === 'failed') {
+      const existing = pendingModRecords.value.some(mod => mod.workshopId === job.workshopId)
+      pendingModRecords.value = existing
+        ? pendingModRecords.value.map(mod => (
+            mod.workshopId === job.workshopId
+              ? { ...mod, installStatus: 'failed', installError: job.error }
+              : mod
+          ))
+        : pendingModRecords.value
+      return
+    }
+    if (job.status === 'success') {
+      pendingModRecords.value = pendingModRecords.value.filter(
+        mod => mod.workshopId !== job.workshopId,
+      )
+    }
+  }
+
   function isPendingWorkshop(workshopId: string): boolean {
     return pendingWorkshopIds.value.has(workshopId)
   }
 
-  function resolveSubscribeButtonText(workshopId: string, installed: boolean): string {
-    if (installed) {
+  function resolveSubscribeButtonText(workshopId: string, subscribed: boolean): string {
+    if (subscribed) {
       return '取消订阅'
     }
-    if (subscribingPhases.value.get(workshopId) === 'waiting_steamcmd') {
-      return '等待 SteamCMD…'
-    }
     if (isPendingWorkshop(workshopId)) {
-      return '正在下载…'
+      return '订阅中'
     }
     return '订阅'
   }
@@ -121,14 +146,19 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
       try {
         const job = await apiMod.pollModInstallJob(id, workshopId, {
           onUpdate: (current) => {
-            trackDownloadingJob(current)
+            if (current.status === 'downloading') {
+              trackDownloadingJob(current)
+            }
+            else {
+              finalizeJobState(current)
+            }
             handlers?.onUpdate?.(current)
           },
         })
+        finalizeJobState(job)
         handlers?.onTerminal?.(job)
       }
       finally {
-        clearTracking(workshopId)
         backgroundPollers.delete(workshopId)
       }
     })()
@@ -165,7 +195,7 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
 
     for (const job of jobs) {
       if (job.status === 'downloading') {
-        trackDownloadingJob(job)
+        finalizeJobState(job)
         resumeBackgroundPoll(job.workshopId, handlers)
       }
     }
@@ -173,6 +203,9 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
     for (const mod of pendingModRecords.value) {
       if (mod.installStatus === 'pending' && !backgroundPollers.has(mod.workshopId)) {
         subscribingWorkshopIds.value = new Set([...subscribingWorkshopIds.value, mod.workshopId])
+        if (!jobs.some(job => job.workshopId === mod.workshopId && job.status === 'downloading')) {
+          resumeBackgroundPoll(mod.workshopId, handlers)
+        }
       }
     }
   }
@@ -192,15 +225,12 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
       finishedAt: null,
     })
     const { data: initialJob } = await apiMod.installMod(id, payload)
-    activeInstallJobs.value = [
-      ...activeInstallJobs.value.filter(job => job.workshopId !== payload.workshopId),
-      initialJob,
-    ]
     if (initialJob.status === 'downloading') {
+      finalizeJobState(initialJob)
       resumeBackgroundPoll(payload.workshopId, handlers)
       return initialJob
     }
-    clearTracking(payload.workshopId)
+    finalizeJobState(initialJob)
     handlers?.onTerminal?.(initialJob)
     return initialJob
   }

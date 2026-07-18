@@ -6,7 +6,7 @@ import type {
   SystemInfoData,
 } from './components/types'
 import dayjs from 'dayjs'
-import { NAlert, NButton, NInputNumber, NSpace } from 'naive-ui'
+import { NAlert, NButton, NForm, NFormItem, NInputNumber } from 'naive-ui'
 import apiSystem from '@/api/modules/system'
 import MonitorNetwork from './components/MonitorNetwork.vue'
 import MonitorStatus from './components/MonitorStatus.vue'
@@ -302,17 +302,25 @@ onUnmounted(() => {
 
 <template>
   <div>
-    <FaPageMain title="轮询设置" >
-      <NSpace align="center" wrap>
-        <span class="text-sm text-muted-foreground">系统信息间隔（毫秒）</span>
-        <NInputNumber v-model:value="systemPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" />
-        <span class="text-sm text-muted-foreground">网络采样间隔（毫秒，建议 ≥ 4000）</span>
-        <NInputNumber v-model:value="networkPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" />
-      </NSpace>
+    <FaPageMain title="轮询设置">
+      <p class="mb-4 text-sm text-muted-foreground">
+        调整主机与网络数据的刷新频率。网络采样间隔建议不低于 4 秒。
+      </p>
+      <NForm label-placement="left" :label-width="160" class="max-w-2xl">
+        <NFormItem label="系统信息间隔">
+          <NInputNumber v-model:value="systemPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" class="w-40" />
+          <span class="ml-2 text-xs text-muted-foreground">毫秒</span>
+        </NFormItem>
+        <NFormItem label="网络采样间隔">
+          <NInputNumber v-model:value="networkPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" class="w-40" />
+          <span class="ml-2 text-xs text-muted-foreground">毫秒</span>
+        </NFormItem>
+      </NForm>
     </FaPageMain>
 
     <FaPageMain title="实时状态">
-      <div v-if="systemError" class="space-y-2">
+      <div v-if="systemError" class="mb-4 space-y-2">
+        <NAlert type="error" :title="systemError" />
         <NButton size="small" @click="loadSystemInfo">
           重试
         </NButton>

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { DataTableColumns } from 'naive-ui'
 import type { ModItemDto } from '@/api/modules/mod'
-import { NAlert, NButton, NDataTable, NSelect, NTag, useMessage } from 'naive-ui'
+import { NButton, NDataTable, NSelect, NTag, NTooltip, useMessage } from 'naive-ui'
 import { computed, h, ref, watch } from 'vue'
+import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import apiMod from '@/api/modules/mod'
 import { useInstanceModState } from '@/composables/useInstanceModState'
 
@@ -21,7 +22,6 @@ const modEnabledFilter = ref<ModEnabledFilter>('all')
 const installedMods = ref<ModItemDto[]>([])
 
 const {
-  downloadingMods,
   restoreInstallJobs,
   resetState,
 } = useInstanceModState(() => props.instanceId)
@@ -42,40 +42,75 @@ const filteredInstalledMods = computed(() => {
   if (modEnabledFilter.value === 'disabled') {
     return readyInstalledMods.value.filter(row => !row.enabled)
   }
-  return readyInstalledMods.value
+  return installedMods.value
 })
+
+function renderInstallStatus(row: ModItemDto) {
+  if (row.installStatus === 'pending') {
+    return h(NTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '下载中' })
+  }
+  if (row.installStatus === 'failed') {
+    return h(NTag, { size: 'small', bordered: false, type: 'error' }, { default: () => '下载失败' })
+  }
+  return h(NTag, { size: 'small', bordered: false, type: 'success' }, { default: () => '已就绪' })
+}
+
 const installedColumns: DataTableColumns<ModItemDto> = [
-  { title: 'Mod 名称', key: 'name', minWidth: 260, render: row => row.name },
+  { title: 'Mod 名称', key: 'name', minWidth: 220, render: row => row.name },
   { title: '创意工坊 ID', key: 'workshopId', width: 170, render: row => row.workshopId },
   {
-    title: '当前状态',
+    title: '安装状态',
+    key: 'installStatus',
+    width: 110,
+    render: row => renderInstallStatus(row),
+  },
+  {
+    title: '开关状态',
     key: 'enabled',
     width: 110,
-    render: row => h(
-      NTag,
-      {
-        size: 'small',
-        bordered: false,
-        type: row.enabled ? 'success' : 'default',
-      },
-      { default: () => (row.enabled ? '已开启' : '已关闭') },
-    ),
+    render: (row) => {
+      if (row.installStatus !== 'ready') {
+        return h('span', { class: 'text-xs text-muted-foreground' }, '-')
+      }
+      return h(
+        NTag,
+        {
+          size: 'small',
+          bordered: false,
+          type: row.enabled ? 'success' : 'default',
+        },
+        { default: () => (row.enabled ? '已开启' : '已关闭') },
+      )
+    },
   },
   {
     title: '操作',
     key: 'actions',
     width: 150,
     render: row => h(
-      NButton,
+      NTooltip,
       {
-        size: 'small',
-        type: row.enabled ? 'warning' : 'primary',
-        ghost: true,
-        loading: mutatingWorkshopIds.value.has(row.workshopId),
-        disabled: !hasInstanceId.value || mutatingWorkshopIds.value.has(row.workshopId),
-        onClick: () => void toggleModEnabled(row),
+        disabled: row.installStatus === 'ready',
       },
-      { default: () => (row.enabled ? '关闭' : '开启') },
+      {
+        trigger: () => h(
+          NButton,
+          {
+            size: 'small',
+            type: row.enabled ? 'warning' : 'primary',
+            ghost: true,
+            loading: mutatingWorkshopIds.value.has(row.workshopId),
+            disabled: !hasInstanceId.value
+              || mutatingWorkshopIds.value.has(row.workshopId)
+              || row.installStatus !== 'ready',
+            onClick: () => void toggleModEnabled(row),
+          },
+          { default: () => (row.enabled ? '关闭' : '开启') },
+        ),
+        default: () => (row.installStatus === 'failed'
+          ? '下载失败，请前往 Mod 管理重试'
+          : '下载完成后方可开启'),
+      },
     ),
   },
 ]
@@ -98,7 +133,7 @@ async function loadInstalledMods() {
 }
 
 async function toggleModEnabled(item: ModItemDto) {
-  if (!hasInstanceId.value || mutatingWorkshopIds.value.has(item.workshopId)) {
+  if (!hasInstanceId.value || mutatingWorkshopIds.value.has(item.workshopId) || item.installStatus !== 'ready') {
     return
   }
   const nextMutating = new Set(mutatingWorkshopIds.value)
@@ -147,21 +182,10 @@ watch(() => props.instanceId, (value) => {
       :message="memoryWarning"
     />
 
-    <NAlert
-      v-if="downloadingMods.length > 0"
-      type="info"
-      title="下载中的 Mod"
-    >
-      <p class="text-sm">
-        有 {{ downloadingMods.length }} 个 Mod 正在下载，完成后会出现在下方列表中。
-      </p>
-    </NAlert>
-
-    <NAlert type="info" title="已订阅 Mod 开关">
-      <p class="text-sm">
-        这里只展示当前实例已就绪的 Mod，可按需开启或关闭。新订阅 Mod 默认未开启，创建或调整世界时请在此手动开启。订阅新 Mod 请前往「Mod 管理」页面。
-      </p>
-    </NAlert>
+    <AdminSettingsSection
+      title="已订阅 Mod"
+      description="管理当前实例已订阅 Mod 的开启状态；新订阅默认关闭，需在此手动开启。下载未完成时请到 Mod 管理处理。"
+    />
 
     <div class="flex flex-wrap items-center gap-3">
       <NSelect
@@ -169,7 +193,7 @@ watch(() => props.instanceId, (value) => {
         :options="modEnabledFilterOptions"
         class="w-36"
       />
-      <NButton :loading="loadingInstalled" @click="loadInstalledMods">
+      <NButton :disabled="loadingInstalled" @click="loadInstalledMods">
         刷新列表
       </NButton>
     </div>

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { PanelSettingsPayload } from '@/api/modules/system'
+import { NSkeleton } from 'naive-ui'
+import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import apiSystem from '@/api/modules/system'
 
 defineOptions({
@@ -271,14 +273,14 @@ onActivated(async () => {
 
 <template>
   <FaPageMain title="系统设置" class="h-full">
-    <div v-if="loading" class="text-muted-foreground flex-center h-48">
-      读取配置中...
+    <div v-if="loading" class="space-y-4" aria-busy="true" aria-label="加载中">
+      <NSkeleton v-for="i in 5" :key="i" text :style="{ width: i === 5 ? '40%' : '100%' }" />
     </div>
     <div v-else class="space-y-6">
-      <section class="space-y-3">
-        <h3 class="text-base font-semibold">
-          面板端口
-        </h3>
+      <AdminSettingsSection
+        title="面板端口"
+        description="设置浏览器访问面板的对外端口。开发双容器环境下请区分浏览器端口与 API 端口。"
+      >
         <div v-if="isSplitDevMode" class="text-sm text-muted-foreground space-y-1">
           <p>当前访问端口：{{ browserAccessPort }}（浏览器地址栏）</p>
           <p>后端 API 端口：{{ apiPort }}（开发双容器，仅内部/直连 API 使用）</p>
@@ -286,21 +288,21 @@ onActivated(async () => {
         <p v-else class="text-sm text-muted-foreground">
           当前访问端口：{{ browserAccessPort }}
         </p>
-        <FaInput v-model="panelPortInput" type="text" class="max-w-80" placeholder="请输入对外发布端口" />
-        <p class="text-xs text-muted-foreground">
+        <FaInput v-model="panelPortInput" type="text" class="max-w-80 mt-3" placeholder="请输入对外发布端口" />
+        <p class="text-xs text-muted-foreground mt-2">
           <template v-if="isSplitDevMode">
-            开发环境前后端分离：请用 {{ browserAccessPort }} 打开面板。下方为生产/网关对外发布端口（当前 API {{ apiPort }}），保存后下次重启 dev:compose 生效。
+            开发环境请用 {{ browserAccessPort }} 打开面板；生产端口保存后下次重启 dev:compose 生效。
           </template>
           <template v-else>
-            端口范围 1-65535，保存后由网关编排模块统一生效。
+            端口范围 1-65535，保存后由网关编排统一生效。
           </template>
         </p>
-      </section>
+      </AdminSettingsSection>
 
-      <section class="space-y-3">
-        <h3 class="text-base font-semibold">
-          Hub 版本
-        </h3>
+      <AdminSettingsSection
+        title="Hub 版本"
+        description="检查并应用面板与 DST 运行镜像更新。应用面板更新会短暂重启管理端。"
+      >
         <div v-if="updateStatus" class="space-y-2 text-sm">
           <p>{{ formatImageLine('面板镜像', updateStatus.panel) }}</p>
           <p>{{ formatImageLine('DST 运行镜像', updateStatus.dst) }}</p>
@@ -332,26 +334,23 @@ onActivated(async () => {
           暂无法读取 Hub 版本信息
         </div>
         <div class="flex flex-wrap gap-2 pt-1">
-          <FaButton variant="outline" :loading="updateStatusLoading" @click="checkHubUpdate">
-            检查更新
-          </FaButton>
           <FaButton
             :loading="applyLoading"
             :disabled="!canApplyUpdate"
             @click="applyHubUpdate"
           >
-            立即更新
+            应用更新
+          </FaButton>
+          <FaButton variant="outline" :loading="updateStatusLoading" @click="checkHubUpdate">
+            检查更新
           </FaButton>
         </div>
-        <p class="text-xs text-muted-foreground">
-          仅更新检测到新版本的镜像。面板更新会短暂重启管理面板（约 30 秒），通常不会中断已运行游戏实例；DST 运行镜像可单独一键拉取，更新后需重启实例才生效。
-        </p>
-      </section>
+      </AdminSettingsSection>
 
-      <section class="space-y-3">
-        <h3 class="text-base font-semibold">
-          Hub 镜像自动检查
-        </h3>
+      <AdminSettingsSection
+        title="Hub 镜像自动检查"
+        description="按间隔自动检查 Hub 镜像是否有新版本。"
+      >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.autoUpdate" />
           <span class="text-sm text-muted-foreground">
@@ -362,22 +361,19 @@ onActivated(async () => {
           <label class="text-sm text-muted-foreground">检查间隔（小时）</label>
           <FaInput v-model="updateIntervalInput" type="text" placeholder="1-168" />
         </div>
-      </section>
+      </AdminSettingsSection>
 
-      <section class="space-y-3">
-        <h3 class="text-base font-semibold">
-          启动前检查游戏更新
-        </h3>
+      <AdminSettingsSection
+        title="启动前检查游戏更新"
+        description="启动或重启实例前，向 Steam 核对服务端 Build ID 是否与本地一致。"
+      >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.checkUpdateBeforeStart" />
           <span class="text-sm text-muted-foreground">
             {{ form.checkUpdateBeforeStart ? '启动前将向 Steam 检查 Build ID，有新版时将阻止启动' : '启动时不额外检查 Steam 远端版本' }}
           </span>
         </div>
-        <p class="text-xs text-muted-foreground">
-          开启后，点击「启动」或「重启」会先拉取 Steam 最新 Build ID；若与本地不一致，需先在实例页执行「更新服务端」。
-        </p>
-      </section>
+      </AdminSettingsSection>
 
       <div class="pt-2">
         <FaButton :loading="saveLoading" @click="saveSettings">

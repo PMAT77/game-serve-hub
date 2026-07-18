@@ -60,6 +60,7 @@ const logViewportPanelRef = ref<HTMLElement | null>(null)
 let eventSource: EventSource | null = null
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let connectInfoTimer: ReturnType<typeof setInterval> | undefined
+let streamRequestVersion = 0
 
 const pageTitle = computed(() => instanceName.value
   ? `实例控制台 · ${instanceName.value}`
@@ -264,12 +265,26 @@ async function refreshLogs() {
   appendLines(res.data.lines)
 }
 
-function connectStream() {
-  if (!appAccountStore.token || !instanceId.value) {
+async function connectStream() {
+  if (!appAccountStore.isLogin || !instanceId.value) {
     return
   }
+  const requestVersion = ++streamRequestVersion
+  const targetInstanceId = instanceId.value
   eventSource?.close()
-  const url = apiInstance.buildInstanceConsoleStreamUrl(instanceId.value, appAccountStore.token)
+  eventSource = null
+  let streamTicket: string
+  try {
+    const response = await apiInstance.createInstanceConsoleStreamTicket(targetInstanceId)
+    streamTicket = response.data.ticket
+  }
+  catch {
+    return
+  }
+  if (requestVersion !== streamRequestVersion || instanceId.value !== targetInstanceId) {
+    return
+  }
+  const url = apiInstance.buildInstanceConsoleStreamUrl(targetInstanceId, streamTicket)
   eventSource = new EventSource(url)
   eventSource.addEventListener('ready', (event) => {
     try {
@@ -309,6 +324,7 @@ function startRealtimeJobs() {
 }
 
 function stopRealtimeJobs() {
+  streamRequestVersion += 1
   eventSource?.close()
   eventSource = null
   if (pollTimer) {
@@ -512,13 +528,13 @@ watch(instanceId, async (nextId, prevId) => {
   stopRealtimeJobs()
   resetInstanceRuntimeState()
   await initInstanceConsole()
-  connectStream()
+  void connectStream()
   startRealtimeJobs()
 })
 
 onMounted(async () => {
   await initInstanceConsole()
-  connectStream()
+  void connectStream()
   startRealtimeJobs()
 })
 

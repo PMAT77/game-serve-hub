@@ -172,6 +172,11 @@ export interface InstanceMaintenancePushResult {
   errorMessage?: string
 }
 
+export interface InstanceConsoleStreamTicket {
+  ticket: string
+  expiresAt: string
+}
+
 export default {
   getInstanceList: (data?: InstanceListQuery) => api.post('app/instance/list', data),
   getInstanceMetrics: (ids?: string[]) => api.post('app/instance/metrics', ids?.length ? { ids } : {}) as Promise<{ data: InstanceMetricsPayload }>,
@@ -210,6 +215,9 @@ export default {
     command,
     shard,
   }),
+  createInstanceConsoleStreamTicket: (instanceId: string) => api.post('app/instance/console/stream-ticket', {
+    instanceId,
+  }) as Promise<{ data: InstanceConsoleStreamTicket }>,
   getInstanceMaintenanceAnnounce: (instanceId: string) => api.get('app/instance/maintenance/announce', {
     params: { instanceId },
   }) as Promise<{ data: InstanceMaintenanceAnnounceState }>,
@@ -221,12 +229,12 @@ export default {
     instanceId,
     ...(message !== undefined ? { message } : {}),
   }) as Promise<{ data: InstanceMaintenancePushResult }>,
-  buildInstanceConsoleStreamUrl(instanceId: string, token: string) {
+  buildInstanceConsoleStreamUrl(instanceId: string, streamTicket: string) {
     const prefix = (import.meta.env.DEV && import.meta.env.VITE_ENABLE_PROXY)
       ? '/proxy/'
       : import.meta.env.VITE_APP_API_BASEURL
     const base = prefix.endsWith('/') ? prefix : `${prefix}/`
-    const params = new URLSearchParams({ instanceId, token })
+    const params = new URLSearchParams({ instanceId, streamTicket })
     return `${base}app/instance/console/stream?${params.toString()}`
   },
 }

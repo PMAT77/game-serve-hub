@@ -17,7 +17,8 @@ import {
 } from '../instance/container-lifecycle'
 import { isCavesShardConfigured, readClusterShardEnabledFromInstall } from '../../infra/game-adapter/dst/shard-service'
 import { businessError, success } from '../../shared/http/response'
-import { requirePermission } from '../system/auth'
+import { requirePermission, resolveAuthorizedContext } from '../system/auth'
+import { consoleStreamTicketStore } from './stream-ticket'
 
 const LOCAL_NODE_ID = 'local-node'
 
@@ -45,7 +46,11 @@ interface ConsoleCommandBody {
 
 interface ConsoleStreamQuery {
   instanceId?: string
-  token?: string
+  streamTicket?: string
+}
+
+interface ConsoleStreamTicketBody {
+  instanceId?: string
 }
 
 function normalizeInstanceId(value: string | undefined) {
@@ -220,14 +225,40 @@ export function registerConsoleModule(app: FastifyInstance) {
     return success({ isSuccess: true }, request)
   })
 
-  app.get('/app/instance/console/stream', async (request, reply) => {
-    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION, { allowQueryToken: true })
-    if (authError) {
-      reply.status(401).send(authError)
-      return
+  app.post('/app/instance/console/stream-ticket', async (request): Promise<ApiSuccessResponse<{
+    ticket: string
+    expiresAt: string
+  }> | ApiErrorResponse> => {
+    const auth = await resolveAuthorizedContext(request, {
+      permissions: NODE_INSTANCE_MANAGE_PERMISSION,
+    })
+    if (auth.error || !auth.context) {
+      return auth.error ?? businessError('Unable to issue console stream authorization', request)
     }
+    const body = (request.body ?? {}) as ConsoleStreamTicketBody
+    const instanceId = normalizeInstanceId(body.instanceId)
+    const resolved = await resolveLocalInstance(instanceId, request)
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    const issued = consoleStreamTicketStore.issue({
+      instanceId,
+      userId: auth.context.user.id,
+    })
+    return success({
+      ticket: issued.ticket,
+      expiresAt: new Date(issued.expiresAt).toISOString(),
+    }, request)
+  })
+
+  app.get('/app/instance/console/stream', async (request, reply) => {
     const query = request.query as ConsoleStreamQuery
     const instanceId = normalizeInstanceId(query.instanceId)
+    const streamTicket = query.streamTicket?.trim() ?? ''
+    if (!streamTicket || !consoleStreamTicketStore.consume(streamTicket, instanceId)) {
+      reply.status(401).send(businessError('Console stream authorization expired or is invalid', request))
+      return
+    }
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       reply.status(400).send(resolved.error)

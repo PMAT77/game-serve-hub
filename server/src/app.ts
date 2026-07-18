@@ -16,6 +16,7 @@ import { registerSystemModule } from './modules/system'
 import { isSteamcmdImagePresent } from './infra/container'
 import { getCachedDockerStatus } from './infra/docker'
 import { success } from './shared/http/response'
+import { sanitizeRequestUrlForLog } from './shared/http/request-url'
 
 /**
  * 创建 Fastify 服务实例。
@@ -33,7 +34,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
       },
     },
     // dev:compose 默认 info，避免终端被每条 API 请求刷屏；需排查时设 LOG_LEVEL=debug
-    disableRequestLogging: config.mode === 'development' && !logHttpRequests,
+    disableRequestLogging: true,
   })
 
   await app.register(cors, {
@@ -78,7 +79,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
         requestId: request.id,
         statusCode: reply.statusCode,
         method: request.method,
-        url: request.url,
+        url: sanitizeRequestUrlForLog(request.url),
         durationMs: reply.elapsedTime,
       }, 'request completed')
       done()

@@ -87,7 +87,7 @@ sudo GSH_RELEASE_TAG=v0.1.2 bash ./scripts/install.linux.sh
 
 ### GHCR 网络问题与自定义镜像
 
-安装器默认只使用官方 `ghcr.io/gameserverhub/*`，不会自动使用维护者的 ACR 或任何第三方镜像站。若 `docker pull` 访问 GHCR 失败：
+安装器默认只使用官方 `ghcr.io/gameserverhub/*`，不会自动使用任何第三方镜像站。若 `docker pull` 访问 GHCR 失败：
 
 1. 先确认服务器 DNS、防火墙和 HTTPS 代理是否允许访问 `ghcr.io`；可直接执行 `docker pull ghcr.io/gameserverhub/game-server-hub:<版本>` 测试。
 2. 如需镜像副本，请使用自己控制或明确可信的仓库，并从同一个 Release 的 `release-images.json` 核对 digest；不要因网络问题改用来源不明、无法校验的镜像。

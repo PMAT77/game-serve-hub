@@ -76,16 +76,9 @@ jobs:
             echo "- ${{ matrix.image }}@${{ steps.build.outputs.digest }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  sync-to-acr:
-    needs: build-and-push
-    uses: ./.github/workflows/sync-to-acr.yml
-    with:
-      tags: ${{ github.ref_type == 'tag' && github.ref_name || 'latest,main' }}
-    secrets: inherit
-
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-and-push, sync-to-acr]
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - name: Set up Docker Buildx

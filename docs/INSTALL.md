@@ -21,22 +21,22 @@
 
 ## 一键安装
 
-从 GitHub 拉取安装脚本（默认分支 `main`）：
+从 GitHub 拉取当前稳定 Release 的安装脚本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/main/scripts/install.linux.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/v0.1.1/scripts/install.linux.sh | sudo bash
 ```
 
 若 `raw.githubusercontent.com` 网络不稳定，可改用 CDN：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@main/scripts/install.linux.sh | sudo bash
+curl -fsSL https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@v0.1.1/scripts/install.linux.sh | sudo bash
 ```
 
 或克隆后本地执行：
 
 ```bash
-git clone https://github.com/GameServerHub/game-server-hub.git
+git clone --branch v0.1.1 --depth 1 https://github.com/GameServerHub/game-server-hub.git
 cd game-server-hub
 sudo bash ./scripts/install.linux.sh
 ```
@@ -47,10 +47,10 @@ sudo bash ./scripts/install.linux.sh
 sudo bash ./scripts/install.linux.sh --open-dst-ports
 ```
 
-生产环境建议固定 Release 版本，勿长期使用 `latest`：
+安装器默认锁定 `v0.1.1` 的安装资源和三类镜像。升级到其它 Release 时，显式指定同一个版本：
 
 ```bash
-sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
+sudo GSH_RELEASE_TAG=v0.1.1 bash ./scripts/install.linux.sh
 ```
 
 ### 安装脚本做了什么
@@ -72,10 +72,11 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 | `PANEL_INSTALL_DIR` | `/opt/game-server-hub` | Compose 与 `panel.env` |
 | `PANEL_DATA_DIR` | `/var/lib/game-server-hub` | SQLite、实例、备份 |
 | `PANEL_LOG_DIR` | `/var/log/game-server-hub` | 日志与安装状态 |
-| `PANEL_IMAGE` | `ghcr.io/gameserverhub/game-server-hub:latest` | 完整面板镜像引用；设置后不再拼接 tag |
-| `GSH_GAME_DST_IMAGE` | `ghcr.io/gameserverhub/game-server-hub-dst:latest` | 完整 DST 运行环境镜像引用；设置后不再拼接 tag |
-| `PANEL_IMAGE_TAG` | `latest` | 未显式设置完整镜像引用时，与 DST / SteamCMD 默认 tag 联动 |
-| `GSH_STEAMCMD_IMAGE` | `ghcr.io/gameserverhub/steamcmd-base:latest` | 游戏安装镜像；面板内拉取严格使用 `panel.env` 中的完整引用 |
+| `GSH_RELEASE_TAG` | `v0.1.1` | 安装资源与默认三类镜像共同使用的不可变 Release 版本 |
+| `PANEL_IMAGE` | `ghcr.io/gameserverhub/game-server-hub:v0.1.1` | 完整面板镜像引用；设置后不再拼接 tag |
+| `GSH_GAME_DST_IMAGE` | `ghcr.io/gameserverhub/game-server-hub-dst:v0.1.1` | 完整 DST 运行环境镜像引用；设置后不再拼接 tag |
+| `PANEL_IMAGE_TAG` | `v0.1.1` | 未显式设置完整镜像引用时，与 DST / SteamCMD 默认 tag 联动 |
+| `GSH_STEAMCMD_IMAGE` | `ghcr.io/gameserverhub/steamcmd-base:v0.1.1` | 游戏安装镜像；面板内拉取严格使用 `panel.env` 中的完整引用 |
 | `INSTALL_STEAMCMD_IMAGE` | `0` | 安装阶段是否预拉 SteamCMD（`1` 时预拉写入 `panel.env` 的同一镜像；默认由面板内安装） |
 | `USE_CN_DEBIAN_MIRROR` | `0` | Debian 是否启用国内 apt 镜像（社区默认关闭；国内可手动开启） |
 | `STRICT_INSTALLER_ASSET_CHECKSUM` | `1` | 是否强制校验安装资源完整性（`0` 为兼容受限网络，不推荐） |

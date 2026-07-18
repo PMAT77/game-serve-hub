@@ -6,6 +6,16 @@
 
 （暂无）
 
+## [0.1.1] - 2026-07-18
+
+### Added
+
+- 发布 SteamCMD 基础镜像，并将面板、DST、SteamCMD 三类镜像纳入同一个 Release 与 digest 清单。
+
+### Changed
+
+- 生产安装默认锁定同一个不可变 Release 的安装资源与镜像，不再默认使用可变的 `latest`。
+
 ## [0.1.0] - 2026-06-06
 
 首个带版本号与 CI 门禁的公测发行版。
@@ -43,6 +53,7 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/GameServerHub/game-server-hub/compare/v0.0.0...v0.1.0
 [0.0.0]: https://github.com/GameServerHub/game-server-hub/releases

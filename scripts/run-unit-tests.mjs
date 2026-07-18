@@ -1,10 +1,12 @@
 process.env.GSH_UNIT_TEST = '1'
 
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = [
-  'exec',
-  'tsx',
+  path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
   '--test',
   '--test-force-exit',
   '--test-concurrency=1',
@@ -13,10 +15,10 @@ const args = [
   'src/views/node/instance/instanceStartGuide.test.ts',
 ]
 
-const result = spawnSync('pnpm', args, {
+const result = spawnSync(process.execPath, args, {
   stdio: 'inherit',
   env: process.env,
-  shell: true,
+  cwd: repoRoot,
 })
 
 process.exit(result.status ?? 1)

@@ -6,8 +6,9 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
+GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.1}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
-INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@main,https://ghproxy.com/https://raw.githubusercontent.com/GameServerHub/game-server-hub/main,https://raw.githubusercontent.com/GameServerHub/game-server-hub/main}" # 安装资源镜像池（按顺序回退）。
+INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@${GSH_RELEASE_TAG},https://ghproxy.com/https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG},https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG}}" # 安装资源镜像池（按顺序回退）。
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
 HOST_MEMORY_WARN_MIN_MB=3800 # 总内存低于此值（约 4GiB）时输出 WARN。
 HOST_MEMORY_TIER_SMALL_MAX_MB=5120 # < 此值视为 small 预设。
@@ -50,7 +51,7 @@ PANEL_LOG_DIR="${PANEL_LOG_DIR:-/var/log/game-server-hub}" # 面板日志与安�
 PANEL_INSTANCES_DIR="${PANEL_INSTANCES_DIR:-${PANEL_DATA_DIR}/instances}" # 游戏实例数据目录。
 PANEL_BACKUPS_DIR="${PANEL_BACKUPS_DIR:-${PANEL_DATA_DIR}/backups}" # 备份目录。
 PANEL_BIND_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.bind.yml"
-PANEL_IMAGE_TAG="${PANEL_IMAGE_TAG:-latest}" # 容器镜像标签。
+PANEL_IMAGE_TAG="${PANEL_IMAGE_TAG:-${GSH_RELEASE_TAG}}" # 容器镜像标签；默认与安装资源锁定同一个 Release。
 PANEL_IMAGE="${PANEL_IMAGE_OVERRIDE:-${PANEL_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # 完整镜像引用（可为 tag 或 digest）。
 GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_OVERRIDE:-${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # DST 镜像引用（可为 tag 或 digest）。
 GSH_STEAMCMD_IMAGE="${GSH_STEAMCMD_IMAGE_OVERRIDE:-${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # SteamCMD 镜像引用（可为 tag 或 digest）。
@@ -69,7 +70,7 @@ EXPOSE_ADMIN_PASSWORD="${EXPOSE_ADMIN_PASSWORD:-0}" # 是否在安装摘要中�
 ROLLBACK_ENABLED=0 # 是否允许回滚（部署开始后置为 1）。
 INSTALLER_REPO_POOL_INITIALIZED=0
 declare -a INSTALLER_REPO_POOL=()
-INSTALLER_CANONICAL_REPO_BASE="${INSTALLER_CANONICAL_REPO_BASE:-https://raw.githubusercontent.com/GameServerHub/game-server-hub/main}" # 用于安装资源完整性校验的权威源。
+INSTALLER_CANONICAL_REPO_BASE="${INSTALLER_CANONICAL_REPO_BASE:-https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG}}" # 用于安装资源完整性校验的权威源。
 STRICT_INSTALLER_ASSET_CHECKSUM="${STRICT_INSTALLER_ASSET_CHECKSUM:-1}" # 安装资源校验是否强制（1=校验失败即中止，0=仅告警）。
 
 # 基础日志函数，统一输出格式。

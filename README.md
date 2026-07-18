@@ -8,7 +8,7 @@
 开源 **Steam 专用服务器** 运维面板，把部署、运行和日常管理收进同一套界面。  
 v1 先从 **饥荒联机版（Don't Starve Together）** 做起，支持一键开服。
 
-> **当前版本：v0.1.1 公测（Pre-1.0 / Public Beta）** — 核心链路（安装、实例、DST 开服）可用；v1 完整能力仍在开发中。升级前请阅读 [CHANGELOG](CHANGELOG.md) 与 [Release](https://github.com/GameServerHub/game-server-hub/releases)。
+> **当前版本：v0.1.2 公测（Pre-1.0 / Public Beta）** — 核心链路（安装、实例、DST 开服）可用；v1 完整能力仍在开发中。升级前请阅读 [CHANGELOG](CHANGELOG.md) 与 [Release](https://github.com/GameServerHub/game-server-hub/releases)。
 
 ## 界面预览
 
@@ -50,7 +50,7 @@ flowchart TB
 在 Ubuntu 22.04+ / Debian 12+ 上（需 root 或 sudo）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/v0.1.1/scripts/install.linux.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/v0.1.2/scripts/install.linux.sh | sudo bash
 ```
 
 完整步骤、环境要求、升级与故障排查见 **[安装与运维指南](docs/INSTALL.md)**。

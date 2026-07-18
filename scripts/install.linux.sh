@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.1}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
+GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.2}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
 INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@${GSH_RELEASE_TAG},https://ghproxy.com/https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG},https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG}}" # 安装资源镜像池（按顺序回退）。
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。

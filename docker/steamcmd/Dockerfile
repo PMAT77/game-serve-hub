@@ -26,7 +26,11 @@ RUN dpkg --add-architecture i386 \
   && if [ -n "${STEAMCMD_ARCHIVE_SHA256}" ]; then echo "${STEAMCMD_ARCHIVE_SHA256}  /tmp/steamcmd.tar.gz" | sha256sum --check --strict; fi \
   && tar --extract --gzip --file /tmp/steamcmd.tar.gz --directory /home/steam/steamcmd \
   && chown -R steam:steam /home/steam/steamcmd \
-  && su -s /bin/sh steam -c '/home/steam/steamcmd/steamcmd.sh +quit' \
+  && for attempt in 1 2 3; do \
+    if su -s /bin/sh steam -c '/home/steam/steamcmd/steamcmd.sh +quit'; then break; fi; \
+    if [ "${attempt}" = 3 ]; then exit 1; fi; \
+    sleep 5; \
+  done \
   && rm -rf /var/lib/apt/lists/* /tmp/steamcmd.tar.gz
 
 USER steam

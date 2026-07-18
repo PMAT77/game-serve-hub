@@ -6,6 +6,12 @@
 
 （暂无）
 
+## [0.1.2] - 2026-07-18
+
+### Fixed
+
+- SteamCMD 镜像构建时的预热步骤在 Valve 服务出现短暂网络故障时自动重试，避免取消同批镜像发布。
+
 ## [0.1.1] - 2026-07-18
 
 ### Added
@@ -53,7 +59,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/GameServerHub/game-server-hub/compare/v0.0.0...v0.1.0
 [0.0.0]: https://github.com/GameServerHub/game-server-hub/releases

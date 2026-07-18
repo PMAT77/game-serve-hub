@@ -24,19 +24,19 @@
 从 GitHub 拉取当前稳定 Release 的安装脚本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/v0.1.2/scripts/install.linux.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/v0.1.3/scripts/install.linux.sh | sudo bash
 ```
 
 若 `raw.githubusercontent.com` 网络不稳定，可改用 CDN：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@v0.1.2/scripts/install.linux.sh | sudo bash
+curl -fsSL https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@v0.1.3/scripts/install.linux.sh | sudo bash
 ```
 
 或克隆后本地执行：
 
 ```bash
-git clone --branch v0.1.2 --depth 1 https://github.com/GameServerHub/game-server-hub.git
+git clone --branch v0.1.3 --depth 1 https://github.com/GameServerHub/game-server-hub.git
 cd game-server-hub
 sudo bash ./scripts/install.linux.sh
 ```
@@ -47,10 +47,10 @@ sudo bash ./scripts/install.linux.sh
 sudo bash ./scripts/install.linux.sh --open-dst-ports
 ```
 
-安装器默认锁定 `v0.1.2` 的安装资源和三类镜像。升级到其它 Release 时，显式指定同一个版本：
+安装器默认锁定 `v0.1.3` 的安装资源和三类镜像。升级到其它 Release 时，显式指定同一个版本：
 
 ```bash
-sudo GSH_RELEASE_TAG=v0.1.2 bash ./scripts/install.linux.sh
+sudo GSH_RELEASE_TAG=v0.1.3 bash ./scripts/install.linux.sh
 ```
 
 ### 安装脚本做了什么
@@ -72,18 +72,29 @@ sudo GSH_RELEASE_TAG=v0.1.2 bash ./scripts/install.linux.sh
 | `PANEL_INSTALL_DIR` | `/opt/game-server-hub` | Compose 与 `panel.env` |
 | `PANEL_DATA_DIR` | `/var/lib/game-server-hub` | SQLite、实例、备份 |
 | `PANEL_LOG_DIR` | `/var/log/game-server-hub` | 日志与安装状态 |
-| `GSH_RELEASE_TAG` | `v0.1.2` | 安装资源与默认三类镜像共同使用的不可变 Release 版本 |
-| `PANEL_IMAGE` | `ghcr.io/gameserverhub/game-server-hub:v0.1.2` | 完整面板镜像引用；设置后不再拼接 tag |
-| `GSH_GAME_DST_IMAGE` | `ghcr.io/gameserverhub/game-server-hub-dst:v0.1.2` | 完整 DST 运行环境镜像引用；设置后不再拼接 tag |
-| `PANEL_IMAGE_TAG` | `v0.1.2` | 未显式设置完整镜像引用时，与 DST / SteamCMD 默认 tag 联动 |
-| `GSH_STEAMCMD_IMAGE` | `ghcr.io/gameserverhub/steamcmd-base:v0.1.2` | 游戏安装镜像；面板内拉取严格使用 `panel.env` 中的完整引用 |
+| `GSH_RELEASE_TAG` | `v0.1.3` | 安装资源与默认三类镜像共同使用的不可变 Release 版本 |
+| `PANEL_IMAGE` | `ghcr.io/gameserverhub/game-server-hub:v0.1.3` | 完整面板镜像引用；设置后不再拼接 tag |
+| `GSH_GAME_DST_IMAGE` | `ghcr.io/gameserverhub/game-server-hub-dst:v0.1.3` | 完整 DST 运行环境镜像引用；设置后不再拼接 tag |
+| `PANEL_IMAGE_TAG` | `v0.1.3` | 未显式设置完整镜像引用时，与 DST / SteamCMD 默认 tag 联动 |
+| `GSH_STEAMCMD_IMAGE` | `ghcr.io/gameserverhub/steamcmd-base:v0.1.3` | 游戏安装镜像；面板内拉取严格使用 `panel.env` 中的完整引用 |
 | `INSTALL_STEAMCMD_IMAGE` | `0` | 安装阶段是否预拉 SteamCMD（`1` 时预拉写入 `panel.env` 的同一镜像；默认由面板内安装） |
+| `PANEL_HEALTHCHECK_TIMEOUT_SECONDS` | `90` | Compose 启动后等待面板健康检查的最长秒数 |
+| `PANEL_HEALTHCHECK_INTERVAL_SECONDS` | `3` | 面板健康检查轮询间隔秒数 |
 | `USE_CN_DEBIAN_MIRROR` | `0` | Debian 是否启用国内 apt 镜像（社区默认关闭；国内可手动开启） |
 | `STRICT_INSTALLER_ASSET_CHECKSUM` | `1` | 是否强制校验安装资源完整性（`0` 为兼容受限网络，不推荐） |
 | `INSTALLER_REPO_MIRRORS` | `https://cdn.jsdelivr.net/gh/...@main,https://ghproxy.com/https://raw.githubusercontent.com/.../main,https://raw.githubusercontent.com/.../main` | 安装资源镜像池（逗号分隔，按顺序回退） |
 | `INSTALLER_REPO_RAW` | 空 | 兼容旧变量；设置后会作为首选单源 |
 
 安装状态文件：`/var/log/game-server-hub/install.status`
+
+安装器按 `platform`、`dependencies`、`preflight`、`network`、`configuration`、`images`、`startup`、`health` 记录阶段。失败时会输出具体阶段、退出码和脚本行号，并生成脱敏诊断报告：`/var/log/game-server-hub/install.diagnostics.log`。报告权限为 `600`，包含磁盘、内存、Docker 版本和 Compose 状态，不采集面板日志、管理员密码或 Registry 凭据。
+
+排障时优先提供以下两个文件，而不是只截取终端最后一行：
+
+```bash
+sudo cat /var/log/game-server-hub/install.status
+sudo cat /var/log/game-server-hub/install.diagnostics.log
+```
 
 ### GHCR 网络问题与自定义镜像
 

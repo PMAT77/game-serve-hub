@@ -10,7 +10,7 @@ let panelSettings = {
 
 const panelUpdateStatus = {
   panel: {
-    image: 'ghcr.io/gameserverhub/game-server-hub:latest',
+    image: 'ghcr.io/gameserverhub/game-server-hub:v0.1.3',
     tag: 'latest',
     releaseVersion: '0.1.0',
     localDigest: 'sha256:abc123',
@@ -22,7 +22,7 @@ const panelUpdateStatus = {
     checkError: null,
   },
   dst: {
-    image: 'ghcr.io/gameserverhub/game-server-hub-dst:latest',
+    image: 'ghcr.io/gameserverhub/game-server-hub-dst:v0.1.3',
     tag: 'latest',
     releaseVersion: '0.1.0',
     localDigest: 'sha256:abc123',
@@ -47,7 +47,7 @@ const panelUpdateStatus = {
   panelApplySupported: false,
   dstApplySupported: true,
   applyHint: '开发环境未配置 GSH_STACK_DIR',
-  manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull && docker pull ghcr.io/gameserverhub/game-server-hub-dst:latest && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d',
+  manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull && docker pull ghcr.io/gameserverhub/game-server-hub-dst:v0.1.3 && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d',
   checkError: null,
 }
 

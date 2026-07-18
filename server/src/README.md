@@ -50,7 +50,7 @@ Node.js 后端代码放在该目录。
 - SteamCMD（优先 apt，失败时回退官方 tarball）
 - 主机预检（系统版本、CPU 架构、磁盘剩余空间、网络连通性）
 - 端口占用检测与防火墙放行（默认 `80`）
-- 拉取并启动面板镜像（默认 `ghcr.io/gameserverhub/game-server-hub:latest`）
+- 拉取并启动面板镜像（默认使用当前 Release tag，不使用滚动的 `latest`）
 - 自动生成管理员账号与随机密码（首次登录强制改密）
 - 安装状态日志与失败回滚（状态文件默认在 `/var/log/game-server-hub/install.status`）
 

@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.2}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
+GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.3}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
 INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@${GSH_RELEASE_TAG},https://ghproxy.com/https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG},https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG}}" # 安装资源镜像池（按顺序回退）。
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
@@ -59,6 +59,9 @@ INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE}"
 PANEL_ENV_FILE="${PANEL_INSTALL_DIR}/panel.env" # 运行时环境变量文件路径。
 PANEL_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.yml" # Docker Compose 文件路径。
 STATUS_FILE="${PANEL_LOG_DIR}/install.status" # 安装状态追踪文件路径。
+DIAGNOSTICS_FILE="${PANEL_LOG_DIR}/install.diagnostics.log" # 失败时生成的脱敏诊断报告。
+PANEL_HEALTHCHECK_TIMEOUT_SECONDS="${PANEL_HEALTHCHECK_TIMEOUT_SECONDS:-90}" # 启动后健康检查总超时。
+PANEL_HEALTHCHECK_INTERVAL_SECONDS="${PANEL_HEALTHCHECK_INTERVAL_SECONDS:-3}" # 健康检查轮询间隔。
 
 DISTRO_ID="" # 发行版 ID（如 ubuntu/debian）。
 DISTRO_CODENAME="" # 发行版代号（如 jammy/bookworm）。
@@ -68,6 +71,11 @@ ADMIN_USERNAME="${ADMIN_USERNAME:-superadmin}" # 初始管理员用户名。
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" # 初始管理员密码（为空时自动生成随机密码）。
 EXPOSE_ADMIN_PASSWORD="${EXPOSE_ADMIN_PASSWORD:-0}" # 是否在安装摘要中明文输出管理员密码（1=输出，0=仅提示凭据文件）。
 ROLLBACK_ENABLED=0 # 是否允许回滚（部署开始后置为 1）。
+INSTALL_COMPLETED=0
+CURRENT_STAGE="bootstrap"
+LAST_ERROR_LINE="unknown"
+LAST_ERROR_EXIT_CODE=1
+LAST_ERROR_MESSAGE="Unexpected installer failure"
 INSTALLER_REPO_POOL_INITIALIZED=0
 declare -a INSTALLER_REPO_POOL=()
 INSTALLER_CANONICAL_REPO_BASE="${INSTALLER_CANONICAL_REPO_BASE:-https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG}}" # 用于安装资源完整性校验的权威源。
@@ -90,6 +98,8 @@ log_error() {
 
 # 输出错误并立即退出脚本。
 abort() {
+  LAST_ERROR_MESSAGE="$*"
+  LAST_ERROR_LINE="${BASH_LINENO[0]:-unknown}"
   log_error "$*"
   exit 1
 }
@@ -108,6 +118,18 @@ run_as_root() {
   sudo "$@"
 }
 
+try_as_root() {
+  if [[ "${GSH_DIAGNOSTICS_UNPRIVILEGED:-0}" == "1" ]]; then
+    "$@"
+  elif [[ "${EUID}" -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
 # 将安装进度写入状态文件，便于审计和排障。
 write_status() {
   local stage status message timestamp
@@ -117,6 +139,71 @@ write_status() {
   timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
   run_as_root mkdir -p "${PANEL_LOG_DIR}"
   printf '%s [%s] [%s] %s\n' "${timestamp}" "${stage}" "${status}" "${message}" | run_as_root tee -a "${STATUS_FILE}" >/dev/null
+}
+
+begin_stage() {
+  CURRENT_STAGE="$1"
+  write_status "$1" "start" "$2"
+}
+
+record_install_error() {
+  LAST_ERROR_EXIT_CODE="$1"
+  LAST_ERROR_LINE="$2"
+}
+
+collect_install_diagnostics() {
+  local exit_code="$1"
+  local line_number="$2"
+  local report
+
+  report="$(mktemp)"
+  {
+    printf 'timestamp=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'stage=%s\n' "${CURRENT_STAGE}"
+    printf 'exit_code=%s\n' "${exit_code}"
+    printf 'line=%s\n' "${line_number}"
+    printf 'release=%s\n' "${GSH_RELEASE_TAG}"
+    printf 'panel_image=%s\n' "${PANEL_IMAGE}"
+    printf 'dst_image=%s\n' "${GSH_GAME_DST_IMAGE}"
+    printf 'steamcmd_image=%s\n' "${GSH_STEAMCMD_IMAGE}"
+    printf 'distro=%s\n' "${DISTRO_ID:-unknown}"
+    printf 'architecture=%s\n' "$(uname -m 2>/dev/null || printf unknown)"
+    printf '\n[disk]\n'
+    df -h "${PANEL_INSTALL_DIR}" 2>&1 || true
+    printf '\n[memory]\n'
+    free -m 2>&1 || true
+    if [[ "${GSH_DIAGNOSTICS_SKIP_DOCKER:-0}" != "1" ]] && command -v docker >/dev/null 2>&1; then
+      printf '\n[docker-version]\n'
+      docker version 2>&1 || true
+      if [[ -f "${PANEL_ENV_FILE}" && -f "${PANEL_COMPOSE_FILE}" && -f "${PANEL_BIND_COMPOSE_FILE}" ]]; then
+        printf '\n[compose-ps]\n'
+        try_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" ps -a 2>&1 || true
+      fi
+    fi
+  } >"${report}"
+
+  try_as_root mkdir -p "${PANEL_LOG_DIR}" || true
+  try_as_root cp "${report}" "${DIAGNOSTICS_FILE}" || true
+  try_as_root chmod 600 "${DIAGNOSTICS_FILE}" || true
+  rm -f "${report}"
+}
+
+handle_install_exit() {
+  local exit_code="$1"
+  trap - ERR EXIT
+  if [[ "${INSTALL_COMPLETED}" -eq 1 || "${exit_code}" -eq 0 ]]; then
+    return
+  fi
+
+  set +e
+  if try_as_root mkdir -p "${PANEL_LOG_DIR}"; then
+    printf '%s [%s] [error] %s; exit=%s; line=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${CURRENT_STAGE}" "${LAST_ERROR_MESSAGE}" "${exit_code}" "${LAST_ERROR_LINE}" | try_as_root tee -a "${STATUS_FILE}" >/dev/null || true
+  fi
+  collect_install_diagnostics "${exit_code}" "${LAST_ERROR_LINE}" || true
+  rollback_install || true
+  log_error "Installation failed during stage '${CURRENT_STAGE}' (exit ${exit_code}, line ${LAST_ERROR_LINE})."
+  log_error "Diagnostics: ${DIAGNOSTICS_FILE}"
+  log_error "Status history: ${STATUS_FILE}"
 }
 
 # 为网络/包管理等易受瞬时故障影响的操作提供重试能力。
@@ -619,6 +706,8 @@ Environment (optional):
   PANEL_IMAGE=REF               Full panel image reference (tag or digest)
   GSH_GAME_DST_IMAGE=REF        Full DST image reference (tag or digest)
   GSH_STEAMCMD_IMAGE=REF        Full SteamCMD image reference (tag or digest)
+  PANEL_HEALTHCHECK_TIMEOUT_SECONDS=90  Maximum wait for panel /health after startup
+  PANEL_HEALTHCHECK_INTERVAL_SECONDS=3  Panel /health polling interval
   USE_CN_DEBIAN_MIRROR=1        Enable CN Debian mirror (default 0 for community-safe baseline)
   STRICT_INSTALLER_ASSET_CHECKSUM=0  Skip canonical checksum verification (not recommended)
   With INSTALL_STEAMCMD_IMAGE=1, SteamCMD pre-pulls the same image recorded in panel.env.
@@ -898,21 +987,42 @@ pull_runtime_images() {
   pull_install_steamcmd_image || return 1
 }
 
+wait_for_panel_health() {
+  local deadline response
+  deadline=$((SECONDS + PANEL_HEALTHCHECK_TIMEOUT_SECONDS))
+  while (( SECONDS < deadline )); do
+    if response="$(curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${PANEL_PORT}/health" 2>/dev/null)"; then
+      if [[ "${response}" == *'"docker"'* ]]; then
+        return 0
+      fi
+    fi
+    sleep "${PANEL_HEALTHCHECK_INTERVAL_SECONDS}"
+  done
+  LAST_ERROR_MESSAGE="Panel did not become healthy within ${PANEL_HEALTHCHECK_TIMEOUT_SECONDS}s"
+  return 1
+}
+
 # 拉取镜像并启动服务栈；通过重试应对临时网络抖动。
 deploy_panel() {
-  write_status "deploy" "start" "Pulling panel image ${PANEL_IMAGE}"
+  begin_stage "images" "Pulling runtime images"
   pull_runtime_images || abort "Image pull failed. Please check outbound network or configure explicit image references."
-  write_status "deploy" "ok" "Image pull completed"
+  write_status "images" "ok" "Runtime image pull completed"
 
-  write_status "deploy" "start" "Starting panel stack"
+  begin_stage "startup" "Starting panel stack"
   ROLLBACK_ENABLED=1
   run_with_retry "docker compose up" run_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" up -d
-  write_status "deploy" "ok" "Panel stack started"
+  write_status "startup" "ok" "Panel stack started"
+
+  begin_stage "health" "Waiting for panel health endpoint"
+  wait_for_panel_health
+  write_status "health" "ok" "Panel health endpoint is ready"
 }
 
 # 输出最终访问信息与安全提醒。
 print_summary() {
   write_status "install" "ok" "Installation completed"
+  INSTALL_COMPLETED=1
+  CURRENT_STAGE="complete"
   log_info "Installation completed."
   log_info "Panel image: ${PANEL_IMAGE}"
   log_info "DST image: ${GSH_GAME_DST_IMAGE}"
@@ -957,24 +1067,27 @@ main() {
     esac
   done
 
-  # 任何未处理错误都会触发 rollback_install。
-  trap 'rollback_install' ERR
+  # ERR 记录失败位置；EXIT 统一写状态、生成脱敏诊断并执行部署回滚。
+  trap 'record_install_error "$?" "$LINENO"' ERR
+  trap 'handle_install_exit "$?"' EXIT
 
   log_info "Running ${SCRIPT_NAME}..."
-  write_status "install" "start" "Installer started"
+  begin_stage "install" "Installer started"
 
+  CURRENT_STAGE="platform"
   detect_distro
   ensure_apt
 
-  write_status "deps" "start" "Installing base dependencies"
+  begin_stage "dependencies" "Installing base dependencies"
   install_base_packages
   install_docker
   add_user_to_docker_group
-  write_status "deps" "ok" "Dependencies installed (Docker only, no host Node/SteamCMD)"
+  write_status "dependencies" "ok" "Dependencies installed (Docker only, no host Node/SteamCMD)"
 
+  CURRENT_STAGE="preflight"
   preflight_checks
 
-  write_status "network" "start" "Checking panel port and firewall"
+  begin_stage "network" "Checking panel port and firewall"
   check_port_conflict
   if [[ "${OPEN_PANEL_PORT}" -eq 1 ]]; then
     open_firewall_port
@@ -988,10 +1101,14 @@ main() {
   fi
   write_status "network" "ok" "Port and firewall processed"
 
+  begin_stage "configuration" "Preparing panel configuration"
   prepare_panel_files
+  write_status "configuration" "ok" "Panel configuration prepared"
   deploy_panel
 
   print_summary
 }
 
-main "$@"
+if [[ "${GSH_INSTALLER_LIB_ONLY:-0}" != "1" ]]; then
+  main "$@"
+fi

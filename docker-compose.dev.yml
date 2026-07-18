@@ -21,8 +21,8 @@ services:
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
-      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/gameserverhub/game-server-hub-dst:latest}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/gameserverhub/steamcmd-base:latest}
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/gameserverhub/game-server-hub-dst:v0.1.3}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/gameserverhub/steamcmd-base:v0.1.3}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB:-}
       GSH_STEAMCMD_APP_INFO_MEMORY_MB: ${GSH_STEAMCMD_APP_INFO_MEMORY_MB:-}

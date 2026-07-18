@@ -6,13 +6,30 @@
 
 （暂无）
 
+## [0.1.3] - 2026-07-18
+
+### Changed
+
+- 容器发布改为构建验证、candidate 推送、完整镜像集提升三个阶段，正式 tag 不再边构建边发布。
+- 移除公开 CI/CD 中的个人 ACR 同步链路；GHCR 是唯一官方镜像源。
+- CI 合并为单次依赖安装的 `Quality Gate`，同时保留类型检查、233 项单测与生产构建。
+
+### Security
+
+- Release tag 必须匹配 `package.json`、存在 Changelog 条目并指向已经合并进 `main` 的提交。
+- 正式镜像附带 provenance、SBOM 与 `release-images.json` digest 清单，且禁止覆盖已有 tag。
+
 ## [0.1.2] - 2026-07-18
+
+> 发布失败：仅部分镜像 tag 写入 GHCR，不可作为安装版本。
 
 ### Fixed
 
 - SteamCMD 镜像构建时的预热步骤在 Valve 服务出现短暂网络故障时自动重试，避免取消同批镜像发布。
 
 ## [0.1.1] - 2026-07-18
+
+> 发布失败：三类镜像未形成完整集合，不可作为安装版本。
 
 ### Added
 
@@ -59,7 +76,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/GameServerHub/game-server-hub/compare/v0.0.0...v0.1.0

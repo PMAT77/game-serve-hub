@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -15,9 +16,9 @@ permissions:
 
 jobs:
   quality:
-    name: Lint & Test
+    name: Quality Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,38 +40,24 @@ jobs:
       - name: Type check
         run: pnpm run lint
 
+      - name: Release consistency
+        run: pnpm run release:verify
+
       - name: Unit tests
         env:
           GSH_UNIT_TEST: '1'
         run: pnpm test:unit
 
-  build:
-    name: Production Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: quality
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Installer syntax and smoke test
+        run: |
+          bash -n scripts/install.linux.sh
+          bash -n scripts/install-linux-smoke.sh
+          bash scripts/install-linux-smoke.sh
 
       - name: Prepare env for build
         run: |
           cp .env.production.example .env.production
           cp server/.env.production.example server/.env.production
 
-      - name: Build frontend
-        run: pnpm run build
+      - name: Production build
+        run: pnpm exec vite build

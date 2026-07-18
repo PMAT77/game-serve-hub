@@ -15,8 +15,8 @@
 
 **单一事实来源：**
 
-1. Git tag：`v0.1.2`
-2. `package.json` → `"version": "0.1.2"`
+1. Git tag：`v0.1.3`
+2. `package.json` → `"version": "0.1.3"`
 3. `CHANGELOG.md` → 对应章节
 4. GitHub Release 说明（镜像 tag 与升级指引）
 
@@ -32,8 +32,9 @@
 [ ] pnpm run release:check 本地通过（lint + test:unit + build）
 [ ] PR 合并后 CI 绿色
 [ ] git tag v0.x.y && git push origin v0.x.y
-[ ] 等待 docker-publish workflow 完成（面板 + DST 镜像）
-[ ] 核对 GHCR 镜像 tag 与 GitHub Release
+[ ] 确认 `steamcmd-base` Package 已授权本仓库写入且公开可拉取
+[ ] 等待 Container Pipeline 完成（三类镜像验证 → candidate → 正式 tag）
+[ ] 核对三个 GHCR 镜像 tag、`release-images.json` 与 GitHub Release
 [ ] README / INSTALL 中如有破坏性变更，补充升级说明
 ```
 
@@ -43,11 +44,13 @@
 
 推送 **`v*`** tag 到 `main` 时：
 
-1. [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) 构建并推送：
+1. [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) 先构建但不推送三类镜像；全部通过后才推送 candidate：
    - `ghcr.io/gameserverhub/game-server-hub:<tag>`
    - `ghcr.io/gameserverhub/game-server-hub-dst:<tag>`
-2. 自动创建 GitHub Release（可编辑补充说明）
-3. 镜像构建参数注入 `GSH_RELEASE_VERSION`、`GSH_BUILD_SHA`
+   - `ghcr.io/gameserverhub/steamcmd-base:<tag>`
+2. 三个 candidate 均写入成功后才提升正式 tag，避免部分 Release
+3. 自动创建 GitHub Release 并附带 `release-images.json`
+4. 镜像附带 provenance、SBOM，并注入 `GSH_RELEASE_VERSION`、`GSH_BUILD_SHA`
 
 `main` 分支推送（无 tag）仅更新 `latest` 等滚动 tag，**不替代**正式版本公告。
 
@@ -61,10 +64,12 @@
 |----|------|
 | Require a pull request before merging | ✅ |
 | Require status checks to pass | ✅ |
-| 必选检查项 | `Lint & Test`、`Production Build`（来自 [ci.yml](../.github/workflows/ci.yml)） |
+| 必选检查项 | `Quality Gate` 与三个 `Validate image (...)`（来自 CI 和 Container Pipeline） |
 | Require branches to be up to date | ✅（可选，减少落后 main 的绿 CI） |
 
 配置后，外部贡献者的 PR 必须在 CI 通过后才能合并，与 [CONTRIBUTING.md](../CONTRIBUTING.md) 中的本地检查一致。
+
+GHCR 新 Package（当前包括 `steamcmd-base`）还需在 Package settings 的 **Manage Actions access** 中授予 `GameServerHub/game-server-hub` 写权限，并设置为 Public。工作流只使用仓库临时 `GITHUB_TOKEN`，不需要长期 PAT。
 
 ---
 

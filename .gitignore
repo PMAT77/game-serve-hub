@@ -19,6 +19,7 @@ docs/*
 !docs/DEVELOPMENT.md
 !docs/RELEASE.md
 !docs/MEMORY.md
+!docs/IMAGE_DISTRIBUTION.md
 !docs/assets/
 !docs/assets/**
 !docs/images/

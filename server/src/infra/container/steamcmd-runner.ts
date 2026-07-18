@@ -13,7 +13,7 @@ import { formatSteamcmdMemoryLimitForLog, resolveSteamcmdContainerMemoryLimits }
 import { parseImageRef } from './image-ref'
 import { DST_WORKSHOP_APP_ID } from '../game-adapter/dst/constants'
 
-/** 面板内「拉取游戏安装镜像」固定使用 GHCR（与 CI / install 写入 panel.env 一致） */
+/** 未配置 SteamCMD 镜像时使用的官方默认仓库。 */
 export const STEAMCMD_OFFICIAL_REPOSITORY = 'ghcr.io/gameserverhub/steamcmd-base'
 
 const STEAMCMD_APP_UPDATE_TIMEOUT_MS = 30 * 60 * 1000
@@ -391,35 +391,30 @@ async function tagImageAlias(sourceRef: string, targetRef: string): Promise<void
   await docker.getImage(sourceRef).tag({ repo, tag })
 }
 
-/** 面板拉取默认目标（GHCR steamcmd-base；tag 与 panel.env 中 GSH_STEAMCMD_IMAGE 对齐） */
+/** 面板拉取目标（完整保留 panel.env 中的 GSH_STEAMCMD_IMAGE） */
 export function resolvePanelSteamcmdPullRef(configuredImage?: string): string {
   const configured = (configuredImage ?? getServerContainerConfig().steamcmdImage).trim()
-  const tag = parseImageRef(configured || `${STEAMCMD_OFFICIAL_REPOSITORY}:latest`).tag || 'latest'
-  return `${STEAMCMD_OFFICIAL_REPOSITORY}:${tag}`
+  return configured || `${STEAMCMD_OFFICIAL_REPOSITORY}:latest`
 }
 
 /**
  * SteamCMD 拉取候选：
  * 1) 若配置 GSH_STEAMCMD_IMAGE_MIRRORS，按顺序优先尝试候选 registry；
- * 2) 最后回退到 GHCR 官方仓库。
+ * 2) 最后尝试完整的已配置镜像引用。
  */
 export function buildSteamcmdImageCandidates(configuredImage?: string): string[] {
-  const ghcrRef = resolvePanelSteamcmdPullRef(configuredImage)
-  const parsed = parseImageRef(ghcrRef)
+  const configuredRef = resolvePanelSteamcmdPullRef(configuredImage)
+  const parsed = parseImageRef(configuredRef)
   const mirrors = normalizeMirrorRegistries().filter(registry => registry !== parsed.registry)
   const candidates = mirrors.map(registry => buildImageRef(registry, parsed.repository, parsed.tag))
-  candidates.push(ghcrRef)
+  candidates.push(configuredRef)
   return candidates
 }
 
 export async function isSteamcmdImagePresent(): Promise<boolean> {
   try {
     const { steamcmdImage } = getServerContainerConfig()
-    const pullRef = resolvePanelSteamcmdPullRef(steamcmdImage)
     if (await isImagePresentByRef(steamcmdImage)) {
-      return true
-    }
-    if (pullRef !== steamcmdImage && await isImagePresentByRef(pullRef)) {
       return true
     }
     return false

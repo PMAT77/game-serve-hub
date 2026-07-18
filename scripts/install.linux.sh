@@ -37,20 +37,13 @@ DST_MASTER_PORT="${DST_MASTER_PORT:-12346}"
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
 PANEL_PORT="${PANEL_PORT:-9527}" # 面板对外暴露端口（默认使用高位端口以降低备案拦截影响）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
-USE_ACR_MIRROR="${USE_ACR_MIRROR:-${USE_CN_GHCR_MIRROR:-0}}" # 是否优先使用 ACR 镜像（1=启用，0=关闭）；兼容历史 USE_CN_GHCR_MIRROR。
 INSTALL_STEAMCMD_IMAGE="${INSTALL_STEAMCMD_IMAGE:-0}" # 安装阶段是否预拉 SteamCMD 镜像（1=拉取，0=仅写入 panel.env，由面板内安装）。
-PANEL_IMAGE_REPOSITORY_OVERRIDE="${PANEL_IMAGE_REPOSITORY:-}" # 兼容旧变量：显式指定面板镜像仓库时优先使用。
+PANEL_IMAGE_OVERRIDE="${PANEL_IMAGE:-}" # 完整面板镜像引用；设置后不再拼接 tag。
+GSH_GAME_DST_IMAGE_OVERRIDE="${GSH_GAME_DST_IMAGE:-}" # 完整 DST 镜像引用；设置后不再拼接 tag。
+GSH_STEAMCMD_IMAGE_OVERRIDE="${GSH_STEAMCMD_IMAGE:-}" # 完整 SteamCMD 镜像引用；设置后不再拼接 tag。
 PANEL_IMAGE_OFFICIAL_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub}" # 面板官方镜像仓库。
-ACR_REGISTRY="${ACR_REGISTRY:-registry.cn-hangzhou.aliyuncs.com}" # ACR Registry 域名。
-ACR_NAMESPACE="${ACR_NAMESPACE:-game-server-hub}" # ACR 命名空间。
-PANEL_IMAGE_ACR_REPOSITORY="${PANEL_IMAGE_ACR_REPOSITORY:-${ACR_REGISTRY}/${ACR_NAMESPACE}/game-server-hub}" # 面板 ACR 镜像仓库。
-PANEL_IMAGE_CN_REPOSITORY="${PANEL_IMAGE_CN_REPOSITORY:-${PANEL_IMAGE_ACR_REPOSITORY}}" # 兼容历史变量名：默认等价 ACR 仓库。
 GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub-dst}" # DST 官方镜像仓库。
-GSH_GAME_DST_IMAGE_ACR_REPOSITORY="${GSH_GAME_DST_IMAGE_ACR_REPOSITORY:-${ACR_REGISTRY}/${ACR_NAMESPACE}/game-server-hub-dst}" # DST ACR 镜像仓库。
-GSH_GAME_DST_IMAGE_CN_REPOSITORY="${GSH_GAME_DST_IMAGE_CN_REPOSITORY:-${GSH_GAME_DST_IMAGE_ACR_REPOSITORY}}" # 兼容历史变量名：默认等价 ACR 仓库。
 GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY="${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/steamcmd-base}" # SteamCMD 官方镜像仓库（与 CI 同步 GHCR 名一致）。
-GSH_STEAMCMD_IMAGE_ACR_REPOSITORY="${GSH_STEAMCMD_IMAGE_ACR_REPOSITORY:-${ACR_REGISTRY}/${ACR_NAMESPACE}/steamcmd-base}" # SteamCMD ACR 镜像仓库（与 sync-to-acr 推送名一致）。
-GSH_STEAMCMD_IMAGE_CN_REPOSITORY="${GSH_STEAMCMD_IMAGE_CN_REPOSITORY:-${GSH_STEAMCMD_IMAGE_ACR_REPOSITORY}}" # 兼容历史变量名：默认等价 ACR 仓库。
 PANEL_INSTALL_DIR="${PANEL_INSTALL_DIR:-/opt/game-server-hub}" # 安装目录（放置 env/compose）。
 PANEL_DATA_DIR="${PANEL_DATA_DIR:-/var/lib/game-server-hub}" # 面板持久化数据目录。
 PANEL_LOG_DIR="${PANEL_LOG_DIR:-/var/log/game-server-hub}" # 面板日志与安装状态目录。
@@ -58,29 +51,10 @@ PANEL_INSTANCES_DIR="${PANEL_INSTANCES_DIR:-${PANEL_DATA_DIR}/instances}" # 游�
 PANEL_BACKUPS_DIR="${PANEL_BACKUPS_DIR:-${PANEL_DATA_DIR}/backups}" # 备份目录。
 PANEL_BIND_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.bind.yml"
 PANEL_IMAGE_TAG="${PANEL_IMAGE_TAG:-latest}" # 容器镜像标签。
-if [[ -n "${PANEL_IMAGE_REPOSITORY_OVERRIDE}" ]]; then
-  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_REPOSITORY_OVERRIDE}"
-elif [[ "${USE_ACR_MIRROR}" == "1" ]]; then
-  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_ACR_REPOSITORY}"
-else
-  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY}"
-fi
-if [[ "${USE_ACR_MIRROR}" == "1" ]]; then
-  GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_ACR_REPOSITORY}"
-else
-  GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}"
-fi
-PANEL_IMAGE="${PANEL_IMAGE_REPOSITORY}:${PANEL_IMAGE_TAG}" # 完整镜像引用（仓库:标签）。
-PANEL_IMAGE_FALLBACK="${PANEL_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}" # 回退镜像引用。
-GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_REPOSITORY}:${PANEL_IMAGE_TAG}" # DST 镜像引用。
-GSH_GAME_DST_IMAGE_FALLBACK="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}" # DST 回退镜像引用。
-# panel.env 中 SteamCMD 固定为 GHCR（面板内安装默认走 GHCR）；安装阶段可选预拉 ACR 同名镜像。
-GSH_STEAMCMD_IMAGE="${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}"
-if [[ "${USE_ACR_MIRROR}" == "1" ]]; then
-  INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE_ACR_REPOSITORY}:${PANEL_IMAGE_TAG}"
-else
-  INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE}"
-fi
+PANEL_IMAGE="${PANEL_IMAGE_OVERRIDE:-${PANEL_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # 完整镜像引用（可为 tag 或 digest）。
+GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_OVERRIDE:-${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # DST 镜像引用（可为 tag 或 digest）。
+GSH_STEAMCMD_IMAGE="${GSH_STEAMCMD_IMAGE_OVERRIDE:-${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # SteamCMD 镜像引用（可为 tag 或 digest）。
+INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE}"
 PANEL_ENV_FILE="${PANEL_INSTALL_DIR}/panel.env" # 运行时环境变量文件路径。
 PANEL_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.yml" # Docker Compose 文件路径。
 STATUS_FILE="${PANEL_LOG_DIR}/install.status" # 安装状态追踪文件路径。
@@ -378,6 +352,10 @@ check_ghcr_reachability() {
   esac
 }
 
+uses_ghcr_image() {
+  [[ "${PANEL_IMAGE}" == ghcr.io/* || "${GSH_GAME_DST_IMAGE}" == ghcr.io/* || "${GSH_STEAMCMD_IMAGE}" == ghcr.io/* ]]
+}
+
 # 校验系统是否提供 apt-get（仅支持 Debian/Ubuntu 体系）。
 ensure_apt() {
   if ! command -v apt-get >/dev/null 2>&1; then
@@ -636,12 +614,13 @@ Options:
   -h, --help         Show this help
 
 Environment (optional):
-  USE_ACR_MIRROR=1              Prefer ACR for panel/DST images (default 0 = GHCR)
   INSTALL_STEAMCMD_IMAGE=1      Pre-pull steamcmd-base during install (default 0; panel UI installs by default)
-  ACR_REGISTRY / ACR_NAMESPACE  ACR endpoint when USE_ACR_MIRROR=1
+  PANEL_IMAGE=REF               Full panel image reference (tag or digest)
+  GSH_GAME_DST_IMAGE=REF        Full DST image reference (tag or digest)
+  GSH_STEAMCMD_IMAGE=REF        Full SteamCMD image reference (tag or digest)
   USE_CN_DEBIAN_MIRROR=1        Enable CN Debian mirror (default 0 for community-safe baseline)
   STRICT_INSTALLER_ASSET_CHECKSUM=0  Skip canonical checksum verification (not recommended)
-  With INSTALL_STEAMCMD_IMAGE=1, SteamCMD follows USE_ACR_MIRROR (ACR first, fallback GHCR); panel.env always records GHCR steamcmd-base.
+  With INSTALL_STEAMCMD_IMAGE=1, SteamCMD pre-pulls the same image recorded in panel.env.
 EOF
 }
 
@@ -812,7 +791,7 @@ preflight_checks() {
     log_info "Docker already installed, skipping download.docker.com preflight check."
   fi
 
-  if ! check_ghcr_reachability; then
+  if uses_ghcr_image && ! check_ghcr_reachability; then
     if [[ "${STRICT_GHCR_CHECK}" == "1" ]]; then
       abort "Cannot reach GHCR registry endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Please check outbound network."
     fi
@@ -898,19 +877,13 @@ rollback_install() {
   write_status "rollback" "ok" "Rollback finished"
 }
 
-# 安装阶段可选预拉 SteamCMD（默认不拉，由面板内触发）；USE_ACR_MIRROR=1 时优先 ACR，失败回退 GHCR。
+# 安装阶段可选预拉 SteamCMD（默认不拉，由面板内触发）。
 pull_install_steamcmd_image() {
   if [[ "${INSTALL_STEAMCMD_IMAGE}" != "1" ]]; then
     return 0
   fi
 
   if run_with_retry "docker pull ${INSTALL_STEAMCMD_PULL_IMAGE}" run_as_root docker pull "${INSTALL_STEAMCMD_PULL_IMAGE}"; then
-    return 0
-  fi
-
-  if [[ "${USE_ACR_MIRROR}" == "1" && "${INSTALL_STEAMCMD_PULL_IMAGE}" != "${GSH_STEAMCMD_IMAGE}" ]]; then
-    log_warn "ACR SteamCMD pull failed, falling back to GHCR steamcmd-base..."
-    run_with_retry "docker pull ${GSH_STEAMCMD_IMAGE}" run_as_root docker pull "${GSH_STEAMCMD_IMAGE}" || return 1
     return 0
   fi
 
@@ -924,33 +897,10 @@ pull_runtime_images() {
   pull_install_steamcmd_image || return 1
 }
 
-# 切换为官方 GHCR 镜像并同步更新 panel.env，供后续 compose 使用。
-switch_to_official_images() {
-  PANEL_IMAGE_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY}"
-  GSH_GAME_DST_IMAGE_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}"
-  PANEL_IMAGE="${PANEL_IMAGE_FALLBACK}"
-  GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_FALLBACK}"
-  INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE}"
-
-  if run_as_root test -f "${PANEL_ENV_FILE}"; then
-    run_as_root sed -i "s|^PANEL_IMAGE=.*$|PANEL_IMAGE=${PANEL_IMAGE}|g" "${PANEL_ENV_FILE}"
-    run_as_root sed -i "s|^GSH_GAME_DST_IMAGE=.*$|GSH_GAME_DST_IMAGE=${GSH_GAME_DST_IMAGE}|g" "${PANEL_ENV_FILE}"
-  fi
-}
-
 # 拉取镜像并启动服务栈；通过重试应对临时网络抖动。
 deploy_panel() {
   write_status "deploy" "start" "Pulling panel image ${PANEL_IMAGE}"
-  if ! pull_runtime_images; then
-    if [[ "${USE_ACR_MIRROR}" == "1" ]]; then
-      log_warn "ACR mirror pull failed, falling back to official ghcr.io..."
-      switch_to_official_images
-      write_status "deploy" "start" "Retrying image pull via official ghcr.io"
-      pull_runtime_images || abort "Image pull failed on both ACR mirror and official ghcr.io."
-    else
-      abort "Image pull failed. Please check outbound network or image repository settings."
-    fi
-  fi
+  pull_runtime_images || abort "Image pull failed. Please check outbound network or configure explicit image references."
   write_status "deploy" "ok" "Image pull completed"
 
   write_status "deploy" "start" "Starting panel stack"

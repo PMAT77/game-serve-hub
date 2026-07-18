@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "naive-ui-skills": {
+      "source": "jiaiyan/naive-ui-skills",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "fd8b3240a9863e85a5de11803d69acc7b41c560bbaac6a2358699390f92637cb"
+    },
+    "ui-design-brain": {
+      "source": "carmahhawwari/ui-design-brain",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "a51816925376721c7bd63cf8ff97905146f596e481c3c7598bfa0722ca75b1f4"
+    }
+  }
+}

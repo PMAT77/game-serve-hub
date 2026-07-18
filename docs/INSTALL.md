@@ -12,7 +12,7 @@
 | 架构 | x86_64 / aarch64 |
 | 内存 | **推荐 ≥ 6 GB**（单实例 + 洞穴 + 中等 Mod）；约 4 GB 仅适合单实例地上、少 Mod（见 [MEMORY.md](MEMORY.md)） |
 | 磁盘 | 根分区可用空间 ≥ 4 GB（仅面板；游戏与存档另计） |
-| 网络 | 可访问 Docker 仓库与镜像仓库（默认 GHCR，可切换 ACR 优先） |
+| 网络 | 可访问 Docker 仓库与镜像仓库（默认 GHCR；受限网络可显式配置自己的镜像地址） |
 | 权限 | root 或 sudo |
 
 宿主机 **无需** 安装 Node.js、pnpm、SteamCMD；安装脚本仅安装 Docker。
@@ -56,7 +56,7 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 ### 安装脚本做了什么
 
 1. 安装 Docker Engine 与 Compose 插件  
-2. 预检架构、磁盘、**内存档位提示**、网络（需能访问 `download.docker.com`；镜像拉取默认走 GHCR，启用 ACR 优先时失败自动回退 `ghcr.io`）  
+2. 预检架构、磁盘、**内存档位提示**、网络（需能访问 `download.docker.com`；镜像默认从 GHCR 拉取）
 3. 检查面板端口；仅在显式参数下配置防火墙（`--open-panel-port` / `--open-dst-ports`）  
 4. 生成 `/opt/game-server-hub/panel.env`（可按总内存自动合并 `config/panel.env.presets/` 预设）与 Compose 文件  
 5. 拉取面板镜像并 `docker compose up -d`  
@@ -72,11 +72,11 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 | `PANEL_INSTALL_DIR` | `/opt/game-server-hub` | Compose 与 `panel.env` |
 | `PANEL_DATA_DIR` | `/var/lib/game-server-hub` | SQLite、实例、备份 |
 | `PANEL_LOG_DIR` | `/var/log/game-server-hub` | 日志与安装状态 |
-| `PANEL_IMAGE` | `ghcr.io/gameserverhub/game-server-hub:latest` | 面板镜像（默认 GHCR） |
-| `PANEL_IMAGE_TAG` | `latest` | 与 DST / SteamCMD 镜像 tag 联动 |
-| `GSH_STEAMCMD_IMAGE` | `ghcr.io/gameserverhub/steamcmd-base:latest` | 游戏安装镜像（安装脚本写入 `panel.env`，面板内拉取固定走 GHCR） |
-| `INSTALL_STEAMCMD_IMAGE` | `0` | 安装阶段是否预拉 SteamCMD（`1` 时随 `USE_ACR_MIRROR` 选 ACR/GHCR；默认由面板内安装） |
-| `USE_ACR_MIRROR` | `0` | 是否优先使用 ACR 拉取面板/DST（及 `INSTALL_STEAMCMD_IMAGE=1` 时的 SteamCMD） |
+| `PANEL_IMAGE` | `ghcr.io/gameserverhub/game-server-hub:latest` | 完整面板镜像引用；设置后不再拼接 tag |
+| `GSH_GAME_DST_IMAGE` | `ghcr.io/gameserverhub/game-server-hub-dst:latest` | 完整 DST 运行环境镜像引用；设置后不再拼接 tag |
+| `PANEL_IMAGE_TAG` | `latest` | 未显式设置完整镜像引用时，与 DST / SteamCMD 默认 tag 联动 |
+| `GSH_STEAMCMD_IMAGE` | `ghcr.io/gameserverhub/steamcmd-base:latest` | 游戏安装镜像；面板内拉取严格使用 `panel.env` 中的完整引用 |
+| `INSTALL_STEAMCMD_IMAGE` | `0` | 安装阶段是否预拉 SteamCMD（`1` 时预拉写入 `panel.env` 的同一镜像；默认由面板内安装） |
 | `USE_CN_DEBIAN_MIRROR` | `0` | Debian 是否启用国内 apt 镜像（社区默认关闭；国内可手动开启） |
 | `STRICT_INSTALLER_ASSET_CHECKSUM` | `1` | 是否强制校验安装资源完整性（`0` 为兼容受限网络，不推荐） |
 | `INSTALLER_REPO_MIRRORS` | `https://cdn.jsdelivr.net/gh/...@main,https://ghproxy.com/https://raw.githubusercontent.com/.../main,https://raw.githubusercontent.com/.../main` | 安装资源镜像池（逗号分隔，按顺序回退） |
@@ -84,13 +84,32 @@ sudo PANEL_IMAGE_TAG=v0.2.0 bash ./scripts/install.linux.sh
 
 安装状态文件：`/var/log/game-server-hub/install.status`
 
-### 镜像分发策略（默认 GHCR）
+### GHCR 网络问题与自定义镜像
 
-- 默认 `USE_ACR_MIRROR=0`：优先拉取官方 `ghcr.io/gameserverhub/*`  
-- 设置 `USE_ACR_MIRROR=1`：优先拉取 `registry.cn-hangzhou.aliyuncs.com/game-server-hub/*`  
-- 若 ACR 拉取失败，安装脚本会自动回退到官方 `ghcr.io/gameserverhub/*`  
-- 需要固定仓库时可显式指定 `PANEL_IMAGE_REPOSITORY`、`GSH_GAME_DST_IMAGE_REPOSITORY`、`GSH_STEAMCMD_IMAGE_REPOSITORY`（或安装后直接改 `panel.env` 中的完整镜像引用）  
-- 若希望 ghcr 连通性预检失败即终止安装，可设置 `STRICT_GHCR_CHECK=1`
+安装器默认只使用官方 `ghcr.io/gameserverhub/*`，不会自动使用维护者的 ACR 或任何第三方镜像站。若 `docker pull` 访问 GHCR 失败：
+
+1. 先确认服务器 DNS、防火墙和 HTTPS 代理是否允许访问 `ghcr.io`；可直接执行 `docker pull ghcr.io/gameserverhub/game-server-hub:<版本>` 测试。
+2. 如需镜像副本，请使用自己控制或明确可信的仓库，并从同一个 Release 的 `release-images.json` 核对 digest；不要因网络问题改用来源不明、无法校验的镜像。
+3. 安装时一次性传入三个完整镜像引用。私有仓库请先在宿主机以 root 身份执行 `docker login <你的仓库域名>`。
+
+```bash
+sudo docker login registry.example.com
+sudo \
+  PANEL_IMAGE=registry.example.com/your-namespace/game-server-hub:v0.2.0 \
+  GSH_GAME_DST_IMAGE=registry.example.com/your-namespace/game-server-hub-dst:v0.2.0 \
+  GSH_STEAMCMD_IMAGE=registry.example.com/your-namespace/steamcmd-base:v0.2.0 \
+  bash ./scripts/install.linux.sh
+```
+
+安装后切换镜像时，编辑 `/opt/game-server-hub/panel.env` 内的 `PANEL_IMAGE`、`GSH_GAME_DST_IMAGE` 和 `GSH_STEAMCMD_IMAGE`，然后执行：
+
+```bash
+cd /opt/game-server-hub
+sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull
+sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d
+```
+
+若仍使用 GHCR 且希望连通性预检失败即终止安装，可设置 `STRICT_GHCR_CHECK=1`；三个运行时镜像均为自定义地址时，安装器会跳过 GHCR 预检。
 
 ### 防火墙策略（默认不自动开面板端口）
 
@@ -177,7 +196,7 @@ GSH_STEAMCMD_DOWNLOAD_REGION=cn
 GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8
 ```
 
-默认拉取 GHCR 的 `gameserverhub/steamcmd-base`。如网络环境需要，可自行配置 SteamCMD 镜像候选 registry（按顺序优先，最后回退 GHCR）：
+默认拉取 GHCR 的 `gameserverhub/steamcmd-base`。如网络环境需要，可自行配置 SteamCMD 镜像候选 registry（按顺序优先，最后尝试 `GSH_STEAMCMD_IMAGE` 的完整引用）：
 
 ```bash
 GSH_STEAMCMD_IMAGE_MIRRORS=your-mirror-1.example.com,your-mirror-2.example.com

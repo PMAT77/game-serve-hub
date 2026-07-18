@@ -1,11 +1,10 @@
 /**
  * 开发 Compose 启动器：SteamCMD 前置拉取 → compose up → 就绪后打印可配置横幅
  */
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execFileSync } from 'node:child_process'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const panelEnvPath = path.join(repoRoot, 'panel.env')
@@ -46,6 +45,9 @@ import { createDevComposeLogFilter, filterDevComposeLogLine } from './dev-compos
 const verboseComposeLogs = process.env.GSH_DEV_COMPOSE_VERBOSE === '1'
 const READY_TIMEOUT_MS = 180_000
 const POLL_INTERVAL_MS = 2_000
+const IMAGE_PULL_ATTEMPTS = 3
+const IMAGE_PULL_RETRY_DELAY_MS = 3_000
+const DEV_BASE_IMAGES = ['node:22-bookworm-slim']
 
 interface BannerConfig {
   panelUrlTemplate?: string
@@ -56,10 +58,12 @@ interface BannerConfig {
 
 function runPrepare() {
   try {
-    const output = execFileSync('pnpm', ['run', 'dev:compose:prepare'], {
+    const output = execFileSync(process.execPath, [
+      path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      path.join(repoRoot, 'server', 'scripts', 'ensure-steamcmd-image.ts'),
+    ], {
       cwd: repoRoot,
       encoding: 'utf8',
-      shell: process.platform === 'win32',
     })
     if (verboseComposeLogs) {
       process.stdout.write(output)
@@ -75,6 +79,49 @@ function runPrepare() {
   catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.warn(`[dev:compose] SteamCMD 镜像准备未完成，将继续启动 compose：${message}`)
+  }
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function isRetryableRegistryError(message: string): boolean {
+  return /tls: bad record MAC|unexpected EOF|connection reset|i\/o timeout|temporary failure/i.test(message)
+}
+
+function commandErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const result = error as { message?: unknown, stderr?: unknown, stdout?: unknown }
+    return [result.message, result.stderr, result.stdout]
+      .map(value => Buffer.isBuffer(value) ? value.toString('utf8') : String(value ?? ''))
+      .filter(Boolean)
+      .join('\n')
+  }
+  return String(error)
+}
+
+async function ensureDevBaseImages() {
+  for (const image of DEV_BASE_IMAGES) {
+    for (let attempt = 1; attempt <= IMAGE_PULL_ATTEMPTS; attempt++) {
+      try {
+        console.log(`[dev:compose] 准备开发基础镜像 (${attempt}/${IMAGE_PULL_ATTEMPTS}): ${image}`)
+        execFileSync('docker', ['pull', image], {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'inherit', 'pipe'],
+        })
+        break
+      }
+      catch (error) {
+        const message = commandErrorMessage(error)
+        if (attempt === IMAGE_PULL_ATTEMPTS || !isRetryableRegistryError(message)) {
+          throw new Error(`无法拉取开发基础镜像 ${image}。请检查 Docker 网络或代理后重试；也可先手动执行 docker pull ${image}。\n${message.trim()}`)
+        }
+        console.warn(`[dev:compose] 镜像拉取发生临时网络错误，${IMAGE_PULL_RETRY_DELAY_MS / 1000}s 后重试…`)
+        await wait(IMAGE_PULL_RETRY_DELAY_MS)
+      }
+    }
   }
 }
 
@@ -194,7 +241,7 @@ async function tryPrintReadyBanner(): Promise<boolean> {
   return bannerPrinted
 }
 
-function startCompose(): Promise<number> {
+function startComposeOnce(): Promise<{ code: number, output: string }> {
   return new Promise((resolve, reject) => {
     const isWin = process.platform === 'win32'
     const composeArgs = [
@@ -212,15 +259,22 @@ function startCompose(): Promise<number> {
       {
         cwd: repoRoot,
         stdio: verboseComposeLogs ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-        shell: isWin,
+        shell: false,
       },
     )
+    let output = ''
     if (!verboseComposeLogs && child.stdout && child.stderr) {
       const emit = (line: string) => console.log(line)
       const filterStdout = createDevComposeLogFilter(emit)
       const filterStderr = createDevComposeLogFilter(emit)
-      child.stdout.on('data', filterStdout)
-      child.stderr.on('data', filterStderr)
+      child.stdout.on('data', (chunk) => {
+        output += chunk.toString()
+        filterStdout(chunk)
+      })
+      child.stderr.on('data', (chunk) => {
+        output += chunk.toString()
+        filterStderr(chunk)
+      })
     }
     const pollTimer = setInterval(() => {
       void tryPrintReadyBanner().then((printed) => {
@@ -236,13 +290,26 @@ function startCompose(): Promise<number> {
     })
     child.on('close', (code) => {
       clearInterval(pollTimer)
-      resolve(code ?? 1)
+      resolve({ code: code ?? 1, output })
     })
   })
 }
 
+async function startCompose(): Promise<number> {
+  for (let attempt = 1; attempt <= IMAGE_PULL_ATTEMPTS; attempt++) {
+    const result = await startComposeOnce()
+    if (result.code === 0 || attempt === IMAGE_PULL_ATTEMPTS || !isRetryableRegistryError(result.output)) {
+      return result.code
+    }
+    console.warn(`[dev:compose] Compose 拉取发生临时网络错误，${IMAGE_PULL_RETRY_DELAY_MS / 1000}s 后重试 (${attempt + 1}/${IMAGE_PULL_ATTEMPTS})…`)
+    await wait(IMAGE_PULL_RETRY_DELAY_MS)
+  }
+  return 1
+}
+
 async function main() {
   runPrepare()
+  await ensureDevBaseImages()
   if (!verboseComposeLogs) {
     console.log('[dev:compose] 启动 docker compose…')
   }

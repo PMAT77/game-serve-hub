@@ -1,11 +1,12 @@
 name: Sync Images To ACR
 
 on:
-  workflow_run:
-    workflows:
-      - Docker Publish
-    types:
-      - completed
+  workflow_call:
+    inputs:
+      tags:
+        description: Comma-separated tags to sync
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tags:
@@ -19,24 +20,28 @@ permissions:
 
 jobs:
   sync-acr:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     env:
       ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
       ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
     steps:
       - name: Validate ACR credentials
+        id: config
         run: |
           if [[ -z "${ACR_REGISTRY}" ]]; then
-            echo "Missing secret ACR_REGISTRY"
-            exit 1
+            echo "ACR is not configured; skipping optional mirror sync."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           if [[ -z "${{ secrets.ACR_USERNAME }}" || -z "${{ secrets.ACR_PASSWORD }}" ]]; then
-            echo "Missing secrets ACR_USERNAME / ACR_PASSWORD"
-            exit 1
+            echo "ACR credentials are not configured; skipping optional mirror sync."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
 
       - name: Resolve tags
+        if: steps.config.outputs.enabled == 'true'
         id: tags
         run: |
           registry_raw="${ACR_REGISTRY}"
@@ -60,7 +65,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             raw="${{ github.event.inputs.tags }}"
           else
-            raw="latest,main"
+            raw="${{ inputs.tags }}"
           fi
           tags=$(echo "${raw}" | tr ',' '\n' | awk '{gsub(/^[ \t]+|[ \t]+$/, ""); if (length) print}' | paste -sd ' ' -)
           if [[ -z "${tags}" ]]; then
@@ -69,6 +74,7 @@ jobs:
           echo "values=${tags}" >> "$GITHUB_OUTPUT"
 
       - name: Login GHCR
+        if: steps.config.outputs.enabled == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -76,28 +82,50 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login ACR
+        if: steps.config.outputs.enabled == 'true'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.ACR_REGISTRY_HOST }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Sync images from GHCR to ACR
+      - name: Sync and verify images from GHCR to ACR
+        if: steps.config.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           tags="${{ steps.tags.outputs.values }}"
           namespace="${ACR_NAMESPACE_EFFECTIVE}"
           images=("game-server-hub" "game-server-hub-dst" "steamcmd-base")
+          remote_digest() {
+            docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r '.digest // empty'
+          }
           for image in "${images[@]}"; do
             for tag in ${tags}; do
               src="ghcr.io/gameserverhub/${image}:${tag}"
               dst="${ACR_REGISTRY_HOST}/${namespace}/${image}:${tag}"
               echo "Sync: ${src} -> ${dst}"
-              if docker pull "${src}"; then
-                docker tag "${src}" "${dst}"
-                docker push "${dst}"
-              else
-                echo "Skip unavailable source image: ${src}"
+              source_digest="$(remote_digest "${src}")"
+              if [[ -z "${source_digest}" ]]; then
+                echo "Unable to resolve source digest for ${src}" >&2
+                exit 1
               fi
+              destination_digest=""
+              if destination_digest="$(remote_digest "${dst}" 2>/dev/null)"; then
+                if [[ "${destination_digest}" == "${source_digest}" ]]; then
+                  echo "Already synchronized: ${dst}@${destination_digest}"
+                  continue
+                fi
+                if [[ "${tag}" != "latest" && "${tag}" != "main" ]]; then
+                  echo "Refusing to overwrite immutable release tag ${dst}: ${destination_digest} != ${source_digest}" >&2
+                  exit 1
+                fi
+              fi
+              docker buildx imagetools create --prefer-index=false --tag "${dst}" "${src}"
+              verified_digest="$(remote_digest "${dst}")"
+              if [[ "${verified_digest}" != "${source_digest}" ]]; then
+                echo "Digest verification failed for ${dst}: expected ${source_digest}, got ${verified_digest}" >&2
+                exit 1
+              fi
+              echo "Verified: ${dst}@${verified_digest}"
             done
           done

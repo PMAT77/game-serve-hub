@@ -6,6 +6,19 @@
 
 （暂无）
 
+## [0.1.4] - 2026-07-26
+
+### Changed
+
+- Linux 一键安装默认预拉 SteamCMD 镜像；首次打开面板即可创建实例，仍可通过 `INSTALL_STEAMCMD_IMAGE=0` 跳过预拉。
+- 实例创建流程不再要求管理员先到镜像管理页手动拉取 SteamCMD；后端统一确保容器运行时就绪。
+- CI 在 PR 与 `main` 推送时仅执行轻量质量检查；生产构建、GHCR 镜像发布与 GitHub Release 仅在 `v*` Release tag 时执行。
+- Release 成功后自动清理本次 candidate 镜像，避免 GHCR 存储累积。
+
+### Security
+
+- 所有 GitHub Actions 均固定到完整 commit SHA，并保留来源版本注释，避免可变 Action tag 改写发布行为。
+
 ## [0.1.3] - 2026-07-18
 
 ### Changed
@@ -76,7 +89,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.0...v0.1.1

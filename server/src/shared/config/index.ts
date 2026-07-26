@@ -132,10 +132,10 @@ export function loadServerConfig(): ServerConfig {
       : 'unix:///var/run/docker.sock'),
     instancesRoot: path.resolve(parsed.GSH_INSTANCES_ROOT || defaultInstancesRoot),
     backupsRoot: path.resolve(parsed.GSH_BACKUPS_ROOT || defaultBackupsRoot),
-    gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/gameserverhub/game-server-hub-dst:v0.1.3',
-    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'ghcr.io/gameserverhub/steamcmd-base:v0.1.3',
+    gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/gameserverhub/game-server-hub-dst:v0.1.4',
+    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'ghcr.io/gameserverhub/steamcmd-base:v0.1.4',
     edition: parsed.GSH_EDITION || 'community',
-    panelImage: parsed.PANEL_IMAGE || 'ghcr.io/gameserverhub/game-server-hub:v0.1.3',
+    panelImage: parsed.PANEL_IMAGE || 'ghcr.io/gameserverhub/game-server-hub:v0.1.4',
     stackDir: parsed.GSH_STACK_DIR?.trim() || '',
     composeFiles: (parsed.GSH_COMPOSE_FILES?.trim() || 'docker-compose.yml:docker-compose.bind.yml')
       .split(':')

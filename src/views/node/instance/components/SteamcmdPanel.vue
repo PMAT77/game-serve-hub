@@ -8,11 +8,10 @@ defineOptions({
 })
 
 const emit = defineEmits<{
-  stateChange: [payload: { installed: boolean, configured: boolean }]
+  stateChange: [payload: { installed: boolean }]
 }>()
 
 const steamcmdInstalling = ref(false)
-const steamcmdConfigured = ref(false)
 const steamcmdInstalled = ref(false)
 const gameDstInstalled = ref(false)
 const isDockerAvailable = ref(false)
@@ -23,7 +22,6 @@ const installRoot = ref('')
 function emitStateChange() {
   emit('stateChange', {
     installed: steamcmdInstalled.value,
-    configured: steamcmdConfigured.value,
   })
 }
 
@@ -35,7 +33,6 @@ async function fetchSteamcmdConfig() {
   isDockerAvailable.value = Boolean(res.data.isDockerAvailable)
   steamcmdInstalled.value = Boolean(res.data.isSteamcmdInstalled)
   gameDstInstalled.value = Boolean(res.data.isGameDstImageInstalled)
-  steamcmdConfigured.value = steamcmdInstalled.value && Boolean(installRoot.value)
   emitStateChange()
 }
 
@@ -71,7 +68,7 @@ onMounted(() => {
 <template>
   <FaPageMain title="容器镜像">
     <p class="mb-4 text-sm text-muted-foreground">
-      管理游戏安装与运行所需的 Docker 镜像。创建实例前需先拉取游戏安装镜像。
+      管理游戏安装与运行所需的 Docker 镜像。首次创建实例会自动准备游戏安装镜像；也可在此提前拉取以缩短等待时间。
     </p>
     <div class="p-4 border border-border/70 rounded-lg bg-muted/20 space-y-4">
       <div class="flex flex-wrap gap-3 items-start justify-between">
@@ -94,7 +91,7 @@ onMounted(() => {
             :disabled="!isDockerAvailable"
             @click="ensureSteamcmdImage"
           >
-            拉取游戏安装镜像
+            预拉游戏安装镜像
           </NButton>
           <NButton
             v-if="!gameDstInstalled"
@@ -146,7 +143,7 @@ onMounted(() => {
         v-if="!steamcmdInstalled && isDockerAvailable"
         class="text-xs text-amber-600 dark:text-amber-400"
       >
-        创建实例前请确保游戏安装镜像已就绪。
+        首次创建实例时会自动拉取游戏安装镜像；提前拉取可减少创建等待时间。
       </p>
       <p
         v-if="!isDockerAvailable"

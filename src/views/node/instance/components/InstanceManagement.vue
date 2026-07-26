@@ -64,10 +64,9 @@ const props = defineProps<Props>()
 interface Props {
   nodes: NodeListItem[]
   steamcmdInstalled: boolean
-  steamcmdConfigured: boolean
 }
 
-const { nodes, steamcmdInstalled, steamcmdConfigured } = toRefs(props)
+const { nodes, steamcmdInstalled } = toRefs(props)
 
 const dialog = useDialog()
 const notification = useNotification()
@@ -1066,14 +1065,6 @@ async function refreshInstancesAndResetKeyword() {
 }
 
 async function createInstance() {
-  if (!steamcmdInstalled.value) {
-    faToast.error('请先拉取游戏安装镜像，再创建实例')
-    return
-  }
-  if (!steamcmdConfigured.value) {
-    faToast.error('容器运行时未就绪，请检查 Docker 与实例数据目录配置')
-    return
-  }
   try {
     await createFormRef.value?.validate()
   }

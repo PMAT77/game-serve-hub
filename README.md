@@ -8,7 +8,7 @@
 开源 **Steam 专用服务器** 运维面板，把部署、运行和日常管理收进同一套界面。  
 v1 先从 **饥荒联机版（Don't Starve Together）** 做起，支持一键开服。
 
-> **当前候选版本：v0.1.3（Pre-1.0）** — `v0.1.1` / `v0.1.2` 发布不完整，不应安装；请以 GitHub Releases 中包含三镜像 digest 清单的版本为准。
+> **当前候选版本：v0.1.4（Pre-1.0）** — `v0.1.1` / `v0.1.2` 发布不完整，不应安装；请以 GitHub Releases 中包含三镜像 digest 清单的版本为准。
 
 ## 界面预览
 
@@ -50,7 +50,7 @@ flowchart TB
 在 Ubuntu 22.04+ / Debian 12+ 上（需 root 或 sudo）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/v0.1.3/scripts/install.linux.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/v0.1.4/scripts/install.linux.sh | sudo bash
 ```
 
 完整步骤、环境要求、升级与故障排查见 **[安装与运维指南](docs/INSTALL.md)**。
@@ -127,7 +127,7 @@ v1 仍在补齐以下能力，将按规划陆续发布：
 
 ## 参与贡献
 
-欢迎 [Issue](https://github.com/GameServerHub/game-server-hub/issues) 与 [Pull Request](https://github.com/GameServerHub/game-server-hub/pulls)。请阅读 **[CONTRIBUTING.md](CONTRIBUTING.md)**；PR 合并前需通过 **[CI](.github/workflows/ci.yml)**（`lint` + `test:unit` + 构建）。版本发布见 **[docs/RELEASE.md](docs/RELEASE.md)** 与 **[CHANGELOG.md](CHANGELOG.md)**。
+欢迎 [Issue](https://github.com/GameServerHub/game-server-hub/issues) 与 [Pull Request](https://github.com/GameServerHub/game-server-hub/pulls)。请阅读 **[CONTRIBUTING.md](CONTRIBUTING.md)**；PR 合并前需通过 **[CI](.github/workflows/ci.yml)**（`lint` + `test:unit` + 安装脚本 smoke test）。生产构建、镜像推送与 GitHub Release 仅在发布 `v*` tag 时执行，详见 **[docs/RELEASE.md](docs/RELEASE.md)** 与 **[CHANGELOG.md](CHANGELOG.md)**。
 
 ---
 

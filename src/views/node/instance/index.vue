@@ -11,15 +11,13 @@ defineOptions({
 
 const nodes = ref<NodeListItem[]>([])
 const steamcmdInstalled = ref(false)
-const steamcmdConfigured = ref(false)
 
 function onNodesChange(list: NodeListItem[]) {
   nodes.value = list
 }
 
-function onSteamcmdStateChange(payload: { installed: boolean, configured: boolean }) {
+function onSteamcmdStateChange(payload: { installed: boolean }) {
   steamcmdInstalled.value = payload.installed
-  steamcmdConfigured.value = payload.configured
 }
 </script>
 
@@ -30,7 +28,6 @@ function onSteamcmdStateChange(payload: { installed: boolean, configured: boolea
     <InstanceManagement
       :nodes="nodes"
       :steamcmd-installed="steamcmdInstalled"
-      :steamcmd-configured="steamcmdConfigured"
     />
   </div>
 </template>

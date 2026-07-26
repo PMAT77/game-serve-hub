@@ -15,8 +15,8 @@
 
 **单一事实来源：**
 
-1. Git tag：`v0.1.3`
-2. `package.json` → `"version": "0.1.3"`
+1. Git tag：`v0.1.4`
+2. `package.json` → `"version": "0.1.4"`
 3. `CHANGELOG.md` → 对应章节
 4. GitHub Release 说明（镜像 tag 与升级指引）
 
@@ -42,17 +42,18 @@
 
 ## 自动发布链路
 
-推送 **`v*`** tag 到 `main` 时：
+仅在推送 **`v*`** Release tag 时：
 
-1. [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) 先构建但不推送三类镜像；全部通过后才推送 candidate：
+1. [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) 先执行发布质量门禁（类型检查、版本一致性、单测、安装脚本 smoke test、生产构建），再构建并推送三类 candidate 镜像：
    - `ghcr.io/gameserverhub/game-server-hub:<tag>`
    - `ghcr.io/gameserverhub/game-server-hub-dst:<tag>`
    - `ghcr.io/gameserverhub/steamcmd-base:<tag>`
 2. 三个 candidate 均写入成功后才提升正式 tag，避免部分 Release
 3. 自动创建 GitHub Release 并附带 `release-images.json`
-4. 镜像附带 provenance、SBOM，并注入 `GSH_RELEASE_VERSION`、`GSH_BUILD_SHA`
+4. Release 创建成功后自动清理本次 candidate 镜像，避免 GHCR 存储持续累积
+5. 镜像附带 provenance、SBOM，并注入 `GSH_RELEASE_VERSION`、`GSH_BUILD_SHA`
 
-`main` 分支推送（无 tag）仅更新 `latest` 等滚动 tag，**不替代**正式版本公告。
+PR 仅执行轻量质量检查，不构建或推送容器镜像；`main` 分支推送不会产生滚动镜像 tag。安装与升级应始终使用正式版本 tag 或 `release-images.json` 中的 digest。
 
 ---
 
@@ -64,7 +65,7 @@
 |----|------|
 | Require a pull request before merging | ✅ |
 | Require status checks to pass | ✅ |
-| 必选检查项 | `Quality Gate` 与三个 `Validate image (...)`（来自 CI 和 Container Pipeline） |
+| 必选检查项 | `Quality Gate`（PR 质量门禁） |
 | Require branches to be up to date | ✅（可选，减少落后 main 的绿 CI） |
 
 配置后，外部贡献者的 PR 必须在 CI 通过后才能合并，与 [CONTRIBUTING.md](../CONTRIBUTING.md) 中的本地检查一致。

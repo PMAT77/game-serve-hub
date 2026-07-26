@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.3}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
+GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.4}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
 INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@${GSH_RELEASE_TAG},https://ghproxy.com/https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG},https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG}}" # 安装资源镜像池（按顺序回退）。
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
@@ -38,7 +38,7 @@ DST_MASTER_PORT="${DST_MASTER_PORT:-12346}"
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
 PANEL_PORT="${PANEL_PORT:-9527}" # 面板对外暴露端口（默认使用高位端口以降低备案拦截影响）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
-INSTALL_STEAMCMD_IMAGE="${INSTALL_STEAMCMD_IMAGE:-0}" # 安装阶段是否预拉 SteamCMD 镜像（1=拉取，0=仅写入 panel.env，由面板内安装）。
+INSTALL_STEAMCMD_IMAGE="${INSTALL_STEAMCMD_IMAGE:-1}" # 安装阶段是否预拉 SteamCMD 镜像（默认拉取，安装完成后可直接创建实例）。
 PANEL_IMAGE_OVERRIDE="${PANEL_IMAGE:-}" # 完整面板镜像引用；设置后不再拼接 tag。
 GSH_GAME_DST_IMAGE_OVERRIDE="${GSH_GAME_DST_IMAGE:-}" # 完整 DST 镜像引用；设置后不再拼接 tag。
 GSH_STEAMCMD_IMAGE_OVERRIDE="${GSH_STEAMCMD_IMAGE:-}" # 完整 SteamCMD 镜像引用；设置后不再拼接 tag。
@@ -702,7 +702,7 @@ Options:
   -h, --help         Show this help
 
 Environment (optional):
-  INSTALL_STEAMCMD_IMAGE=1      Pre-pull steamcmd-base during install (default 0; panel UI installs by default)
+  INSTALL_STEAMCMD_IMAGE=0      Skip SteamCMD pre-pull (default: pre-pull so the panel is ready to create instances)
   PANEL_IMAGE=REF               Full panel image reference (tag or digest)
   GSH_GAME_DST_IMAGE=REF        Full DST image reference (tag or digest)
   GSH_STEAMCMD_IMAGE=REF        Full SteamCMD image reference (tag or digest)

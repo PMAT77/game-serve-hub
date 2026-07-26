@@ -21,15 +21,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.33.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
           cache: pnpm
@@ -39,9 +39,6 @@ jobs:
 
       - name: Type check
         run: pnpm run lint
-
-      - name: Release consistency
-        run: pnpm run release:verify
 
       - name: Unit tests
         env:
@@ -53,11 +50,3 @@ jobs:
           bash -n scripts/install.linux.sh
           bash -n scripts/install-linux-smoke.sh
           bash scripts/install-linux-smoke.sh
-
-      - name: Prepare env for build
-        run: |
-          cp .env.production.example .env.production
-          cp server/.env.production.example server/.env.production
-
-      - name: Production build
-        run: pnpm exec vite build

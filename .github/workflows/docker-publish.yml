@@ -1,13 +1,9 @@
 name: Container Pipeline
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
-  workflow_dispatch:
 
 concurrency:
   group: container-pipeline-${{ github.ref }}
@@ -21,46 +17,56 @@ env:
   IMAGE_PREFIX: ghcr.io/gameserverhub
 
 jobs:
-  validate-images:
-    name: Validate image (${{ matrix.name }})
+  quality:
+    name: Release quality gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: panel
-            context: .
-            file: Dockerfile
-          - name: game-dst
-            context: docker/game-dst
-            file: docker/game-dst/Dockerfile
-          - name: steamcmd-base
-            context: docker/steamcmd
-            file: docker/steamcmd/Dockerfile
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build without publishing
-        uses: docker/build-push-action@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          push: false
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-          build-args: |
-            GSH_RELEASE_VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('main-{0}', github.sha) }}
-            GSH_BUILD_SHA=${{ github.sha }}
-            STEAMCMD_ARCHIVE_SHA256=${{ vars.STEAMCMD_ARCHIVE_SHA256 }}
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm run lint
+
+      - name: Release consistency
+        run: pnpm run release:verify
+
+      - name: Unit tests
+        env:
+          GSH_UNIT_TEST: '1'
+        run: pnpm test:unit
+
+      - name: Installer syntax and smoke test
+        run: |
+          bash -n scripts/install.linux.sh
+          bash -n scripts/install-linux-smoke.sh
+          bash scripts/install-linux-smoke.sh
+
+      - name: Prepare env for build
+        run: |
+          cp .env.production.example .env.production
+          cp server/.env.production.example server/.env.production
+
+      - name: Production build
+        run: pnpm exec vite build
 
   release-guard:
     name: Release guard
-    if: github.event_name != 'pull_request'
+    needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -68,12 +74,11 @@ jobs:
       packages: read
     steps:
       - name: Checkout complete history
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Verify tag, package version, changelog, and main ancestry
-        if: github.ref_type == 'tag'
         shell: bash
         run: |
           set -euo pipefail
@@ -94,19 +99,16 @@ jobs:
           fi
 
       - name: Set up Docker Buildx
-        if: github.ref_type == 'tag'
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to GHCR for manifest checks
-        if: github.ref_type == 'tag'
-        uses: docker/login-action@v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Refuse an existing or partially published release tag
-        if: github.ref_type == 'tag'
         shell: bash
         run: |
           set -euo pipefail
@@ -126,8 +128,7 @@ jobs:
 
   publish-staging:
     name: Publish candidate (${{ matrix.name }})
-    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: [validate-images, release-guard]
+    needs: release-guard
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -151,13 +152,13 @@ jobs:
             image: ghcr.io/gameserverhub/steamcmd-base
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -165,7 +166,7 @@ jobs:
 
       - name: Build and publish candidate image
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -176,7 +177,7 @@ jobs:
           provenance: mode=max
           sbom: true
           build-args: |
-            GSH_RELEASE_VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('main-{0}', github.sha) }}
+            GSH_RELEASE_VERSION=${{ github.ref_name }}
             GSH_BUILD_SHA=${{ github.sha }}
             STEAMCMD_ARCHIVE_SHA256=${{ vars.STEAMCMD_ARCHIVE_SHA256 }}
 
@@ -185,7 +186,6 @@ jobs:
 
   promote-images:
     name: Promote complete image set
-    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: publish-staging
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -194,10 +194,10 @@ jobs:
       packages: write
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -209,11 +209,7 @@ jobs:
           set -euo pipefail
           images=(game-server-hub game-server-hub-dst steamcmd-base)
           candidate_tag="candidate-${{ github.run_id }}-${{ github.run_attempt }}"
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            tags=("${{ github.ref_name }}")
-          else
-            tags=(main latest)
-          fi
+          tags=("${{ github.ref_name }}")
           remote_digest() {
             docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r '.digest // empty'
           }
@@ -227,15 +223,13 @@ jobs:
               exit 1
             fi
           done
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            for image in "${images[@]}"; do
-              target="${IMAGE_PREFIX}/${image}:${{ github.ref_name }}"
-              if existing="$(remote_digest "${target}" 2>/dev/null)" && [[ -n "${existing}" ]]; then
-                echo "Refusing to overwrite immutable release tag: ${target}@${existing}" >&2
-                exit 1
-              fi
-            done
-          fi
+          for image in "${images[@]}"; do
+            target="${IMAGE_PREFIX}/${image}:${{ github.ref_name }}"
+            if existing="$(remote_digest "${target}" 2>/dev/null)" && [[ -n "${existing}" ]]; then
+              echo "Refusing to overwrite immutable release tag: ${target}@${existing}" >&2
+              exit 1
+            fi
+          done
 
           for image in "${images[@]}"; do
             source="${IMAGE_PREFIX}/${image}:${candidate_tag}"
@@ -254,7 +248,6 @@ jobs:
 
   release:
     name: Create GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: promote-images
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -263,10 +256,10 @@ jobs:
       packages: read
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -297,7 +290,7 @@ jobs:
           printf '  ]\n}\n' >> release-images.json
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           generate_release_notes: true
           files: release-images.json
@@ -305,3 +298,31 @@ jobs:
             本 Release 的面板、DST 与 SteamCMD 镜像已作为同一完整集合发布。
 
             每个镜像的不可变 digest 见附件 `release-images.json`。安装与升级请使用版本 tag 或附件中的 digest，不要依赖 `latest`。
+
+  cleanup-candidates:
+    name: Clean up promoted candidate images
+    needs: release
+    if: ${{ always() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Delete candidate package versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_tag="candidate-${{ github.run_id }}-${{ github.run_attempt }}"
+          images=(game-server-hub game-server-hub-dst steamcmd-base)
+          for image in "${images[@]}"; do
+            version_ids="$(gh api --paginate \
+              "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${image}/versions?per_page=100" \
+              --jq ".[] | select(.metadata.container.tags | index(\"${candidate_tag}\")) | .id")"
+            for version_id in ${version_ids}; do
+              gh api --method DELETE \
+                "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${image}/versions/${version_id}"
+              echo "Deleted ${image}:${candidate_tag} (version ${version_id})"
+            done
+          done

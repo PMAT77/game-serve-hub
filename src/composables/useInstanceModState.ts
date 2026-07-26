@@ -6,7 +6,7 @@ import type {
   ModItemDto,
   ModListDto,
 } from '@/api/modules/mod'
-import { computed, ref, toValue } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, toValue } from 'vue'
 import apiMod from '@/api/modules/mod'
 
 export interface ModInstallHandlers {
@@ -20,7 +20,8 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
   const activeInstallJobs = ref<ModInstallJobDto[]>([])
   const pendingModRecords = ref<ModItemDto[]>([])
 
-  const backgroundPollers = new Set<string>()
+  const backgroundPollers = new Map<string, AbortController>()
+  const pollingGeneration = shallowRef(0)
 
   const pendingWorkshopIds = computed(() => {
     const ids = new Set(subscribingWorkshopIds.value)
@@ -73,6 +74,36 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
 
   function resolveInstanceId(): string {
     return toValue(instanceId).trim()
+  }
+
+  function getPollerKey(targetInstanceId: string, workshopId: string): string {
+    return `${targetInstanceId}:${workshopId}`
+  }
+
+  function isCurrentInstance(targetInstanceId: string, generation: number): boolean {
+    return generation === pollingGeneration.value && targetInstanceId === resolveInstanceId()
+  }
+
+  function getErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) {
+      return error.message
+    }
+    if (typeof error === 'object' && error && 'error' in error) {
+      return String((error as { error?: unknown }).error ?? '订阅失败，请稍后重试')
+    }
+    return '订阅失败，请稍后重试'
+  }
+
+  function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError'
+  }
+
+  function stopBackgroundPolling() {
+    pollingGeneration.value += 1
+    for (const controller of backgroundPollers.values()) {
+      controller.abort()
+    }
+    backgroundPollers.clear()
   }
 
   function trackDownloadingJob(job: ModInstallJobDto) {
@@ -138,14 +169,21 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
 
   function resumeBackgroundPoll(workshopId: string, handlers?: ModInstallHandlers) {
     const id = resolveInstanceId()
-    if (!id || backgroundPollers.has(workshopId)) {
+    const pollerKey = getPollerKey(id, workshopId)
+    if (!id || backgroundPollers.has(pollerKey)) {
       return
     }
-    backgroundPollers.add(workshopId)
+    const controller = new AbortController()
+    const generation = pollingGeneration.value
+    backgroundPollers.set(pollerKey, controller)
     void (async () => {
       try {
         const job = await apiMod.pollModInstallJob(id, workshopId, {
+          signal: controller.signal,
           onUpdate: (current) => {
+            if (!isCurrentInstance(id, generation)) {
+              return
+            }
             if (current.status === 'downloading') {
               trackDownloadingJob(current)
             }
@@ -155,11 +193,32 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
             handlers?.onUpdate?.(current)
           },
         })
+        if (!isCurrentInstance(id, generation)) {
+          return
+        }
+        finalizeJobState(job)
+        handlers?.onTerminal?.(job)
+      }
+      catch (error) {
+        if (!isCurrentInstance(id, generation) || isAbortError(error)) {
+          return
+        }
+        const job: ModInstallJobDto = {
+          instanceId: id,
+          workshopId,
+          status: 'failed',
+          phase: null,
+          error: getErrorMessage(error),
+          startedAt: null,
+          finishedAt: new Date().toISOString(),
+        }
         finalizeJobState(job)
         handlers?.onTerminal?.(job)
       }
       finally {
-        backgroundPollers.delete(workshopId)
+        if (backgroundPollers.get(pollerKey) === controller) {
+          backgroundPollers.delete(pollerKey)
+        }
       }
     })()
   }
@@ -168,6 +227,7 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
     modList?: ModListDto
   }) {
     const id = resolveInstanceId()
+    const generation = pollingGeneration.value
     if (!id) {
       subscribingWorkshopIds.value = new Set()
       subscribingPhases.value = new Map()
@@ -185,11 +245,15 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
       ])
       jobs = jobsResponse.data
       mods = listResponse.data.mods
-      activeInstallJobs.value = jobs
+      if (!isCurrentInstance(id, generation)) {
+        return
+      }
     }
-    else {
-      activeInstallJobs.value = jobs
+    if (!isCurrentInstance(id, generation)) {
+      return
     }
+
+    activeInstallJobs.value = jobs
 
     pendingModRecords.value = mods.filter(mod => mod.installStatus === 'pending' || mod.installStatus === 'failed')
 
@@ -201,7 +265,7 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
     }
 
     for (const mod of pendingModRecords.value) {
-      if (mod.installStatus === 'pending' && !backgroundPollers.has(mod.workshopId)) {
+      if (mod.installStatus === 'pending' && !backgroundPollers.has(getPollerKey(id, mod.workshopId))) {
         subscribingWorkshopIds.value = new Set([...subscribingWorkshopIds.value, mod.workshopId])
         if (!jobs.some(job => job.workshopId === mod.workshopId && job.status === 'downloading')) {
           resumeBackgroundPoll(mod.workshopId, handlers)
@@ -212,6 +276,7 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
 
   async function installMod(payload: ModInstallPayload, handlers?: ModInstallHandlers) {
     const id = resolveInstanceId()
+    const generation = pollingGeneration.value
     if (!id) {
       throw new Error('实例 ID 不能为空')
     }
@@ -224,15 +289,36 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
       startedAt: new Date().toISOString(),
       finishedAt: null,
     })
-    const { data: initialJob } = await apiMod.installMod(id, payload)
-    if (initialJob.status === 'downloading') {
+    try {
+      const { data: initialJob } = await apiMod.installMod(id, payload)
+      if (!isCurrentInstance(id, generation)) {
+        return initialJob
+      }
+      if (initialJob.status === 'downloading') {
+        finalizeJobState(initialJob)
+        resumeBackgroundPoll(payload.workshopId, handlers)
+        return initialJob
+      }
       finalizeJobState(initialJob)
-      resumeBackgroundPoll(payload.workshopId, handlers)
+      handlers?.onTerminal?.(initialJob)
       return initialJob
     }
-    finalizeJobState(initialJob)
-    handlers?.onTerminal?.(initialJob)
-    return initialJob
+    catch (error) {
+      if (isCurrentInstance(id, generation)) {
+        const failedJob: ModInstallJobDto = {
+          instanceId: id,
+          workshopId: payload.workshopId,
+          status: 'failed',
+          phase: null,
+          error: getErrorMessage(error),
+          startedAt: null,
+          finishedAt: new Date().toISOString(),
+        }
+        finalizeJobState(failedJob)
+        handlers?.onTerminal?.(failedJob)
+      }
+      throw error
+    }
   }
 
   function syncPendingWorkshopIds(ids: string[], handlers?: ModInstallHandlers) {
@@ -243,12 +329,14 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
   }
 
   function resetState() {
+    stopBackgroundPolling()
     subscribingWorkshopIds.value = new Set()
     subscribingPhases.value = new Map()
     activeInstallJobs.value = []
     pendingModRecords.value = []
-    backgroundPollers.clear()
   }
+
+  onScopeDispose(stopBackgroundPolling)
 
   return {
     subscribingWorkshopIds,
@@ -264,5 +352,6 @@ export function useInstanceModState(instanceId: MaybeRefOrGetter<string>) {
     resumeBackgroundPoll,
     syncPendingWorkshopIds,
     resetState,
+    stopBackgroundPolling,
   }
 }

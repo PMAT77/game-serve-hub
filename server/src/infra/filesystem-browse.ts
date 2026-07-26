@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import type { DirectoryItem } from '../../../shared/contracts/system'
 
 const LINUX_ALLOWED_BROWSE_ROOTS = ['/opt', '/srv', '/var/lib']
 const FILESYSTEM_SEARCH_MAX_RESULTS = 120
@@ -8,11 +9,7 @@ const FILESYSTEM_SEARCH_MAX_DIRECTORIES = 1_000
 const FILESYSTEM_SEARCH_MAX_DEPTH = 6
 const FILESYSTEM_SEARCH_MAX_DURATION_MS = 100_000
 
-export interface DirectoryItem {
-  name: string
-  path: string
-  type: 'directory' | 'file'
-}
+export type { DirectoryItem } from '../../../shared/contracts/system'
 
 function isReadableDirectory(targetPath: string): boolean {
   try {

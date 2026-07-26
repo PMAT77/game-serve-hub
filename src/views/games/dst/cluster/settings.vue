@@ -25,7 +25,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
-import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, reactive, ref, shallowRef, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
 import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
 import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
@@ -53,8 +53,11 @@ const cavesMemoryAlert = computed(() => {
 
 const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
-const saving = ref(false)
-const savingAndRestart = ref(false)
+const loadError = shallowRef<string | null>(null)
+const activeSaveOperation = shallowRef<'save' | 'restart' | null>(null)
+const isSaving = computed(() => activeSaveOperation.value !== null)
+const saving = computed(() => activeSaveOperation.value === 'save')
+const savingAndRestart = computed(() => activeSaveOperation.value === 'restart')
 const formRef = ref<FormInst | null>(null)
 const serverConfig = ref<ClusterConfigDto | null>(null)
 
@@ -232,15 +235,19 @@ function applyConfig(config: ClusterConfigDto) {
 
 async function loadConfig() {
   if (!instanceId.value) {
+    serverConfig.value = null
+    loadError.value = '缺少实例标识，无法读取房间配置。'
     return
   }
   loading.value = true
+  loadError.value = null
   try {
     const response = await apiCluster.getClusterConfig(instanceId.value)
     applyConfig(response.data)
   }
   catch {
-    message.error('加载房间配置失败，请确认实例已安装且后端服务正常')
+    serverConfig.value = null
+    loadError.value = '加载房间配置失败，请确认实例已安装且后端服务正常。'
   }
   finally {
     loading.value = false
@@ -279,9 +286,17 @@ function buildSavePayload(restart = false): ClusterSavePayload {
 }
 
 async function saveConfig(restart = false) {
-  await formRef.value?.validate()
-  const savingFlag = restart ? savingAndRestart : saving
-  savingFlag.value = true
+  if (!serverConfig.value || loading.value || isSaving.value) {
+    return
+  }
+  try {
+    await formRef.value?.validate()
+  }
+  catch {
+    return
+  }
+  const operation = restart ? 'restart' : 'save'
+  activeSaveOperation.value = operation
   try {
     await apiCluster.saveClusterConfig(buildSavePayload(restart))
     message.success(restart ? '房间配置已保存并触发重启' : '房间配置已保存')
@@ -289,7 +304,9 @@ async function saveConfig(restart = false) {
     await loadConfig()
   }
   finally {
-    savingFlag.value = false
+    if (activeSaveOperation.value === operation) {
+      activeSaveOperation.value = null
+    }
   }
 }
 
@@ -347,6 +364,14 @@ onActivated(() => {
 
     <div v-if="loading && !serverConfig" class="space-y-3" aria-busy="true">
       <NSkeleton v-for="i in 8" :key="i" text />
+    </div>
+    <div v-else-if="loadError || !serverConfig" class="space-y-4" role="alert">
+      <NAlert type="error" title="无法加载房间配置">
+        {{ loadError ?? '当前配置不可用，请重新加载后再编辑。' }}
+      </NAlert>
+      <NButton :loading="loading" @click="loadConfig">
+        重试加载
+      </NButton>
     </div>
     <div v-else class="space-y-4">
       <AdminSettingsSection
@@ -602,14 +627,14 @@ onActivated(() => {
         </NForm>
 
         <div class="flex flex-wrap items-center justify-center gap-3">
-          <NButton type="primary" :loading="saving" @click="saveConfig(false)">
+          <NButton type="primary" :loading="saving" :disabled="isSaving" @click="saveConfig(false)">
             保存配置
           </NButton>
           <NTooltip :disabled="!saveAndRestartDisabled">
             <template #trigger>
               <NButton
                 :loading="savingAndRestart"
-                :disabled="saveAndRestartDisabled"
+                :disabled="saveAndRestartDisabled || isSaving"
                 @click="confirmSaveAndRestart"
               >
                 保存并重启

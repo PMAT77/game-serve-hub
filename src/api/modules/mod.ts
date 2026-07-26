@@ -39,8 +39,32 @@ export type {
 
 const MOD_INSTALL_JOB_POLL_INTERVAL_MS = 2000
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+function createAbortError(): Error {
+  const error = new Error('Mod 安装任务轮询已取消')
+  error.name = 'AbortError'
+  return error
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw createAbortError()
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    throwIfAborted(signal)
+    const timer = globalThis.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      globalThis.clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(createAbortError())
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function isModInstallJobTerminal(status: ModInstallJobDto['status']): boolean {
@@ -89,16 +113,20 @@ export default {
     options?: {
       intervalMs?: number
       onUpdate?: (job: ModInstallJobDto) => void
+      signal?: AbortSignal
     },
   ): Promise<ModInstallJobDto> => {
     const intervalMs = options?.intervalMs ?? MOD_INSTALL_JOB_POLL_INTERVAL_MS
     while (true) {
-      const { data } = await api.get(`app/instances/${instanceId}/mods/install-jobs/${workshopId}`) as { data: ModInstallJobDto }
+      throwIfAborted(options?.signal)
+      const { data } = await api.get(`app/instances/${instanceId}/mods/install-jobs/${workshopId}`, {
+        signal: options?.signal,
+      }) as { data: ModInstallJobDto }
       options?.onUpdate?.(data)
       if (isModInstallJobTerminal(data.status)) {
         return data
       }
-      await sleep(intervalMs)
+      await sleep(intervalMs, options?.signal)
     }
   },
   updateMod: (instanceId: string, modId: string, payload: ModUpdatePayload) =>

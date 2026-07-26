@@ -1,16 +1,13 @@
 <script setup lang="ts">
 import type { DataTableColumns } from 'naive-ui'
 import type { ClusterNetworkMode } from '@/api/modules/cluster'
-import type { InstanceItem } from '@/api/modules/instance'
+import type { DstInstanceSummaryDto } from '@/api/modules/dst-summary'
 import { NButton, NDataTable, NTag, NTooltip } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
 import AdminListToolbar from '@/components/AdminListToolbar.vue'
 import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
-import apiCluster from '@/api/modules/cluster'
-import apiShard from '@/api/modules/shard'
-import apiInstance from '@/api/modules/instance'
+import apiDstSummary from '@/api/modules/dst-summary'
 import { useAdminPageState } from '@/composables/useAdminPageState'
-import { isInstallableGameInstance } from '@/composables/useGameInstance'
 import { routeToDstRoomSettings, routeToNodeInstance } from '@/navigation/game-routes'
 import { getStatusBadgeClass, getStatusLabel } from '@/views/node/instance/instanceDisplay'
 
@@ -18,20 +15,11 @@ defineOptions({
   name: 'DstRoomList',
 })
 
-interface ClusterListRow {
-  instance: InstanceItem
-  networkMode: ClusterNetworkMode | null
-  clusterName: string | null
-  shardEnabled: boolean | null
-  cavesSummary: string | null
-  onlinePlayerCount: number | null
-  maxPlayers: number | null
-  loadError: string | null
-}
-
 const router = useRouter()
-const rows = ref<ClusterListRow[]>([])
+const appSettingsStore = useAppSettingsStore()
+const rows = ref<DstInstanceSummaryDto[]>([])
 const keywordFilter = ref('')
+const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
 
 const {
   loading,
@@ -58,7 +46,7 @@ const filteredRows = computed(() => {
   return rows.value.filter((row) => {
     const haystack = [
       row.instance.name,
-      row.clusterName ?? '',
+      row.room.clusterName ?? '',
       row.instance.gameCode ?? '',
     ].join(' ').toLowerCase()
     return haystack.includes(keyword)
@@ -68,7 +56,7 @@ const filteredRows = computed(() => {
 const hasFilteredRows = computed(() => filteredRows.value.length > 0)
 const showFilteredEmpty = computed(() => initialLoadDone.value && !loading.value && rows.value.length > 0 && !hasFilteredRows.value)
 
-const columns: DataTableColumns<ClusterListRow> = [
+const columns: DataTableColumns<DstInstanceSummaryDto> = [
   {
     title: '实例名称',
     key: 'instanceName',
@@ -77,7 +65,7 @@ const columns: DataTableColumns<ClusterListRow> = [
   {
     title: '房间名称',
     key: 'clusterName',
-    render: row => row.clusterName ?? '—',
+    render: row => row.room.clusterName ?? '—',
   },
   {
     title: '运行状态',
@@ -102,16 +90,16 @@ const columns: DataTableColumns<ClusterListRow> = [
     title: '联网模式',
     key: 'networkMode',
     render: (row) => {
-      if (row.networkMode) {
-        return networkModeLabel[row.networkMode]
+      if (row.room.networkMode) {
+        return networkModeLabel[row.room.networkMode]
       }
-      if (row.loadError) {
+      if (row.room.error) {
         return h(
           NTooltip,
           { trigger: 'hover' },
           {
             trigger: () => h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '异常' }),
-            default: () => row.loadError,
+            default: () => row.room.error,
           },
         )
       }
@@ -121,7 +109,7 @@ const columns: DataTableColumns<ClusterListRow> = [
   {
     title: '洞穴',
     key: 'caves',
-    render: row => row.cavesSummary ?? '—',
+    render: row => buildCavesSummary(row.room.shardEnabled, row.world.caves?.configured),
   },
   {
     title: '操作',
@@ -150,93 +138,30 @@ function goToInstanceManagement() {
   router.push(routeToNodeInstance())
 }
 
-function buildCavesSummary(shardEnabled: boolean, cavesConfigured: boolean): string {
+function buildCavesSummary(shardEnabled: boolean | null, cavesConfigured: boolean | undefined): string {
+  if (shardEnabled === null) {
+    return '—'
+  }
   if (!shardEnabled) {
     return cavesConfigured ? '未启用' : '未开启'
   }
   return cavesConfigured ? '已开启' : '待修复'
 }
 
-function formatOnlinePlayers(row: ClusterListRow): string {
+function formatOnlinePlayers(row: DstInstanceSummaryDto): string {
   if (row.instance.status !== 'running') {
     return '—'
   }
-  if (row.onlinePlayerCount === null || row.maxPlayers === null) {
+  if (row.room.onlinePlayerCount === null || row.room.maxPlayers === null) {
     return '—'
   }
-  return `${row.onlinePlayerCount} / ${row.maxPlayers}`
-}
-
-async function loadOnlinePlayers(instance: InstanceItem): Promise<Pick<ClusterListRow, 'onlinePlayerCount' | 'maxPlayers'>> {
-  if (instance.status !== 'running') {
-    return { onlinePlayerCount: null, maxPlayers: null }
-  }
-  try {
-    const response = await apiCluster.getOnlinePlayers(instance.id)
-    const data = response.data
-    return {
-      onlinePlayerCount: data.onlinePlayerCount,
-      maxPlayers: data.maxPlayers,
-    }
-  }
-  catch {
-    return { onlinePlayerCount: null, maxPlayers: null }
-  }
-}
-
-async function loadClusterSummary(instance: InstanceItem): Promise<ClusterListRow> {
-  if (instance.status === 'pending_install' || !instance.installPath) {
-    return {
-      instance,
-      networkMode: null,
-      clusterName: null,
-      shardEnabled: null,
-      cavesSummary: null,
-      onlinePlayerCount: null,
-      maxPlayers: null,
-      loadError: instance.status === 'pending_install' ? '尚未安装' : null,
-    }
-  }
-  try {
-    const [clusterRes, shardRes, onlineRes] = await Promise.all([
-      apiCluster.getClusterConfig(instance.id),
-      apiShard.getShardList(instance.id),
-      loadOnlinePlayers(instance),
-    ])
-    const config = clusterRes.data
-    const caves = shardRes.data.shards.find(s => s.id === 'caves')
-    const cavesConfigured = Boolean(caves?.configured)
-    return {
-      instance,
-      networkMode: config.networkMode,
-      clusterName: config.clusterName,
-      shardEnabled: config.shardEnabled,
-      cavesSummary: buildCavesSummary(config.shardEnabled, cavesConfigured),
-      onlinePlayerCount: onlineRes.onlinePlayerCount,
-      maxPlayers: onlineRes.maxPlayers ?? config.maxPlayers,
-      loadError: null,
-    }
-  }
-  catch {
-    return {
-      instance,
-      networkMode: null,
-      clusterName: null,
-      shardEnabled: null,
-      cavesSummary: null,
-      onlinePlayerCount: null,
-      maxPlayers: null,
-      loadError: '读取失败',
-    }
-  }
+  return `${row.room.onlinePlayerCount} / ${row.room.maxPlayers}`
 }
 
 async function loadRows() {
   await runLoad(async () => {
-    const response = await apiInstance.getInstanceList()
-    const instances = (response.data ?? []) as InstanceItem[]
-    const dstInstances = instances.filter(isInstallableGameInstance)
-    rows.value = await Promise.all(dstInstances.map(loadClusterSummary))
+    const response = await apiDstSummary.getDstInstanceSummaries()
+    rows.value = response.data.items
   })
 }
 
@@ -289,15 +214,58 @@ onMounted(() => {
       @retry="loadRows"
       @empty-action="goToInstanceManagement"
     >
-      <NDataTable
-        v-if="hasFilteredRows"
-        :bordered="false"
-        :single-line="false"
-        :columns="columns"
-        :data="filteredRows"
-        :loading="showTableLoading"
-        :scroll-x="1000"
-      />
+      <template v-if="hasFilteredRows">
+        <NDataTable
+          v-if="!isMobileMode"
+          :bordered="false"
+          :single-line="false"
+          :columns="columns"
+          :data="filteredRows"
+          :loading="showTableLoading"
+          :scroll-x="1000"
+        />
+        <div v-else class="space-y-3" :aria-busy="showTableLoading">
+          <article
+            v-for="row in filteredRows"
+            :key="row.instance.id"
+            class="rounded-lg border border-border bg-card p-4 space-y-3"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h2 class="truncate font-medium">
+                  {{ row.instance.name }}
+                </h2>
+                <p class="mt-1 text-sm text-muted-foreground truncate">
+                  {{ row.room.clusterName || '尚未配置房间名称' }}
+                </p>
+              </div>
+              <NTag size="small" :bordered="false" :class="getStatusBadgeClass(row.instance.status)">
+                {{ getStatusLabel(row.instance.status) }}
+              </NTag>
+            </div>
+            <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <div>
+                <dt class="text-muted-foreground">联机模式</dt>
+                <dd>{{ row.room.networkMode ? networkModeLabel[row.room.networkMode] : '—' }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted-foreground">在线人数</dt>
+                <dd>{{ formatOnlinePlayers(row) }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted-foreground">洞穴</dt>
+                <dd>{{ buildCavesSummary(row.room.shardEnabled, row.world.caves?.configured) }}</dd>
+              </div>
+              <div v-if="row.room.error" class="col-span-2 text-amber-600 dark:text-amber-400">
+                {{ row.room.error }}
+              </div>
+            </dl>
+            <NButton block :disabled="row.instance.status === 'pending_install'" @click="openSettings(row.instance.id)">
+              配置房间
+            </NButton>
+          </article>
+        </div>
+      </template>
       <div
         v-else-if="showFilteredEmpty"
         class="text-muted-foreground py-12 text-center text-sm"

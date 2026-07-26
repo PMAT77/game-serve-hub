@@ -81,7 +81,7 @@ const updateCheckLoading = ref(false)
 const UPDATE_CHECK_POLL_MS = 2000
 const UPDATE_CHECK_POLL_MAX_ATTEMPTS = 45
 const createLoading = ref(false)
-const actionLoadingId = ref('')
+const actionLoadingIds = ref<Set<string>>(new Set())
 const instances = ref<InstanceItem[]>([])
 const {
   uptimeNowMs,
@@ -355,25 +355,26 @@ interface InstanceRowAction {
 function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
   const stopAction = row.status === 'installing' || row.status === 'pending_install' ? 'cancel_install' : 'stop'
   const stopLabel = stopAction === 'cancel_install' ? '取消安装' : '停止'
+  const instanceActionRunning = isInstanceActionRunning(row.id)
   return [
     {
       key: 'room',
       label: '房间设置',
-      disabled: row.status === 'pending_install' || !instanceSupportsDstRoom(row),
+      disabled: instanceActionRunning || row.status === 'pending_install' || !instanceSupportsDstRoom(row),
       title: !instanceSupportsDstRoom(row) ? '当前仅 DST 实例支持房间配置' : undefined,
       onClick: () => router.push(routeToDstRoomSettings(row.id)),
     },
     {
       key: 'console',
       label: '控制台',
-      disabled: row.status === 'pending_install' || row.status === 'installing',
+      disabled: instanceActionRunning || row.status === 'pending_install' || row.status === 'installing',
       onClick: () => router.push(routeToInstanceConsole(row.id)),
     },
     {
       key: 'update',
       label: '更新服务端',
       loading: isActionLoading(row.id, 'update'),
-      disabled: !canUpdateInstance(row),
+      disabled: instanceActionRunning || !canUpdateInstance(row),
       title: getUpdateInstanceButtonTitle(row),
       onClick: () => confirmUpdateInstance(row),
     },
@@ -381,28 +382,28 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
       key: 'start',
       label: '启动',
       loading: isActionLoading(row.id, 'start'),
-      disabled: row.status === 'running' || row.status === 'pending_install' || row.status === 'installing',
+      disabled: instanceActionRunning || row.status === 'running' || row.status === 'pending_install' || row.status === 'installing',
       onClick: () => confirmStartInstance(row),
     },
     {
       key: 'stop',
       label: stopLabel,
       loading: isActionLoading(row.id, 'stop'),
-      disabled: row.status === 'stopped' || row.status === 'error',
+      disabled: instanceActionRunning || row.status === 'stopped' || row.status === 'error',
       onClick: () => confirmDangerousInstanceAction(row, stopAction),
     },
     {
       key: 'restart',
       label: '重启',
       loading: isActionLoading(row.id, 'restart'),
-      disabled: row.status === 'pending_install' || row.status === 'installing',
+      disabled: instanceActionRunning || row.status === 'pending_install' || row.status === 'installing',
       onClick: () => confirmDangerousInstanceAction(row, 'restart'),
     },
     {
       key: 'delete',
       label: '删除',
       type: 'error',
-      disabled: row.status === 'pending_install' || row.status === 'installing',
+      disabled: instanceActionRunning || row.status === 'pending_install' || row.status === 'installing',
       onClick: () => confirmDangerousInstanceAction(row, 'delete'),
     },
   ]
@@ -457,6 +458,32 @@ function renderInstanceRowActions(row: InstanceItem) {
       ),
     },
   )
+}
+
+function mobileActionOptions(row: InstanceItem): DropdownOption[] {
+  return buildInstanceRowActions(row).map((action) => {
+    const option: DropdownOption = {
+      label: action.loading ? `${action.label}…` : action.label,
+      key: action.key,
+      disabled: Boolean(action.disabled || action.loading),
+    }
+    if (action.type === 'error') {
+      option.props = { class: 'text-red-600 dark:text-red-400' }
+    }
+    return option
+  })
+}
+
+function selectMobileAction(row: InstanceItem, key: string) {
+  const action = buildInstanceRowActions(row).find(item => item.key === key)
+  if (!action || action.disabled || action.loading) {
+    return
+  }
+  action.onClick()
+}
+
+function hasMobileActionLoading(row: InstanceItem): boolean {
+  return buildInstanceRowActions(row).some(action => action.loading)
 }
 
 /** 渲染表格操作列中的文本按钮 */
@@ -649,9 +676,7 @@ function confirmUpdateInstance(row: InstanceItem) {
     positiveButtonProps: {
       type: 'warning',
     },
-    onPositiveClick: () => {
-      void runUpdateInstance(row)
-    },
+    onPositiveClick: () => runUpdateInstance(row),
   })
 }
 
@@ -664,8 +689,12 @@ function suppressInstanceUpdateNotificationForCurrentBatch() {
 }
 
 async function runUpdateInstance(row: InstanceItem) {
+  if (isInstanceActionRunning(row.id)) {
+    return
+  }
   suppressInstanceUpdateNotificationForCurrentBatch()
-  actionLoadingId.value = `update:${row.id}`
+  const operationKey = `update:${row.id}`
+  actionLoadingIds.value = new Set([...actionLoadingIds.value, operationKey])
   try {
     await apiInstance.updateInstance(row.id, { force: row.status === 'error' || !row.localBuildId })
     faToast.success('已开始更新服务端，请查看安装日志了解进度')
@@ -680,7 +709,9 @@ async function runUpdateInstance(row: InstanceItem) {
     await fetchInstances()
   }
   finally {
-    actionLoadingId.value = ''
+    const next = new Set(actionLoadingIds.value)
+    next.delete(operationKey)
+    actionLoadingIds.value = next
   }
 }
 
@@ -722,10 +753,7 @@ function confirmDangerousInstanceAction(row: InstanceItem, action: 'stop' | 'can
       type: actionConfig.type,
     },
     onPositiveClick: () => {
-      if (action === 'delete') {
-        return runInstanceAction(row.id, action, { useTableLoading: false })
-      }
-      void runInstanceAction(row.id, action === 'cancel_install' ? 'stop' : action)
+      return runInstanceAction(row.id, action === 'cancel_install' ? 'stop' : action)
     },
   })
 }
@@ -1244,12 +1272,12 @@ async function runInstanceLifecycleWithPortHandling(
 async function runInstanceAction(
   instanceId: string,
   action: 'start' | 'stop' | 'restart' | 'delete',
-  options?: { useTableLoading?: boolean },
 ) {
-  const useTableLoading = options?.useTableLoading ?? true
-  if (useTableLoading) {
-    actionLoadingId.value = `${action}:${instanceId}`
+  if (isInstanceActionRunning(instanceId)) {
+    return
   }
+  const operationKey = `${action}:${instanceId}`
+  actionLoadingIds.value = new Set([...actionLoadingIds.value, operationKey])
   try {
     if (action === 'start') {
       await runInstanceLifecycleWithPortHandling(instanceId, 'start')
@@ -1277,15 +1305,19 @@ async function runInstanceAction(
     }
   }
   finally {
-    if (useTableLoading) {
-      actionLoadingId.value = ''
-    }
+    const next = new Set(actionLoadingIds.value)
+    next.delete(operationKey)
+    actionLoadingIds.value = next
   }
 }
 
 /** 操作按钮是否处于 loading（格式 action:instanceId） */
 function isActionLoading(instanceId: string, action: 'start' | 'stop' | 'restart' | 'delete' | 'update') {
-  return actionLoadingId.value === `${action}:${instanceId}`
+  return actionLoadingIds.value.has(`${action}:${instanceId}`)
+}
+
+function isInstanceActionRunning(instanceId: string) {
+  return [...actionLoadingIds.value].some(key => key.endsWith(`:${instanceId}`))
 }
 
 onMounted(async () => {
@@ -1392,7 +1424,81 @@ onBeforeUnmount(() => {
         </template>
       </AdminListToolbar>
 
-      <div class="min-h-80 overflow-x-auto">
+      <div v-if="isMobileMode" class="min-h-80 space-y-3" :aria-busy="instanceLoading">
+        <NEmpty v-if="!instanceLoading && instances.length === 0" description="暂无实例">
+          <template #extra>
+            <NButton type="primary" @click="openCreateModal">
+              创建实例
+            </NButton>
+          </template>
+        </NEmpty>
+        <article
+          v-for="instance in instances"
+          :key="instance.id"
+          class="rounded-lg border border-border bg-card p-4 space-y-3"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h2 class="truncate font-medium">
+                {{ instance.name }}
+              </h2>
+              <p class="mt-1 truncate text-xs text-muted-foreground">
+                {{ getNodeName(instance.nodeId) }} · {{ instance.gameCode }}
+              </p>
+            </div>
+            <NTag size="small" :bordered="false" :class="getStatusBadgeClass(instance.status)">
+              {{ getStatusLabel(instance.status) }}
+            </NTag>
+          </div>
+          <div v-if="shouldShowInstallDetail(instance)" class="space-y-1">
+            <div class="flex justify-between text-xs text-muted-foreground">
+              <span>安装进度</span>
+              <span v-if="extractInstallProgressPercent(instance) != null">{{ extractInstallProgressPercent(instance) }}%</span>
+              <span v-else>处理中</span>
+            </div>
+            <NProgress
+              v-if="extractInstallProgressPercent(instance) != null"
+              :percentage="extractInstallProgressPercent(instance) ?? 0"
+              :show-indicator="false"
+              :processing="instance.status === 'installing' || instance.status === 'pending_install'"
+              :height="8"
+            />
+          </div>
+          <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+            <div>
+              <dt class="text-muted-foreground">CPU</dt>
+              <dd>{{ getMetricsForInstance(instance.id)?.cpuPercent == null ? '—' : `${getMetricsForInstance(instance.id)?.cpuPercent.toFixed(1)}%` }}</dd>
+            </div>
+            <div>
+              <dt class="text-muted-foreground">内存</dt>
+              <dd>{{ getMetricsForInstance(instance.id)?.memoryMb == null ? '—' : formatMemoryMb(getMetricsForInstance(instance.id)?.memoryMb ?? 0) }}</dd>
+            </div>
+            <div>
+              <dt class="text-muted-foreground">运行时长</dt>
+              <dd>{{ formatUptime(computeUptimeSecondsFromStartedAt(instance.startedAt, uptimeNowMs)) }}</dd>
+            </div>
+            <div>
+              <dt class="text-muted-foreground">更新时间</dt>
+              <dd>{{ formatDateTime(instance.updatedAt) }}</dd>
+            </div>
+          </dl>
+          <div class="flex gap-2">
+            <NButton class="flex-1" :disabled="instance.status === 'pending_install' || instance.status === 'installing'" @click="router.push(routeToInstanceConsole(instance.id))">
+              控制台
+            </NButton>
+            <NDropdown
+              trigger="click"
+              :options="mobileActionOptions(instance)"
+              @select="key => selectMobileAction(instance, String(key))"
+            >
+              <NButton secondary :loading="hasMobileActionLoading(instance)">
+                更多
+              </NButton>
+            </NDropdown>
+          </div>
+        </article>
+      </div>
+      <div v-else class="min-h-80 overflow-x-auto">
         <NDataTable
           :bordered="false"
           :single-line="false"

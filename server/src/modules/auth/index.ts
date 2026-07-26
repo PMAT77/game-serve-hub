@@ -1,6 +1,21 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { timingSafeEqual } from 'node:crypto'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import {
+  loginBodySchema,
+  logoutBodySchema,
+  passwordEditBodySchema,
+  passwordRecoverBodySchema,
+  refreshTokenBodySchema,
+} from '../../../../shared/contracts/auth'
+import type {
+  LoginResponse,
+  PasswordEditResponse,
+  PasswordRecoveryStatusResponse,
+  PermissionResponse,
+  RefreshTokenResponse,
+  SuccessResponse,
+} from '../../../../shared/contracts/auth'
 import { ErrorCode } from '../../../../shared/constants/error-code'
 import { loadServerConfig } from '../../shared/config'
 import { createSessionTokens, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, rotateSessionByRefreshToken, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
@@ -17,33 +32,6 @@ import {
   shouldRequireCaptcha,
   verifyCaptchaChallenge,
 } from './login-guard'
-
-interface LoginBody {
-  account: string
-  password: string
-  remember?: boolean
-  challengeToken?: string
-  challengeAnswer?: string
-}
-
-interface RefreshTokenBody {
-  refreshToken: string
-}
-
-interface PasswordEditBody {
-  password: string
-  newPassword: string
-}
-
-interface LogoutBody {
-  refreshToken?: string
-}
-
-interface PasswordRecoverBody {
-  account: string
-  recoveryToken: string
-  newPassword: string
-}
 
 interface PasswordChangeRateState {
   count: number
@@ -198,18 +186,14 @@ export function registerAuthModule(app: FastifyInstance) {
     return success(menuRouteList, request)
   })
 
-  app.post('/app/account/login', async (request): Promise<ApiSuccessResponse<{
-    account: string
-    token: string
-    refreshToken: string
-    avatar: string
-    email: string
-    accessExpiresInSec: number
-    refreshExpiresInSec: number
-  }> | ApiErrorResponse> => {
-    const body = (request.body ?? {}) as Partial<LoginBody>
-    const account = body.account?.trim() ?? ''
-    const password = body.password ?? ''
+  app.post('/app/account/login', async (request): Promise<ApiSuccessResponse<LoginResponse> | ApiErrorResponse> => {
+    const parsed = loginBodySchema.safeParse(request.body ?? {})
+    if (!parsed.success) {
+      return businessError('请求参数无效', request)
+    }
+    const body = parsed.data
+    const account = body.account
+    const password = body.password
     if (!account || !password) {
       return businessError('账号和密码不能为空', request)
     }
@@ -275,10 +259,12 @@ export function registerAuthModule(app: FastifyInstance) {
     }, request)
   })
 
-  app.post('/app/account/logout', async (request): Promise<ApiSuccessResponse<{
-    isSuccess: boolean
-  }> | ApiErrorResponse> => {
-    const body = (request.body ?? {}) as Partial<LogoutBody>
+  app.post('/app/account/logout', async (request): Promise<ApiSuccessResponse<SuccessResponse> | ApiErrorResponse> => {
+    const parsed = logoutBodySchema.safeParse(request.body ?? {})
+    if (!parsed.success) {
+      return businessError('请求参数无效', request)
+    }
+    const body = parsed.data
     const token = getTokenByRequest(request)
     const refreshToken = body.refreshToken?.trim()
     if (!token) {
@@ -293,17 +279,12 @@ export function registerAuthModule(app: FastifyInstance) {
     }, request)
   })
 
-  app.post('/app/account/token/refresh', async (request): Promise<ApiSuccessResponse<{
-    account: string
-    token: string
-    refreshToken: string
-    avatar: string
-    email: string
-    accessExpiresInSec: number
-    refreshExpiresInSec: number
-  }> | ApiErrorResponse> => {
-    const body = (request.body ?? {}) as Partial<RefreshTokenBody>
-    const refreshToken = body.refreshToken?.trim() ?? ''
+  app.post('/app/account/token/refresh', async (request): Promise<ApiSuccessResponse<RefreshTokenResponse> | ApiErrorResponse> => {
+    const body = refreshTokenBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return unauthorized(request)
+    }
+    const refreshToken = body.data.refreshToken
     if (!refreshToken) {
       return unauthorized(request)
     }
@@ -322,12 +303,11 @@ export function registerAuthModule(app: FastifyInstance) {
       email: rotated.user.email,
       accessExpiresInSec: rotated.tokens.accessExpiresInSec,
       refreshExpiresInSec: rotated.tokens.refreshExpiresInSec,
+      mustChangePassword: userMustChangePassword(rotated.user),
     }, request)
   })
 
-  app.get('/app/account/permission', async (request): Promise<ApiSuccessResponse<{
-    permissions: string[]
-  }> | ApiErrorResponse> => {
+  app.get('/app/account/permission', async (request): Promise<ApiSuccessResponse<PermissionResponse> | ApiErrorResponse> => {
     const token = getTokenByRequest(request)
     if (!token) {
       return unauthorized(request)
@@ -344,9 +324,7 @@ export function registerAuthModule(app: FastifyInstance) {
     }, request)
   })
 
-  app.post('/app/account/password/edit', async (request): Promise<ApiSuccessResponse<{
-    isSuccess: boolean
-  }> | ApiErrorResponse> => {
+  app.post('/app/account/password/edit', async (request): Promise<ApiSuccessResponse<PasswordEditResponse> | ApiErrorResponse> => {
     const token = getTokenByRequest(request)
     if (!token) {
       return unauthorized(request)
@@ -361,9 +339,12 @@ export function registerAuthModule(app: FastifyInstance) {
       return businessError(changeRateLimitError, request)
     }
 
-    const body = (request.body ?? {}) as Partial<PasswordEditBody>
-    const password = body.password ?? ''
-    const newPassword = body.newPassword ?? ''
+    const body = passwordEditBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const password = body.data.password
+    const newPassword = body.data.newPassword
 
     if (!password || !newPassword) {
       return businessError('原密码和新密码不能为空', request)
@@ -399,10 +380,7 @@ export function registerAuthModule(app: FastifyInstance) {
     }, request)
   })
 
-  app.get('/app/account/password/recovery-status', async (request): Promise<ApiSuccessResponse<{
-    enabled: boolean
-    hint: string | null
-  }> | ApiErrorResponse> => {
+  app.get('/app/account/password/recovery-status', async (request): Promise<ApiSuccessResponse<PasswordRecoveryStatusResponse> | ApiErrorResponse> => {
     const configuredToken = loadServerConfig().passwordRecoveryToken
     return success({
       enabled: configuredToken.length >= 16,
@@ -412,18 +390,19 @@ export function registerAuthModule(app: FastifyInstance) {
     }, request)
   })
 
-  app.post('/app/account/password/recover', async (request): Promise<ApiSuccessResponse<{
-    isSuccess: boolean
-  }> | ApiErrorResponse> => {
+  app.post('/app/account/password/recover', async (request): Promise<ApiSuccessResponse<SuccessResponse> | ApiErrorResponse> => {
     const configuredToken = loadServerConfig().passwordRecoveryToken
     if (configuredToken.length < 16) {
       return businessError('当前未启用在线找回密码，请通过服务器命令行重置', request)
     }
 
-    const body = (request.body ?? {}) as Partial<PasswordRecoverBody>
-    const account = body.account?.trim() ?? ''
-    const recoveryToken = body.recoveryToken?.trim() ?? ''
-    const newPassword = body.newPassword ?? ''
+    const body = passwordRecoverBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const account = body.data.account
+    const recoveryToken = body.data.recoveryToken
+    const newPassword = body.data.newPassword
     const clientKey = `recover:${getClientIp(request)}`
 
     const rateLimitError = checkPasswordRecoveryRateLimit(clientKey)

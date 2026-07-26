@@ -1,5 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import {
+  shardInstanceQuerySchema,
+  shardSavePayloadSchema,
+} from '../../../../shared/contracts/shard'
 import type {
   ShardInitCavesResult,
   ShardListDto,
@@ -24,14 +28,6 @@ const SHARD_RESOLVE_MESSAGES = {
   clusterDirFailed: '无法创建房间配置目录',
 }
 
-interface ShardQuery {
-  instanceId?: string
-}
-
-function normalizeInstanceId(value: string | undefined) {
-  return value?.trim() ?? ''
-}
-
 async function restartInstance(
   app: FastifyInstance,
   request: FastifyRequest,
@@ -50,8 +46,11 @@ export function registerShardModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const query = request.query as ShardQuery
-    const instanceId = normalizeInstanceId(query.instanceId)
+    const query = shardInstanceQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = query.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, { messages: SHARD_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
@@ -71,8 +70,11 @@ export function registerShardModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const query = request.query as ShardQuery
-    const instanceId = normalizeInstanceId(query.instanceId)
+    const query = shardInstanceQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = query.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, { messages: SHARD_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
@@ -92,18 +94,19 @@ export function registerShardModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as ShardSavePayload
-    const instanceId = normalizeInstanceId(body.instanceId)
+    const body = shardSavePayloadSchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const payload: ShardSavePayload = body.data
+    const instanceId = payload.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, { messages: SHARD_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
     }
-    if (!body.shard || (body.shard !== 'master' && body.shard !== 'caves')) {
-      return businessError('分片类型无效', request)
-    }
     try {
-      const result = saveShardConfig(resolved.instance, body)
-      if (body.restart) {
+      const result = saveShardConfig(resolved.instance, payload)
+      if (payload.restart) {
         const restartError = await restartInstance(app, request, instanceId)
         if (restartError) {
           return restartError

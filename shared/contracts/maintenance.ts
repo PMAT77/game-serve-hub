@@ -1,4 +1,7 @@
 /** 实例维护公告草稿 */
+import { z } from 'zod'
+import { instanceIdSchema } from './instance'
+
 export interface InstanceMaintenanceDraftDto {
   message: string
   updatedAt: string | null
@@ -26,3 +29,20 @@ export interface InstanceMaintenancePushResultDto {
   pushLog: InstanceMaintenancePushLogDto
   errorMessage?: string
 }
+
+export const maintenanceInstanceQuerySchema = z.object({
+  instanceId: instanceIdSchema,
+})
+export type MaintenanceInstanceQuery = z.infer<typeof maintenanceInstanceQuerySchema>
+
+export const maintenanceDraftPayloadSchema = z.object({
+  instanceId: instanceIdSchema,
+  message: z.string().trim().min(1).max(500),
+})
+export type MaintenanceDraftPayload = z.infer<typeof maintenanceDraftPayloadSchema>
+
+export const maintenancePushPayloadSchema = z.object({
+  instanceId: instanceIdSchema,
+  message: z.string().trim().max(500).optional(),
+})
+export type MaintenancePushPayload = z.infer<typeof maintenancePushPayloadSchema>

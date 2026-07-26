@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import type { DstInstanceSummariesDto } from '../../../../shared/contracts/dst-summary'
 import {
   createInstanceBodySchema,
   instanceActionBodySchema,
@@ -75,6 +76,8 @@ import { businessError, success } from '../../shared/http/response'
 import { hostMemoryPressureError } from '../../shared/http/host-memory-pressure-error'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
 import { registerInstanceMetricsRoute } from './metrics'
+import { registerInstanceRoutes } from './instance-routes'
+import { getDstInstanceSummaries } from './dst-summary'
 import type { InstanceUpdateCheckJobStatus } from './update-check'
 import { readLocalBuildId } from '../../shared/steam-update/build-id'
 import {
@@ -267,6 +270,10 @@ async function handleListInstances(
  * 负责游戏实例生命周期管理（创建、启动、停止、重启、删除）。
  */
 export function registerInstanceModule(app: FastifyInstance) {
+  registerInstanceRoutes(app, registerInstanceRouteHandlers)
+}
+
+function registerInstanceRouteHandlers(app: FastifyInstance) {
   registerDstContainerCommandPort({
     isInstanceContainerRunning,
     readRecentInstanceContainerLogLines,
@@ -279,6 +286,24 @@ export function registerInstanceModule(app: FastifyInstance) {
       return businessError('请求参数无效', request)
     }
     return handleListInstances(app, request, body.data)
+  })
+
+  app.post('/app/instance/dst-summaries', async (request): Promise<ApiSuccessResponse<DstInstanceSummariesDto> | ApiErrorResponse> => {
+    const body = instanceListQuerySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    await reconcileInstanceRuntimeState(app)
+    const instances = await listGameInstances({
+      nodeId: body.data.nodeId?.trim() || undefined,
+      status: body.data.status,
+      keyword: body.data.keyword?.trim() || undefined,
+    })
+    return success(await getDstInstanceSummaries(instances), request)
   })
 
   app.get('/app/instance/games', async (request): Promise<ApiSuccessResponse<InstallableGameItem[]> | ApiErrorResponse> => {

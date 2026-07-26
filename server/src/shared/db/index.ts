@@ -263,7 +263,7 @@ export async function rotateSessionByRefreshToken(
     ip?: string
     userAgent?: string
   } = {},
-): Promise<{ user: Pick<DbUserRow, 'id' | 'account' | 'email' | 'avatar'>, tokens: SessionTokenBundle } | undefined> {
+): Promise<{ user: Pick<DbUserRow, 'id' | 'account' | 'email' | 'avatar' | 'must_change_password'>, tokens: SessionTokenBundle } | undefined> {
   const { drizzleDb } = ensureDb()
   const nowMs = Date.now()
   const now = toIsoFromMs(nowMs)
@@ -277,6 +277,7 @@ export async function rotateSessionByRefreshToken(
       account: users.account,
       email: users.email,
       avatar: users.avatar,
+      mustChangePassword: users.mustChangePassword,
     })
     .from(authSessions)
     .innerJoin(users, eq(authSessions.userId, users.id))
@@ -323,6 +324,7 @@ export async function rotateSessionByRefreshToken(
       account: row.account,
       email: row.email,
       avatar: row.avatar,
+      must_change_password: row.mustChangePassword,
     },
     tokens,
   }

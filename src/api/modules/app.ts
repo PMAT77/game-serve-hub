@@ -1,48 +1,44 @@
+import type {
+  LoginBody,
+  LoginResponse,
+  LogoutBody,
+  PasswordEditBody,
+  PasswordEditResponse,
+  PasswordRecoverBody,
+  PasswordRecoveryStatusResponse,
+  PermissionResponse,
+  RefreshTokenBody,
+  RefreshTokenResponse,
+  SuccessResponse,
+} from '../../../shared/contracts/auth'
 import api from '../index'
 
+export type {
+  LoginBody,
+  LoginResponse,
+  LogoutBody,
+  PasswordEditBody,
+  PasswordEditResponse,
+  PasswordRecoverBody,
+  PasswordRecoveryStatusResponse,
+  PermissionResponse,
+  RefreshTokenBody,
+  RefreshTokenResponse,
+}
+
 export default {
-  // 后端获取路由数据
   routeList: () => api.get('app/route/list'),
-
-  // 登录
-  login: (data: {
-    account: string
-    password: string
-    remember?: boolean
-    challengeToken?: string
-    challengeAnswer?: string
-  }) => api.post('app/account/login', data),
-
-  // 登出
-  logout: (data?: { refreshToken?: string }) => api.post('app/account/logout', data ?? {}),
-
-  // 刷新 token
-  refreshToken: (data: { refreshToken: string }) => api.post('app/account/token/refresh', data, {
+  login: (data: LoginBody) => api.post('app/account/login', data) as Promise<{ data: LoginResponse }>,
+  logout: (data?: LogoutBody) => api.post('app/account/logout', data ?? {}) as Promise<{ data: SuccessResponse }>,
+  refreshToken: (data: RefreshTokenBody) => api.post('app/account/token/refresh', data, {
     skipAuthRefresh: true,
-  }),
-
-  // 获取权限
-  permission: () => api.get('app/account/permission'),
-
-  // 修改密码
-  passwordEdit: (data: {
-    password: string
-    newPassword: string
-  }) => api.post('app/account/password/edit', data),
-
+  }) as Promise<{ data: RefreshTokenResponse }>,
+  permission: () => api.get('app/account/permission') as Promise<{ data: PermissionResponse }>,
+  passwordEdit: (data: PasswordEditBody) => api.post('app/account/password/edit', data) as Promise<{ data: PasswordEditResponse }>,
   passwordRecoveryStatus: () => api.get('app/account/password/recovery-status') as Promise<{
-    data: {
-      enabled: boolean
-      hint: string | null
-    }
+    data: PasswordRecoveryStatusResponse
   }>,
-
-  passwordRecover: (data: {
-    account: string
-    recoveryToken: string
-    newPassword: string
-  }) => api.post('app/account/password/recover', data, {
+  passwordRecover: (data: PasswordRecoverBody) => api.post('app/account/password/recover', data, {
     skipAuthRefresh: true,
-  }) as Promise<{ data: { isSuccess: boolean } }>,
-
+  }) as Promise<{ data: SuccessResponse }>,
 }

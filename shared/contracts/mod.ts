@@ -1,3 +1,6 @@
+import { z } from 'zod'
+import { instanceIdSchema } from './instance'
+
 export type ModInstanceStatus = 'pending_install' | 'running' | 'stopped' | 'installing' | 'error'
 
 export type ModInstallStatus = 'pending' | 'ready' | 'failed'
@@ -205,3 +208,69 @@ export interface SteamModListMeta {
   upstreamMessage?: string
   steamErrorCode?: SteamModFetchErrorCode
 }
+
+const workshopIdSchema = z.string().trim().min(1).max(64)
+const optionalTextSchema = z.string().trim().max(512).optional()
+
+export const modInstanceParamsSchema = z.object({
+  instanceId: instanceIdSchema,
+})
+export type ModInstanceParams = z.infer<typeof modInstanceParamsSchema>
+
+export const modItemParamsSchema = modInstanceParamsSchema.extend({
+  modId: workshopIdSchema,
+})
+export type ModItemParams = z.infer<typeof modItemParamsSchema>
+
+export const modWorkshopParamsSchema = modInstanceParamsSchema.extend({
+  workshopId: workshopIdSchema,
+})
+export type ModWorkshopParams = z.infer<typeof modWorkshopParamsSchema>
+
+export const modListQuerySchema = z.object({
+  enrich: z.string().trim().max(128).optional(),
+})
+export type ModListQuery = z.infer<typeof modListQuerySchema>
+
+const queryNumberSchema = z.union([z.string().trim().max(16), z.number().finite()]).optional()
+
+export const steamModListQuerySchema = z.object({
+  keyword: z.string().trim().max(256).optional(),
+  page: queryNumberSchema,
+  pageSize: queryNumberSchema,
+  sort: z.string().trim().max(64).optional(),
+  trendDays: queryNumberSchema,
+})
+export type SteamModListQuery = z.infer<typeof steamModListQuerySchema>
+
+export const steamModDetailQuerySchema = z.object({
+  locale: z.string().trim().max(16).optional(),
+})
+export type SteamModDetailQuery = z.infer<typeof steamModDetailQuerySchema>
+
+export const modInstallPayloadSchema = z.object({
+  workshopId: workshopIdSchema,
+  name: optionalTextSchema,
+  previewImage: z.string().trim().max(2048).optional(),
+  version: optionalTextSchema,
+  enabled: z.boolean().optional(),
+  dependencyIds: z.array(workshopIdSchema).max(128).optional(),
+})
+
+export const modUpdatePayloadSchema = z.object({
+  enabled: z.boolean().optional(),
+  name: optionalTextSchema,
+  version: optionalTextSchema,
+  dependencyIds: z.array(workshopIdSchema).max(128).optional(),
+})
+
+export const modReorderPayloadSchema = z.object({
+  workshopIds: z.array(workshopIdSchema).max(512),
+})
+
+export const modInstallJobsQuerySchema = z.object({
+  workshopIds: z.union([
+    z.string().trim().max(16_384),
+    z.array(workshopIdSchema).max(512),
+  ]).optional(),
+})

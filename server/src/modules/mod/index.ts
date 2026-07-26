@@ -3,22 +3,31 @@ import type { FastifyInstance } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import type {
   ModDeleteResult,
-  ModInstallPayload,
   ModInstallJobDto,
   ModInstallStatus,
   ModItemDto,
   ModListDto,
   ModMutationResult,
-  ModReorderPayload,
   ModReorderResult,
   SteamModSort,
   SteamModTrendDays,
   SteamModListQueryResult,
   SteamModDetailDto,
-  ModUpdatePayload,
   ModContentLocale,
 } from '../../../../shared/contracts/mod'
-import { DEFAULT_MOD_CONTENT_LOCALE } from '../../../../shared/contracts/mod'
+import {
+  DEFAULT_MOD_CONTENT_LOCALE,
+  modInstanceParamsSchema,
+  modItemParamsSchema,
+  modWorkshopParamsSchema,
+  modListQuerySchema,
+  steamModListQuerySchema,
+  steamModDetailQuerySchema,
+  modInstallPayloadSchema,
+  modUpdatePayloadSchema,
+  modReorderPayloadSchema,
+  modInstallJobsQuerySchema,
+} from '../../../../shared/contracts/mod'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
 import {
@@ -45,10 +54,6 @@ import {
   listModInstallJobs,
   resolveModInstallJob,
 } from './mod-download-service'
-
-function normalizeInstanceId(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
 
 function normalizeWorkshopId(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -382,9 +387,12 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string }
-    const query = request.query as { enrich?: string }
-    const instanceId = normalizeInstanceId(params.instanceId)
+    const parsedParams = modInstanceParamsSchema.safeParse(request.params)
+    const parsedQuery = modListQuerySchema.safeParse(request.query)
+    if (!parsedParams.success || !parsedQuery.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
         wrongNode: '当前仅支持本地节点实例 Mod 管理',
@@ -400,7 +408,7 @@ export function registerModModule(app: FastifyInstance) {
         instanceId,
         installPath: resolved.instance.installPath,
       })
-      const enrich = parseModListEnrich(query.enrich)
+      const enrich = parseModListEnrich(parsedQuery.data.enrich)
       const payload = await buildModListPayload(instanceId, enrich)
       return success(payload, request)
     }
@@ -415,15 +423,12 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string }
-    const query = request.query as {
-      keyword?: string
-      page?: string | number
-      pageSize?: string | number
-      sort?: string
-      trendDays?: string | number
+    const parsedParams = modInstanceParamsSchema.safeParse(request.params)
+    const parsedQuery = steamModListQuerySchema.safeParse(request.query)
+    if (!parsedParams.success || !parsedQuery.success) {
+      return businessError('请求参数无效', request)
     }
-    const instanceId = normalizeInstanceId(params.instanceId)
+    const instanceId = parsedParams.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
         wrongNode: '当前仅支持本地节点实例 Mod 管理',
@@ -439,11 +444,11 @@ export function registerModModule(app: FastifyInstance) {
       const subscribedModStatusByWorkshopId = buildSubscribedModStatusMap(installedMods)
       const pendingWorkshopIds = collectPendingWorkshopIds(instanceId, installedMods)
       const payload = await fetchDstSteamWorkshopMods({
-        keyword: query.keyword?.trim() ?? '',
-        page: normalizePositiveNumber(query.page, 1),
-        pageSize: normalizePositiveNumber(query.pageSize, 20),
-        sort: normalizeSteamSort(query.sort),
-        trendDays: normalizeTrendDays(query.trendDays),
+        keyword: parsedQuery.data.keyword ?? '',
+        page: normalizePositiveNumber(parsedQuery.data.page, 1),
+        pageSize: normalizePositiveNumber(parsedQuery.data.pageSize, 20),
+        sort: normalizeSteamSort(parsedQuery.data.sort),
+        trendDays: normalizeTrendDays(parsedQuery.data.trendDays),
         subscribedModStatusByWorkshopId,
         pendingWorkshopIds,
       })
@@ -460,11 +465,14 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string, workshopId?: string }
-    const query = request.query as { locale?: string }
-    const instanceId = normalizeInstanceId(params.instanceId)
-    const workshopId = normalizeWorkshopId(params.workshopId)
-    const locale = normalizeModContentLocale(query.locale)
+    const parsedParams = modWorkshopParamsSchema.safeParse(request.params)
+    const parsedQuery = steamModDetailQuerySchema.safeParse(request.query)
+    if (!parsedParams.success || !parsedQuery.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
+    const workshopId = parsedParams.data.workshopId
+    const locale = normalizeModContentLocale(parsedQuery.data.locale)
     if (!workshopId) {
       return businessError('创意工坊 ID 不能为空', request)
     }
@@ -502,8 +510,12 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string }
-    const instanceId = normalizeInstanceId(params.instanceId)
+    const parsedParams = modInstanceParamsSchema.safeParse(request.params)
+    const parsedBody = modInstallPayloadSchema.safeParse(request.body ?? {})
+    if (!parsedParams.success || !parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
         wrongNode: '当前仅支持本地节点实例 Mod 管理',
@@ -514,7 +526,7 @@ export function registerModModule(app: FastifyInstance) {
     if (!resolved.ok) {
       return resolved.error
     }
-    const body = (request.body ?? {}) as ModInstallPayload
+    const body = parsedBody.data
     const workshopId = normalizeWorkshopId(body.workshopId)
     if (!workshopId) {
       return businessError('创意工坊 ID 不能为空', request)
@@ -532,9 +544,12 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string, workshopId?: string }
-    const instanceId = normalizeInstanceId(params.instanceId)
-    const workshopId = normalizeWorkshopId(params.workshopId)
+    const parsedParams = modWorkshopParamsSchema.safeParse(request.params)
+    if (!parsedParams.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
+    const workshopId = parsedParams.data.workshopId
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
         wrongNode: '当前仅支持本地节点实例 Mod 管理',
@@ -557,9 +572,12 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string }
-    const query = request.query as { workshopIds?: string | string[] }
-    const instanceId = normalizeInstanceId(params.instanceId)
+    const parsedParams = modInstanceParamsSchema.safeParse(request.params)
+    const parsedQuery = modInstallJobsQuerySchema.safeParse(request.query)
+    if (!parsedParams.success || !parsedQuery.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
         wrongNode: '当前仅支持本地节点实例 Mod 管理',
@@ -570,7 +588,7 @@ export function registerModModule(app: FastifyInstance) {
     if (!resolved.ok) {
       return resolved.error
     }
-    const rawIds = query.workshopIds
+    const rawIds = parsedQuery.data.workshopIds
     const workshopIds = Array.isArray(rawIds)
       ? rawIds.flatMap(id => normalizeDependencyIds([id]))
       : (typeof rawIds === 'string' && rawIds.trim()
@@ -586,9 +604,13 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string, modId?: string }
-    const instanceId = normalizeInstanceId(params.instanceId)
-    const modId = normalizeWorkshopId(params.modId)
+    const parsedParams = modItemParamsSchema.safeParse(request.params)
+    const parsedBody = modUpdatePayloadSchema.safeParse(request.body ?? {})
+    if (!parsedParams.success || !parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
+    const modId = parsedParams.data.modId
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
         wrongNode: '当前仅支持本地节点实例 Mod 管理',
@@ -602,7 +624,7 @@ export function registerModModule(app: FastifyInstance) {
     if (!modId) {
       return businessError('Mod ID 不能为空', request)
     }
-    const body = (request.body ?? {}) as ModUpdatePayload
+    const body = parsedBody.data
     const mod = await getInstanceModByWorkshopId(instanceId, modId)
     if (!mod) {
       return businessError('Mod 不存在', request)
@@ -638,8 +660,12 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string }
-    const instanceId = normalizeInstanceId(params.instanceId)
+    const parsedParams = modInstanceParamsSchema.safeParse(request.params)
+    const parsedBody = modReorderPayloadSchema.safeParse(request.body ?? {})
+    if (!parsedParams.success || !parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
         wrongNode: '当前仅支持本地节点实例 Mod 管理',
@@ -650,7 +676,7 @@ export function registerModModule(app: FastifyInstance) {
     if (!resolved.ok) {
       return resolved.error
     }
-    const body = (request.body ?? {}) as ModReorderPayload
+    const body = parsedBody.data
     const workshopIds = normalizeDependencyIds(body.workshopIds)
     const currentMods = normalizeLoadOrder(
       (await listInstanceMods(instanceId)).filter(mod => mod.installStatus === 'ready'),
@@ -680,9 +706,12 @@ export function registerModModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const params = request.params as { instanceId?: string, modId?: string }
-    const instanceId = normalizeInstanceId(params.instanceId)
-    const modId = normalizeWorkshopId(params.modId)
+    const parsedParams = modItemParamsSchema.safeParse(request.params)
+    if (!parsedParams.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
+    const modId = parsedParams.data.modId
     const resolved = await resolveLocalDstInstance(instanceId, request, {
       messages: {
         wrongNode: '当前仅支持本地节点实例 Mod 管理',

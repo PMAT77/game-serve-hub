@@ -1,24 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import type { NodeListItem } from '../../../../shared/contracts/node'
 import os from 'node:os'
 import { collectHostResourceSnapshot } from '../../shared/host-metrics'
-import type { HostResourceSnapshot } from '../../shared/host-metrics'
 import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import { listServerNodes, saveServerNode } from '../../shared/db/index'
 import { success } from '../../shared/http/response'
 import { requirePermission } from '../system/auth'
-
-interface NodeViewItem {
-  id: string
-  name: string
-  host: string
-  sshPort: number
-  status: 'online' | 'offline'
-  resources: HostResourceSnapshot
-  lastHeartbeatAt: string | null
-  createdAt: string
-  updatedAt: string
-}
 
 const LOCAL_NODE_ID = 'local-node'
 
@@ -45,10 +33,10 @@ async function upsertLocalNode() {
     lastHeartbeatAt: saved.lastHeartbeatAt,
     createdAt: saved.createdAt,
     updatedAt: saved.updatedAt,
-  } satisfies NodeViewItem
+  } satisfies NodeListItem
 }
 
-function toNodeViewItem(item: Awaited<ReturnType<typeof listServerNodes>>[number]): NodeViewItem {
+function toNodeViewItem(item: Awaited<ReturnType<typeof listServerNodes>>[number]): NodeListItem {
   return {
     id: item.id,
     name: item.name,
@@ -89,7 +77,7 @@ export function registerNodeModule(app: FastifyInstance) {
     await upsertLocalNode()
   })
 
-  app.post('/app/node/local/register', async (request): Promise<ApiSuccessResponse<NodeViewItem> | ApiErrorResponse> => {
+  app.post('/app/node/local/register', async (request): Promise<ApiSuccessResponse<NodeListItem> | ApiErrorResponse> => {
     const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
@@ -97,7 +85,7 @@ export function registerNodeModule(app: FastifyInstance) {
     return success(await upsertLocalNode(), request)
   })
 
-  app.post('/app/node/list', async (request): Promise<ApiSuccessResponse<NodeViewItem[]> | ApiErrorResponse> => {
+  app.post('/app/node/list', async (request): Promise<ApiSuccessResponse<NodeListItem[]> | ApiErrorResponse> => {
     const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError

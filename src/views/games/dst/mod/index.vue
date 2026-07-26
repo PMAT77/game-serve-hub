@@ -9,7 +9,7 @@ import type {
 } from '@/api/modules/mod'
 import type { InstanceItem } from '@/api/modules/instance'
 import { useDebounceFn } from '@vueuse/core'
-import { NButton, NCard, NDataTable, NEmpty, NImage, NRate, NSelect, NTabPane, NTabs, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NCard, NDataTable, NEmpty, NImage, NPagination, NRate, NSelect, NTabPane, NTabs, NTag, useDialog, useMessage } from 'naive-ui'
 import AdminListToolbar from '@/components/AdminListToolbar.vue'
 import { computed, h, onMounted, ref, shallowRef, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
@@ -25,6 +25,8 @@ defineOptions({
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
+const appSettingsStore = useAppSettingsStore()
+const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
 
 interface BusinessErrorLike {
   error?: string
@@ -163,6 +165,10 @@ const pagination = computed(() => ({
   },
 }))
 
+function changeSteamPage(page: number) {
+  pagination.value.onChange(page)
+}
+
 const instanceOptions = computed(() => {
   return instances.value.map(instance => ({
     label: instance.name,
@@ -214,6 +220,33 @@ function resolveMarketSubscribeStatus(row: SteamModListQueryResultItem): ModInst
     return 'ready'
   }
   return null
+}
+
+function marketStatusLabel(row: SteamModListQueryResultItem): string {
+  const status = resolveMarketSubscribeStatus(row)
+  if (status === 'pending') return '下载中'
+  if (status === 'failed') return '下载失败'
+  if (status === 'ready') return '已订阅'
+  return '未订阅'
+}
+
+function marketStatusType(row: SteamModListQueryResultItem): 'default' | 'success' | 'warning' | 'error' {
+  const status = resolveMarketSubscribeStatus(row)
+  if (status === 'pending') return 'warning'
+  if (status === 'failed') return 'error'
+  if (status === 'ready') return 'success'
+  return 'default'
+}
+
+function subscribedStatusLabel(row: ModItemDto): string {
+  if (row.installStatus === 'pending' || isPendingWorkshop(row.workshopId)) return '下载中'
+  if (row.installStatus === 'failed') return '下载失败'
+  return '已就绪'
+}
+
+function subscribedStatusType(row: ModItemDto): 'success' | 'warning' | 'error' {
+  if (row.installStatus === 'pending' || isPendingWorkshop(row.workshopId)) return 'warning'
+  return row.installStatus === 'failed' ? 'error' : 'success'
 }
 
 function mergeSteamRowsWithInstalled(
@@ -864,6 +897,42 @@ async function installFromSteam(item: SteamModListQueryResultItem) {
   }
 }
 
+function handleMarketAction(item: SteamModListQueryResultItem) {
+  const status = resolveMarketSubscribeStatus(item)
+  if (item.installed || status === 'ready') {
+    confirmUnsubscribeFromMarket(item)
+    return
+  }
+  if (status === 'failed') {
+    void retryFromMarket(item)
+    return
+  }
+  if (status !== 'pending') {
+    void installFromSteam(item)
+  }
+}
+
+function marketActionLabel(item: SteamModListQueryResultItem): string {
+  const status = resolveMarketSubscribeStatus(item)
+  if (item.installed || status === 'ready') return '取消订阅'
+  if (status === 'pending' || isPendingWorkshop(item.workshopId)) return '订阅中'
+  return status === 'failed' ? '重试' : '订阅'
+}
+
+function marketActionDisabled(item: SteamModListQueryResultItem): boolean {
+  return !hasSelectedInstance.value
+    || unsubscribingWorkshopIds.value.has(item.workshopId)
+    || resolveMarketSubscribeStatus(item) === 'pending'
+}
+
+function handleSubscribedAction(item: ModItemDto) {
+  if (item.installStatus === 'failed') {
+    void retryFailedInstall(item)
+    return
+  }
+  confirmUnsubscribe(item)
+}
+
 function confirmUnsubscribe(row: ModItemDto) {
   openUnsubscribeConfirm(row.workshopId, row.name)
 }
@@ -1069,6 +1138,7 @@ onMounted(async () => {
         <NTabs v-model:value="activeTab" type="segment" class="dst-mod-tabs min-h-0 flex-1">
           <NTabPane name="market" tab="Mod 市场" display-directive="show" class="h-full">
             <NDataTable
+              v-if="!isMobileMode"
               :bordered="false"
               :single-line="false"
               :columns="marketColumns"
@@ -1086,6 +1156,57 @@ onMounted(async () => {
                 </div>
               </template>
             </NDataTable>
+            <div v-else class="space-y-3 overflow-y-auto pr-1" :aria-busy="loadingSteam">
+              <NEmpty v-if="!loadingSteam && steamMods.length === 0" size="small" :description="marketEmptyDescription" />
+              <article
+                v-for="mod in steamMods"
+                :key="mod.workshopId"
+                class="rounded-lg border border-border bg-card p-3 space-y-3"
+              >
+                <div class="flex gap-3">
+                  <NImage
+                    v-if="mod.previewImage"
+                    :src="mod.previewImage"
+                    width="64"
+                    height="64"
+                    object-fit="cover"
+                    class="shrink-0 rounded"
+                  />
+                  <div class="min-w-0 flex-1">
+                    <h3 class="line-clamp-2 font-medium">{{ mod.title }}</h3>
+                    <p class="mt-1 text-xs text-muted-foreground">Workshop ID: {{ mod.workshopId }}</p>
+                    <NRate v-if="mod.rating != null" class="mt-1" readonly allow-half size="small" :value="mod.rating" />
+                  </div>
+                  <NTag size="small" :bordered="false" :type="marketStatusType(mod)">
+                    {{ marketStatusLabel(mod) }}
+                  </NTag>
+                </div>
+                <p v-if="mod.description" class="line-clamp-2 text-sm text-muted-foreground">{{ mod.description }}</p>
+                <div class="flex gap-2">
+                  <NButton
+                    class="flex-1"
+                    type="primary"
+                    :loading="isPendingWorkshop(mod.workshopId) || unsubscribingWorkshopIds.has(mod.workshopId)"
+                    :disabled="marketActionDisabled(mod)"
+                    @click="handleMarketAction(mod)"
+                  >
+                    {{ marketActionLabel(mod) }}
+                  </NButton>
+                  <NButton :disabled="!hasSelectedInstance" @click="goToModDetail(mod.workshopId)">
+                    详情
+                  </NButton>
+                </div>
+              </article>
+              <NPagination
+                v-if="resolvedPageCount > 1"
+                :page="steamPage"
+                :page-count="resolvedPageCount"
+                :disabled="loadingSteam"
+                simple
+                class="justify-center py-2"
+                @update:page="changeSteamPage"
+              />
+            </div>
           </NTabPane>
 
           <NTabPane
@@ -1098,6 +1219,7 @@ onMounted(async () => {
             </template>
             <div class="h-full min-h-0">
               <NDataTable
+                v-if="!isMobileMode"
                 :key="`subscribed-${selectedInstanceId}`"
                 :bordered="false"
                 :single-line="false"
@@ -1115,6 +1237,47 @@ onMounted(async () => {
                   </div>
                 </template>
               </NDataTable>
+              <div v-else class="space-y-3 overflow-y-auto pr-1" :aria-busy="loadingInstalled">
+                <NEmpty v-if="!loadingInstalled && installedMods.length === 0" size="small" :description="subscribedEmptyDescription" />
+                <article
+                  v-for="mod in installedMods"
+                  :key="mod.workshopId"
+                  class="rounded-lg border border-border bg-card p-3 space-y-3"
+                >
+                  <div class="flex gap-3">
+                    <NImage
+                      v-if="mod.previewImage"
+                      :src="mod.previewImage"
+                      width="64"
+                      height="64"
+                      object-fit="cover"
+                      class="shrink-0 rounded"
+                    />
+                    <div class="min-w-0 flex-1">
+                      <h3 class="line-clamp-2 font-medium">{{ mod.name }}</h3>
+                      <p class="mt-1 text-xs text-muted-foreground">Workshop ID: {{ mod.workshopId }}</p>
+                      <NRate v-if="mod.rating != null" class="mt-1" readonly allow-half size="small" :value="mod.rating" />
+                    </div>
+                    <NTag size="small" :bordered="false" :type="subscribedStatusType(mod)">
+                      {{ subscribedStatusLabel(mod) }}
+                    </NTag>
+                  </div>
+                  <p v-if="mod.installError" class="text-sm text-rose-600 dark:text-rose-400">{{ mod.installError }}</p>
+                  <div class="flex gap-2">
+                    <NButton
+                      class="flex-1"
+                      :loading="unsubscribingWorkshopIds.has(mod.workshopId) || (mod.installStatus === 'failed' && isPendingWorkshop(mod.workshopId))"
+                      :disabled="!hasSelectedInstance || mod.installStatus === 'pending' || isPendingWorkshop(mod.workshopId)"
+                      @click="handleSubscribedAction(mod)"
+                    >
+                      {{ mod.installStatus === 'failed' ? '重试' : '取消订阅' }}
+                    </NButton>
+                    <NButton :disabled="!hasSelectedInstance" @click="goToModDetail(mod.workshopId)">
+                      详情
+                    </NButton>
+                  </div>
+                </article>
+              </div>
             </div>
           </NTabPane>
         </NTabs>

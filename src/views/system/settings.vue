@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PanelSettingsPayload } from '@/api/modules/system'
-import { NSkeleton } from 'naive-ui'
+import { NAlert, NInputNumber, NSelect, NSkeleton } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import apiSystem from '@/api/modules/system'
 
@@ -9,6 +9,9 @@ defineOptions({
 })
 
 const loading = ref(false)
+const appSettingsStore = useAppSettingsStore()
+const settingsLoaded = ref(false)
+const settingsLoadError = ref<string | null>(null)
 const saveLoading = ref(false)
 const updateStatusLoading = ref(false)
 const applyLoading = ref(false)
@@ -45,27 +48,11 @@ const form = reactive<PanelSettingsPayload>({
   updateCheckIntervalHours: 3,
 })
 
-const panelPortInput = computed({
-  get: () => String(form.panelPort),
-  set: (value: string) => {
-    const nextPort = Number.parseInt(value, 10)
-    if (Number.isNaN(nextPort)) {
-      return
-    }
-    form.panelPort = nextPort
-  },
-})
-
-const updateIntervalInput = computed({
-  get: () => String(form.updateCheckIntervalHours),
-  set: (value: string) => {
-    const nextHours = Number.parseInt(value, 10)
-    if (Number.isNaN(nextHours)) {
-      return
-    }
-    form.updateCheckIntervalHours = nextHours
-  },
-})
+const themeOptions = [
+  { label: '跟随系统', value: 'system' },
+  { label: '浅色', value: 'light' },
+  { label: '深色', value: 'dark' },
+]
 
 const canApplyPanelUpdate = computed(() => {
   if (!updateStatus.value) {
@@ -165,6 +152,18 @@ async function loadSettings(options?: { silent?: boolean }) {
     form.autoUpdate = data.autoUpdate
     form.checkUpdateBeforeStart = data.checkUpdateBeforeStart ?? false
     form.updateCheckIntervalHours = data.updateCheckIntervalHours ?? 3
+    settingsLoaded.value = true
+    settingsLoadError.value = null
+  }
+  catch (error) {
+    if (!settingsLoaded.value) {
+      const detail = error instanceof Error && error.message ? `：${error.message}` : ''
+      settingsLoadError.value = `加载系统设置失败${detail}`
+      apiPort.value = null
+    }
+    else if (!options?.silent) {
+      faToast.error('刷新系统设置失败，当前页面保留上次成功加载的数据。')
+    }
   }
   finally {
     if (!options?.silent) {
@@ -237,6 +236,10 @@ async function applyHubUpdate() {
 }
 
 async function saveSettings() {
+  if (!settingsLoaded.value || loading.value) {
+    faToast.warning('请先成功加载系统设置后再保存。')
+    return
+  }
   if (!Number.isInteger(form.panelPort) || form.panelPort <= 0 || form.panelPort > 65535) {
     faToast.warning('端口范围应为 1-65535')
     return
@@ -254,6 +257,7 @@ async function saveSettings() {
       checkUpdateBeforeStart: form.checkUpdateBeforeStart,
       updateCheckIntervalHours: form.updateCheckIntervalHours,
     })
+    appSettingsStore.setColorScheme(form.theme)
     faToast.success('系统设置已保存')
     await loadSettings({ silent: true })
   }
@@ -276,6 +280,14 @@ onActivated(async () => {
     <div v-if="loading" class="space-y-4" aria-busy="true" aria-label="加载中">
       <NSkeleton v-for="i in 5" :key="i" text :style="{ width: i === 5 ? '40%' : '100%' }" />
     </div>
+    <div v-else-if="settingsLoadError || !settingsLoaded" class="space-y-4" role="alert">
+      <NAlert type="error" title="无法加载系统设置">
+        {{ settingsLoadError ?? '当前设置不可用，请重新加载后再编辑。' }}
+      </NAlert>
+      <FaButton :loading="loading" @click="loadSettings">
+        重试加载
+      </FaButton>
+    </div>
     <div v-else class="space-y-6">
       <AdminSettingsSection
         title="面板端口"
@@ -288,7 +300,7 @@ onActivated(async () => {
         <p v-else class="text-sm text-muted-foreground">
           当前访问端口：{{ browserAccessPort }}
         </p>
-        <FaInput v-model="panelPortInput" type="text" class="max-w-80 mt-3" placeholder="请输入对外发布端口" />
+        <NInputNumber v-model:value="form.panelPort" :min="1" :max="65535" class="max-w-80 mt-3" placeholder="请输入对外发布端口" />
         <p class="text-xs text-muted-foreground mt-2">
           <template v-if="isSplitDevMode">
             开发环境请用 {{ browserAccessPort }} 打开面板；生产端口保存后下次重启 dev:compose 生效。
@@ -297,6 +309,13 @@ onActivated(async () => {
             端口范围 1-65535，保存后由网关编排统一生效。
           </template>
         </p>
+      </AdminSettingsSection>
+
+      <AdminSettingsSection
+        title="界面主题"
+        description="选择管理面板的显示主题；保存后立即应用到当前浏览器。"
+      >
+        <NSelect v-model:value="form.theme" :options="themeOptions" class="max-w-80" />
       </AdminSettingsSection>
 
       <AdminSettingsSection
@@ -359,7 +378,7 @@ onActivated(async () => {
         </div>
         <div class="space-y-2 max-w-80">
           <label class="text-sm text-muted-foreground">检查间隔（小时）</label>
-          <FaInput v-model="updateIntervalInput" type="text" placeholder="1-168" />
+          <NInputNumber v-model:value="form.updateCheckIntervalHours" :min="1" :max="168" placeholder="1-168" class="w-full" />
         </div>
       </AdminSettingsSection>
 

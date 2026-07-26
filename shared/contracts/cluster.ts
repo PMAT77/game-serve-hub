@@ -1,83 +1,105 @@
-export type ClusterNetworkMode = 'offline' | 'lan_only' | 'public'
+import { z } from 'zod'
+import { instanceIdSchema, instanceStatusSchema } from './instance'
 
-/** Klei cluster.ini game_mode；暗无天日为官方拼写 darkandwildernes */
-export type ClusterGameMode = 'survival' | 'endless' | 'wilderness' | 'easy' | 'darkandwildernes'
+export const clusterNetworkModeSchema = z.enum(['offline', 'lan_only', 'public'])
+export type ClusterNetworkMode = z.infer<typeof clusterNetworkModeSchema>
 
-export type ClusterIntention = 'cooperative' | 'competitive' | 'social' | 'madness'
+export const clusterGameModeSchema = z.enum([
+  'survival',
+  'endless',
+  'wilderness',
+  'easy',
+  'darkandwildernes',
+])
+export type ClusterGameMode = z.infer<typeof clusterGameModeSchema>
 
-export type ClusterInstanceStatus = 'pending_install' | 'running' | 'stopped' | 'installing' | 'error'
+export const clusterIntentionSchema = z.enum([
+  'cooperative',
+  'competitive',
+  'social',
+  'madness',
+])
+export type ClusterIntention = z.infer<typeof clusterIntentionSchema>
 
-export interface ClusterConfigDto {
-  instanceId: string
-  instanceName: string
-  instanceStatus: ClusterInstanceStatus
-  networkMode: ClusterNetworkMode
-  clusterName: string
-  clusterDescription: string
-  clusterPassword: string
-  gameMode: ClusterGameMode
-  maxPlayers: number
-  pvp: boolean
-  pauseWhenEmpty: boolean
-  voteEnabled: boolean
-  clusterIntention: ClusterIntention
-  tickRate: number
-  maxSnapshots: number
-  shardEnabled: boolean
-  bindIp: string
-  masterIp: string
-  masterPort: number
-  clusterKey: string
-  steamGroupOnly: boolean
-  steamGroupId: string
-  steamGroupAdmins: boolean
-  clusterTokenConfigured: boolean
-  /** 已配置时令牌掩码（如 pds-****abcd）；GET 禁止返回明文 */
-  clusterTokenMasked: string | null
-  /** 用户曾在面板保存过房间设置（含安装期间预设） */
-  panelRoomSaved: boolean
-  configDirty: boolean
-  effectiveHints: string[]
-  warnings: string[]
-}
+export type ClusterInstanceStatus = z.infer<typeof instanceStatusSchema>
 
-export interface ClusterSavePayload {
-  instanceId: string
-  networkMode: ClusterNetworkMode
-  clusterName: string
-  clusterDescription: string
-  clusterPassword: string
-  gameMode: ClusterGameMode
-  maxPlayers: number
-  pvp: boolean
-  pauseWhenEmpty: boolean
-  voteEnabled: boolean
-  clusterIntention: ClusterIntention
-  tickRate: number
-  maxSnapshots: number
-  shardEnabled: boolean
-  bindIp: string
-  masterIp: string
-  masterPort: number
-  clusterKey: string
-  steamGroupOnly: boolean
-  steamGroupId: string
-  steamGroupAdmins: boolean
-  /** 仅公网模式且用户提交新令牌时传入 */
-  clusterToken?: string | null
-  restart?: boolean
-}
+const clusterTextSchema = z.string().trim().max(2048)
+const clusterPortSchema = z.number().int().min(1).max(65535)
 
-export interface ClusterSaveResult {
-  saved: true
-  restarted: boolean
-}
+export const clusterInstanceQuerySchema = z.object({
+  instanceId: instanceIdSchema,
+})
 
-/** GET /app/instance/cluster/online-players 响应体 */
-export interface ClusterOnlinePlayersDto {
-  instanceId: string
-  running: boolean
-  /** 实例未运行或查询失败时为 null */
-  onlinePlayerCount: number | null
-  maxPlayers: number
-}
+export const clusterConfigSchema = z.object({
+  instanceId: instanceIdSchema,
+  instanceName: z.string(),
+  instanceStatus: instanceStatusSchema,
+  networkMode: clusterNetworkModeSchema,
+  clusterName: z.string(),
+  clusterDescription: z.string(),
+  clusterPassword: z.string(),
+  gameMode: clusterGameModeSchema,
+  maxPlayers: z.number().int().min(1).max(64),
+  pvp: z.boolean(),
+  pauseWhenEmpty: z.boolean(),
+  voteEnabled: z.boolean(),
+  clusterIntention: clusterIntentionSchema,
+  tickRate: z.number().int().min(15).max(60),
+  maxSnapshots: z.number().int().min(1),
+  shardEnabled: z.boolean(),
+  bindIp: z.string(),
+  masterIp: z.string(),
+  masterPort: clusterPortSchema,
+  clusterKey: z.string(),
+  steamGroupOnly: z.boolean(),
+  steamGroupId: z.string(),
+  steamGroupAdmins: z.boolean(),
+  clusterTokenConfigured: z.boolean(),
+  clusterTokenMasked: z.string().nullable(),
+  panelRoomSaved: z.boolean(),
+  configDirty: z.boolean(),
+  effectiveHints: z.array(z.string()),
+  warnings: z.array(z.string()),
+})
+export type ClusterConfigDto = z.infer<typeof clusterConfigSchema>
+
+export const clusterSavePayloadSchema = z.object({
+  instanceId: instanceIdSchema,
+  networkMode: clusterNetworkModeSchema,
+  clusterName: clusterTextSchema.min(1).max(128),
+  clusterDescription: clusterTextSchema,
+  clusterPassword: clusterTextSchema.max(256),
+  gameMode: clusterGameModeSchema,
+  maxPlayers: z.number().int().min(1).max(64),
+  pvp: z.boolean(),
+  pauseWhenEmpty: z.boolean(),
+  voteEnabled: z.boolean(),
+  clusterIntention: clusterIntentionSchema,
+  tickRate: z.number().int().min(15).max(60),
+  maxSnapshots: z.number().int().min(1).max(10_000),
+  shardEnabled: z.boolean(),
+  bindIp: clusterTextSchema.max(128),
+  masterIp: clusterTextSchema.max(128),
+  masterPort: clusterPortSchema,
+  clusterKey: clusterTextSchema.max(256),
+  steamGroupOnly: z.boolean(),
+  steamGroupId: z.string().trim().regex(/^\d+$/).max(64),
+  steamGroupAdmins: z.boolean(),
+  clusterToken: z.string().trim().max(512).nullable().optional(),
+  restart: z.boolean().optional(),
+})
+export type ClusterSavePayload = z.infer<typeof clusterSavePayloadSchema>
+
+export const clusterSaveResultSchema = z.object({
+  saved: z.literal(true),
+  restarted: z.boolean(),
+})
+export type ClusterSaveResult = z.infer<typeof clusterSaveResultSchema>
+
+export const clusterOnlinePlayersSchema = z.object({
+  instanceId: instanceIdSchema,
+  running: z.boolean(),
+  onlinePlayerCount: z.number().int().nonnegative().nullable(),
+  maxPlayers: z.number().int().min(1).max(64),
+})
+export type ClusterOnlinePlayersDto = z.infer<typeof clusterOnlinePlayersSchema>

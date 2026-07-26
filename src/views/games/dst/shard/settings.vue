@@ -21,7 +21,7 @@ import {
   useDialog,
   useMessage,
 } from 'naive-ui'
-import { computed, h, onActivated, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, onActivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
 import apiShard from '@/api/modules/shard'
 import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
@@ -47,6 +47,7 @@ import {
 } from './utils/leveldataOverrides'
 
 type ShardSubTab = 'rules' | 'worldgen' | 'network'
+type ShardSaveOperation = `${ShardId}:${'save' | 'restart'}`
 
 defineOptions({
   name: 'DstWorldSettings',
@@ -62,10 +63,12 @@ const { guidance: hostMemoryGuidance } = useHostMemoryGuidance()
 
 const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
-const savingMaster = ref(false)
-const savingMasterRestart = ref(false)
-const savingCaves = ref(false)
-const savingCavesRestart = ref(false)
+const activeSaveOperation = shallowRef<ShardSaveOperation | null>(null)
+const isSaving = computed(() => activeSaveOperation.value !== null)
+const savingMaster = computed(() => activeSaveOperation.value === 'master:save')
+const savingMasterRestart = computed(() => activeSaveOperation.value === 'master:restart')
+const savingCaves = computed(() => activeSaveOperation.value === 'caves:save')
+const savingCavesRestart = computed(() => activeSaveOperation.value === 'caves:restart')
 const shardList = ref<ShardListDto | null>(null)
 
 const saveAndRestartDisabled = computed(() =>
@@ -231,14 +234,14 @@ function buildSavePayload(shard: ShardId, restart: boolean): ShardSavePayload {
   return payload
 }
 
-function shardSavingFlags(shard: ShardId, restart: boolean) {
-  if (shard === 'master') {
-    return restart ? savingMasterRestart : savingMaster
-  }
-  return restart ? savingCavesRestart : savingCaves
+function getSaveOperation(shard: ShardId, restart: boolean): ShardSaveOperation {
+  return `${shard}:${restart ? 'restart' : 'save'}`
 }
 
 async function saveShard(shard: ShardId, restart: boolean) {
+  if (isSaving.value || allocatingPorts.value) {
+    return
+  }
   const formRef = shard === 'master' ? masterFormRef.value : cavesFormRef.value
   try {
     await formRef?.validate()
@@ -246,8 +249,8 @@ async function saveShard(shard: ShardId, restart: boolean) {
   catch {
     return
   }
-  const savingFlag = shardSavingFlags(shard, restart)
-  savingFlag.value = true
+  const operation = getSaveOperation(shard, restart)
+  activeSaveOperation.value = operation
   try {
     await apiShard.saveShardConfig(buildSavePayload(shard, restart))
     message.success(restart ? '世界配置已保存并触发重启' : '世界配置已保存')
@@ -293,7 +296,9 @@ async function saveShard(shard: ShardId, restart: boolean) {
     message.error(msg)
   }
   finally {
-    savingFlag.value = false
+    if (activeSaveOperation.value === operation) {
+      activeSaveOperation.value = null
+    }
   }
 }
 
@@ -323,14 +328,22 @@ function applyRouteTabFromQuery() {
 }
 
 async function autoAllocatePorts() {
-  if (!instanceId.value) {
+  if (!instanceId.value || allocatingPorts.value || isSaving.value) {
     return
   }
   allocatingPorts.value = true
   try {
     const { data } = await apiInstance.allocateInstancePorts(instanceId.value)
+    const offset = data.gamePort - 10999
+    masterForm.serverPort = data.gamePort
+    masterForm.steamAuthPort = 8766 + offset
+    masterForm.steamMasterPort = 12346 + offset
+    if (cavesShard.value?.configured) {
+      cavesForm.serverPort = masterForm.serverPort + 1
+      cavesForm.steamAuthPort = masterForm.steamAuthPort + 2
+      cavesForm.steamMasterPort = masterForm.steamMasterPort + 2
+    }
     message.success(`已自动分配端口，主世界游戏端口为 ${data.gamePort}`)
-    await loadConfig()
   }
   catch (error) {
     const description = error instanceof Error
@@ -410,6 +423,13 @@ onActivated(() => {
           :title="w"
           class="mb-2"
         />
+        <NAlert
+          v-for="(hint, i) in configAlerts.hints"
+          :key="`h-${i}`"
+          type="info"
+          :title="hint"
+          class="mb-2"
+        />
 
         <NCard size="small" title="洞穴开关">
           <p class="text-sm text-muted-foreground mb-2">
@@ -468,6 +488,7 @@ onActivated(() => {
                     <NButton
                       size="small"
                       :loading="allocatingPorts"
+                      :disabled="isSaving"
                       @click="autoAllocatePorts"
                     >
                       自动分配未占用端口
@@ -487,7 +508,7 @@ onActivated(() => {
             </NForm>
 
             <div class="flex flex-wrap justify-center gap-2 mt-4 pt-4 border-t border-border">
-              <NButton type="primary" size="small" :loading="savingMaster" @click="saveShard('master', false)">
+              <NButton type="primary" size="small" :loading="savingMaster" :disabled="isSaving" @click="saveShard('master', false)">
                 保存地上
               </NButton>
               <NTooltip :disabled="!saveAndRestartDisabled">
@@ -495,7 +516,7 @@ onActivated(() => {
                   <NButton
                     size="small"
                     :loading="savingMasterRestart"
-                    :disabled="saveAndRestartDisabled"
+                    :disabled="saveAndRestartDisabled || isSaving"
                     @click="confirmSaveAndRestart('master')"
                   >
                     保存并重启
@@ -572,7 +593,7 @@ onActivated(() => {
               </NForm>
 
               <div class="flex flex-wrap justify-center gap-2 mt-4 pt-4 border-t border-border">
-                <NButton type="primary" size="small" :loading="savingCaves" @click="saveShard('caves', false)">
+                <NButton type="primary" size="small" :loading="savingCaves" :disabled="isSaving" @click="saveShard('caves', false)">
                   保存洞穴
                 </NButton>
                 <NTooltip :disabled="!saveAndRestartDisabled">
@@ -580,7 +601,7 @@ onActivated(() => {
                     <NButton
                       size="small"
                       :loading="savingCavesRestart"
-                      :disabled="saveAndRestartDisabled"
+                      :disabled="saveAndRestartDisabled || isSaving"
                       @click="confirmSaveAndRestart('caves')"
                     >
                       保存并重启

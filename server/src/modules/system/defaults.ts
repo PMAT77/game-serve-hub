@@ -1,29 +1,11 @@
 import type { DbSystemNetworkConfig, DbSystemPanelSettings, DbSystemSteamcmdConfig } from '../../shared/db/index'
+import type { NetworkConfigRequest, PanelSettingsRequest, SteamcmdConfigRequest } from '../../../../shared/contracts/system'
 import path from 'node:path'
 import { getServerContainerConfig } from '../../shared/config/container'
 
-export interface NetworkConfigBody {
-  mode?: 'bootstrap_pending' | 'managed'
-  httpPort?: number
-  domain?: string
-  tls?: {
-    enabled?: boolean
-    provider?: 'none' | 'letsencrypt' | 'custom'
-  }
-}
-
-export interface PanelSettingsBody {
-  panelPort?: number
-  theme?: 'light' | 'dark' | 'system'
-  autoUpdate?: boolean
-  checkUpdateBeforeStart?: boolean
-  updateCheckIntervalHours?: number
-}
-
-export interface SteamcmdConfigBody {
-  steamcmdPath?: string
-  installRoot?: string
-}
+export type NetworkConfigBody = NetworkConfigRequest
+export type PanelSettingsBody = PanelSettingsRequest
+export type SteamcmdConfigBody = SteamcmdConfigRequest
 
 export function getDefaultNetworkConfig(): DbSystemNetworkConfig {
   return {

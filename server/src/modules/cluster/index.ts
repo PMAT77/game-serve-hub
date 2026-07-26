@@ -1,5 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import {
+  clusterInstanceQuerySchema,
+  clusterSavePayloadSchema,
+} from '../../../../shared/contracts/cluster'
 import type {
   ClusterConfigDto,
   ClusterOnlinePlayersDto,
@@ -17,14 +21,6 @@ import { isInstanceContainerRunning } from '../instance/container-lifecycle'
 import { injectRestartInstance } from '../instance/inject-restart'
 import { businessError, success } from '../../shared/http/response'
 import { requirePermission } from '../system/auth'
-
-interface ClusterQuery {
-  instanceId?: string
-}
-
-function normalizeInstanceId(value: string | undefined) {
-  return value?.trim() ?? ''
-}
 
 async function restartInstance(
   app: FastifyInstance,
@@ -51,8 +47,11 @@ export function registerClusterModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const query = request.query as ClusterQuery
-    const instanceId = normalizeInstanceId(query.instanceId)
+    const query = clusterInstanceQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = query.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, { messages: CLUSTER_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
@@ -72,8 +71,11 @@ export function registerClusterModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const query = request.query as ClusterQuery
-    const instanceId = normalizeInstanceId(query.instanceId)
+    const query = clusterInstanceQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = query.data.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, { messages: CLUSTER_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
@@ -102,15 +104,19 @@ export function registerClusterModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as ClusterSavePayload
-    const instanceId = normalizeInstanceId(body.instanceId)
+    const body = clusterSavePayloadSchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const payload: ClusterSavePayload = body.data
+    const instanceId = payload.instanceId
     const resolved = await resolveLocalDstInstance(instanceId, request, { messages: CLUSTER_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
     }
     try {
-      const result = saveClusterConfig(resolved.instance, body)
-      if (body.restart) {
+      const result = saveClusterConfig(resolved.instance, payload)
+      if (payload.restart) {
         const restartError = await restartInstance(app, request, instanceId)
         if (restartError) {
           return restartError

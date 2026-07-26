@@ -1,8 +1,21 @@
 import type { FastifyInstance } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
-import type { DirectoryItem } from '../../infra/filesystem-browse'
+import type {
+  DirectoryItem,
+  NetworkConfigRequest,
+  PanelSettingsRequest,
+  PanelUpdateApplyRequest,
+  SteamcmdConfigRequest,
+} from '../../../../shared/contracts/system'
+import {
+  directoryListQuerySchema,
+  directorySearchQuerySchema,
+  networkConfigRequestSchema,
+  panelSettingsRequestSchema,
+  panelUpdateApplyRequestSchema,
+  steamcmdConfigRequestSchema,
+} from '../../../../shared/contracts/system'
 import type { DbSystemSteamcmdConfig } from '../../shared/db/index'
-import type { NetworkConfigBody, PanelSettingsBody, SteamcmdConfigBody } from './defaults'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -72,14 +85,6 @@ import {
 import { resolveActualPanelPortFromRequest } from './panel-port'
 import { syncDevComposeWebPort } from './dev-compose-env'
 
-interface DirectoryListQuery {
-  path?: string
-}
-
-interface DirectorySearchQuery {
-  keyword?: string
-}
-
 /**
  * system 模块注册入口
  */
@@ -113,7 +118,11 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as PanelSettingsBody
+    const parsedBody = panelSettingsRequestSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const body: PanelSettingsRequest = parsedBody.data
     const panelPort = body.panelPort ?? 80
     const theme = body.theme ?? 'system'
     const autoUpdate = body.autoUpdate ?? true
@@ -151,7 +160,11 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const query = (request.query ?? {}) as DirectoryListQuery
+    const parsedQuery = directoryListQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      return businessError('请求参数无效', request)
+    }
+    const query = parsedQuery.data
     const rawPath = query.path?.trim()
     if (!rawPath) {
       return success(listRootDirectories(), request)
@@ -177,7 +190,11 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const query = (request.query ?? {}) as DirectorySearchQuery
+    const parsedQuery = directorySearchQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      return businessError('请求参数无效', request)
+    }
+    const query = parsedQuery.data
     const keyword = query.keyword?.trim() ?? ''
     if (!keyword) {
       return success([], request)
@@ -254,7 +271,11 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as SteamcmdConfigBody
+    const parsedBody = steamcmdConfigRequestSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const body: SteamcmdConfigRequest = parsedBody.data
     const containerConfig = getServerContainerConfig()
     const config = {
       ...normalizeSteamcmdConfigBody(body),
@@ -364,7 +385,11 @@ export function registerSystemModule(app: FastifyInstance) {
     if ((await resolveDockerStatus(true)) !== 'running') {
       return businessError('无法连接 Docker，暂不能更新 Hub 镜像', request)
     }
-    const body = (request.body ?? {}) as { targets?: Array<'panel' | 'dst'> }
+    const parsedBody = panelUpdateApplyRequestSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const body: PanelUpdateApplyRequest = parsedBody.data
     try {
       const result = await applyPanelUpdates(body.targets)
       return success(result, request)
@@ -537,7 +562,11 @@ export function registerSystemModule(app: FastifyInstance) {
       return authError
     }
 
-    const body = (request.body ?? {}) as NetworkConfigBody
+    const parsedBody = networkConfigRequestSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const body: NetworkConfigRequest = parsedBody.data
     const networkConfig = {
       mode: body.mode ?? 'bootstrap_pending',
       httpPort: body.httpPort ?? 80,
@@ -565,7 +594,14 @@ export function registerSystemModule(app: FastifyInstance) {
       return authError
     }
 
-    const body = (request.body ?? {}) as NetworkConfigBody
+    const parsedBody = networkConfigRequestSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      return success({
+        isValid: false,
+        message: '请求参数无效',
+      }, request)
+    }
+    const body: NetworkConfigRequest = parsedBody.data
     const httpPort = body.httpPort ?? 80
     if (!Number.isInteger(httpPort) || httpPort <= 0 || httpPort > 65535) {
       return success({

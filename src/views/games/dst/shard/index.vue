@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import type { DataTableColumns } from 'naive-ui'
-import type { ShardContainerStatus, ShardListDto } from '@/api/modules/shard'
-import type { InstanceItem } from '@/api/modules/instance'
+import type { ShardContainerStatus } from '@/api/modules/shard'
+import type { DstInstanceSummaryDto } from '@/api/modules/dst-summary'
 import { NButton, NDataTable, NTag, NTooltip } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
 import AdminListToolbar from '@/components/AdminListToolbar.vue'
 import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
-import apiShard from '@/api/modules/shard'
-import apiInstance from '@/api/modules/instance'
+import apiDstSummary from '@/api/modules/dst-summary'
 import { useAdminPageState } from '@/composables/useAdminPageState'
-import { isInstallableGameInstance } from '@/composables/useGameInstance'
 import { routeToDstWorldSettings, routeToNodeInstance } from '@/navigation/game-routes'
 import { getStatusBadgeClass, getStatusLabel } from '@/views/node/instance/instanceDisplay'
 
@@ -17,15 +15,11 @@ defineOptions({
   name: 'DstWorldList',
 })
 
-interface ShardListRow {
-  instance: InstanceItem
-  shardList: ShardListDto | null
-  loadError: string | null
-}
-
 const router = useRouter()
-const rows = ref<ShardListRow[]>([])
+const appSettingsStore = useAppSettingsStore()
+const rows = ref<DstInstanceSummaryDto[]>([])
 const keywordFilter = ref('')
+const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
 
 const {
   loading,
@@ -54,6 +48,17 @@ function renderShardStatusTag(status: ShardContainerStatus) {
   )
 }
 
+function shardStatusText(row: DstInstanceSummaryDto, shardId: 'master' | 'caves'): string {
+  const shard = row.world[shardId]
+  if (!shard) {
+    return '—'
+  }
+  if (!shard.configured) {
+    return '待配置'
+  }
+  return containerStatusLabel[shard.containerStatus]
+}
+
 const filteredRows = computed(() => {
   const keyword = keywordFilter.value.trim().toLowerCase()
   if (!keyword) {
@@ -67,7 +72,7 @@ const filteredRows = computed(() => {
 const hasFilteredRows = computed(() => filteredRows.value.length > 0)
 const showFilteredEmpty = computed(() => initialLoadDone.value && !loading.value && rows.value.length > 0 && !hasFilteredRows.value)
 
-const columns: DataTableColumns<ShardListRow> = [
+const columns: DataTableColumns<DstInstanceSummaryDto> = [
   {
     title: '实例名称',
     key: 'instanceName',
@@ -89,15 +94,15 @@ const columns: DataTableColumns<ShardListRow> = [
     title: '洞穴',
     key: 'clusterShard',
     render: (row) => {
-      const enabled = row.shardList?.clusterShardEnabled
-      if (enabled === undefined) {
-        if (row.loadError) {
+      const enabled = row.world.clusterShardEnabled
+      if (enabled === null) {
+        if (row.world.error) {
           return h(
             NTooltip,
             { trigger: 'hover' },
             {
               trigger: () => h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '异常' }),
-              default: () => row.loadError,
+              default: () => row.world.error,
             },
           )
         }
@@ -114,11 +119,7 @@ const columns: DataTableColumns<ShardListRow> = [
     title: '主世界',
     key: 'master',
     render: (row) => {
-      const list = row.shardList
-      if (!list) {
-        return '—'
-      }
-      const master = list.shards.find(s => s.id === 'master')
+      const master = row.world.master
       if (!master) {
         return '—'
       }
@@ -132,11 +133,7 @@ const columns: DataTableColumns<ShardListRow> = [
     title: '洞穴分片',
     key: 'caves',
     render: (row) => {
-      const list = row.shardList
-      if (!list) {
-        return '—'
-      }
-      const caves = list.shards.find(s => s.id === 'caves')
+      const caves = row.world.caves
       if (!caves) {
         return '—'
       }
@@ -173,37 +170,10 @@ function goToInstanceManagement() {
   router.push(routeToNodeInstance())
 }
 
-async function loadShardSummary(instance: InstanceItem): Promise<ShardListRow> {
-  if (instance.status === 'pending_install' || !instance.installPath) {
-    return {
-      instance,
-      shardList: null,
-      loadError: instance.status === 'pending_install' ? '尚未安装' : null,
-    }
-  }
-  try {
-    const response = await apiShard.getShardList(instance.id)
-    return {
-      instance,
-      shardList: response.data,
-      loadError: null,
-    }
-  }
-  catch {
-    return {
-      instance,
-      shardList: null,
-      loadError: '读取失败',
-    }
-  }
-}
-
 async function loadRows() {
   await runLoad(async () => {
-    const response = await apiInstance.getInstanceList()
-    const instances = (response.data ?? []) as InstanceItem[]
-    const dstInstances = instances.filter(isInstallableGameInstance)
-    rows.value = await Promise.all(dstInstances.map(loadShardSummary))
+    const response = await apiDstSummary.getDstInstanceSummaries()
+    rows.value = response.data.items
   })
 }
 
@@ -252,15 +222,53 @@ onMounted(() => {
       @retry="loadRows"
       @empty-action="goToInstanceManagement"
     >
-      <NDataTable
-        v-if="hasFilteredRows"
-        :bordered="false"
-        :single-line="false"
-        :columns="columns"
-        :data="filteredRows"
-        :loading="showTableLoading"
-        :scroll-x="860"
-      />
+      <template v-if="hasFilteredRows">
+        <NDataTable
+          v-if="!isMobileMode"
+          :bordered="false"
+          :single-line="false"
+          :columns="columns"
+          :data="filteredRows"
+          :loading="showTableLoading"
+          :scroll-x="860"
+        />
+        <div v-else class="space-y-3" :aria-busy="showTableLoading">
+          <article
+            v-for="row in filteredRows"
+            :key="row.instance.id"
+            class="rounded-lg border border-border bg-card p-4 space-y-3"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <h2 class="min-w-0 truncate font-medium">
+                {{ row.instance.name }}
+              </h2>
+              <NTag size="small" :bordered="false" :class="getStatusBadgeClass(row.instance.status)">
+                {{ getStatusLabel(row.instance.status) }}
+              </NTag>
+            </div>
+            <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <div>
+                <dt class="text-muted-foreground">洞穴</dt>
+                <dd>{{ row.world.clusterShardEnabled === null ? '—' : row.world.clusterShardEnabled ? '已启用' : '未启用' }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted-foreground">地上世界</dt>
+                <dd>{{ shardStatusText(row, 'master') }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted-foreground">洞穴分片</dt>
+                <dd>{{ shardStatusText(row, 'caves') }}</dd>
+              </div>
+              <div v-if="row.world.error" class="col-span-2 text-amber-600 dark:text-amber-400">
+                {{ row.world.error }}
+              </div>
+            </dl>
+            <NButton block :disabled="row.instance.status === 'pending_install'" @click="openSettings(row.instance.id)">
+              配置世界
+            </NButton>
+          </article>
+        </div>
+      </template>
       <div
         v-else-if="showFilteredEmpty"
         class="text-muted-foreground py-12 text-center text-sm"

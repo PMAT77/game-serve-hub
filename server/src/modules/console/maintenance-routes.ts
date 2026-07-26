@@ -5,6 +5,11 @@ import type {
   InstanceMaintenancePushResultDto,
 } from '../../../../shared/contracts/maintenance'
 import {
+  maintenanceDraftPayloadSchema,
+  maintenanceInstanceQuerySchema,
+  maintenancePushPayloadSchema,
+} from '../../../../shared/contracts/maintenance'
+import {
   getGameInstanceById,
   getMaintenanceDraft,
   insertMaintenancePushLog,
@@ -28,20 +33,6 @@ import { resolveAuthorizedContext } from '../system/auth'
 
 const LOCAL_NODE_ID = 'local-node'
 
-interface MaintenanceInstanceQuery {
-  instanceId?: string
-}
-
-interface MaintenanceDraftBody {
-  instanceId?: string
-  message?: string
-}
-
-interface MaintenancePushBody {
-  instanceId?: string
-  message?: string
-}
-
 async function verifyAuthorizedUser(request: FastifyRequest) {
   const auth = await resolveAuthorizedContext(request, {
     permissions: NODE_INSTANCE_MANAGE_PERMISSION,
@@ -51,10 +42,6 @@ async function verifyAuthorizedUser(request: FastifyRequest) {
     return { error: auth.error as ApiErrorResponse }
   }
   return { user: auth.context.user }
-}
-
-function normalizeInstanceId(value: string | undefined) {
-  return value?.trim() ?? ''
 }
 
 async function resolveLocalInstance(instanceId: string, request: FastifyRequest) {
@@ -77,8 +64,11 @@ export function registerMaintenanceAnnounceRoutes(app: FastifyInstance) {
     if (auth.error) {
       return auth.error
     }
-    const query = request.query as MaintenanceInstanceQuery
-    const instanceId = normalizeInstanceId(query.instanceId)
+    const parsedQuery = maintenanceInstanceQuerySchema.safeParse(request.query)
+    if (!parsedQuery.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedQuery.data.instanceId
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       return resolved.error
@@ -93,9 +83,12 @@ export function registerMaintenanceAnnounceRoutes(app: FastifyInstance) {
     if (auth.error) {
       return auth.error
     }
-    const body = (request.body ?? {}) as MaintenanceDraftBody
-    const instanceId = normalizeInstanceId(body.instanceId)
-    const message = normalizeMaintenanceMessage(body.message)
+    const parsedBody = maintenanceDraftPayloadSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedBody.data.instanceId
+    const message = normalizeMaintenanceMessage(parsedBody.data.message)
     const validationError = validateMaintenanceMessage(message)
     if (validationError) {
       return businessError(validationError, request)
@@ -114,8 +107,11 @@ export function registerMaintenanceAnnounceRoutes(app: FastifyInstance) {
     if (auth.error || !auth.user) {
       return auth.error!
     }
-    const body = (request.body ?? {}) as MaintenancePushBody
-    const instanceId = normalizeInstanceId(body.instanceId)
+    const parsedBody = maintenancePushPayloadSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedBody.data.instanceId
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       return resolved.error
@@ -129,7 +125,7 @@ export function registerMaintenanceAnnounceRoutes(app: FastifyInstance) {
       return businessError('主世界未运行，无法推送维护公告', request)
     }
 
-    const bodyMessage = normalizeMaintenanceMessage(body.message)
+    const bodyMessage = normalizeMaintenanceMessage(parsedBody.data.message)
     const draft = await getMaintenanceDraft(instanceId)
     const message = bodyMessage || draft?.message?.trim() || ''
     const validationError = validateMaintenanceMessage(message)

@@ -60,7 +60,12 @@ const logViewportPanelRef = ref<HTMLElement | null>(null)
 let eventSource: EventSource | null = null
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let connectInfoTimer: ReturnType<typeof setInterval> | undefined
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 let streamRequestVersion = 0
+let connectInfoRequest: Promise<void> | null = null
+let logsRefreshRequest: Promise<void> | null = null
+let realtimeActive = false
+let initializing = false
 
 const pageTitle = computed(() => instanceName.value
   ? `实例控制台 · ${instanceName.value}`
@@ -153,21 +158,45 @@ async function loadInstanceMeta() {
   instanceStatus.value = target.status
 }
 
-async function loadConnectInfo() {
+async function loadConnectInfo(options?: { silent?: boolean }) {
   if (!instanceId.value) {
     return
   }
-  connectInfoLoading.value = true
-  try {
-    const res = await apiInstance.getInstanceConnectInfo(instanceId.value)
-    connectInfo.value = res.data
-    running.value = res.data.running
+  if (connectInfoRequest) {
+    return connectInfoRequest
   }
-  catch {
-    connectInfo.value = null
+  const targetInstanceId = instanceId.value
+  const request = (async () => {
+    if (!options?.silent) {
+      connectInfoLoading.value = true
+    }
+    try {
+      const res = await apiInstance.getInstanceConnectInfo(targetInstanceId)
+      if (targetInstanceId !== instanceId.value) {
+        return
+      }
+      connectInfo.value = res.data
+      running.value = res.data.running
+    }
+    catch {
+      if (targetInstanceId === instanceId.value) {
+        connectInfo.value = null
+      }
+    }
+    finally {
+      if (!options?.silent) {
+        connectInfoLoading.value = false
+      }
+    }
+  })()
+  connectInfoRequest = request
+  try {
+    await request
   }
   finally {
-    connectInfoLoading.value = false
+    if (connectInfoRequest === request) {
+      connectInfoRequest = null
+    }
   }
 }
 
@@ -258,11 +287,29 @@ async function refreshLogs() {
   if (!instanceId.value) {
     return
   }
-  const lastId = logs.value.at(-1)?.id ?? 0
-  const stream = activeTab.value === 'panel' ? 'panel' : 'game'
-  const res = await apiInstance.getInstanceConsoleLogs(instanceId.value, lastId, stream)
-  running.value = res.data.running
-  appendLines(res.data.lines)
+  if (logsRefreshRequest) {
+    return logsRefreshRequest
+  }
+  const targetInstanceId = instanceId.value
+  const request = (async () => {
+    const lastId = logs.value.at(-1)?.id ?? 0
+    const stream = activeTab.value === 'panel' ? 'panel' : 'game'
+    const res = await apiInstance.getInstanceConsoleLogs(targetInstanceId, lastId, stream)
+    if (targetInstanceId !== instanceId.value) {
+      return
+    }
+    running.value = res.data.running
+    appendLines(res.data.lines)
+  })()
+  logsRefreshRequest = request
+  try {
+    await request
+  }
+  finally {
+    if (logsRefreshRequest === request) {
+      logsRefreshRequest = null
+    }
+  }
 }
 
 async function connectStream() {
@@ -279,14 +326,17 @@ async function connectStream() {
     streamTicket = response.data.ticket
   }
   catch {
+    scheduleStreamReconnect()
     return
   }
   if (requestVersion !== streamRequestVersion || instanceId.value !== targetInstanceId) {
     return
   }
   const url = apiInstance.buildInstanceConsoleStreamUrl(targetInstanceId, streamTicket)
-  eventSource = new EventSource(url)
-  eventSource.addEventListener('ready', (event) => {
+  const source = new EventSource(url)
+  eventSource = source
+  source.addEventListener('ready', (event) => {
+    clearStreamReconnect()
     try {
       const payload = JSON.parse((event as MessageEvent<string>).data) as { running?: boolean }
       running.value = Boolean(payload.running)
@@ -295,7 +345,7 @@ async function connectStream() {
       // ignore malformed payload
     }
   })
-  eventSource.addEventListener('log', (event) => {
+  source.addEventListener('log', (event) => {
     try {
       const line = JSON.parse((event as MessageEvent<string>).data) as InstanceConsoleLogLine
       appendLines([line])
@@ -304,26 +354,50 @@ async function connectStream() {
       // ignore malformed payload
     }
   })
-  eventSource.onerror = () => {
-    eventSource?.close()
+  source.onerror = () => {
+    if (eventSource !== source) {
+      return
+    }
+    source.close()
     eventSource = null
+    scheduleStreamReconnect()
   }
 }
 
+function clearStreamReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
+}
+
+function scheduleStreamReconnect() {
+  if (!realtimeActive || reconnectTimer || !appAccountStore.isLogin || !instanceId.value) {
+    return
+  }
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined
+    void connectStream()
+  }, 3000)
+}
+
 function startRealtimeJobs() {
+  realtimeActive = true
   if (!pollTimer) {
     pollTimer = setInterval(() => {
-      void refreshLogs()
+      void refreshLogs().catch(() => undefined)
     }, 5000)
   }
   if (!connectInfoTimer) {
     connectInfoTimer = setInterval(() => {
-      void loadConnectInfo()
+      void loadConnectInfo({ silent: true })
     }, 30000)
   }
 }
 
 function stopRealtimeJobs() {
+  realtimeActive = false
+  clearStreamReconnect()
   streamRequestVersion += 1
   eventSource?.close()
   eventSource = null
@@ -359,6 +433,21 @@ async function initInstanceConsole() {
   await loadConnectInfo()
   await loadMaintenanceAnnounce()
   await refreshLogs()
+}
+
+async function activateConsole() {
+  if (realtimeActive || initializing || !instanceId.value) {
+    return
+  }
+  initializing = true
+  try {
+    await initInstanceConsole()
+    void connectStream()
+    startRealtimeJobs()
+  }
+  finally {
+    initializing = false
+  }
 }
 
 async function sendCommand(command?: string) {
@@ -527,15 +616,15 @@ watch(instanceId, async (nextId, prevId) => {
   }
   stopRealtimeJobs()
   resetInstanceRuntimeState()
-  await initInstanceConsole()
-  void connectStream()
-  startRealtimeJobs()
+  await activateConsole()
 })
 
-onMounted(async () => {
-  await initInstanceConsole()
-  void connectStream()
-  startRealtimeJobs()
+onMounted(() => {
+  void activateConsole()
+})
+
+onActivated(() => {
+  void activateConsole()
 })
 
 onDeactivated(() => {

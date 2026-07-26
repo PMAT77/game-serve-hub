@@ -1,6 +1,18 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
-import type { InstanceConnectInfoDto, InstanceConsoleCommandShard } from '../../../../shared/contracts/console'
+import type {
+  InstanceConnectInfoDto,
+  InstanceConsoleLogsPayload,
+  InstanceConsoleLogFilter,
+  InstanceConsoleStreamTicketDto,
+} from '../../../../shared/contracts/console'
+import {
+  consoleCommandBodySchema,
+  consoleInstanceQuerySchema,
+  consoleLogsQuerySchema,
+  consoleStreamQuerySchema,
+  consoleStreamTicketRequestSchema,
+} from '../../../../shared/contracts/console'
 import type { ConsoleLogLine } from '../../shared/instance-runtime/console-log-store'
 import type { DbGameInstance } from '../../shared/db/index'
 import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
@@ -21,41 +33,6 @@ import { requirePermission, resolveAuthorizedContext } from '../system/auth'
 import { consoleStreamTicketStore } from './stream-ticket'
 
 const LOCAL_NODE_ID = 'local-node'
-
-type ConsoleLogFilter = 'all' | 'game' | 'panel'
-
-interface ConsoleLogsQuery {
-  instanceId?: string
-  afterId?: string
-  stream?: string
-}
-
-interface ConnectInfoQuery {
-  instanceId?: string
-}
-
-interface ConsoleInstanceBody {
-  instanceId?: string
-}
-
-interface ConsoleCommandBody {
-  instanceId?: string
-  command?: string
-  shard?: string
-}
-
-interface ConsoleStreamQuery {
-  instanceId?: string
-  streamTicket?: string
-}
-
-interface ConsoleStreamTicketBody {
-  instanceId?: string
-}
-
-function normalizeInstanceId(value: string | undefined) {
-  return value?.trim() ?? ''
-}
 
 type ResolveLocalInstanceResult =
   | { ok: false; error: ApiErrorResponse }
@@ -83,26 +60,7 @@ function writeSse(reply: FastifyReply, event: string, data: unknown) {
   reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
 }
 
-function normalizeCommandShard(value: string | undefined): InstanceConsoleCommandShard | undefined {
-  const raw = value?.trim().toLowerCase()
-  if (!raw || raw === 'master') {
-    return 'master'
-  }
-  if (raw === 'caves') {
-    return 'caves'
-  }
-  return undefined
-}
-
-function normalizeLogFilter(value: string | undefined): ConsoleLogFilter {
-  const raw = value?.trim().toLowerCase()
-  if (raw === 'game' || raw === 'panel') {
-    return raw
-  }
-  return 'all'
-}
-
-function filterConsoleLines(lines: ConsoleLogLine[], filter: ConsoleLogFilter): ConsoleLogLine[] {
+function filterConsoleLines(lines: ConsoleLogLine[], filter: InstanceConsoleLogFilter): ConsoleLogLine[] {
   if (filter === 'all') {
     return lines
   }
@@ -124,8 +82,11 @@ export function registerConsoleModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const query = request.query as ConnectInfoQuery
-    const instanceId = normalizeInstanceId(query.instanceId)
+    const query = consoleInstanceQuerySchema.safeParse(request.query)
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = query.data.instanceId
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       return resolved.error
@@ -153,26 +114,24 @@ export function registerConsoleModule(app: FastifyInstance) {
     }, request)
   })
 
-  app.get('/app/instance/console/logs', async (request): Promise<ApiSuccessResponse<{
-    lines: ReturnType<typeof instanceConsoleLogStore.listLogs>
-    running: boolean
-  }> | ApiErrorResponse> => {
+  app.get('/app/instance/console/logs', async (request): Promise<ApiSuccessResponse<InstanceConsoleLogsPayload> | ApiErrorResponse> => {
     const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       return authError
     }
-    const query = request.query as ConsoleLogsQuery
-    const instanceId = normalizeInstanceId(query.instanceId)
+    const query = consoleLogsQuerySchema.safeParse(request.query)
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = query.data.instanceId
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       return resolved.error
     }
-    const afterId = Number.parseInt(query.afterId ?? '0', 10)
-    const logFilter = normalizeLogFilter(query.stream)
     const running = await isInstanceContainerRunning(instanceId)
     const lines = filterConsoleLines(
-      instanceConsoleLogStore.listLogs(instanceId, Number.isNaN(afterId) ? 0 : afterId),
-      logFilter,
+      instanceConsoleLogStore.listLogs(instanceId, query.data.afterId),
+      query.data.stream,
     )
     return success({
       lines,
@@ -185,8 +144,11 @@ export function registerConsoleModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as ConsoleInstanceBody
-    const instanceId = normalizeInstanceId(body.instanceId)
+    const body = consoleInstanceQuerySchema.safeParse(request.body)
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = body.data.instanceId
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       return resolved.error
@@ -200,13 +162,11 @@ export function registerConsoleModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as ConsoleCommandBody
-    const instanceId = normalizeInstanceId(body.instanceId)
-    const command = body.command?.trim() ?? ''
-    const shard = normalizeCommandShard(body.shard)
-    if (!shard) {
-      return businessError('分片参数无效，仅支持 master 或 caves', request)
+    const body = consoleCommandBodySchema.safeParse(request.body)
+    if (!body.success) {
+      return businessError('请求参数无效', request)
     }
+    const { instanceId, command, shard } = body.data
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       return resolved.error
@@ -225,18 +185,18 @@ export function registerConsoleModule(app: FastifyInstance) {
     return success({ isSuccess: true }, request)
   })
 
-  app.post('/app/instance/console/stream-ticket', async (request): Promise<ApiSuccessResponse<{
-    ticket: string
-    expiresAt: string
-  }> | ApiErrorResponse> => {
+  app.post('/app/instance/console/stream-ticket', async (request): Promise<ApiSuccessResponse<InstanceConsoleStreamTicketDto> | ApiErrorResponse> => {
     const auth = await resolveAuthorizedContext(request, {
       permissions: NODE_INSTANCE_MANAGE_PERMISSION,
     })
     if (auth.error || !auth.context) {
       return auth.error ?? businessError('Unable to issue console stream authorization', request)
     }
-    const body = (request.body ?? {}) as ConsoleStreamTicketBody
-    const instanceId = normalizeInstanceId(body.instanceId)
+    const body = consoleStreamTicketRequestSchema.safeParse(request.body)
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = body.data.instanceId
     const resolved = await resolveLocalInstance(instanceId, request)
     if (!resolved.ok) {
       return resolved.error
@@ -252,10 +212,13 @@ export function registerConsoleModule(app: FastifyInstance) {
   })
 
   app.get('/app/instance/console/stream', async (request, reply) => {
-    const query = request.query as ConsoleStreamQuery
-    const instanceId = normalizeInstanceId(query.instanceId)
-    const streamTicket = query.streamTicket?.trim() ?? ''
-    if (!streamTicket || !consoleStreamTicketStore.consume(streamTicket, instanceId)) {
+    const query = consoleStreamQuerySchema.safeParse(request.query)
+    if (!query.success) {
+      reply.status(401).send(businessError('Console stream authorization expired or is invalid', request))
+      return
+    }
+    const { instanceId, streamTicket } = query.data
+    if (!consoleStreamTicketStore.consume(streamTicket, instanceId)) {
       reply.status(401).send(businessError('Console stream authorization expired or is invalid', request))
       return
     }

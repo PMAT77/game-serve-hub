@@ -1,4 +1,9 @@
 import type { FastifyInstance } from 'fastify'
+import type {
+  InstanceCheckUpdatesPayload,
+  InstanceUpdateCheckJobPayload,
+  InstanceUpdateStatusItem,
+} from '../../../../shared/contracts/instance'
 import fs from 'node:fs'
 import process from 'node:process'
 import type { InstallSeedDonor } from './install-seed'
@@ -26,28 +31,8 @@ const LOCAL_NODE_ID = 'local-node'
 
 let backgroundCheckRunning = false
 
-export interface InstanceUpdateStatusItem {
-  id: string
-  name: string
-  updateAvailable: boolean
-  localBuildId: string | null
-  remoteBuildId: string | null
-  updateCheckedAt: string | null
-  message?: string
-}
-
-export interface InstanceCheckUpdatesResponse {
-  items: InstanceUpdateStatusItem[]
-  updateAvailableCount: number
-}
-
-export interface InstanceUpdateCheckJobStatus {
-  checking: boolean
-  startedAt: string | null
-  finishedAt: string | null
-  result: InstanceCheckUpdatesResponse | null
-  error: string | null
-}
+export type InstanceCheckUpdatesResponse = InstanceCheckUpdatesPayload
+export type InstanceUpdateCheckJobStatus = InstanceUpdateCheckJobPayload
 
 let updateCheckJobStatus: InstanceUpdateCheckJobStatus = {
   checking: false,

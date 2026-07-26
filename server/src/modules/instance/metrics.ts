@@ -1,5 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import { instanceIdsBodySchema } from '../../../../shared/contracts/instance'
+import type {
+  InstanceIdsBody,
+  InstanceMetricsPayload,
+  InstanceRuntimeMetrics,
+} from '../../../../shared/contracts/instance'
 import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import type { DbGameInstance } from '../../shared/db/index'
 import {
@@ -12,20 +18,7 @@ import { requirePermission } from '../system/auth'
 
 const LOCAL_NODE_ID = 'local-node'
 
-export interface InstanceRuntimeMetrics {
-  cpuUsageRate: number | null
-  memoryMb: number | null
-  uptimeSeconds: number | null
-}
-
-export interface InstanceMetricsResponse {
-  items: Record<string, InstanceRuntimeMetrics | null>
-  collectedAt: string
-}
-
-interface InstanceMetricsBody {
-  ids?: string[]
-}
+export type InstanceMetricsResponse = InstanceMetricsPayload
 
 function computeUptimeSeconds(startedAt: string | null | undefined): number | null {
   if (!startedAt) {
@@ -69,7 +62,7 @@ async function collectMetricsForInstance(instance: DbGameInstance): Promise<Inst
 
 export async function handleInstanceMetrics(
   request: FastifyRequest,
-  body: InstanceMetricsBody,
+  body: InstanceIdsBody,
 ): Promise<ApiSuccessResponse<InstanceMetricsResponse> | ApiErrorResponse> {
   const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
   if (authError) {
@@ -117,6 +110,10 @@ export async function handleInstanceMetrics(
 
 export function registerInstanceMetricsRoute(app: FastifyInstance) {
   app.post('/app/instance/metrics', async (request) => {
-    return handleInstanceMetrics(request, (request.body ?? {}) as InstanceMetricsBody)
+    const body = instanceIdsBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    return handleInstanceMetrics(request, body.data)
   })
 }

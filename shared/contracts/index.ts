@@ -5,4 +5,6 @@
 export * from './api'
 export * from './cluster'
 export * from './console'
+export * from './instance'
+export * from './maintenance'
 export * from './mod'

@@ -1,34 +1,83 @@
-import type { ClusterNetworkMode } from './cluster'
+import { z } from 'zod'
+import { instanceIdSchema } from './instance'
 
-/** POST /app/instance/console/command 目标分片 */
-export type InstanceConsoleCommandShard = 'master' | 'caves'
+export { instanceIdSchema }
 
-/** 控制台命令可下发分片状态（connect-info 附带，供 UI 禁用洞穴选项） */
-export interface InstanceConsoleShardStatus {
-  masterRunning: boolean
-  cavesConfigured: boolean
-  cavesRunning: boolean
-}
+export const instanceConsoleCommandShardSchema = z.enum(['master', 'caves'])
+export type InstanceConsoleCommandShard = z.infer<typeof instanceConsoleCommandShardSchema>
 
-/** GET /app/instance/connect-info 响应体 */
-export interface InstanceConnectInfoDto {
-  running: boolean
-  /** 公网/对外推荐直连命令 */
-  command: string
-  /** 游戏与服务器在同一台电脑时使用（127.0.0.1） */
-  localCommand: string
-  /** 局域网内其他设备使用（192.168.x.x 等，视宿主机网卡而定） */
-  lanCommand: string | null
-  host: string
-  port: number
-  /** 直连需在宿主机放行的 UDP 端口（含 Steam 辅助端口） */
-  udpPorts: number[]
-  roomName: string
-  networkMode: ClusterNetworkMode
-  networkModeLabel: string
-  hasPassword: boolean
-  hostSourceLabel: string
-  isPlaceholder: boolean
-  hints: string[]
-  consoleShards: InstanceConsoleShardStatus
-}
+export const instanceConsoleLogFilterSchema = z.enum(['all', 'game', 'panel'])
+export type InstanceConsoleLogFilter = z.infer<typeof instanceConsoleLogFilterSchema>
+
+export const instanceConsoleLogStreamSchema = z.enum(['stdout', 'stderr', 'system'])
+export type InstanceConsoleLogStream = z.infer<typeof instanceConsoleLogStreamSchema>
+
+export const instanceConsoleLogShardSchema = z.enum(['master', 'caves'])
+export type InstanceConsoleLogShard = z.infer<typeof instanceConsoleLogShardSchema>
+
+export const instanceConsoleLogLineSchema = z.object({
+  id: z.number().int().nonnegative(),
+  stream: instanceConsoleLogStreamSchema,
+  text: z.string(),
+  at: z.string(),
+  shard: instanceConsoleLogShardSchema.nullable().optional(),
+})
+export type InstanceConsoleLogLineDto = z.infer<typeof instanceConsoleLogLineSchema>
+
+export const instanceConsoleShardStatusSchema = z.object({
+  masterRunning: z.boolean(),
+  cavesConfigured: z.boolean(),
+  cavesRunning: z.boolean(),
+})
+export type InstanceConsoleShardStatus = z.infer<typeof instanceConsoleShardStatusSchema>
+
+export const instanceConnectInfoSchema = z.object({
+  running: z.boolean(),
+  command: z.string(),
+  localCommand: z.string(),
+  lanCommand: z.string().nullable(),
+  host: z.string(),
+  port: z.number().int().min(1).max(65535),
+  udpPorts: z.array(z.number().int().min(1).max(65535)),
+  roomName: z.string(),
+  networkMode: z.enum(['offline', 'lan_only', 'public']),
+  networkModeLabel: z.string(),
+  hasPassword: z.boolean(),
+  hostSourceLabel: z.string(),
+  isPlaceholder: z.boolean(),
+  hints: z.array(z.string()),
+  consoleShards: instanceConsoleShardStatusSchema,
+})
+export type InstanceConnectInfoDto = z.infer<typeof instanceConnectInfoSchema>
+
+export const instanceConsoleLogsPayloadSchema = z.object({
+  lines: z.array(instanceConsoleLogLineSchema),
+  running: z.boolean(),
+})
+export type InstanceConsoleLogsPayload = z.infer<typeof instanceConsoleLogsPayloadSchema>
+
+export const consoleInstanceQuerySchema = z.object({
+  instanceId: instanceIdSchema,
+})
+
+export const consoleLogsQuerySchema = consoleInstanceQuerySchema.extend({
+  afterId: z.coerce.number().int().min(0).default(0),
+  stream: instanceConsoleLogFilterSchema.default('all'),
+})
+
+export const consoleCommandBodySchema = consoleInstanceQuerySchema.extend({
+  command: z.string().trim().min(1).max(4096),
+  shard: instanceConsoleCommandShardSchema.default('master'),
+})
+
+export const consoleStreamTicketRequestSchema = consoleInstanceQuerySchema
+
+export const consoleStreamTicketSchema = z.object({
+  ticket: z.string().min(1),
+  expiresAt: z.string().datetime({ offset: true }),
+})
+export type InstanceConsoleStreamTicketDto = z.infer<typeof consoleStreamTicketSchema>
+
+export const consoleStreamQuerySchema = consoleInstanceQuerySchema.extend({
+  streamTicket: z.string().trim().min(1),
+})

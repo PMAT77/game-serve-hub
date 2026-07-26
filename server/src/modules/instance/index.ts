@@ -1,5 +1,17 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
+import {
+  createInstanceBodySchema,
+  instanceActionBodySchema,
+  instanceIdsBodySchema,
+  instanceInstallLogQuerySchema,
+  instanceListQuerySchema,
+} from '../../../../shared/contracts/instance'
+import type {
+  InstanceInstallLogPayload,
+  InstanceListQuery,
+  InstallableGameItem,
+} from '../../../../shared/contracts/instance'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -76,49 +88,6 @@ import {
 } from './update-check'
 import { requirePermission } from '../system/auth'
 
-interface InstanceListQuery {
-  nodeId?: string
-  status?: 'pending_install' | 'running' | 'stopped' | 'installing' | 'error'
-  keyword?: string
-}
-
-interface CreateInstanceBody {
-  nodeId?: string
-  name?: string
-  gameCode?: string
-  installPath?: string
-  configPath?: string
-  queryPort?: number
-  gamePort?: number
-  rconPort?: number
-}
-
-interface InstanceActionBody {
-  id?: string
-  force?: boolean
-  /** 为 true 时在同节点端口冲突下自动分配新端口块并写回配置 */
-  autoAllocatePorts?: boolean
-}
-
-interface InstallLogQuery {
-  id?: string
-}
-
-interface InstallableGameItem {
-  appId: string
-  name: string
-  steamcmdLoginMode?: 'anonymous' | 'account' | 'account-fallback'
-}
-
-type InstallLogSource = 'install_log' | 'status_summary' | 'empty'
-
-interface InstallLogResponse {
-  content: string
-  status: 'success' | 'failed' | 'running' | 'unknown'
-  updatedAt: string | null
-  source: InstallLogSource
-}
-
 const LOCAL_NODE_ID = 'local-node'
 const DANGEROUS_WINDOWS_PATHS = [
   'Windows',
@@ -137,10 +106,6 @@ const INSTALLABLE_GAMES: InstallableGameItem[] = [
 
 async function verifyAuthorized(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
   return requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
-}
-
-function normalizeInstanceId(value: string | undefined) {
-  return value?.trim() ?? ''
 }
 
 function normalizePort(value: number | undefined): number | null {
@@ -308,7 +273,13 @@ export function registerInstanceModule(app: FastifyInstance) {
     sendInstanceContainerCommand,
   })
   registerInstanceMetricsRoute(app)
-  app.post('/app/instance/list', async request => handleListInstances(app, request, (request.body ?? {}) as InstanceListQuery))
+  app.post('/app/instance/list', async (request) => {
+    const body = instanceListQuerySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    return handleListInstances(app, request, body.data)
+  })
 
   app.get('/app/instance/games', async (request): Promise<ApiSuccessResponse<InstallableGameItem[]> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
@@ -318,13 +289,16 @@ export function registerInstanceModule(app: FastifyInstance) {
     return success(INSTALLABLE_GAMES, request)
   })
 
-  app.get('/app/instance/install-log', async (request): Promise<ApiSuccessResponse<InstallLogResponse> | ApiErrorResponse> => {
+  app.get('/app/instance/install-log', async (request): Promise<ApiSuccessResponse<InstanceInstallLogPayload> | ApiErrorResponse> => {
     const authError = await verifyAuthorized(request)
     if (authError) {
       return authError
     }
-    const query = (request.query ?? {}) as InstallLogQuery
-    const id = normalizeInstanceId(query.id)
+    const query = instanceInstallLogQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const id = query.data.id
     if (!id) {
       return businessError('实例 ID 不能为空', request)
     }
@@ -334,7 +308,7 @@ export function registerInstanceModule(app: FastifyInstance) {
     }
     const fileContent = readInstallLogContent(getInstallLogsDirPath(), id)
     if (fileContent) {
-      return success<InstallLogResponse>({
+      return success<InstanceInstallLogPayload>({
         content: formatInstallLogContent(fileContent),
         status: mapDbInstallLogStatusToResponse(instance.installLogStatus, instance.status),
         updatedAt: instance.installLogUpdatedAt ?? instance.updatedAt,
@@ -342,7 +316,7 @@ export function registerInstanceModule(app: FastifyInstance) {
       }, request)
     }
     if (isInstallJobActive(id)) {
-      return success<InstallLogResponse>({
+      return success<InstanceInstallLogPayload>({
         content: '安装任务已启动，等待 SteamCMD 输出...',
         status: 'running',
         updatedAt: instance.installLogUpdatedAt ?? instance.updatedAt,
@@ -354,14 +328,14 @@ export function registerInstanceModule(app: FastifyInstance) {
       .join('\n')
       .trim()
     if (!summaryLines) {
-      return success<InstallLogResponse>({
+      return success<InstanceInstallLogPayload>({
         content: '暂无 SteamCMD 安装输出。',
         status: 'unknown',
         updatedAt: instance.updatedAt,
         source: 'empty',
       }, request)
     }
-    return success<InstallLogResponse>({
+    return success<InstanceInstallLogPayload>({
       content: formatInstallLogContent([
         '【最近状态摘要，非完整 SteamCMD 输出】',
         '',
@@ -378,10 +352,14 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as CreateInstanceBody
-    const nodeId = body.nodeId?.trim() ?? ''
-    const name = body.name?.trim() ?? ''
-    const gameCode = body.gameCode?.trim() ?? ''
+    const parsed = createInstanceBodySchema.safeParse(request.body ?? {})
+    if (!parsed.success) {
+      return businessError('请求参数无效', request)
+    }
+    const body = parsed.data
+    const nodeId = body.nodeId
+    const name = body.name
+    const gameCode = body.gameCode
     const manualInstallPath = normalizeInstallPath(body.installPath)
     if (!nodeId) {
       return businessError('请选择节点', request)
@@ -490,11 +468,12 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as { ids?: string[] }
+    const body = instanceIdsBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
     const steamcmdCommand = await resolveSteamcmdCommandForUpdateCheck()
-    const instanceIds = Array.isArray(body.ids)
-      ? body.ids.map(id => (typeof id === 'string' ? id.trim() : '')).filter(Boolean)
-      : undefined
+    const instanceIds = body.data.ids
     const status = enqueueInstanceUpdateCheck({
       steamcmdCommand,
       instanceIds,
@@ -517,8 +496,11 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as InstanceActionBody
-    const id = normalizeInstanceId(body.id)
+    const body = instanceActionBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const id = body.data.id
     if (!id) {
       return businessError('实例 ID 不能为空', request)
     }
@@ -559,7 +541,7 @@ export function registerInstanceModule(app: FastifyInstance) {
       status: current.status,
       gameCode: current.gameCode,
       updateAvailable: current.updateAvailable,
-    }, installPath, body.force)
+    }, installPath, body.data.force)
     const localBuildId = readLocalBuildId(installPath, current.gameCode)
     if (
       !forceReinstall
@@ -635,8 +617,11 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as InstanceActionBody
-    const id = normalizeInstanceId(body.id)
+    const body = instanceActionBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const id = body.data.id
     if (!id) {
       return businessError('实例 ID 不能为空', request)
     }
@@ -691,8 +676,11 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as InstanceActionBody
-    const id = normalizeInstanceId(body.id)
+    const body = instanceActionBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const id = body.data.id
     if (!id) {
       return businessError('实例 ID 不能为空', request)
     }
@@ -787,7 +775,7 @@ export function registerInstanceModule(app: FastifyInstance) {
         gameCode: current.gameCode,
         installPath,
         gamePort: current.gamePort,
-        autoAllocatePorts: body.autoAllocatePorts === true,
+        autoAllocatePorts: body.data.autoAllocatePorts === true,
       })
       if (!portResult.ok) {
         if (portResult.kind === 'port_conflict') {
@@ -908,8 +896,11 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as InstanceActionBody
-    const id = normalizeInstanceId(body.id)
+    const body = instanceActionBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const id = body.data.id
     if (!id) {
       return businessError('实例 ID 不能为空', request)
     }
@@ -956,11 +947,14 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as InstanceActionBody
-    const id = normalizeInstanceId(body.id)
+    const body = instanceActionBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const id = body.data.id
     const { restartInstanceCore } = await import('./restart-instance-core.ts')
     return restartInstanceCore(app, request, id, {
-      autoAllocatePorts: body.autoAllocatePorts === true,
+      autoAllocatePorts: body.data.autoAllocatePorts === true,
     })
   })
 
@@ -969,8 +963,11 @@ export function registerInstanceModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = (request.body ?? {}) as InstanceActionBody
-    const id = normalizeInstanceId(body.id)
+    const body = instanceActionBodySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const id = body.data.id
     if (!id) {
       return businessError('实例 ID 不能为空', request)
     }

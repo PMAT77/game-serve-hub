@@ -48,6 +48,7 @@ export interface ContainerInspect {
   id: string
   name: string
   running: boolean
+  pid?: number
   startedAt?: string
 }
 

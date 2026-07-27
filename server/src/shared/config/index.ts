@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { loadEnv } from 'vite'
 import { z } from 'zod'
+import { loadModeEnv } from './env-file'
 
 const envSchema = z.object({
   SERVER_HOST: z.string().trim().min(1).default('0.0.0.0'),
@@ -21,6 +22,10 @@ const envSchema = z.object({
   GSH_GAME_DST_IMAGE: z.string().trim().optional(),
   GSH_STEAMCMD_IMAGE: z.string().trim().optional(),
   GSH_EDITION: z.string().trim().optional(),
+  GSH_RUNTIME_MODE: z.enum(['docker', 'native']).default('docker'),
+  GSH_NATIVE_RUNTIME_DIR: z.string().trim().optional(),
+  GSH_NATIVE_STEAMCMD_PATH: z.string().trim().optional(),
+  GSH_NATIVE_SYSTEMD_UNIT_DIR: z.string().trim().optional(),
   PANEL_IMAGE: z.string().trim().optional(),
   GSH_STACK_DIR: z.string().trim().optional(),
   GSH_COMPOSE_FILES: z.string().trim().optional(),
@@ -64,6 +69,10 @@ export interface ServerConfig {
   gameDstImage: string
   steamcmdImage: string
   edition: string
+  runtimeMode: 'docker' | 'native'
+  nativeRuntimeDir: string
+  nativeSteamcmdPath: string
+  nativeSystemdUnitDir: string
   panelImage: string
   stackDir: string
   composeFiles: string[]
@@ -80,7 +89,7 @@ export interface ServerConfig {
 export function loadServerConfig(): ServerConfig {
   const mode = resolveMode()
   const serverRootDir = getServerRootDir()
-  const env = loadEnv(mode, serverRootDir, '')
+  const env = loadModeEnv(serverRootDir, mode)
   const merged = {
     SERVER_HOST: process.env.SERVER_HOST ?? env.SERVER_HOST,
     SERVER_PORT: process.env.SERVER_PORT ?? env.SERVER_PORT,
@@ -96,6 +105,10 @@ export function loadServerConfig(): ServerConfig {
     GSH_GAME_DST_IMAGE: process.env.GSH_GAME_DST_IMAGE ?? env.GSH_GAME_DST_IMAGE,
     GSH_STEAMCMD_IMAGE: process.env.GSH_STEAMCMD_IMAGE ?? env.GSH_STEAMCMD_IMAGE,
     GSH_EDITION: process.env.GSH_EDITION ?? env.GSH_EDITION,
+    GSH_RUNTIME_MODE: process.env.GSH_RUNTIME_MODE ?? env.GSH_RUNTIME_MODE,
+    GSH_NATIVE_RUNTIME_DIR: process.env.GSH_NATIVE_RUNTIME_DIR ?? env.GSH_NATIVE_RUNTIME_DIR,
+    GSH_NATIVE_STEAMCMD_PATH: process.env.GSH_NATIVE_STEAMCMD_PATH ?? env.GSH_NATIVE_STEAMCMD_PATH,
+    GSH_NATIVE_SYSTEMD_UNIT_DIR: process.env.GSH_NATIVE_SYSTEMD_UNIT_DIR ?? env.GSH_NATIVE_SYSTEMD_UNIT_DIR,
     PANEL_IMAGE: process.env.PANEL_IMAGE ?? env.PANEL_IMAGE,
     GSH_STACK_DIR: process.env.GSH_STACK_DIR ?? env.GSH_STACK_DIR,
     GSH_COMPOSE_FILES: process.env.GSH_COMPOSE_FILES ?? env.GSH_COMPOSE_FILES,
@@ -132,17 +145,21 @@ export function loadServerConfig(): ServerConfig {
       : 'unix:///var/run/docker.sock'),
     instancesRoot: path.resolve(parsed.GSH_INSTANCES_ROOT || defaultInstancesRoot),
     backupsRoot: path.resolve(parsed.GSH_BACKUPS_ROOT || defaultBackupsRoot),
-    gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/gameserverhub/game-server-hub-dst:v0.1.4',
-    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'ghcr.io/gameserverhub/steamcmd-base:v0.1.4',
+    gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/pmat77/game-server-hub-dst:v0.1.4',
+    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'ghcr.io/pmat77/steamcmd-base:v0.1.4',
     edition: parsed.GSH_EDITION || 'community',
-    panelImage: parsed.PANEL_IMAGE || 'ghcr.io/gameserverhub/game-server-hub:v0.1.4',
+    runtimeMode: parsed.GSH_RUNTIME_MODE,
+    nativeRuntimeDir: path.resolve(parsed.GSH_NATIVE_RUNTIME_DIR || path.join(defaultInstancesRoot, '..', 'runtime')),
+    nativeSteamcmdPath: path.resolve(parsed.GSH_NATIVE_STEAMCMD_PATH || '/opt/game-server-hub/runtime/steamcmd/steamcmd.sh'),
+    nativeSystemdUnitDir: path.resolve(parsed.GSH_NATIVE_SYSTEMD_UNIT_DIR || path.join(os.homedir(), '.config/systemd/user')),
+    panelImage: parsed.PANEL_IMAGE || 'ghcr.io/pmat77/game-server-hub:v0.1.4',
     stackDir: parsed.GSH_STACK_DIR?.trim() || '',
     composeFiles: (parsed.GSH_COMPOSE_FILES?.trim() || 'docker-compose.yml:docker-compose.bind.yml')
       .split(':')
       .map(item => item.trim())
       .filter(Boolean),
     panelContainerName: parsed.GSH_PANEL_CONTAINER_NAME?.trim() || 'game-server-hub-panel',
-    githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'GameServerHub/game-server-hub',
+    githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'PMAT77/game-serve-hub',
     releaseVersion: parsed.GSH_RELEASE_VERSION?.trim() || '',
     buildSha: parsed.GSH_BUILD_SHA?.trim() || '',
     syncAdminPasswordFromEnv: isTruthyEnv(parsed.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV),
@@ -210,10 +227,11 @@ export function resolveInstallLogsDir(dbPath: string) {
   return path.join(path.dirname(dbPath), 'install-logs')
 }
 
-export function ensureServerRuntimeDirs(config: Pick<ServerConfig, 'dbPath' | 'logDir' | 'instancesRoot' | 'backupsRoot'>) {
+export function ensureServerRuntimeDirs(config: Pick<ServerConfig, 'dbPath' | 'logDir' | 'instancesRoot' | 'backupsRoot' | 'nativeRuntimeDir'>) {
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true })
   fs.mkdirSync(config.logDir, { recursive: true })
   fs.mkdirSync(config.instancesRoot, { recursive: true })
   fs.mkdirSync(config.backupsRoot, { recursive: true })
+  fs.mkdirSync(config.nativeRuntimeDir, { recursive: true })
   fs.mkdirSync(resolveInstallLogsDir(config.dbPath), { recursive: true })
 }

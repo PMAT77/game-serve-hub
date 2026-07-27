@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { getCachedDockerStatus, startDockerStatusRefreshLoop } from '../../infra/docker'
+import { getRuntimeMode, startRuntimeStatusRefreshLoop } from '../../infra/runtime'
 import { execPowerShellAsync } from '../../infra/powershell'
 import {
   clampPercent,
@@ -332,7 +333,12 @@ function startSlowMetricsRefreshLoops() {
     return
   }
   slowMetricsRefreshLoopsStarted = true
-  startDockerStatusRefreshLoop()
+  if (getRuntimeMode() === 'docker') {
+    startDockerStatusRefreshLoop()
+  }
+  else {
+    startRuntimeStatusRefreshLoop()
+  }
   if (process.platform === 'win32') {
     scheduleWindowsQueueRefresh(true)
     const queueTimer = setInterval(scheduleWindowsQueueRefresh, WINDOWS_QUEUE_CACHE_MS, true)

@@ -9,6 +9,8 @@ import { DST_CLUSTER_NAME, DST_CONF_DIR, DST_STORAGE_DIR } from './constants'
 import {
   DOCKER_SHARD_BIND_IP,
   ensureDockerShardInterconnectConfig,
+  ensureNativeShardInterconnectConfig,
+  NATIVE_SHARD_LOOPBACK_IP,
 } from './shard-network-config'
 
 const tempDirs: string[] = []
@@ -17,6 +19,23 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+describe('ensureNativeShardInterconnectConfig', () => {
+  it('switches a Docker shard config back to loopback', () => {
+    const installPath = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-shard-native-'))
+    tempDirs.push(installPath)
+    writeClusterIni(installPath, true, DOCKER_SHARD_BIND_IP, 'gsh-abc-master')
+
+    assert.equal(ensureNativeShardInterconnectConfig(installPath), true)
+    const content = fs.readFileSync(
+      path.join(installPath, DST_STORAGE_DIR, DST_CONF_DIR, DST_CLUSTER_NAME, 'cluster.ini'),
+      'utf8',
+    )
+    assert.match(content, new RegExp(`bind_ip = ${NATIVE_SHARD_LOOPBACK_IP.replaceAll('.', '\\.')}`))
+    assert.match(content, new RegExp(`master_ip = ${NATIVE_SHARD_LOOPBACK_IP.replaceAll('.', '\\.')}`))
+    assert.equal(ensureNativeShardInterconnectConfig(installPath), false)
+  })
 })
 
 function writeClusterIni(installPath: string, shardEnabled: boolean, bindIp = '127.0.0.1', masterIp = '127.0.0.1') {

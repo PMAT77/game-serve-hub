@@ -1,6 +1,6 @@
 services:
   panel:
-    image: ${PANEL_IMAGE:-ghcr.io/gameserverhub/game-server-hub:v0.1.4}
+    image: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.1.4}
     build:
       context: .
       dockerfile: Dockerfile
@@ -20,9 +20,9 @@ services:
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
-      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/gameserverhub/game-server-hub:v0.1.4}
-      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/gameserverhub/game-server-hub-dst:v0.1.4}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/gameserverhub/steamcmd-base:v0.1.4}
+      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.1.4}
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub-dst:v0.1.4}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/steamcmd-base:v0.1.4}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB:-}
       GSH_STEAMCMD_APP_INFO_MEMORY_MB: ${GSH_STEAMCMD_APP_INFO_MEMORY_MB:-}
@@ -43,9 +43,10 @@ services:
       GSH_INSTALL_SEED_ENABLED: ${GSH_INSTALL_SEED_ENABLED:-}
       GSH_INSTALL_DEFER_DST_IMAGE_PULL: ${GSH_INSTALL_DEFER_DST_IMAGE_PULL:-}
       GSH_EDITION: ${GSH_EDITION:-community}
+      GSH_RUNTIME_MODE: docker
       GSH_STACK_DIR: ${GSH_STACK_DIR:-/opt/game-server-hub}
       GSH_COMPOSE_FILES: ${GSH_COMPOSE_FILES:-docker-compose.yml:docker-compose.bind.yml}
-      GSH_GITHUB_REPO: ${GSH_GITHUB_REPO:-GameServerHub/game-server-hub}
+      GSH_GITHUB_REPO: ${GSH_GITHUB_REPO:-PMAT77/game-serve-hub}
     volumes:
       - gsh-data:/app/data
       - gsh-logs:/app/logs
@@ -54,7 +55,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   steamcmd:
-    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/gameserverhub/steamcmd-base:v0.1.4}
+    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/steamcmd-base:v0.1.4}
     profiles:
       - tools
     entrypoint: ["/bin/true"]

@@ -8,6 +8,7 @@ import {
 } from './steamcmd-container-resources'
 
 export interface ResourceSnapshot {
+  runtimeMode: 'docker' | 'native'
   timestamp: string
   phase: string
   instanceId: string
@@ -88,12 +89,13 @@ async function collectManagedSteamcmdStats(docker: Docker): Promise<ResourceSnap
 }
 
 export async function buildInstallResourceSnapshot(
-  docker: Docker,
+  docker: Docker | null,
   input: { instanceId: string, phase: string, extra?: Record<string, unknown> },
 ): Promise<ResourceSnapshot> {
   let dockerMemTotalMb: number | null = null
   let dockerContainersRunning: number | null = null
-  try {
+  if (docker) {
+    try {
     const info = await docker.info()
     if (typeof info.MemTotal === 'number') {
       dockerMemTotalMb = Math.round(info.MemTotal / 1024 / 1024)
@@ -101,15 +103,17 @@ export async function buildInstallResourceSnapshot(
     if (typeof info.ContainersRunning === 'number') {
       dockerContainersRunning = info.ContainersRunning
     }
-  }
-  catch {
-    // ignore
+    }
+    catch {
+      // ignore
+    }
   }
 
-  const containers = await collectManagedSteamcmdStats(docker)
-  const limits = resolveSteamcmdContainerMemoryLimits('app-update')
+  const containers = docker ? await collectManagedSteamcmdStats(docker) : []
+  const limits = docker ? resolveSteamcmdContainerMemoryLimits('app-update') : undefined
 
   return {
+    runtimeMode: docker ? 'docker' : 'native',
     timestamp: new Date().toISOString(),
     phase: input.phase,
     instanceId: input.instanceId,
@@ -119,7 +123,7 @@ export async function buildInstallResourceSnapshot(
     dockerMemTotalMb,
     dockerContainersRunning,
     steamcmdJobsRunning: containers.length,
-    steamcmdMemoryLimit: formatSteamcmdMemoryLimitForLog(limits),
+    steamcmdMemoryLimit: docker ? formatSteamcmdMemoryLimitForLog(limits) : '宿主机/systemd 策略',
     containers,
     extra: input.extra,
   }
@@ -128,10 +132,17 @@ export async function buildInstallResourceSnapshot(
 export function formatResourceSnapshotLines(snapshot: ResourceSnapshot): string[] {
   const lines = [
     `[资源快照 ${snapshot.phase}] ${snapshot.timestamp}`,
-    `面板容器 MemAvailable: ${snapshot.panelMemAvailableMb ?? '?'} / ${snapshot.panelMemTotalMb ?? '?'} MiB，SwapFree: ${snapshot.panelSwapFreeMb ?? '?'} MiB`,
-    `Docker 可见 MemTotal: ${snapshot.dockerMemTotalMb ?? '?'} MiB，运行中容器: ${snapshot.dockerContainersRunning ?? '?'}`,
-    `SteamCMD 子容器内存上限: ${snapshot.steamcmdMemoryLimit}，当前运行中 SteamCMD 任务: ${snapshot.steamcmdJobsRunning}`,
+    `宿主机 MemAvailable: ${snapshot.panelMemAvailableMb ?? '?'} / ${snapshot.panelMemTotalMb ?? '?'} MiB，SwapFree: ${snapshot.panelSwapFreeMb ?? '?'} MiB`,
   ]
+  if (snapshot.runtimeMode === 'docker') {
+    lines.push(
+      `Docker 可见 MemTotal: ${snapshot.dockerMemTotalMb ?? '?'} MiB，运行中容器: ${snapshot.dockerContainersRunning ?? '?'}`,
+      `SteamCMD 子容器内存上限: ${snapshot.steamcmdMemoryLimit}，当前运行中 SteamCMD 任务: ${snapshot.steamcmdJobsRunning}`,
+    )
+  }
+  else {
+    lines.push('SteamCMD 直接运行在宿主机，由面板任务队列管理')
+  }
   for (const row of snapshot.containers) {
     lines.push(
       `  - ${row.name}: ${row.memoryUsageMb ?? '?'} / ${row.memoryLimitMb ?? '?'} MiB`,
@@ -145,7 +156,7 @@ export function formatResourceSnapshotLines(snapshot: ResourceSnapshot): string[
 
 export async function appendInstallResourceSnapshot(
   installLogsDir: string,
-  docker: Docker,
+  docker: Docker | null,
   input: { instanceId: string, phase: string, extra?: Record<string, unknown> },
 ): Promise<string[]> {
   ensureInstallLogsDir(installLogsDir)

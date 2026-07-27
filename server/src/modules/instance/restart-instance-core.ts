@@ -22,7 +22,7 @@ export interface RestartInstanceCoreOptions {
 async function requireContainerRuntime(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
   const runtimeReady = await ensureContainerRuntimeReady()
   if (!runtimeReady.ok) {
-    return businessError(runtimeReady.message ?? '容器运行时未就绪', request)
+    return businessError(runtimeReady.message ?? '游戏运行时未就绪', request)
   }
   return undefined
 }

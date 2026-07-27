@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { SystemInfoData } from './types'
-import { NProgress, NSkeleton } from 'naive-ui'
+import { NProgress, NSkeleton, NSpace } from 'naive-ui'
+import { computed } from 'vue'
 
 defineOptions({
-  name: 'DockerInfoCard',
+  name: 'RuntimeInfoCard',
 })
 
 const props = withDefaults(defineProps<{
@@ -14,7 +15,11 @@ const props = withDefaults(defineProps<{
   mode: 'info',
 })
 
-const isRunning = computed(() => props.info?.dockerStatus === 'running')
+const runtimeMode = computed(() => props.info?.runtimeMode ?? 'docker')
+const runtimeStatus = computed(() => props.info?.runtimeStatus ?? props.info?.dockerStatus ?? 'stopped')
+const runtimeLabel = computed(() => runtimeMode.value === 'native' ? 'systemd' : 'Docker')
+const runtimeDescription = computed(() => runtimeMode.value === 'native' ? '原生进程运行时' : '容器运行时')
+const isRunning = computed(() => runtimeStatus.value === 'running')
 const statusPercent = computed(() => (isRunning.value ? 100 : 0))
 const statusColor = computed(() => (isRunning.value ? '#10b981' : '#f59e0b'))
 const statusText = computed(() => (isRunning.value ? '运行中' : '未运行'))
@@ -22,19 +27,19 @@ const statusClass = computed(() => (isRunning.value ? 'text-emerald-600' : 'text
 </script>
 
 <template>
-  <div v-if="mode === 'info'" class="p-3 border rounded-lg">
+  <div v-if="props.mode === 'info'" class="p-3 border rounded-lg">
     <div class="text-xs text-muted-foreground mb-2">
-      Docker 状态
+      {{ runtimeLabel }} 状态
     </div>
     <div class="font-semibold" :class="statusClass">
-      <NSkeleton v-if="loading" text animated :sharp="false" width="72px" />
+      <NSkeleton v-if="props.loading" text animated :sharp="false" width="72px" />
       <template v-else>
         {{ statusText }}
       </template>
     </div>
   </div>
 
-  <div v-if="mode === 'charts'" class="p-3 rounded-lg flex flex-col cursor-pointer items-center justify-center">
+  <div v-if="props.mode === 'charts'" class="p-3 rounded-lg flex flex-col cursor-pointer items-center justify-center">
     <NProgress
       type="circle"
       :percentage="statusPercent"
@@ -44,15 +49,15 @@ const statusClass = computed(() => (isRunning.value ? 'text-emerald-600' : 'text
       :offset-degree="180"
       :show-indicator="true"
     >
-      <n-space vertical align="center">
+      <NSpace vertical align="center">
         <span class="text-lg text-muted-foreground">
-          {{ loading ? '--' : statusText }}
+          {{ props.loading ? '--' : statusText }}
         </span>
         <span class="text-xs text-muted-foreground">
-          Docker
+          {{ runtimeLabel }}
         </span>
-      </n-space>
+      </NSpace>
     </NProgress>
-    <span class="text-xs text-muted-foreground mt-4">容器运行时</span>
+    <span class="text-xs text-muted-foreground mt-4">{{ runtimeDescription }}</span>
   </div>
 </template>

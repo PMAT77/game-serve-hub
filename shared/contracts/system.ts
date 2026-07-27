@@ -51,7 +51,8 @@ export const steamcmdConfigRequestSchema = steamcmdConfigPayloadSchema.partial()
 export type SteamcmdConfigRequest = z.infer<typeof steamcmdConfigRequestSchema>
 
 export const steamcmdConfigResponseSchema = steamcmdConfigPayloadSchema.extend({
-  runtimeMode: z.literal('container'),
+  runtimeMode: z.enum(['docker', 'native']),
+  runtimeStatus: z.enum(['running', 'stopped']),
   steamcmdImage: z.string(),
   gameDstImage: z.string(),
   isDockerAvailable: z.boolean(),
@@ -127,6 +128,7 @@ const gitHubReleaseSummarySchema = z.object({
 export type GitHubReleaseSummary = z.infer<typeof gitHubReleaseSummarySchema>
 
 export const panelUpdateStatusSchema = z.object({
+  runtimeMode: z.enum(['docker', 'native']),
   panel: hubImageUpdateInfoSchema,
   dst: hubImageUpdateInfoSchema,
   release: gitHubReleaseSummarySchema.nullable(),

@@ -7,7 +7,7 @@ ARG STEAMCMD_ARCHIVE_SHA256=
 
 LABEL org.opencontainers.image.title="Game Server Hub SteamCMD runtime"
 LABEL org.opencontainers.image.description="SteamCMD runtime used by Game Server Hub game and Workshop installers"
-LABEL org.opencontainers.image.source="https://github.com/GameServerHub/game-server-hub"
+LABEL org.opencontainers.image.source="https://github.com/PMAT77/game-serve-hub"
 LABEL org.opencontainers.image.version="${GSH_RELEASE_VERSION}"
 LABEL org.opencontainers.image.revision="${GSH_BUILD_SHA}"
 

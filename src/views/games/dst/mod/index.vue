@@ -1181,7 +1181,6 @@ onMounted(async () => {
                     {{ marketStatusLabel(mod) }}
                   </NTag>
                 </div>
-                <p v-if="mod.description" class="line-clamp-2 text-sm text-muted-foreground">{{ mod.description }}</p>
                 <div class="flex gap-2">
                   <NButton
                     class="flex-1"

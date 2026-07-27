@@ -8,6 +8,7 @@ import {
   hasStackRequiredFiles,
   resolveApplySupport,
   resolveStackPaths,
+  isReleaseNewer,
 } from './panel-update'
 
 const tempDirs: string[] = []
@@ -39,14 +40,18 @@ function buildConfig(partial: Partial<ServerConfig>): ServerConfig {
     dockerHost: 'unix:///var/run/docker.sock',
     instancesRoot: '/tmp/instances',
     backupsRoot: '/tmp/backups',
-    gameDstImage: 'ghcr.io/gameserverhub/game-server-hub-dst:latest',
-    steamcmdImage: 'ghcr.io/gameserverhub/steamcmd-base:latest',
+    gameDstImage: 'ghcr.io/pmat77/game-server-hub-dst:latest',
+    steamcmdImage: 'ghcr.io/pmat77/steamcmd-base:latest',
     edition: 'community',
-    panelImage: 'ghcr.io/gameserverhub/game-server-hub:latest',
+    runtimeMode: 'docker',
+    nativeRuntimeDir: '/tmp/runtime',
+    nativeSteamcmdPath: '/opt/game-server-hub/runtime/steamcmd/steamcmd.sh',
+    nativeSystemdUnitDir: '/tmp/systemd',
+    panelImage: 'ghcr.io/pmat77/game-server-hub:latest',
     stackDir: '',
     composeFiles: ['docker-compose.yml', 'docker-compose.bind.yml'],
     panelContainerName: 'game-server-hub-panel',
-    githubRepo: 'GameServerHub/game-server-hub',
+    githubRepo: 'PMAT77/game-serve-hub',
     releaseVersion: '',
     buildSha: '',
     syncAdminPasswordFromEnv: false,
@@ -103,6 +108,14 @@ describe('resolveApplySupport', () => {
     assert.match(support.hint ?? '', /GSH_STACK_DIR/)
   })
 
+  it('uses the verified installer path for Native upgrades', () => {
+    const support = resolveApplySupport(buildConfig({ runtimeMode: 'native' }))
+    assert.equal(support.panelSupported, false)
+    assert.equal(support.dstSupported, false)
+    assert.equal(support.supported, false)
+    assert.match(support.hint ?? '', /原地升级/)
+  })
+
   it('enables panel apply when stack files are reachable', () => {
     const hostDir = createTempStackDir(['panel.env', 'docker-compose.yml', 'docker-compose.bind.yml'])
     const support = resolveApplySupport(buildConfig({ stackDir: hostDir }))
@@ -111,5 +124,14 @@ describe('resolveApplySupport', () => {
     assert.equal(support.hint, null)
     assert.equal(support.stackPaths?.hostDir, hostDir)
     assert.equal(support.stackPaths?.localDir, hostDir)
+  })
+})
+
+describe('isReleaseNewer', () => {
+  it('compares stable and prerelease versions without offering downgrades', () => {
+    assert.equal(isReleaseNewer('v0.1.4', 'v0.2.0'), true)
+    assert.equal(isReleaseNewer('v0.2.0', 'v0.1.4'), false)
+    assert.equal(isReleaseNewer('v0.2.0-beta.1', 'v0.2.0'), true)
+    assert.equal(isReleaseNewer('v0.2.0', 'v0.2.0-beta.1'), false)
   })
 })

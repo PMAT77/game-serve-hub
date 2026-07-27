@@ -8,7 +8,7 @@
 
 1. 阅读 [README.md](README.md) 了解项目定位（当前为 **v0.x 公测**，DST 优先）
 2. 查阅 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 搭建本地环境
-3. 大改动请先开 [Issue](https://github.com/GameServerHub/game-server-hub/issues) 讨论，避免重复劳动
+3. 大改动请先开 [Issue](https://github.com/PMAT77/game-serve-hub/issues) 讨论，避免重复劳动
 
 ---
 

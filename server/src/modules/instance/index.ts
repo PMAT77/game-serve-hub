@@ -141,7 +141,7 @@ async function checkContainerInstallReady(): Promise<{ ok: boolean, message?: st
 async function requireContainerRuntime(request: FastifyRequest): Promise<ApiErrorResponse | undefined> {
   const runtimeReady = await checkContainerInstallReady()
   if (!runtimeReady.ok) {
-    return businessError(runtimeReady.message ?? '容器运行时未就绪', request)
+    return businessError(runtimeReady.message ?? '游戏运行时未就绪', request)
   }
 }
 
@@ -203,7 +203,7 @@ async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<num
       runtimeStartedAt: null,
     })
     reconciled++
-    app.log.info({ instanceId: instance.id }, '实例容器不存在，已同步状态为已停止')
+    app.log.info({ instanceId: instance.id }, '实例运行时不存在，已同步状态为已停止')
   }
   return reconciled
 }
@@ -233,7 +233,7 @@ async function reconcileStoppedButContainerRunning(app: FastifyInstance): Promis
     })
     await ensureInstanceContainerLogFollow(instance.id)
     reconciled++
-    app.log.info({ instanceId: instance.id }, '实例容器仍在运行，已同步状态为运行中')
+    app.log.info({ instanceId: instance.id }, '实例运行时仍在运行，已同步状态为运行中')
   }
   return reconciled
 }
@@ -407,7 +407,7 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
     const steamcmdCommand = steamcmdConfig?.steamcmdPath?.trim() || (process.platform === 'win32' ? 'steamcmd.exe' : 'steamcmd')
     const runtimeReady = await checkContainerInstallReady()
     if (!runtimeReady.ok) {
-      return businessError(runtimeReady.message ?? '容器运行时未就绪', request)
+      return businessError(runtimeReady.message ?? '游戏运行时未就绪', request)
     }
     const instanceId = randomUUID()
     const installPath = manualInstallPath || await getDefaultSteamInstallPath(gameCode, instanceId)
@@ -778,7 +778,7 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       : {
         ready: false,
         code: 'missing_game_files' as const,
-        message: '当前仅支持饥荒（343050）容器化启动',
+        message: '当前仅支持饥荒（343050）实例启动',
       }
     if (!installReadiness.ready) {
       const errorMessage = buildDstStartBlockedMessage(installReadiness, steamcmdImageReady, {
@@ -828,7 +828,7 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
         instanceName: current.name,
         gamePort,
       })
-      : { ok: false, message: '当前仅支持饥荒（343050）容器化启动' }
+      : { ok: false, message: '当前仅支持饥荒（343050）实例启动' }
     if (!layoutResult.ok) {
       const layoutReadiness = diagnoseDstInstallReadiness(installPath)
       const errorMessage = buildDstStartBlockedMessage(
@@ -1060,7 +1060,7 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       await reconcileInstanceRuntimeState(app)
     }
     catch (error) {
-      app.log.warn({ error }, '实例运行时对齐跳过（Docker 不可用或连接失败）')
+      app.log.warn({ error }, '实例运行时对齐跳过（运行时不可用或连接失败）')
     }
     scheduleInstanceUpdateChecks(app)
   })

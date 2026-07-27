@@ -36,6 +36,8 @@ export interface SystemInfoData {
     hostname: string
   }
   panelVersion: string
+  runtimeMode: 'docker' | 'native'
+  runtimeStatus: 'running' | 'stopped'
   dockerStatus: 'running' | 'stopped'
 }
 

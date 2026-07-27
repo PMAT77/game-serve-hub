@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemInfoData } from './types'
-import DockerInfoCard from './DockerInfoCard.vue'
+import RuntimeInfoCard from './RuntimeInfoCard.vue'
 import SystemLoadCard from './SystemLoadCard.vue'
 import SystemOverviewCard from './SystemOverviewCard.vue'
 
@@ -19,7 +19,7 @@ defineProps<{
     <SystemOverviewCard :loading="loading" :info="info" />
     <div class="gap-3 grid grid-cols-1 md:grid-cols-2">
       <SystemLoadCard :loading="loading" :info="info" />
-      <DockerInfoCard :loading="loading" :info="info" />
+      <RuntimeInfoCard :loading="loading" :info="info" />
     </div>
   </div>
 </template>

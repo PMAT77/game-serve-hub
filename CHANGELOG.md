@@ -4,7 +4,27 @@
 
 ## [Unreleased]
 
-（暂无）
+### Added
+
+- 新增 Docker / Native systemd 双运行时；Native 模式下的面板、SteamCMD 和 DST 分片均不依赖 Docker。
+- Linux 安装器新增 `--mode auto|docker|native` 与 `--network auto|cn|global`，支持国内 apt 镜像、SteamCMD 重试和多源安装资源回退。
+- GitHub Release 流程新增 Linux x64 Native 包与同名 SHA256 文件。
+- 新增中文架构、双模式安装、升级回滚与按错误关键词排查文档。
+
+### Changed
+
+- 监控与 SteamCMD 页面改用通用运行时语义，不再假定 Docker。
+- 同模式重跑安装器改为原地升级：保留 `panel.env`，并在升级前备份 SQLite 与部署配置。
+
+### Fixed
+
+- 清除 Native 安装、资源快照、定时更新检查中的隐式 Docker 依赖。
+- 修复已有前端类型错误，使完整 `vue-tsc` 与生产构建重新通过。
+
+### Security
+
+- Compose 安装资源使用安装器内置 SHA256，校验过程不再强制二次访问 GitHub Raw。
+- Native systemd 服务采用专用无登录用户、只读 Release、受限可写路径和权限受控的控制台 FIFO。
 
 ## [0.1.4] - 2026-07-26
 
@@ -89,10 +109,10 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.4...HEAD
-[0.1.4]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.3...v0.1.4
-[0.1.3]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/GameServerHub/game-server-hub/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/GameServerHub/game-server-hub/compare/v0.0.0...v0.1.0
-[0.0.0]: https://github.com/GameServerHub/game-server-hub/releases
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/PMAT77/game-serve-hub/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/PMAT77/game-serve-hub/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/PMAT77/game-serve-hub/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/PMAT77/game-serve-hub/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/PMAT77/game-serve-hub/compare/v0.0.0...v0.1.0
+[0.0.0]: https://github.com/PMAT77/game-serve-hub/releases

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NTag } from 'naive-ui'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, shallowRef } from 'vue'
 import apiSystem from '@/api/modules/system'
 
 defineOptions({
@@ -11,13 +11,19 @@ const emit = defineEmits<{
   stateChange: [payload: { installed: boolean }]
 }>()
 
-const steamcmdInstalling = ref(false)
-const steamcmdInstalled = ref(false)
-const gameDstInstalled = ref(false)
-const isDockerAvailable = ref(false)
-const steamcmdImage = ref('')
-const gameDstImage = ref('')
-const installRoot = ref('')
+const steamcmdInstalling = shallowRef(false)
+const steamcmdInstalled = shallowRef(false)
+const gameDstInstalled = shallowRef(false)
+const runtimeMode = shallowRef<'docker' | 'native'>('docker')
+const runtimeStatus = shallowRef<'running' | 'stopped'>('stopped')
+const steamcmdImage = shallowRef('')
+const gameDstImage = shallowRef('')
+const installRoot = shallowRef('')
+
+const isNativeMode = computed(() => runtimeMode.value === 'native')
+const runtimeAvailable = computed(() => runtimeStatus.value === 'running')
+const runtimeLabel = computed(() => isNativeMode.value ? 'systemd' : 'Docker')
+const steamcmdLabel = computed(() => isNativeMode.value ? 'SteamCMD 路径' : '游戏安装镜像')
 
 function emitStateChange() {
   emit('stateChange', {
@@ -30,7 +36,8 @@ async function fetchSteamcmdConfig() {
   steamcmdImage.value = res.data.steamcmdImage?.trim() || res.data.steamcmdPath?.trim() || ''
   gameDstImage.value = res.data.gameDstImage?.trim() || ''
   installRoot.value = res.data.installRoot?.trim() || ''
-  isDockerAvailable.value = Boolean(res.data.isDockerAvailable)
+  runtimeMode.value = res.data.runtimeMode
+  runtimeStatus.value = res.data.runtimeStatus
   steamcmdInstalled.value = Boolean(res.data.isSteamcmdInstalled)
   gameDstInstalled.value = Boolean(res.data.isGameDstImageInstalled)
   emitStateChange()
@@ -66,21 +73,29 @@ onMounted(() => {
 </script>
 
 <template>
-  <FaPageMain title="容器镜像">
+  <FaPageMain title="游戏运行时">
     <p class="mb-4 text-sm text-muted-foreground">
-      管理游戏安装与运行所需的 Docker 镜像。首次创建实例会自动准备游戏安装镜像；也可在此提前拉取以缩短等待时间。
+      <template v-if="isNativeMode">
+        SteamCMD 与游戏进程直接运行在宿主机，由 systemd 管理启动、自恢复、日志和资源限制。
+      </template>
+      <template v-else>
+        管理游戏安装与运行所需的 Docker 镜像。首次创建实例会自动准备镜像，也可在此提前拉取。
+      </template>
     </p>
     <div class="p-4 border border-border/70 rounded-lg bg-muted/20 space-y-4">
       <div class="flex flex-wrap gap-3 items-start justify-between">
         <div class="flex flex-wrap gap-2">
-          <NTag size="small" :bordered="false" :type="isDockerAvailable ? 'success' : 'error'">
-            {{ isDockerAvailable ? 'Docker 可用' : 'Docker 不可用' }}
+          <NTag size="small" :bordered="false" :type="runtimeAvailable ? 'success' : 'error'">
+            {{ runtimeAvailable ? `${runtimeLabel} 可用` : `${runtimeLabel} 不可用` }}
           </NTag>
           <NTag size="small" :bordered="false" :type="steamcmdInstalled ? 'success' : 'default'">
-            {{ steamcmdInstalled ? '游戏安装镜像已就绪' : '游戏安装镜像未就绪' }}
+            {{ steamcmdInstalled ? 'SteamCMD 已就绪' : 'SteamCMD 未就绪' }}
           </NTag>
-          <NTag size="small" :bordered="false" :type="gameDstInstalled ? 'success' : 'warning'">
+          <NTag v-if="!isNativeMode" size="small" :bordered="false" :type="gameDstInstalled ? 'success' : 'warning'">
             {{ gameDstInstalled ? 'DST 运行镜像已就绪' : '安装实例后自动准备' }}
+          </NTag>
+          <NTag v-else size="small" :bordered="false" type="info">
+            游戏进程由 systemd 管理
           </NTag>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -88,17 +103,17 @@ onMounted(() => {
             type="primary"
             secondary
             :loading="steamcmdInstalling"
-            :disabled="!isDockerAvailable"
+            :disabled="!runtimeAvailable"
             @click="ensureSteamcmdImage"
           >
-            预拉游戏安装镜像
+            {{ isNativeMode ? '检查 SteamCMD' : '预拉游戏安装镜像' }}
           </NButton>
           <NButton
-            v-if="!gameDstInstalled"
+            v-if="!isNativeMode && !gameDstInstalled"
             type="default"
             secondary
             :loading="steamcmdInstalling"
-            :disabled="!isDockerAvailable"
+            :disabled="!runtimeAvailable"
             @click="ensureGameDstImageManual"
           >
             手动拉取 DST 运行镜像
@@ -109,7 +124,7 @@ onMounted(() => {
       <div class="gap-3 grid md:grid-cols-2">
         <div class="space-y-1">
           <div class="text-xs text-muted-foreground">
-            游戏安装镜像
+            {{ steamcmdLabel }}
           </div>
           <NInput
             :value="steamcmdImage"
@@ -117,7 +132,7 @@ onMounted(() => {
             placeholder="未配置"
           />
         </div>
-        <div class="space-y-1">
+        <div v-if="!isNativeMode" class="space-y-1">
           <div class="text-xs text-muted-foreground">
             游戏运行镜像
           </div>
@@ -127,7 +142,7 @@ onMounted(() => {
             placeholder="未配置"
           />
         </div>
-        <div class="space-y-1 md:col-span-2">
+        <div class="space-y-1" :class="{ 'md:col-span-2': !isNativeMode }">
           <div class="text-xs text-muted-foreground">
             实例数据目录
           </div>
@@ -140,16 +155,20 @@ onMounted(() => {
       </div>
 
       <p
-        v-if="!steamcmdInstalled && isDockerAvailable"
+        v-if="!steamcmdInstalled && runtimeAvailable"
         class="text-xs text-amber-600 dark:text-amber-400"
       >
-        首次创建实例时会自动拉取游戏安装镜像；提前拉取可减少创建等待时间。
+        {{ isNativeMode
+          ? '安装脚本通常会预装 SteamCMD；若检查失败，请确认路径与执行权限。'
+          : '首次创建实例时会自动拉取游戏安装镜像；提前拉取可减少创建等待时间。' }}
       </p>
       <p
-        v-if="!isDockerAvailable"
+        v-if="!runtimeAvailable"
         class="text-xs text-rose-600 dark:text-rose-400"
       >
-        面板进程无法连接 Docker。请确认 Docker 已启动，且 Compose 部署时已挂载 Docker 套接字。
+        {{ isNativeMode
+          ? '面板无法连接 systemd 用户服务管理器。请检查 gsh 用户 linger、user bus 与系统服务状态。'
+          : '面板无法连接 Docker。请确认 Docker 已启动，且 Compose 部署时已挂载 Docker 套接字。' }}
       </p>
     </div>
   </FaPageMain>

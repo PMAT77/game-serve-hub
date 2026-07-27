@@ -36,6 +36,7 @@ export interface GitHubReleaseSummary {
 }
 
 export interface PanelUpdateStatus {
+  runtimeMode: 'docker' | 'native'
   panel: HubImageUpdateInfo
   dst: HubImageUpdateInfo
   release: GitHubReleaseSummary | null
@@ -201,8 +202,50 @@ export function resolveStackPaths(
   return null
 }
 
-function buildManualUpdateCommand(stackPaths: StackPaths | null): string {
+function normalizeReleaseTag(value: string | null | undefined, fallback: string): string {
+  const normalized = value?.trim() ?? ''
+  return /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized)
+    ? normalized
+    : fallback
+}
+
+export function isReleaseNewer(current: string | null, latest: string | null): boolean {
+  const parse = (value: string | null) => {
+    const match = value?.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/)
+    if (!match) {
+      return null
+    }
+    return {
+      parts: [Number(match[1]), Number(match[2]), Number(match[3])],
+      prerelease: match[4] ?? null,
+    }
+  }
+  const left = parse(current)
+  const right = parse(latest)
+  if (!left || !right) {
+    return Boolean(latest && current && latest !== current)
+  }
+  for (let index = 0; index < left.parts.length; index += 1) {
+    if (right.parts[index] !== left.parts[index]) {
+      return right.parts[index] > left.parts[index]
+    }
+  }
+  if (left.prerelease && !right.prerelease) {
+    return true
+  }
+  if (!left.prerelease || !right.prerelease) {
+    return false
+  }
+  return right.prerelease.localeCompare(left.prerelease, 'en', { numeric: true }) > 0
+}
+
+function buildManualUpdateCommand(stackPaths: StackPaths | null, releaseTag?: string | null): string {
   const config = loadServerConfig()
+  if (config.runtimeMode === 'native') {
+    const currentTag = normalizeReleaseTag(config.releaseVersion, 'v0.1.4')
+    const targetTag = normalizeReleaseTag(releaseTag, currentTag)
+    return `curl -fsSL https://raw.githubusercontent.com/${config.githubRepo}/${targetTag}/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=${targetTag} bash -s -- --mode native`
+  }
   const hostDir = stackPaths?.hostDir || config.stackDir || '/opt/game-server-hub'
   const composeArgs = config.composeFiles.map(file => `-f ${file}`).join(' ')
   return [
@@ -214,6 +257,15 @@ function buildManualUpdateCommand(stackPaths: StackPaths | null): string {
 }
 
 export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
+  if (config.runtimeMode === 'native') {
+    return {
+      panelSupported: false,
+      dstSupported: false,
+      supported: false,
+      hint: '裸机模式使用带 SHA256 校验和回滚的安装脚本原地升级；请执行下方命令。',
+      stackPaths: null,
+    }
+  }
   if (!config.stackDir) {
     return {
       panelSupported: false,
@@ -251,13 +303,13 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   }
 }
 
-function buildApplyFields(applySupport: ApplySupport) {
+function buildApplyFields(applySupport: ApplySupport, releaseTag?: string | null) {
   return {
     applySupported: applySupport.supported,
     panelApplySupported: applySupport.panelSupported,
     dstApplySupported: applySupport.dstSupported,
     applyHint: applySupport.hint,
-    manualUpdateCommand: buildManualUpdateCommand(applySupport.stackPaths),
+    manualUpdateCommand: buildManualUpdateCommand(applySupport.stackPaths, releaseTag),
   }
 }
 
@@ -330,6 +382,7 @@ function buildEmptyStatus(): PanelUpdateStatus {
     checkError: null,
   })
   return {
+    runtimeMode: config.runtimeMode,
     panel: emptyImage(config.panelImage),
     dst: emptyImage(config.gameDstImage),
     release: null,
@@ -354,6 +407,48 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
     const config = loadServerConfig()
     const applySupport = resolveApplySupport(config)
     const envReleaseVersion = resolveReleaseVersionFromEnv()
+    if (config.runtimeMode === 'native') {
+      const release = await fetchLatestGitHubRelease(config.githubRepo)
+      const currentVersion = envReleaseVersion || null
+      const latestVersion = release?.tagName ?? null
+      const panel: HubImageUpdateInfo = {
+        image: 'native-release',
+        tag: currentVersion || 'unknown',
+        releaseVersion: currentVersion,
+        localDigest: config.buildSha || null,
+        localDigestShort: config.buildSha ? config.buildSha.slice(0, 12) : null,
+        remoteDigest: null,
+        remoteDigestShort: null,
+        updateAvailable: isReleaseNewer(currentVersion, latestVersion),
+        localPresent: true,
+        checkError: release ? null : '无法读取最新 GitHub Release',
+      }
+      const dst: HubImageUpdateInfo = {
+        image: 'native-systemd',
+        tag: 'host',
+        releaseVersion: currentVersion,
+        localDigest: null,
+        localDigestShort: null,
+        remoteDigest: null,
+        remoteDigestShort: null,
+        updateAvailable: false,
+        localPresent: true,
+        checkError: null,
+      }
+      const nextStatus: PanelUpdateStatus = {
+        runtimeMode: config.runtimeMode,
+        panel,
+        dst,
+        release,
+        lastCheckedAt: new Date().toISOString(),
+        checking: false,
+        updating,
+        ...buildApplyFields(applySupport, latestVersion),
+        checkError: panel.checkError,
+      }
+      cachedStatus = nextStatus
+      return nextStatus
+    }
     const [panel, dst, release] = await Promise.all([
       buildImageUpdateInfo(config.panelImage, envReleaseVersion),
       buildImageUpdateInfo(config.gameDstImage, envReleaseVersion),
@@ -362,13 +457,14 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
 
     const checkErrors = normalizeErrorMessages([panel.checkError, dst.checkError])
     const nextStatus: PanelUpdateStatus = {
+      runtimeMode: config.runtimeMode,
       panel,
       dst,
       release,
       lastCheckedAt: new Date().toISOString(),
       checking: false,
       updating,
-      ...buildApplyFields(applySupport),
+      ...buildApplyFields(applySupport, release?.tagName),
       checkError: checkErrors,
     }
     cachedStatus = nextStatus

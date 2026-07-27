@@ -15,7 +15,7 @@ describe('resolvePanelSteamcmdPullRef', () => {
       'registry.cn-hangzhou.aliyuncs.com/game-server-hub/steamcmd-base:stable',
     )
     assert.equal(
-      resolvePanelSteamcmdPullRef('ghcr.io/gameserverhub/steamcmd-base:latest'),
+      resolvePanelSteamcmdPullRef('ghcr.io/pmat77/steamcmd-base:latest'),
       `${STEAMCMD_OFFICIAL_REPOSITORY}:latest`,
     )
     assert.equal(resolvePanelSteamcmdPullRef(''), `${STEAMCMD_OFFICIAL_REPOSITORY}:latest`)
@@ -47,10 +47,10 @@ describe('buildSteamcmdImageCandidates', () => {
     process.env.GSH_STEAMCMD_IMAGE_MIRRORS = 'docker.m.daocloud.io,hub-mirror.c.163.com'
     try {
       assert.deepEqual(
-        buildSteamcmdImageCandidates('ghcr.io/gameserverhub/steamcmd-base:latest'),
+        buildSteamcmdImageCandidates('ghcr.io/pmat77/steamcmd-base:latest'),
         [
-          'docker.m.daocloud.io/gameserverhub/steamcmd-base:latest',
-          'hub-mirror.c.163.com/gameserverhub/steamcmd-base:latest',
+          'docker.m.daocloud.io/pmat77/steamcmd-base:latest',
+          'hub-mirror.c.163.com/pmat77/steamcmd-base:latest',
           `${STEAMCMD_OFFICIAL_REPOSITORY}:latest`,
         ],
       )

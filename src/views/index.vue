@@ -2,8 +2,8 @@
 const router = useRouter()
 
 const LINKS = {
-  docs: 'https://github.com/GameServerHub/game-server-hub#readme',
-  github: 'https://github.com/GameServerHub/game-server-hub',
+  docs: 'https://github.com/PMAT77/game-serve-hub#readme',
+  github: 'https://github.com/PMAT77/game-serve-hub',
 } as const
 
 const products = ref([

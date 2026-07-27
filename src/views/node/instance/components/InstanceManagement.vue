@@ -1458,7 +1458,7 @@ onBeforeUnmount(() => {
           <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
             <div>
               <dt class="text-muted-foreground">CPU</dt>
-              <dd>{{ getMetricsForInstance(instance.id)?.cpuPercent == null ? '—' : `${getMetricsForInstance(instance.id)?.cpuPercent.toFixed(1)}%` }}</dd>
+              <dd>{{ formatCpuPercent(getMetricsForInstance(instance.id)?.cpuUsageRate) }}</dd>
             </div>
             <div>
               <dt class="text-muted-foreground">内存</dt>
@@ -1466,7 +1466,7 @@ onBeforeUnmount(() => {
             </div>
             <div>
               <dt class="text-muted-foreground">运行时长</dt>
-              <dd>{{ formatUptime(computeUptimeSecondsFromStartedAt(instance.startedAt, uptimeNowMs)) }}</dd>
+              <dd>{{ formatUptime(computeUptimeSecondsFromStartedAt(instance.runtimeStartedAt, uptimeNowMs)) }}</dd>
             </div>
             <div>
               <dt class="text-muted-foreground">更新时间</dt>

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { runSteamcmdAppInfoInContainer } from '../../infra/container'
-import { resolveDockerStatus } from '../../infra/docker'
+import { resolveRuntimeStatus } from '../../infra/runtime'
 
 const REMOTE_BUILD_CACHE_MS = 30 * 60 * 1000
 
@@ -112,7 +112,7 @@ export async function fetchRemoteBuildId(
   }
 
   const task = (async () => {
-    if ((await resolveDockerStatus()) !== 'running') {
+    if ((await resolveRuntimeStatus()) !== 'running') {
       return cached?.buildId ?? null
     }
     const result = await runSteamcmdAppInfoInContainer(normalizedAppId)

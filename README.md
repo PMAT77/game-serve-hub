@@ -1,168 +1,152 @@
 # Game Server Hub
 
-[License: MIT](LICENSE)
-[GitHub](https://github.com/GameServerHub/game-server-hub)
-![CI](https://github.com/GameServerHub/game-server-hub/actions/workflows/ci.yml/badge.svg)
-![Public Beta](https://img.shields.io/badge/status-Public%20Beta%20(Pre--1.0)-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/PMAT77/game-serve-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/PMAT77/game-serve-hub/actions/workflows/ci.yml)
+![Public Beta](https://img.shields.io/badge/status-Public%20Beta-orange)
 
-开源 **Steam 专用服务器** 运维面板，把部署、运行和日常管理收进同一套界面。  
-v1 先从 **饥荒联机版（Don't Starve Together）** 做起，支持一键开服。
+面向 Steam 专用服务器的开源运维面板。当前以《饥荒联机版》（DST）为首个完整适配游戏，提供安装、更新、启停、监控、日志、控制台、世界和 Mod 管理。
 
-> **当前候选版本：v0.1.4（Pre-1.0）** — `v0.1.1` / `v0.1.2` 发布不完整，不应安装；请以 GitHub Releases 中包含三镜像 digest 清单的版本为准。
-
-## 界面预览
+项目采用 **Open-Core**：单机服主需要的 Community 核心永久开源；多节点等高级能力以独立 Pro 插件提供。当前仓库版本为 `v0.1.4` 公测线，裸机模式属于首期预览能力，建议先在非关键服务器验证。
 
 ![Game Server Hub 首页](https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/game-server-hub/home.png)
 
----
+## 两种部署模式
 
-## 特性
+| 模式 | 适合谁 | 面板 | SteamCMD / 游戏进程 | 进程管理 |
+| --- | --- | --- | --- | --- |
+| Docker | 小型游戏社区、托管商 | Docker Compose | Docker | Docker Engine |
+| Native | 个人服主 | 裸机 | 裸机 | 仅 systemd |
 
-- **一键部署**：Linux 安装脚本 + Docker Compose 全容器化运行时
-- **实例生命周期**：创建实例、SteamCMD 安装/更新、启停、资源占用与安装日志
-- **监控台**：主机 CPU / 内存 / 磁盘、Docker 概况、网卡实时流量
-- **游戏控制台**：实例日志流（SSE）、游戏内命令下发
-- **DST 房间 / 世界**：Cluster 与 Master/Caves 分片配置
+Native 模式完全不依赖 Docker，也不使用 tmux、screen 或 PM2。面板由系统级 `game-server-hub.service` 管理，游戏分片由 `gsh` 用户的 systemd 服务管理；重启、自恢复、journald 日志和资源限制均由 systemd 接管。
 
----
+## 立即安装
 
-## 架构概览
+要求：Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘。Native 正式支持 x86_64；Docker 的 ARM64 支持仍为实验性。
 
-```mermaid
-flowchart TB
-  subgraph host [Linux 宿主机]
-    Panel[panel 容器]
-    Inst1[gsh 实例容器 1]
-    Inst2[gsh 实例容器 N]
-  end
-  User[管理员浏览器] --> Panel
-  Panel --> Inst1
-  Panel --> Inst2
-  Players[游戏客户端] --> Inst1
-```
+建议明确指定模式，避免自动判断与你的隔离预期不一致。
 
-面板通过 Docker 管理游戏实例；升级面板镜像并重启 `panel` 时，可不停止 `gsh-*` 游戏容器（详见 [安装指南](docs/INSTALL.md)）。
-
----
-
-## 快速开始
-
-在 Ubuntu 22.04+ / Debian 12+ 上（需 root 或 sudo）：
+### Docker 模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GameServerHub/game-server-hub/v0.1.4/scripts/install.linux.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/scripts/install.linux.sh \
+  | sudo bash -s -- --mode docker
 ```
 
-完整步骤、环境要求、升级与故障排查见 **[安装与运维指南](docs/INSTALL.md)**。
+### Native systemd 模式
 
-### 默认管理员账号（生产部署）
+```bash
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/scripts/install.linux.sh \
+  | sudo bash -s -- --mode native
+```
 
+### 国内网络
 
-| 项   | 默认值          |
-| --- | ------------ |
-| 用户名 | `superadmin` |
-| 密码  | `123456`     |
+若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位：
 
+```bash
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.1.4/scripts/install.linux.sh \
+  | sudo bash -s -- --mode native --network cn
+```
 
-安装脚本会写入上述初始凭证（可通过环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 覆盖）。**首次部署上线后务必立即修改密码**；默认启用 `FORCE_PASSWORD_CHANGE=1`，首次登录会进入强制改密页。生产环境若未设置 `ADMIN_PASSWORD`，后端将自动生成随机密码并写入启动日志。详见 [INSTALL.md](docs/INSTALL.md#默认管理员账号与安全)。
+`--network auto` 根据 GitHub、Docker 仓库和国内软件源的实际连通性选择档位，不使用 IP 归属接口。`cn` 会临时切换 Ubuntu/Debian 软件源、增加 SteamCMD 重试；失败时恢复原软件源。
 
----
+> 当前尚无官方国内容器仓库。Docker 模式仍默认拉取官方 GHCR 镜像，不会把来源不明的容器代理写入默认配置。你可以显式配置自己信任的镜像仓库。
+
+安装完成后打开脚本输出的地址。安装器会生成随机初始密码，默认不在摘要中明文展示；可在服务器上读取：
+
+```bash
+sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
+  /opt/game-server-hub/panel.env
+```
+
+首次登录必须修改密码。完整的代理、端口、升级、回滚和排错说明见 [安装与运维指南](docs/INSTALL.md)。
+
+## 核心能力
+
+- 实例创建、SteamCMD 安装/更新、启动、停止和重启
+- DST 地上/洞穴分片、房间、世界生成和 Mod 管理
+- 主机与实例 CPU、内存、磁盘和网络监控
+- SSE 实时日志、游戏控制台命令
+- Docker Compose 与 Native systemd 双运行时
+- 安装资源多源回退、SHA256 校验、阶段状态和脱敏诊断
+- 同模式原地升级；升级前一致性备份 SQLite，并保留实例、存档、备份和自定义 `panel.env`
+
+## Open-Core 边界
+
+Community 核心永久包含单节点完整生命周期、双部署模式、基础监控、DST 管理和本地数据能力，采用 [MIT License](LICENSE)。
+
+首个 Pro 插件规划为**多节点管理**，后续候选包括计划任务、异地备份、告警、审计、高级 RBAC、SSO 与托管商能力。商业插件将采用签名包和可离线使用的设备授权文件；授权服务不可达时不会停止已运行的游戏实例。
+
+目前 Pro 插件与授权服务尚未发布，Community 不包含占位付费按钮。技术边界见 [架构与产品边界](docs/ARCHITECTURE.md)。
+
+## 常见问题
+
+### 下载脚本或安装资源失败
+
+先改用上面的 jsDelivr 命令并指定 `--network cn`。安装器会依次尝试资源源，Compose 文件使用脚本内置 SHA256 校验，不会为了校验再次强制访问 GitHub Raw。
+
+### Docker 安装失败
+
+脚本会先尝试 Docker 官方仓库，再回退到发行版签名软件包。仍失败时检查 DNS、HTTPS 出站和 `/var/log/game-server-hub/install.diagnostics.log`。不会静默切换为 Native；确认需要裸机模式后显式重跑 `--mode native`。
+
+### GHCR 镜像拉取失败
+
+这是 Docker 模式最常见的受限网络问题。请配置 HTTPS 代理，或把 `PANEL_IMAGE`、`GSH_GAME_DST_IMAGE`、`GSH_STEAMCMD_IMAGE` 指向你控制的可信仓库，并核对 Release digest。Native 模式不拉取这些容器镜像。
+
+### Native 显示 systemd 不可用
+
+执行：
+
+```bash
+sudo systemctl status game-server-hub.service --no-pager
+sudo journalctl -u game-server-hub.service -n 100 --no-pager
+sudo loginctl show-user gsh -p Linger
+```
+
+`Linger=yes` 且 `user@gsh-uid.service` 正常时，面板才能管理无人登录状态下的游戏用户服务。
+
+### 玩家无法连接
+
+同时检查本机防火墙和云厂商安全组。默认需放行面板 `9527/tcp`，以及 DST 的 `10999/udp`、`8766/udp`、`12346/udp`。安装器只有在传入 `--open-panel-port` / `--open-dst-ports` 时才修改本机防火墙。
+
+### 重跑安装脚本会清空数据吗
+
+不会。同模式重跑被视为原地升级：保留数据库、实例、备份、账号和自定义配置，备份 `panel.env` 后只更新版本相关键。Docker 与 Native 之间不自动迁移。
+
+更多按错误关键词整理的处理方法见 [INSTALL.md 的 FAQ](docs/INSTALL.md#faq-按错误关键词排查)。
 
 ## 文档
 
-
-| 文档                                         | 说明             |
-| ------------------------------------------ | -------------- |
-| [docs/README.md](docs/README.md)           | 公开文档索引         |
-| [docs/INSTALL.md](docs/INSTALL.md)         | 生产安装、DST 使用、运维 |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 本地开发、测试        |
-| [docs/RELEASE.md](docs/RELEASE.md)         | 版本与发布流程        |
-| [CHANGELOG.md](CHANGELOG.md)               | 版本变更记录         |
-| [CONTRIBUTING.md](CONTRIBUTING.md)         | 参与贡献           |
-| [SECURITY.md](SECURITY.md)                 | 安全报告           |
-
-
----
-
-## 功能模块
-
-### 已实装（v1 核心 · 公测可用）
-
-| 模块 | 说明 |
+| 文档 | 内容 |
 | --- | --- |
-| 安装与部署 | Linux 一键安装、Docker Compose 全容器化、面板热升级 |
-| 实例管理 | 创建实例、SteamCMD 安装/更新、启停、资源占用与安装日志 |
-| 监控台 | 主机 CPU / 内存 / 磁盘、Docker 概况、网卡实时流量 |
-| DST 房间 | Cluster 配置与可视化管理 |
-| DST 世界 | Master / Caves 分片与世界生成规则配置 |
-| DST Mod | Steam 工坊浏览、订阅安装、启停与加载顺序 |
-| 实例控制台 | 日志流（SSE）、游戏内命令下发、连接信息、维护公告 |
-| 系统与认证 | 管理员账号、强制首次改密与基础系统设置 |
-
-### 即将上线
-
-v1 仍在补齐以下能力，将按规划陆续发布：
-
-- **游戏大厅与玩家**：大厅展示配置、访问名单与在线玩家视图
-- **存档备份**：手动备份与一键恢复（`backup` 模块占位，尚未接线）
-- **运维工具**：文件管理、配置中心、通知与操作审计等（`file` / `config` 模块占位，尚未接线）
-
----
-
-## 当前支持与路线图
-
-| 游戏 | 状态 |
-| --- | --- |
-| 饥荒联机版（DST） | **核心能力可用（公测）** |
-| 其他 Steam 专用服 | 计划中 |
-
----
-
-## Community 与 Pro
-
-- **Community**：本仓库 MIT 开源，提供自托管核心能力（见上文「已实装」模块）。
-- **Pro**：商业扩展（多集群、计划任务、高级运维等）通过独立授权与扩展包提供；**含多集群能力的 Pro 版正在推进中**，详情敬请期待。
-
----
+| [安装与运维](docs/INSTALL.md) | 两种模式从零安装、升级、回滚、日志与 FAQ |
+| [架构与产品边界](docs/ARCHITECTURE.md) | 运行时分层、Open-Core 边界、Native 服务模型 |
+| [内存建议](docs/MEMORY.md) | 4/6/8 GiB 档位、洞穴与 Mod 建议 |
+| [开发指南](docs/DEVELOPMENT.md) | 本地开发、测试和构建 |
+| [发布流程](docs/RELEASE.md) | Release 与镜像发布 |
+| [变更记录](CHANGELOG.md) | 版本变更 |
 
 ## 参与贡献
 
-欢迎 [Issue](https://github.com/GameServerHub/game-server-hub/issues) 与 [Pull Request](https://github.com/GameServerHub/game-server-hub/pulls)。请阅读 **[CONTRIBUTING.md](CONTRIBUTING.md)**；PR 合并前需通过 **[CI](.github/workflows/ci.yml)**（`lint` + `test:unit` + 安装脚本 smoke test）。生产构建、镜像推送与 GitHub Release 仅在发布 `v*` tag 时执行，详见 **[docs/RELEASE.md](docs/RELEASE.md)** 与 **[CHANGELOG.md](CHANGELOG.md)**。
+欢迎提交 [Issue](https://github.com/PMAT77/game-serve-hub/issues) 与 [Pull Request](https://github.com/PMAT77/game-serve-hub/pulls)。开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)。
 
----
-
-## 技术栈与致谢
-
-前端管理界面基于 [Fantastic-admin](https://fantastic-admin.hurui.me) 构建，使用 [Vue 3](https://vuejs.org/)、[Vite](https://vite.dev/) 等开源技术。
-后端采用 [Fastify](https://fastify.dev/) 与 [Drizzle ORM](https://orm.drizzle.team/)。
-感谢上述项目及社区贡献者。
-
----
+前端基于 Fantastic-admin、Vue 3 和 Vite；后端采用 Fastify、Drizzle ORM。感谢这些项目及所有贡献者。
 
 ## 赞助
 
-平时在业余时间维护这个项目。若你觉得好用、想支持一下，欢迎随缘赞助，主要用于挤出点时间继续开发和补文档。
+项目主要利用业余时间维护。赞助用于持续开发、测试机器和文档维护，不等同于购买 Pro、故障处理时限或一对一支持。
 
 <img src="https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/common/collection_wechat.jpg" alt="微信赞助码" width="200" />
-<br>
-> 非 Pro 或一对一技术支持；商业合作欢迎开 Issue 聊。
 
----
+商业合作或托管商集成可通过[商业合作 Issue](https://github.com/PMAT77/game-serve-hub/issues/new?title=%5B%E5%95%86%E4%B8%9A%E5%90%88%E4%BD%9C%5D)联系。付费调试服务说明与 GIF 演示按当前计划暂缓发布。
 
 ## 许可证
 
-本仓库 **Community 版** 源代码采用 **[MIT License](LICENSE)** 发布。
+Community 源代码采用 [MIT License](LICENSE)：
 
 ```text
 Copyright (c) 2026 Game Server Hub
 SPDX-License-Identifier: MIT
 ```
-
----
-
-## 商业合作
-Game Server Hub 采用 Open Core 模式：Community 可自由自托管；Pro 能力与官方云集成通过商业授权提供。
-云服务器厂商、托管服务商合作欢迎 [联系我们](https://github.com/GameServerHub/game-server-hub/issues/new?title=%5B商业合作%5D)。
-在产品名称或宣传中使用 Game Server Hub 商标与 Logo 需事先授权。
 
 **Game Server Hub** — 让开服像点一下那么简单。

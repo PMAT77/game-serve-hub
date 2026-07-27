@@ -8,6 +8,8 @@ dist-*/
 dist-test/
 *.tsbuildinfo
 packages/*/dist/
+.artifacts/
+.native-*-probe/
 
 # Internal documentation (not published in open-source repo)
 docs_local/
@@ -20,6 +22,7 @@ docs/*
 !docs/RELEASE.md
 !docs/MEMORY.md
 !docs/IMAGE_DISTRIBUTION.md
+!docs/ARCHITECTURE.md
 !docs/assets/
 !docs/assets/**
 !docs/images/

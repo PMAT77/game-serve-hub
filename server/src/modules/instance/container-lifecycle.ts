@@ -29,7 +29,10 @@ import { ensureDstCavesShardConfig } from '../../infra/game-adapter/dst/cluster-
 import { syncInstanceModFilesFromDb } from '../mod/mod-file-sync-service'
 import { collectReservedDstPortsOnNode } from './dst-port-service'
 import { LOCAL_NODE_ID } from '../../shared/dst/local-dst-instance'
-import { ensureDockerShardInterconnectConfig } from '../../infra/game-adapter/dst/shard-network-config'
+import {
+  ensureDockerShardInterconnectConfig,
+  ensureNativeShardInterconnectConfig,
+} from '../../infra/game-adapter/dst/shard-network-config'
 import {
   isCavesShardConfigured,
   readClusterShardEnabledFromInstall,
@@ -37,6 +40,7 @@ import {
   readMasterServerIniFields,
 } from '../../infra/game-adapter/dst/shard-service'
 import { getServerContainerConfig } from '../../shared/config/container'
+import { isSteamcmdRuntimeReady, resolveRuntimeStatus } from '../../infra/runtime'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
 import { getGameInstanceById, updateGameInstanceRuntime } from '../../shared/db/index'
 
@@ -54,6 +58,16 @@ function logFollowKey(instanceId: string, shard: ConsoleCommandShard) {
 }
 
 export async function ensureContainerRuntimeReady(): Promise<{ ok: boolean, message?: string }> {
+  const { runtimeMode } = getServerContainerConfig()
+  if (runtimeMode === 'native') {
+    if ((await resolveRuntimeStatus()) !== 'running') {
+      return { ok: false, message: '无法连接 systemd 用户服务管理器，请确认 gsh 用户已启用 linger 且 user bus 正常' }
+    }
+    if (!(await isSteamcmdRuntimeReady())) {
+      return { ok: false, message: 'SteamCMD 未就绪，请检查 GSH_NATIVE_STEAMCMD_PATH 或重新运行 Native 安装器' }
+    }
+    return { ok: true }
+  }
   if ((await resolveDockerStatus()) !== 'running') {
     return { ok: false, message: '无法连接 Docker，请确认面板已挂载 docker.sock（或 Windows 下 Docker Desktop 已启动）' }
   }
@@ -120,7 +134,7 @@ function startShardLogFollow(instanceId: string, ref: ContainerRef, shard: Conso
   const controller = new AbortController()
   logFollowAbortControllers.set(key, controller)
   const label = CONSOLE_SHARD_LABEL[shard]
-  instanceConsoleLogStore.appendSystem(instanceId, `已连接${label}容器，开始采集控制台输出`, shard)
+  instanceConsoleLogStore.appendSystem(instanceId, `已连接${label}运行时，开始采集控制台输出`, shard)
   void (async () => {
     const runtime = getContainerRuntime()
     try {
@@ -204,7 +218,7 @@ async function startSingleShardContainer(
     ref = await runtime.createShardContainer(spec)
   }
   catch (error) {
-    const raw = error instanceof Error ? error.message : '创建分片容器失败'
+    const raw = error instanceof Error ? error.message : '创建分片运行时失败'
     return { ok: false, message: formatGameDstImageError(raw, gameDstImage) }
   }
   try {
@@ -212,14 +226,14 @@ async function startSingleShardContainer(
   }
   catch (error) {
     await runtime.remove(ref)
-    const raw = error instanceof Error ? error.message : '分片容器启动失败'
+    const raw = error instanceof Error ? error.message : '分片运行时启动失败'
     return { ok: false, message: formatGameDstImageError(raw, gameDstImage) }
   }
   const inspect = await runtime.inspect(ref)
   if (!inspect.running) {
     const logTail = await readRecentContainerLogs(runtime, ref)
     await runtime.remove(ref)
-    const hint = logTail || '分片容器启动后立即退出，请检查安装目录与分片配置'
+    const hint = logTail || '分片启动后立即退出，请检查安装目录与分片配置'
     return { ok: false, message: hint }
   }
   return { ok: true, ref }
@@ -257,17 +271,25 @@ export async function startInstanceContainer(
   | { ok: false, message: string, hostMemoryPressure?: HostMemoryPressureFailure }
 > {
   if (input.gameCode.trim() !== DST_APP_ID) {
-    return { ok: false, message: '当前仅支持饥荒（343050）容器化启动' }
+    return { ok: false, message: '当前仅支持饥荒（343050）实例启动' }
   }
   const memoryPressure = assessHostMemoryForHeavyOperation('dst-container-start')
   if (!memoryPressure.ok) {
     return { ok: false, message: memoryPressure.detail, hostMemoryPressure: memoryPressure }
   }
-  const { gameDstImage, instancesRoot, dockerHost } = getServerContainerConfig()
-  const docker = new DockerClient(resolveDockerConnectOptions(dockerHost))
-  const bindPlan = await resolveInstanceContainerBind(docker, input.installPath, instancesRoot)
-  if (bindPlan.error) {
-    return { ok: false, message: bindPlan.error }
+  const { gameDstImage, instancesRoot, dockerHost, runtimeMode } = getServerContainerConfig()
+  let containerGameRoot = input.installPath
+  let hostBinds: string[] = []
+  let bindMode = 'native'
+  if (runtimeMode === 'docker') {
+    const docker = new DockerClient(resolveDockerConnectOptions(dockerHost))
+    const bindPlan = await resolveInstanceContainerBind(docker, input.installPath, instancesRoot)
+    if (bindPlan.error) {
+      return { ok: false, message: bindPlan.error }
+    }
+    containerGameRoot = bindPlan.containerGameRoot
+    hostBinds = bindPlan.hostBinds
+    bindMode = bindPlan.mode
   }
   const clusterInput = {
     instanceName: input.instanceName,
@@ -277,12 +299,14 @@ export async function startInstanceContainer(
     instanceId: input.instanceId,
     hostInstallPath: input.installPath,
     image: gameDstImage,
-    containerGameRoot: bindPlan.containerGameRoot,
+    containerGameRoot,
     clusterInput,
   })
   if (!masterSpec) {
     const readiness = diagnoseDstInstallReadiness(input.installPath)
-    const steamcmdImageReady = await isSteamcmdImagePresent()
+    const steamcmdImageReady = runtimeMode === 'docker'
+      ? await isSteamcmdImagePresent()
+      : await isSteamcmdRuntimeReady()
     return {
       ok: false,
       message: buildDstStartBlockedMessage(readiness, steamcmdImageReady, {
@@ -325,26 +349,34 @@ export async function startInstanceContainer(
       instanceId: input.instanceId,
       hostInstallPath: input.installPath,
       image: gameDstImage,
-      containerGameRoot: bindPlan.containerGameRoot,
+      containerGameRoot,
       clusterInput,
     })
     if (!cavesSpec) {
       return { ok: false, message: '无法构建洞穴分片运行规格，请检查游戏文件是否完整' }
     }
   }
-  app.log.info({ gameDstImage, bindMode: bindPlan.mode, hostBinds: bindPlan.hostBinds, shardEnabled }, '确保 DST 运行镜像可用')
-  const imagePull = await pullGameDstImage()
-  if (!imagePull.ok) {
-    return { ok: false, message: imagePull.error }
+  if (runtimeMode === 'docker') {
+    app.log.info({ gameDstImage, bindMode, hostBinds, shardEnabled }, '确保 DST 运行镜像可用')
+    const imagePull = await pullGameDstImage()
+    if (!imagePull.ok) {
+      return { ok: false, message: imagePull.error }
+    }
+    masterSpec.hostBinds = hostBinds
+    if (cavesSpec) {
+      cavesSpec.hostBinds = hostBinds
+    }
   }
-  masterSpec.hostBinds = bindPlan.hostBinds
-  if (cavesSpec) {
-    cavesSpec.hostBinds = bindPlan.hostBinds
+  else {
+    app.log.info({ runtimeMode, installPath: input.installPath, shardEnabled }, '使用 Native systemd 运行 DST')
   }
   const runtime = getContainerRuntime()
   let shardNetworkName: string | undefined
   if (shardEnabled && cavesConfigured) {
-    if (ensureDockerShardInterconnectConfig(input.installPath, input.instanceId)) {
+    const interconnectChanged = runtimeMode === 'docker'
+      ? ensureDockerShardInterconnectConfig(input.installPath, input.instanceId)
+      : ensureNativeShardInterconnectConfig(input.installPath)
+    if (interconnectChanged) {
       instanceConsoleLogStore.appendSystem(
         input.instanceId,
         '已自动配置地上与洞穴互联地址',
@@ -377,7 +409,7 @@ export async function startInstanceContainer(
       }
       return { ok: false, message: cavesStart.message }
     }
-    instanceConsoleLogStore.appendSystem(input.instanceId, '洞穴分片容器已启动', 'caves')
+    instanceConsoleLogStore.appendSystem(input.instanceId, '洞穴分片已启动', 'caves')
     startShardLogFollow(input.instanceId, cavesStart.ref, 'caves')
   }
   const ref = masterStart.ref
@@ -388,7 +420,7 @@ export async function startInstanceContainer(
     name: ref.name,
     command: displayCommand,
     shardEnabled,
-  }, '实例容器已启动')
+  }, '实例运行时已启动')
   startShardLogFollow(input.instanceId, ref, 'master')
   return { ok: true, ref, displayCommand }
 }
@@ -400,15 +432,15 @@ export async function stopInstanceContainer(instanceId: string): Promise<void> {
   const cavesRef = await resolveCavesContainerRef(instanceId)
   const masterRef = await resolveInstanceContainerRef(instanceId)
   if (cavesRef) {
-    instanceConsoleLogStore.appendSystem(instanceId, '正在停止并移除洞穴容器以释放内存')
+    instanceConsoleLogStore.appendSystem(instanceId, '正在停止并移除洞穴分片以释放内存')
   }
   await stopAndRemoveShard(runtime, cavesRef)
   if (masterRef) {
-    instanceConsoleLogStore.appendSystem(instanceId, '正在停止并移除主世界容器以释放内存')
+    instanceConsoleLogStore.appendSystem(instanceId, '正在停止并移除主世界分片以释放内存')
   }
   await stopAndRemoveShard(runtime, masterRef)
   if (masterRef) {
-    instanceConsoleLogStore.appendSystem(instanceId, '实例容器已删除')
+    instanceConsoleLogStore.appendSystem(instanceId, '实例运行时已删除')
   }
   await runtime.removeShardNetwork(instanceId)
   if (!masterRef && !cavesRef) {
@@ -440,7 +472,7 @@ export async function removeInstanceContainer(instanceId: string): Promise<void>
   const masterRef = await resolveInstanceContainerRef(instanceId)
   if (masterRef) {
     await stopAndRemoveShard(runtime, masterRef)
-    instanceConsoleLogStore.appendSystem(instanceId, '实例容器已删除')
+    instanceConsoleLogStore.appendSystem(instanceId, '实例运行时已删除')
   }
   await runtime.removeShardNetwork(instanceId)
 }

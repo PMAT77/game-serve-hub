@@ -16,7 +16,7 @@ import {
   updateGameInstanceRuntime,
 } from '../../shared/db/index'
 import { getDefaultPanelSettings } from '../system/defaults'
-import { resolveDockerStatus } from '../../infra/docker'
+import { resolveRuntimeStatus } from '../../infra/runtime'
 import {
   checkGameUpdateAvailable,
   clearRemoteBuildCache,
@@ -83,7 +83,7 @@ export function enqueueInstanceUpdateCheck(input: {
       if (input.validateRuntime) {
         const runtimeReady = await input.validateRuntime()
         if (!runtimeReady.ok) {
-          updateCheckJobStatus.error = runtimeReady.message ?? '容器运行时未就绪，无法检查更新'
+          updateCheckJobStatus.error = runtimeReady.message ?? '游戏运行时未就绪，无法检查更新'
           return
         }
       }
@@ -287,8 +287,8 @@ export async function refreshStaleInstanceUpdateChecks(
 export function scheduleInstanceUpdateChecks(app: FastifyInstance) {
   const run = async () => {
     try {
-      if ((await resolveDockerStatus()) !== 'running') {
-        app.log.debug('Docker 未运行，跳过定时游戏服务端更新检查')
+      if ((await resolveRuntimeStatus()) !== 'running') {
+        app.log.debug('游戏运行时未运行，跳过定时游戏服务端更新检查')
         return
       }
       const steamcmdCommand = await resolveSteamcmdCommandForUpdateCheck()

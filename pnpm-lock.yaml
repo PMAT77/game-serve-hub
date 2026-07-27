@@ -339,6 +339,9 @@ importers:
       tailwind-merge:
         specifier: 'catalog:'
         version: 3.6.0
+      tsx:
+        specifier: 'catalog:'
+        version: 4.22.1
       ua-parser-js:
         specifier: 'catalog:'
         version: 2.0.9
@@ -406,6 +409,9 @@ importers:
       drizzle-kit:
         specifier: 'catalog:'
         version: 0.31.10
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
       http-server:
         specifier: 'catalog:'
         version: 14.1.1
@@ -430,9 +436,6 @@ importers:
       svgo:
         specifier: 'catalog:'
         version: 4.0.1
-      tsx:
-        specifier: 'catalog:'
-        version: 4.22.1
       unbuild:
         specifier: 'catalog:'
         version: 3.6.1(sass@1.99.0)(typescript@5.9.3)(vue-tsc@3.2.9(typescript@5.9.3))(vue@3.5.34(typescript@5.9.3))

@@ -1,13 +1,24 @@
 import { getServerContainerConfig } from '../../shared/config/container'
 import { DockerContainerRuntime } from './docker-runtime'
+import { NativeSystemdRuntime } from './native-systemd-runtime'
 import type { ContainerRuntime } from './types'
 
 let runtime: ContainerRuntime | undefined
 
 export function getContainerRuntime(): ContainerRuntime {
   if (!runtime) {
-    const { dockerHost } = getServerContainerConfig()
-    runtime = new DockerContainerRuntime(dockerHost)
+    const {
+      dockerHost,
+      nativeRuntimeDir,
+      nativeSystemdUnitDir,
+      runtimeMode,
+    } = getServerContainerConfig()
+    runtime = runtimeMode === 'native'
+      ? new NativeSystemdRuntime({
+          runtimeDir: nativeRuntimeDir,
+          unitDir: nativeSystemdUnitDir,
+        })
+      : new DockerContainerRuntime(dockerHost)
   }
   return runtime
 }

@@ -8,7 +8,13 @@ set -Eeuo pipefail
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
 GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.4}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
-INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/GameServerHub/game-server-hub@${GSH_RELEASE_TAG},https://ghproxy.com/https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG},https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG}}" # 安装资源镜像池（按顺序回退）。
+INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@${GSH_RELEASE_TAG},https://ghproxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${GSH_RELEASE_TAG},https://raw.githubusercontent.com/PMAT77/game-serve-hub/${GSH_RELEASE_TAG}}" # 安装资源镜像池（按顺序回退）。
+INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-eb30aeae543d7bb6bf989684eee700fb7b85174540badba6871b4fc59b4d570d}"
+INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML:-525eaf74e17df33887fe47248f414c0de3e6cd94a8d20e072ab5d66284c760ae}"
+INSTALL_MODE="${GSH_INSTALL_MODE:-auto}" # auto | docker | native
+NETWORK_PROFILE="${GSH_NETWORK_PROFILE:-auto}" # auto | cn | global
+RESOLVED_INSTALL_MODE=""
+RESOLVED_NETWORK_PROFILE=""
 MIN_FREE_DISK_MB=4096 # 最小可用磁盘空间阈值（MB）。
 HOST_MEMORY_WARN_MIN_MB=3800 # 总内存低于此值（约 4GiB）时输出 WARN。
 HOST_MEMORY_TIER_SMALL_MAX_MB=5120 # < 此值视为 small 预设。
@@ -24,10 +30,11 @@ OPEN_DST_PORTS=0 # 是否在安装时开放 DST 默认 UDP 游戏端口。
 GHCR_CHECK_TIMEOUT_SECONDS="${GHCR_CHECK_TIMEOUT_SECONDS:-20}" # ghcr.io 连通性预检查超时时间（秒）。
 STRICT_GHCR_CHECK="${STRICT_GHCR_CHECK:-0}" # 是否要求 ghcr.io 预检查必须通过（1=失败即终止，0=失败仅告警）。
 DOCKER_REPO_CHECK_TIMEOUT_SECONDS="${DOCKER_REPO_CHECK_TIMEOUT_SECONDS:-8}" # download.docker.com 连通性预检查超时时间（秒）。
-STRICT_DOCKER_REPO_CHECK="${STRICT_DOCKER_REPO_CHECK:-1}" # 是否要求 download.docker.com 预检查必须通过（1=失败即终止，0=失败仅告警）。
+STRICT_DOCKER_REPO_CHECK="${STRICT_DOCKER_REPO_CHECK:-0}" # 是否要求 download.docker.com 预检查必须通过（1=失败即终止，0=失败仅告警）。
 USE_CN_DEBIAN_MIRROR="${USE_CN_DEBIAN_MIRROR:-0}" # Debian 是否优先尝试国内镜像（1=启用，0=关闭）。
 DEBIAN_MIRROR_URL="${DEBIAN_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}" # Debian 主仓库镜像。
 DEBIAN_SECURITY_MIRROR_URL="${DEBIAN_SECURITY_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}" # Debian 安全仓库镜像。
+UBUNTU_MIRROR_URL="${UBUNTU_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/ubuntu}" # Ubuntu 主仓库与安全更新镜像。
 APT_SOURCES_BACKUP_DIR="/tmp/gsh-apt-sources-backup"
 
 # DST 默认 UDP 端口（与 cluster.ini / server.ini 默认值一致）
@@ -42,9 +49,9 @@ INSTALL_STEAMCMD_IMAGE="${INSTALL_STEAMCMD_IMAGE:-1}" # 安装阶段是否预拉
 PANEL_IMAGE_OVERRIDE="${PANEL_IMAGE:-}" # 完整面板镜像引用；设置后不再拼接 tag。
 GSH_GAME_DST_IMAGE_OVERRIDE="${GSH_GAME_DST_IMAGE:-}" # 完整 DST 镜像引用；设置后不再拼接 tag。
 GSH_STEAMCMD_IMAGE_OVERRIDE="${GSH_STEAMCMD_IMAGE:-}" # 完整 SteamCMD 镜像引用；设置后不再拼接 tag。
-PANEL_IMAGE_OFFICIAL_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub}" # 面板官方镜像仓库。
-GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/game-server-hub-dst}" # DST 官方镜像仓库。
-GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY="${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/gameserverhub/steamcmd-base}" # SteamCMD 官方镜像仓库（与 CI 同步 GHCR 名一致）。
+PANEL_IMAGE_OFFICIAL_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/pmat77/game-server-hub}" # 面板官方镜像仓库。
+GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/pmat77/game-server-hub-dst}" # DST 官方镜像仓库。
+GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY="${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/pmat77/steamcmd-base}" # SteamCMD 官方镜像仓库（与 CI 同步 GHCR 名一致）。
 PANEL_INSTALL_DIR="${PANEL_INSTALL_DIR:-/opt/game-server-hub}" # 安装目录（放置 env/compose）。
 PANEL_DATA_DIR="${PANEL_DATA_DIR:-/var/lib/game-server-hub}" # 面板持久化数据目录。
 PANEL_LOG_DIR="${PANEL_LOG_DIR:-/var/log/game-server-hub}" # 面板日志与安装状态目录。
@@ -62,6 +69,21 @@ STATUS_FILE="${PANEL_LOG_DIR}/install.status" # 安装状态追踪文件路径�
 DIAGNOSTICS_FILE="${PANEL_LOG_DIR}/install.diagnostics.log" # 失败时生成的脱敏诊断报告。
 PANEL_HEALTHCHECK_TIMEOUT_SECONDS="${PANEL_HEALTHCHECK_TIMEOUT_SECONDS:-90}" # 启动后健康检查总超时。
 PANEL_HEALTHCHECK_INTERVAL_SECONDS="${PANEL_HEALTHCHECK_INTERVAL_SECONDS:-3}" # 健康检查轮询间隔。
+NATIVE_SERVICE_USER="${GSH_NATIVE_USER:-gsh}"
+NATIVE_SERVICE_GROUP="${GSH_NATIVE_GROUP:-gsh}"
+NATIVE_USER_HOME="${GSH_NATIVE_USER_HOME:-${PANEL_DATA_DIR}/home}"
+NATIVE_RELEASE_ROOT="${GSH_NATIVE_RELEASE_ROOT:-${PANEL_INSTALL_DIR}/releases}"
+NATIVE_CURRENT_LINK="${PANEL_INSTALL_DIR}/current"
+NATIVE_RELEASE_NAME="game-server-hub-native-${GSH_RELEASE_TAG}-linux-x64"
+NATIVE_RELEASE_ARCHIVE="${GSH_NATIVE_RELEASE_ARCHIVE:-}"
+NATIVE_RELEASE_MIRRORS="${GSH_NATIVE_RELEASE_MIRRORS:-https://github.com/PMAT77/game-serve-hub/releases/download/${GSH_RELEASE_TAG},https://ghproxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${GSH_RELEASE_TAG}}"
+NATIVE_STEAMCMD_DIR="${GSH_NATIVE_STEAMCMD_DIR:-${PANEL_INSTALL_DIR}/runtime/steamcmd}"
+NATIVE_STEAMCMD_PATH="${NATIVE_STEAMCMD_DIR}/steamcmd.sh"
+NATIVE_STEAMCMD_URL="${GSH_NATIVE_STEAMCMD_URL:-https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz}"
+NATIVE_SYSTEMD_UNIT="/etc/systemd/system/game-server-hub.service"
+NATIVE_PREVIOUS_RELEASE=""
+UPGRADE_STATE_BACKUP_DIR=""
+UPGRADE_DATABASE_BACKUP=""
 
 DISTRO_ID="" # 发行版 ID（如 ubuntu/debian）。
 DISTRO_CODENAME="" # 发行版代号（如 jammy/bookworm）。
@@ -78,7 +100,6 @@ LAST_ERROR_EXIT_CODE=1
 LAST_ERROR_MESSAGE="Unexpected installer failure"
 INSTALLER_REPO_POOL_INITIALIZED=0
 declare -a INSTALLER_REPO_POOL=()
-INSTALLER_CANONICAL_REPO_BASE="${INSTALLER_CANONICAL_REPO_BASE:-https://raw.githubusercontent.com/GameServerHub/game-server-hub/${GSH_RELEASE_TAG}}" # 用于安装资源完整性校验的权威源。
 STRICT_INSTALLER_ASSET_CHECKSUM="${STRICT_INSTALLER_ASSET_CHECKSUM:-1}" # 安装资源校验是否强制（1=校验失败即中止，0=仅告警）。
 
 # 基础日志函数，统一输出格式。
@@ -130,6 +151,142 @@ try_as_root() {
   fi
 }
 
+# 只读取精确的 KEY=value 行，不 source 用户可编辑的 panel.env。
+read_env_value() {
+  local file="$1"
+  local key="$2"
+  local command=(awk -v "target=${key}" '
+    index($0, target "=") == 1 {
+      value = substr($0, length(target) + 2)
+    }
+    END {
+      sub(/\r$/, "", value)
+      printf "%s", value
+    }
+  ' "${file}")
+  if [[ -r "${file}" ]]; then
+    "${command[@]}"
+  else
+    try_as_root "${command[@]}"
+  fi
+}
+
+# 原子更新指定环境变量，保留未涉及的用户配置、权限和文件 inode。
+upsert_env_values() {
+  local file="$1"
+  shift
+  local updater
+  updater='
+    set -Eeuo pipefail
+    file="$1"
+    shift
+    work="$(mktemp)"
+    cp "$file" "$work"
+    for pair in "$@"; do
+      key="${pair%%=*}"
+      value="${pair#*=}"
+      next="$(mktemp)"
+      awk -v target="$key" -v replacement="$key=$value" "
+        BEGIN { replaced = 0 }
+        index(\$0, target \"=\") == 1 {
+          if (!replaced) {
+            print replacement
+            replaced = 1
+          }
+          next
+        }
+        { print }
+        END {
+          if (!replaced) {
+            print replacement
+          }
+        }
+      " "$work" > "$next"
+      mv "$next" "$work"
+    done
+    cat "$work" > "$file"
+    rm -f "$work"
+  '
+  if [[ -w "${file}" ]]; then
+    bash -c "${updater}" _ "${file}" "$@"
+  else
+    run_as_root bash -c "${updater}" _ "${file}" "$@"
+  fi
+}
+
+resolve_existing_install_mode() {
+  if ! try_as_root test -f "${PANEL_ENV_FILE}"; then
+    return 1
+  fi
+  local existing_mode
+  existing_mode="$(read_env_value "${PANEL_ENV_FILE}" "GSH_RUNTIME_MODE")"
+  printf '%s' "${existing_mode:-docker}"
+}
+
+validate_install_mode_transition() {
+  local existing_mode
+  if ! existing_mode="$(resolve_existing_install_mode)"; then
+    return
+  fi
+  if [[ "${existing_mode}" != "${RESOLVED_INSTALL_MODE}" ]]; then
+    abort "Existing ${existing_mode} installation detected at ${PANEL_INSTALL_DIR}. Automatic cross-mode migration is not supported; back up data and follow docs/INSTALL.md."
+  fi
+  log_info "Existing ${existing_mode} installation detected; performing an in-place upgrade."
+}
+
+backup_existing_install_state() {
+  local existing_mode timestamp database_path
+  if ! existing_mode="$(resolve_existing_install_mode)" || [[ "${existing_mode}" != "${RESOLVED_INSTALL_MODE}" ]]; then
+    return
+  fi
+
+  timestamp="$(date +%Y%m%d%H%M%S)"
+  UPGRADE_STATE_BACKUP_DIR="${PANEL_BACKUPS_DIR}/panel-upgrades/${timestamp}-${GSH_RELEASE_TAG}"
+  UPGRADE_DATABASE_BACKUP="${UPGRADE_STATE_BACKUP_DIR}/game-server-hub.sqlite"
+  database_path="${PANEL_DATA_DIR}/game-server-hub.sqlite"
+  run_as_root mkdir -p "${UPGRADE_STATE_BACKUP_DIR}"
+
+  if try_as_root test -f "${PANEL_ENV_FILE}"; then
+    run_as_root cp -p "${PANEL_ENV_FILE}" "${UPGRADE_STATE_BACKUP_DIR}/panel.env"
+  fi
+  if try_as_root test -f "${PANEL_COMPOSE_FILE}"; then
+    run_as_root cp -p "${PANEL_COMPOSE_FILE}" "${UPGRADE_STATE_BACKUP_DIR}/docker-compose.yml"
+  fi
+  if try_as_root test -f "${PANEL_BIND_COMPOSE_FILE}"; then
+    run_as_root cp -p "${PANEL_BIND_COMPOSE_FILE}" "${UPGRADE_STATE_BACKUP_DIR}/docker-compose.bind.yml"
+  fi
+  if try_as_root test -f "${database_path}"; then
+    run_as_root sqlite3 "${database_path}" ".backup '${UPGRADE_DATABASE_BACKUP}'"
+    run_as_root chmod 0600 "${UPGRADE_DATABASE_BACKUP}"
+  else
+    UPGRADE_DATABASE_BACKUP=""
+  fi
+  log_info "Upgrade state backed up to ${UPGRADE_STATE_BACKUP_DIR}."
+}
+
+restore_existing_install_state() {
+  local database_path="${PANEL_DATA_DIR}/game-server-hub.sqlite"
+  if [[ -z "${UPGRADE_STATE_BACKUP_DIR}" ]] || ! try_as_root test -d "${UPGRADE_STATE_BACKUP_DIR}"; then
+    return
+  fi
+  if try_as_root test -f "${UPGRADE_STATE_BACKUP_DIR}/panel.env"; then
+    run_as_root cp -p "${UPGRADE_STATE_BACKUP_DIR}/panel.env" "${PANEL_ENV_FILE}"
+  fi
+  if try_as_root test -f "${UPGRADE_STATE_BACKUP_DIR}/docker-compose.yml"; then
+    run_as_root cp -p "${UPGRADE_STATE_BACKUP_DIR}/docker-compose.yml" "${PANEL_COMPOSE_FILE}"
+  fi
+  if try_as_root test -f "${UPGRADE_STATE_BACKUP_DIR}/docker-compose.bind.yml"; then
+    run_as_root cp -p "${UPGRADE_STATE_BACKUP_DIR}/docker-compose.bind.yml" "${PANEL_BIND_COMPOSE_FILE}"
+  fi
+  if [[ -n "${UPGRADE_DATABASE_BACKUP}" ]] && try_as_root test -f "${UPGRADE_DATABASE_BACKUP}"; then
+    run_as_root cp "${UPGRADE_DATABASE_BACKUP}" "${database_path}"
+    if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]]; then
+      run_as_root chown "${NATIVE_SERVICE_USER}:${NATIVE_SERVICE_GROUP}" "${database_path}"
+    fi
+  fi
+  log_warn "Restored configuration and database from ${UPGRADE_STATE_BACKUP_DIR}."
+}
+
 # 将安装进度写入状态文件，便于审计和排障。
 write_status() {
   local stage status message timestamp
@@ -163,6 +320,8 @@ collect_install_diagnostics() {
     printf 'exit_code=%s\n' "${exit_code}"
     printf 'line=%s\n' "${line_number}"
     printf 'release=%s\n' "${GSH_RELEASE_TAG}"
+    printf 'install_mode=%s\n' "${RESOLVED_INSTALL_MODE:-${INSTALL_MODE}}"
+    printf 'network_profile=%s\n' "${RESOLVED_NETWORK_PROFILE:-${NETWORK_PROFILE}}"
     printf 'panel_image=%s\n' "${PANEL_IMAGE}"
     printf 'dst_image=%s\n' "${GSH_GAME_DST_IMAGE}"
     printf 'steamcmd_image=%s\n' "${GSH_STEAMCMD_IMAGE}"
@@ -179,6 +338,12 @@ collect_install_diagnostics() {
         printf '\n[compose-ps]\n'
         try_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" ps -a 2>&1 || true
       fi
+    fi
+    if [[ "${RESOLVED_INSTALL_MODE:-}" == "native" ]] && command -v systemctl >/dev/null 2>&1; then
+      printf '\n[native-service]\n'
+      try_as_root systemctl status game-server-hub.service --no-pager 2>&1 || true
+      printf '\n[native-journal]\n'
+      try_as_root journalctl -u game-server-hub.service -n 80 --no-pager 2>&1 || true
     fi
   } >"${report}"
 
@@ -312,28 +477,37 @@ download_installer_asset() {
   return 1
 }
 
-# 对镜像源下载的安装资源做完整性校验（与权威源同路径内容对比）。
+# 返回随安装脚本发布的资源摘要。校验不能再次依赖 GitHub Raw，否则镜像回退仍会在国内网络失败。
+resolve_installer_asset_sha256() {
+  case "$1" in
+    docker-compose.yml)
+      printf '%s' "${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML}"
+      ;;
+    docker-compose.bind.yml)
+      printf '%s' "${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# 对镜像源下载的安装资源做完整性校验（摘要固定在当前版本安装脚本中）。
 verify_installer_asset_checksum() {
   local relative_path="$1"
   local downloaded_file="$2"
-  local canonical_url canonical_tmp expected_sum actual_sum
+  local expected_sum actual_sum
 
   if [[ "${STRICT_INSTALLER_ASSET_CHECKSUM}" != "1" ]]; then
     return 0
   fi
 
-  canonical_url="${INSTALLER_CANONICAL_REPO_BASE}/${relative_path}"
-  canonical_tmp="$(mktemp)"
-
-  if ! curl -fL --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" --max-time "${REPO_DOWNLOAD_TIMEOUT_SECONDS}" -o "${canonical_tmp}" "${canonical_url}" >/dev/null 2>&1; then
-    rm -f "${canonical_tmp}"
-    log_warn "Cannot fetch canonical asset for checksum verification: ${canonical_url}"
+  if ! expected_sum="$(resolve_installer_asset_sha256 "${relative_path}")" || [[ -z "${expected_sum}" ]]; then
+    log_warn "No embedded checksum for installer asset: ${relative_path}"
     return 1
   fi
 
-  expected_sum="$(sha256sum "${canonical_tmp}" | awk '{print $1}')"
   actual_sum="$(sha256sum "${downloaded_file}" | awk '{print $1}')"
-  rm -f "${canonical_tmp}"
 
   if [[ "${expected_sum}" != "${actual_sum}" ]]; then
     log_warn "Checksum mismatch for ${relative_path}: expected ${expected_sum}, got ${actual_sum}"
@@ -444,6 +618,78 @@ uses_ghcr_image() {
   [[ "${PANEL_IMAGE}" == ghcr.io/* || "${GSH_GAME_DST_IMAGE}" == ghcr.io/* || "${GSH_STEAMCMD_IMAGE}" == ghcr.io/* ]]
 }
 
+probe_https_url() {
+  local url="$1"
+  local timeout_seconds="${2:-6}"
+  curl -fsSL -o /dev/null --connect-timeout 3 --max-time "${timeout_seconds}" "${url}" >/dev/null 2>&1
+}
+
+# 基于实际连通性选择网络档位，不通过 IP 地理接口收集服务器位置。
+resolve_network_profile() {
+  local global_score=0
+
+  case "${NETWORK_PROFILE}" in
+    cn|global)
+      RESOLVED_NETWORK_PROFILE="${NETWORK_PROFILE}"
+      ;;
+    auto)
+      probe_https_url "https://raw.githubusercontent.com/" 5 && global_score=$((global_score + 1))
+      probe_https_url "https://download.docker.com/" 5 && global_score=$((global_score + 1))
+      check_ghcr_reachability >/dev/null 2>&1 && global_score=$((global_score + 1))
+      if [[ "${global_score}" -ge 2 ]]; then
+        RESOLVED_NETWORK_PROFILE="global"
+      elif probe_https_url "${DEBIAN_MIRROR_URL}/" 5; then
+        RESOLVED_NETWORK_PROFILE="cn"
+      else
+        RESOLVED_NETWORK_PROFILE="global"
+        log_warn "Unable to confirm a reachable CN mirror; retaining global sources."
+      fi
+      ;;
+    *)
+      abort "Invalid network profile '${NETWORK_PROFILE}'. Expected auto, cn or global."
+      ;;
+  esac
+
+  if [[ "${RESOLVED_NETWORK_PROFILE}" == "cn" ]]; then
+    USE_CN_DEBIAN_MIRROR=1
+    log_info "Network profile: cn (distribution mirror + extended SteamCMD retries)."
+  else
+    log_info "Network profile: global."
+  fi
+}
+
+resolve_install_mode() {
+  case "${INSTALL_MODE}" in
+    docker|native)
+      RESOLVED_INSTALL_MODE="${INSTALL_MODE}"
+      ;;
+    auto)
+      if command -v docker >/dev/null 2>&1; then
+        RESOLVED_INSTALL_MODE="docker"
+      elif [[ -t 0 && -t 1 ]]; then
+        printf 'Select deployment mode [1=Docker (recommended for communities), 2=Native systemd]: '
+        local answer
+        read -r answer
+        case "${answer}" in
+          2|native|Native)
+            RESOLVED_INSTALL_MODE="native"
+            ;;
+          *)
+            RESOLVED_INSTALL_MODE="docker"
+            ;;
+        esac
+      else
+        # 非交互场景保持 Docker 默认值；若失败会给出显式 Native 重试命令，不静默改变隔离模型。
+        RESOLVED_INSTALL_MODE="docker"
+      fi
+      ;;
+    *)
+      abort "Invalid install mode '${INSTALL_MODE}'. Expected auto, docker or native."
+      ;;
+  esac
+  log_info "Deployment mode: ${RESOLVED_INSTALL_MODE}."
+}
+
 # 校验系统是否提供 apt-get（仅支持 Debian/Ubuntu 体系）。
 ensure_apt() {
   if ! command -v apt-get >/dev/null 2>&1; then
@@ -496,6 +742,10 @@ backup_apt_sources() {
   if run_as_root test -f /etc/apt/sources.list.d/debian.sources; then
     run_as_root cp /etc/apt/sources.list.d/debian.sources "${APT_SOURCES_BACKUP_DIR}/debian.sources"
   fi
+
+  if run_as_root test -f /etc/apt/sources.list.d/ubuntu.sources; then
+    run_as_root cp /etc/apt/sources.list.d/ubuntu.sources "${APT_SOURCES_BACKUP_DIR}/ubuntu.sources"
+  fi
 }
 
 # 恢复 apt 源配置到脚本运行前状态。
@@ -511,6 +761,12 @@ restore_apt_sources_backup() {
   else
     run_as_root rm -f /etc/apt/sources.list.d/debian.sources
   fi
+
+  if run_as_root test -f "${APT_SOURCES_BACKUP_DIR}/ubuntu.sources"; then
+    run_as_root cp "${APT_SOURCES_BACKUP_DIR}/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources
+  else
+    run_as_root rm -f /etc/apt/sources.list.d/ubuntu.sources
+  fi
 }
 
 # 将 Debian apt 源切换为国内镜像（bookworm/bookworm-updates/bookworm-backports/security）。
@@ -524,18 +780,33 @@ deb ${DEBIAN_SECURITY_MIRROR_URL} ${DISTRO_CODENAME}-security main contrib non-f
 EOF"
 }
 
-# Debian 优先使用国内镜像；失败则回退系统默认源。
+# 将 Ubuntu apt 源切换为国内镜像；发行版签名仍由系统密钥验证。
+apply_cn_ubuntu_mirror() {
+  run_as_root rm -f /etc/apt/sources.list.d/ubuntu.sources
+  run_as_root bash -c "cat > /etc/apt/sources.list <<EOF
+deb ${UBUNTU_MIRROR_URL} ${DISTRO_CODENAME} main restricted universe multiverse
+deb ${UBUNTU_MIRROR_URL} ${DISTRO_CODENAME}-updates main restricted universe multiverse
+deb ${UBUNTU_MIRROR_URL} ${DISTRO_CODENAME}-backports main restricted universe multiverse
+deb ${UBUNTU_MIRROR_URL} ${DISTRO_CODENAME}-security main restricted universe multiverse
+EOF"
+}
+
+# Debian / Ubuntu 优先使用国内镜像；失败则回退系统默认源。
 prepare_apt_sources() {
-  if [[ "${DISTRO_ID}" != "debian" || "${USE_CN_DEBIAN_MIRROR}" != "1" ]]; then
+  if [[ "${USE_CN_DEBIAN_MIRROR}" != "1" ]]; then
     run_with_retry "apt-get update" run_as_root apt-get update -y || abort "apt-get update failed."
     return
   fi
 
   backup_apt_sources
-  apply_cn_debian_mirror
+  if [[ "${DISTRO_ID}" == "debian" ]]; then
+    apply_cn_debian_mirror
+  else
+    apply_cn_ubuntu_mirror
+  fi
 
   if run_with_retry "apt-get update with CN mirror" run_as_root apt-get update -y; then
-    log_info "Using CN Debian mirror: ${DEBIAN_MIRROR_URL}"
+    log_info "Using CN ${DISTRO_ID} mirror."
     return
   fi
 
@@ -548,7 +819,7 @@ prepare_apt_sources() {
 install_base_packages() {
   log_info "Installing base packages..."
   prepare_apt_sources
-  apt_install ca-certificates curl gnupg lsb-release software-properties-common apt-transport-https jq
+  apt_install ca-certificates curl gnupg lsb-release software-properties-common apt-transport-https jq sqlite3
 }
 
 # 配置 Docker 官方 apt 仓库与 GPG key。
@@ -561,7 +832,10 @@ configure_docker_repo() {
   log_info "Configuring Docker apt repository..."
   run_as_root install -m 0755 -d /etc/apt/keyrings
   run_as_root rm -f "${keyring}"
-  curl -fsSL "${repo}/gpg" | run_as_root gpg --dearmor -o "${keyring}"
+  if ! curl -fsSL --connect-timeout 8 --max-time 30 "${repo}/gpg" | run_as_root gpg --dearmor -o "${keyring}"; then
+    log_warn "Unable to download Docker repository signing key from ${repo}."
+    return 1
+  fi
   run_as_root chmod a+r "${keyring}"
   run_as_root bash -c "echo 'deb [arch=${arch} signed-by=${keyring}] ${repo} ${DISTRO_CODENAME} stable' > /etc/apt/sources.list.d/docker.list"
 }
@@ -571,14 +845,29 @@ install_docker() {
   if command -v docker >/dev/null 2>&1; then
     log_info "Docker already installed. Skipping package installation."
   else
-    configure_docker_repo
-    run_as_root apt-get update -y
-    apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    if configure_docker_repo \
+      && run_as_root apt-get update -y \
+      && apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+      log_info "Docker CE installed from the official repository."
+    else
+      log_warn "Docker CE repository is unavailable. Trying signed distribution packages..."
+      run_as_root rm -f /etc/apt/sources.list.d/docker.list
+      run_as_root apt-get update -y || return 1
+      apt_install docker.io || return 1
+      if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
+        apt_install docker-compose-v2 || return 1
+      elif apt-cache show docker-compose-plugin >/dev/null 2>&1; then
+        apt_install docker-compose-plugin || return 1
+      fi
+    fi
   fi
 
   log_info "Ensuring Docker service is enabled..."
-  run_as_root systemctl enable --now docker
-  run_as_root docker compose version >/dev/null 2>&1 || abort "docker compose plugin is required."
+  run_as_root systemctl enable --now docker || return 1
+  if ! run_as_root docker compose version >/dev/null 2>&1; then
+    log_error "Docker Compose v2 plugin is required but unavailable."
+    return 1
+  fi
 }
 
 # 将当前执行用户加入 docker 组，避免非 root 场景下无法使用 Docker CLI。
@@ -603,8 +892,272 @@ add_user_to_docker_group() {
   log_info "Added ${target_user} to docker group. Re-login is required for group changes to take effect."
 }
 
+install_native_dependencies() {
+  if [[ "$(uname -m)" != "x86_64" ]]; then
+    abort "Native mode currently supports x86_64 only. ARM64 remains experimental and has no Release artifact."
+  fi
+  if ! dpkg --print-foreign-architectures | grep -Fxq i386; then
+    run_as_root dpkg --add-architecture i386
+    run_as_root apt-get update -y
+  fi
+  apt_install tar gzip xz-utils lib32gcc-s1 libstdc++6:i386 libc6:i386
+}
+
+ensure_native_service_user() {
+  if ! getent group "${NATIVE_SERVICE_GROUP}" >/dev/null 2>&1; then
+    run_as_root groupadd --system "${NATIVE_SERVICE_GROUP}"
+  fi
+  if ! id "${NATIVE_SERVICE_USER}" >/dev/null 2>&1; then
+    run_as_root useradd \
+      --system \
+      --gid "${NATIVE_SERVICE_GROUP}" \
+      --home-dir "${NATIVE_USER_HOME}" \
+      --create-home \
+      --shell /usr/sbin/nologin \
+      "${NATIVE_SERVICE_USER}"
+  fi
+  run_as_root mkdir -p \
+    "${NATIVE_USER_HOME}/.config/systemd/user" \
+    "${PANEL_DATA_DIR}" \
+    "${PANEL_LOG_DIR}" \
+    "${PANEL_INSTANCES_DIR}" \
+    "${PANEL_BACKUPS_DIR}" \
+    "${PANEL_DATA_DIR}/runtime"
+  run_as_root chown -R "${NATIVE_SERVICE_USER}:${NATIVE_SERVICE_GROUP}" \
+    "${NATIVE_USER_HOME}" \
+    "${PANEL_DATA_DIR}" \
+    "${PANEL_LOG_DIR}"
+
+  local native_uid
+  native_uid="$(id -u "${NATIVE_SERVICE_USER}")"
+  run_as_root loginctl enable-linger "${NATIVE_SERVICE_USER}"
+  run_as_root systemctl start "user@${native_uid}.service"
+}
+
+verify_native_archive_paths() {
+  local archive_path="$1"
+  if tar -tzf "${archive_path}" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    return 1
+  fi
+  return 0
+}
+
+download_native_release_archive() {
+  local archive_dest="$1"
+  local checksum_dest="$2"
+  local archive_filename="${NATIVE_RELEASE_NAME}.tar.gz"
+  local checksum_filename="${archive_filename}.sha256"
+  local source expected_sum actual_sum
+
+  if [[ -n "${NATIVE_RELEASE_ARCHIVE}" ]]; then
+    if [[ ! -f "${NATIVE_RELEASE_ARCHIVE}" ]]; then
+      log_error "Configured Native archive does not exist: ${NATIVE_RELEASE_ARCHIVE}"
+      return 1
+    fi
+    cp "${NATIVE_RELEASE_ARCHIVE}" "${archive_dest}"
+    if [[ -f "${NATIVE_RELEASE_ARCHIVE}.sha256" ]]; then
+      cp "${NATIVE_RELEASE_ARCHIVE}.sha256" "${checksum_dest}"
+    elif [[ -n "${GSH_NATIVE_RELEASE_SHA256:-}" ]]; then
+      printf '%s  %s\n' "${GSH_NATIVE_RELEASE_SHA256}" "${archive_filename}" > "${checksum_dest}"
+    else
+      log_error "Local Native archive requires a sibling .sha256 file or GSH_NATIVE_RELEASE_SHA256."
+      return 1
+    fi
+  else
+    local raw_sources=()
+    IFS=',' read -r -a raw_sources <<< "${NATIVE_RELEASE_MIRRORS}"
+    for source in "${raw_sources[@]}"; do
+      source="${source%/}"
+      log_info "Trying Native Release source: ${source}"
+      if curl -fL \
+        --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time 600 \
+        -o "${archive_dest}" \
+        "${source}/${archive_filename}" \
+        && curl -fL \
+          --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" \
+          --max-time "${REPO_DOWNLOAD_TIMEOUT_SECONDS}" \
+          -o "${checksum_dest}" \
+          "${source}/${checksum_filename}"; then
+        break
+      fi
+      rm -f "${archive_dest}" "${checksum_dest}"
+    done
+  fi
+
+  if [[ ! -s "${archive_dest}" || ! -s "${checksum_dest}" ]]; then
+    log_error "Unable to download Native Release ${archive_filename} and its checksum."
+    return 1
+  fi
+  expected_sum="$(awk 'NR == 1 { print $1 }' "${checksum_dest}")"
+  actual_sum="$(sha256sum "${archive_dest}" | awk '{print $1}')"
+  if [[ -z "${expected_sum}" || "${expected_sum}" != "${actual_sum}" ]]; then
+    log_error "Native Release checksum mismatch: expected ${expected_sum:-missing}, got ${actual_sum}."
+    return 1
+  fi
+  verify_native_archive_paths "${archive_dest}" || {
+    log_error "Native Release contains an unsafe archive path."
+    return 1
+  }
+}
+
+install_native_release() {
+  local temp_dir archive_path checksum_path extracted_root target_dir replaced_dir
+  temp_dir="$(mktemp -d)"
+  archive_path="${temp_dir}/${NATIVE_RELEASE_NAME}.tar.gz"
+  checksum_path="${archive_path}.sha256"
+
+  download_native_release_archive "${archive_path}" "${checksum_path}" || {
+    rm -rf "${temp_dir}"
+    abort "Native Release download failed. Verify the ${GSH_RELEASE_TAG} GitHub Release assets or set GSH_NATIVE_RELEASE_ARCHIVE."
+  }
+  tar -xzf "${archive_path}" -C "${temp_dir}"
+  extracted_root="${temp_dir}/${NATIVE_RELEASE_NAME}"
+  if [[ ! -x "${extracted_root}/bin/game-server-hub" || ! -f "${extracted_root}/release.json" ]]; then
+    rm -rf "${temp_dir}"
+    abort "Native Release is incomplete: launcher or release.json is missing."
+  fi
+
+  target_dir="${NATIVE_RELEASE_ROOT}/${GSH_RELEASE_TAG}"
+  run_as_root mkdir -p "${NATIVE_RELEASE_ROOT}"
+  if [[ -L "${NATIVE_CURRENT_LINK}" ]]; then
+    NATIVE_PREVIOUS_RELEASE="$(readlink -f "${NATIVE_CURRENT_LINK}" || true)"
+  fi
+  if run_as_root test -e "${target_dir}"; then
+    replaced_dir="${target_dir}.replaced.$(date +%Y%m%d%H%M%S)"
+    run_as_root mv "${target_dir}" "${replaced_dir}"
+  fi
+  run_as_root mv "${extracted_root}" "${target_dir}"
+  run_as_root chown -R root:"${NATIVE_SERVICE_GROUP}" "${target_dir}"
+  run_as_root chmod -R a-w "${target_dir}"
+  run_as_root chmod 0755 "${target_dir}/bin/game-server-hub"
+  run_as_root ln -sfn "${target_dir}" "${NATIVE_CURRENT_LINK}.new"
+  run_as_root mv -Tf "${NATIVE_CURRENT_LINK}.new" "${NATIVE_CURRENT_LINK}"
+  rm -rf "${temp_dir}"
+}
+
+install_native_steamcmd() {
+  local temp_archive
+  if run_as_root test -x "${NATIVE_STEAMCMD_PATH}"; then
+    log_info "Native SteamCMD already installed: ${NATIVE_STEAMCMD_PATH}"
+    return
+  fi
+  temp_archive="$(mktemp)"
+  if ! run_with_retry "download Native SteamCMD" curl -fL \
+    --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" \
+    --max-time 600 \
+    -o "${temp_archive}" \
+    "${NATIVE_STEAMCMD_URL}"; then
+    rm -f "${temp_archive}"
+    abort "SteamCMD download failed: ${NATIVE_STEAMCMD_URL}"
+  fi
+  run_as_root mkdir -p "${NATIVE_STEAMCMD_DIR}"
+  run_as_root tar -xzf "${temp_archive}" -C "${NATIVE_STEAMCMD_DIR}"
+  rm -f "${temp_archive}"
+  run_as_root chown -R "${NATIVE_SERVICE_USER}:${NATIVE_SERVICE_GROUP}" "${NATIVE_STEAMCMD_DIR}"
+  run_as_root chmod 0755 "${NATIVE_STEAMCMD_PATH}"
+}
+
+prepare_native_panel_env() {
+  local native_uid steamcmd_region steamcmd_attempts existing_port existing_public_url
+  native_uid="$(id -u "${NATIVE_SERVICE_USER}")"
+  steamcmd_region=""
+  steamcmd_attempts=5
+  if [[ "${RESOLVED_NETWORK_PROFILE}" == "cn" ]]; then
+    steamcmd_region="cn"
+    steamcmd_attempts=8
+  fi
+  run_as_root mkdir -p "${PANEL_INSTALL_DIR}"
+  if try_as_root test -f "${PANEL_ENV_FILE}"; then
+    existing_port="$(read_env_value "${PANEL_ENV_FILE}" "SERVER_PORT")"
+    existing_public_url="$(read_env_value "${PANEL_ENV_FILE}" "PANEL_PUBLIC_URL")"
+    if [[ "${existing_port}" =~ ^[0-9]+$ ]]; then
+      PANEL_PORT="${existing_port}"
+    fi
+    detect_host_ip
+    PANEL_ACCESS_URL="${existing_public_url:-${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}}"
+    run_as_root cp -p "${PANEL_ENV_FILE}" "${PANEL_ENV_FILE}.backup.$(date +%Y%m%d%H%M%S)"
+    upsert_env_values "${PANEL_ENV_FILE}" \
+      "NODE_ENV=production" \
+      "GSH_EDITION=community" \
+      "GSH_RUNTIME_MODE=native" \
+      "GSH_INSTANCES_ROOT=${PANEL_INSTANCES_DIR}" \
+      "GSH_BACKUPS_ROOT=${PANEL_BACKUPS_DIR}" \
+      "GSH_NATIVE_RUNTIME_DIR=${PANEL_DATA_DIR}/runtime" \
+      "GSH_NATIVE_STEAMCMD_PATH=${NATIVE_STEAMCMD_PATH}" \
+      "GSH_NATIVE_SYSTEMD_UNIT_DIR=${NATIVE_USER_HOME}/.config/systemd/user" \
+      "GSH_GITHUB_REPO=PMAT77/game-serve-hub" \
+      "GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}"
+    log_info "Preserved existing Native panel.env and updated release/runtime keys."
+  else
+    detect_host_ip
+    PANEL_ACCESS_URL="${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}"
+    generate_admin_credentials
+    run_as_root bash -c "cat > \"${PANEL_ENV_FILE}\" <<EOF
+NODE_ENV=production
+SERVER_HOST=0.0.0.0
+SERVER_PORT=${PANEL_PORT}
+DB_PATH=${PANEL_DATA_DIR}/game-server-hub.sqlite
+SERVER_LOG_DIR=${PANEL_LOG_DIR}
+PANEL_PUBLIC_URL=${PANEL_ACCESS_URL}
+ADMIN_USERNAME=${ADMIN_USERNAME}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+FORCE_PASSWORD_CHANGE=1
+GSH_EDITION=community
+GSH_RUNTIME_MODE=native
+GSH_INSTANCES_ROOT=${PANEL_INSTANCES_DIR}
+GSH_BACKUPS_ROOT=${PANEL_BACKUPS_DIR}
+GSH_NATIVE_RUNTIME_DIR=${PANEL_DATA_DIR}/runtime
+GSH_NATIVE_STEAMCMD_PATH=${NATIVE_STEAMCMD_PATH}
+GSH_NATIVE_SYSTEMD_UNIT_DIR=${NATIVE_USER_HOME}/.config/systemd/user
+GSH_STEAMCMD_DOWNLOAD_REGION=${steamcmd_region}
+GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=${steamcmd_attempts}
+GSH_GITHUB_REPO=PMAT77/game-serve-hub
+GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}
+TZ=UTC
+EOF"
+  fi
+  run_as_root chown root:"${NATIVE_SERVICE_GROUP}" "${PANEL_ENV_FILE}"
+  run_as_root chmod 0640 "${PANEL_ENV_FILE}"
+
+  run_as_root bash -c "cat > \"${NATIVE_SYSTEMD_UNIT}\" <<EOF
+[Unit]
+Description=Game Server Hub (Native)
+After=network-online.target user@${native_uid}.service
+Wants=network-online.target
+Requires=user@${native_uid}.service
+
+[Service]
+Type=simple
+User=${NATIVE_SERVICE_USER}
+Group=${NATIVE_SERVICE_GROUP}
+WorkingDirectory=${NATIVE_CURRENT_LINK}
+EnvironmentFile=${PANEL_ENV_FILE}
+Environment=HOME=${NATIVE_USER_HOME}
+Environment=XDG_RUNTIME_DIR=/run/user/${native_uid}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${native_uid}/bus
+ExecStart=${NATIVE_CURRENT_LINK}/bin/game-server-hub
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=${PANEL_DATA_DIR} ${PANEL_LOG_DIR} ${NATIVE_USER_HOME} ${PANEL_INSTALL_DIR}/runtime
+
+[Install]
+WantedBy=multi-user.target
+EOF"
+  run_as_root systemctl daemon-reload
+}
+
 # 避免将面板绑定到已被占用的宿主机端口。
 check_port_conflict() {
+  local existing_mode
+  if existing_mode="$(resolve_existing_install_mode)" && [[ "${existing_mode}" == "${RESOLVED_INSTALL_MODE}" ]]; then
+    log_info "Skipping port-conflict rejection for the existing ${existing_mode} installation."
+    return
+  fi
   if command -v ss >/dev/null 2>&1; then
     if ss -ltn "( sport = :${PANEL_PORT} )" | awk 'NR > 1 { found = 1 } END { exit(found ? 0 : 1) }'; then
       abort "Port ${PANEL_PORT} is already in use. Set PANEL_PORT to an unused port and retry."
@@ -697,19 +1250,24 @@ print_usage() {
 Usage: ${SCRIPT_NAME} [options]
 
 Options:
+  --mode MODE         Deployment mode: auto, docker or native
+  --network PROFILE   Network profile: auto, cn or global
   --open-panel-port  Open panel TCP port (${PANEL_PORT}) via ufw/firewalld
   --open-dst-ports   Open default DST UDP ports (${DST_GAME_PORT}, ${DST_AUTH_PORT}, ${DST_MASTER_PORT}) via ufw/firewalld
   -h, --help         Show this help
 
 Environment (optional):
+  GSH_INSTALL_MODE=MODE          Same as --mode
+  GSH_NETWORK_PROFILE=PROFILE    Same as --network
   INSTALL_STEAMCMD_IMAGE=0      Skip SteamCMD pre-pull (default: pre-pull so the panel is ready to create instances)
   PANEL_IMAGE=REF               Full panel image reference (tag or digest)
   GSH_GAME_DST_IMAGE=REF        Full DST image reference (tag or digest)
   GSH_STEAMCMD_IMAGE=REF        Full SteamCMD image reference (tag or digest)
   PANEL_HEALTHCHECK_TIMEOUT_SECONDS=90  Maximum wait for panel /health after startup
   PANEL_HEALTHCHECK_INTERVAL_SECONDS=3  Panel /health polling interval
-  USE_CN_DEBIAN_MIRROR=1        Enable CN Debian mirror (default 0 for community-safe baseline)
-  STRICT_INSTALLER_ASSET_CHECKSUM=0  Skip canonical checksum verification (not recommended)
+  USE_CN_DEBIAN_MIRROR=1        Enable CN Debian/Ubuntu mirror
+  GSH_NATIVE_RELEASE_ARCHIVE=PATH  Install a local Native Release archive
+  STRICT_INSTALLER_ASSET_CHECKSUM=0  Skip embedded checksum verification (not recommended)
   With INSTALL_STEAMCMD_IMAGE=1, SteamCMD pre-pulls the same image recorded in panel.env.
 EOF
 }
@@ -865,27 +1423,22 @@ preflight_checks() {
   if [[ "${arch}" != "x86_64" && "${arch}" != "aarch64" ]]; then
     abort "Unsupported architecture ${arch}. Only x86_64/aarch64 are supported."
   fi
+  if [[ "${RESOLVED_INSTALL_MODE}" == "native" && "${arch}" != "x86_64" ]]; then
+    abort "Native Release is currently available for x86_64 only."
+  fi
 
   if [[ "${free_disk_mb}" -lt "${MIN_FREE_DISK_MB}" ]]; then
     abort "Insufficient disk space on /. Require >= ${MIN_FREE_DISK_MB} MB."
   fi
 
-  if ! command -v docker >/dev/null 2>&1; then
-    if ! curl -fsSI --max-time "${DOCKER_REPO_CHECK_TIMEOUT_SECONDS}" "https://download.docker.com" >/dev/null; then
-      if [[ "${STRICT_DOCKER_REPO_CHECK}" == "1" ]]; then
-        abort "Cannot reach https://download.docker.com within ${DOCKER_REPO_CHECK_TIMEOUT_SECONDS}s. Please check outbound network."
-      fi
-      log_warn "Cannot reach https://download.docker.com within ${DOCKER_REPO_CHECK_TIMEOUT_SECONDS}s during preflight. Continue because strict check is disabled."
-    fi
-  else
-    log_info "Docker already installed, skipping download.docker.com preflight check."
-  fi
-
-  if uses_ghcr_image && ! check_ghcr_reachability; then
+  if [[ "${RESOLVED_INSTALL_MODE}" == "docker" ]] && uses_ghcr_image && ! check_ghcr_reachability; then
     if [[ "${STRICT_GHCR_CHECK}" == "1" ]]; then
       abort "Cannot reach GHCR registry endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Please check outbound network."
     fi
     log_warn "Cannot reach GHCR registry endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s during preflight. Continue and rely on docker pull retries."
+  fi
+  if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]] && ! command -v systemctl >/dev/null 2>&1; then
+    abort "Native mode requires systemd/systemctl."
   fi
 
   write_status "preflight" "ok" "Host checks passed"
@@ -893,10 +1446,16 @@ preflight_checks() {
 
 # 生成运行目录、环境变量文件与 compose 配置。
 prepare_panel_files() {
-  local script_dir repo_compose compose_source bind_compose
+  local script_dir repo_compose compose_source bind_compose steamcmd_region steamcmd_attempts existing_port existing_public_url is_upgrade
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   repo_compose="${script_dir}/../docker-compose.yml"
   compose_source="${COMPOSE_SOURCE:-${repo_compose}}"
+  steamcmd_region=""
+  steamcmd_attempts=5
+  if [[ "${RESOLVED_NETWORK_PROFILE}" == "cn" ]]; then
+    steamcmd_region="cn"
+    steamcmd_attempts=8
+  fi
 
   write_status "deploy" "start" "Preparing runtime files"
   run_as_root mkdir -p "${PANEL_INSTALL_DIR}" "${PANEL_DATA_DIR}" "${PANEL_LOG_DIR}" "${PANEL_INSTANCES_DIR}"
@@ -904,9 +1463,17 @@ prepare_panel_files() {
   run_as_root chmod 700 "${PANEL_INSTALL_DIR}"
   run_as_root chmod 750 "${PANEL_DATA_DIR}" "${PANEL_LOG_DIR}" "${PANEL_INSTANCES_DIR}"
 
+  is_upgrade=0
+  if try_as_root test -f "${PANEL_ENV_FILE}"; then
+    is_upgrade=1
+    existing_port="$(read_env_value "${PANEL_ENV_FILE}" "PANEL_PORT")"
+    existing_public_url="$(read_env_value "${PANEL_ENV_FILE}" "PANEL_PUBLIC_URL")"
+    if [[ "${existing_port}" =~ ^[0-9]+$ ]]; then
+      PANEL_PORT="${existing_port}"
+    fi
+  fi
   detect_host_ip
-  PANEL_ACCESS_URL="${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}"
-  generate_admin_credentials
+  PANEL_ACCESS_URL="${existing_public_url:-${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}}"
 
   if [[ -f "${compose_source}" ]]; then
     run_as_root cp "${compose_source}" "${PANEL_COMPOSE_FILE}"
@@ -921,7 +1488,22 @@ prepare_panel_files() {
     download_installer_asset "docker-compose.bind.yml" "${PANEL_BIND_COMPOSE_FILE}" || abort "Failed to download docker-compose.bind.yml from installer mirrors."
   fi
 
-  run_as_root bash -c "cat > \"${PANEL_ENV_FILE}\" <<EOF
+  if [[ "${is_upgrade}" -eq 1 ]]; then
+    run_as_root cp -p "${PANEL_ENV_FILE}" "${PANEL_ENV_FILE}.backup.$(date +%Y%m%d%H%M%S)"
+    upsert_env_values "${PANEL_ENV_FILE}" \
+      "PANEL_IMAGE=${PANEL_IMAGE}" \
+      "GSH_EDITION=community" \
+      "GSH_RUNTIME_MODE=docker" \
+      "GSH_GAME_DST_IMAGE=${GSH_GAME_DST_IMAGE}" \
+      "GSH_STEAMCMD_IMAGE=${GSH_STEAMCMD_IMAGE}" \
+      "GSH_STACK_DIR=${PANEL_INSTALL_DIR}" \
+      "GSH_COMPOSE_FILES=docker-compose.yml:docker-compose.bind.yml" \
+      "GSH_GITHUB_REPO=PMAT77/game-serve-hub" \
+      "GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}"
+    log_info "Preserved existing Docker panel.env and updated release/image keys."
+  else
+    generate_admin_credentials
+    run_as_root bash -c "cat > \"${PANEL_ENV_FILE}\" <<EOF
 PANEL_PORT=${PANEL_PORT}
 PANEL_DATA_DIR=${PANEL_DATA_DIR}
 PANEL_LOG_DIR=${PANEL_LOG_DIR}
@@ -933,26 +1515,30 @@ ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 FORCE_PASSWORD_CHANGE=1
 GSH_EDITION=community
+GSH_RUNTIME_MODE=docker
 DOCKER_HOST=unix:///var/run/docker.sock
 GSH_GAME_DST_IMAGE=${GSH_GAME_DST_IMAGE}
 GSH_STEAMCMD_IMAGE=${GSH_STEAMCMD_IMAGE}
-# 国内服务器建议取消注释以下 SteamCMD 优化项：
-# GSH_STEAMCMD_DOWNLOAD_REGION=cn
-# GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8
+GSH_STEAMCMD_DOWNLOAD_REGION=${steamcmd_region}
+GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=${steamcmd_attempts}
 # GSH_STEAMCMD_INSTALL_RETRY_DELAYS_MS=5000,10000,15000,20000,25000,30000,35000
 # STEAMCMD_USERNAME=
 # STEAMCMD_PASSWORD=
 GSH_STACK_DIR=${PANEL_INSTALL_DIR}
 GSH_COMPOSE_FILES=docker-compose.yml:docker-compose.bind.yml
-GSH_GITHUB_REPO=GameServerHub/game-server-hub
+GSH_GITHUB_REPO=PMAT77/game-serve-hub
+GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}
 TZ=UTC
 EOF"
+  fi
   run_as_root chmod 600 "${PANEL_ENV_FILE}"
 
-  local host_mem_total_mb preset_name
-  host_mem_total_mb="$(read_host_mem_total_mb)"
-  preset_name="$(resolve_panel_env_preset_name "${host_mem_total_mb}")"
-  append_panel_env_preset "${preset_name}"
+  if [[ "${is_upgrade}" -eq 0 ]]; then
+    local host_mem_total_mb preset_name
+    host_mem_total_mb="$(read_host_mem_total_mb)"
+    preset_name="$(resolve_panel_env_preset_name "${host_mem_total_mb}")"
+    append_panel_env_preset "${preset_name}"
+  fi
 }
 
 # 仅在部署阶段开始后启用容器栈回滚。
@@ -962,8 +1548,25 @@ rollback_install() {
   fi
 
   write_status "rollback" "start" "Rolling back failed deployment"
-  log_warn "Deployment failed, rolling back container stack..."
-  run_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" down --remove-orphans >/dev/null 2>&1 || true
+  if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]]; then
+    log_warn "Native deployment failed, stopping the panel service..."
+    run_as_root systemctl stop game-server-hub.service >/dev/null 2>&1 || true
+    restore_existing_install_state
+    if [[ -n "${NATIVE_PREVIOUS_RELEASE}" && -d "${NATIVE_PREVIOUS_RELEASE}" ]]; then
+      run_as_root ln -sfn "${NATIVE_PREVIOUS_RELEASE}" "${NATIVE_CURRENT_LINK}.rollback"
+      run_as_root mv -Tf "${NATIVE_CURRENT_LINK}.rollback" "${NATIVE_CURRENT_LINK}"
+      run_as_root systemctl start game-server-hub.service >/dev/null 2>&1 || true
+    fi
+  else
+    log_warn "Deployment failed, rolling back container stack..."
+    run_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" stop panel >/dev/null 2>&1 || true
+    restore_existing_install_state
+    if [[ -n "${UPGRADE_STATE_BACKUP_DIR}" ]]; then
+      run_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" up -d panel >/dev/null 2>&1 || true
+    else
+      run_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" down --remove-orphans >/dev/null 2>&1 || true
+    fi
+  fi
   write_status "rollback" "ok" "Rollback finished"
 }
 
@@ -992,7 +1595,10 @@ wait_for_panel_health() {
   deadline=$((SECONDS + PANEL_HEALTHCHECK_TIMEOUT_SECONDS))
   while (( SECONDS < deadline )); do
     if response="$(curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${PANEL_PORT}/health" 2>/dev/null)"; then
-      if [[ "${response}" == *'"docker"'* ]]; then
+      if [[ "${RESOLVED_INSTALL_MODE}" == "native" && "${response}" == *'"mode":"native"'* ]]; then
+        return 0
+      fi
+      if [[ "${RESOLVED_INSTALL_MODE}" == "docker" && "${response}" == *'"docker"'* ]]; then
         return 0
       fi
     fi
@@ -1005,11 +1611,11 @@ wait_for_panel_health() {
 # 拉取镜像并启动服务栈；通过重试应对临时网络抖动。
 deploy_panel() {
   begin_stage "images" "Pulling runtime images"
-  pull_runtime_images || abort "Image pull failed. Please check outbound network or configure explicit image references."
+  ROLLBACK_ENABLED=1
+  pull_runtime_images || abort "Image pull failed. Check outbound network or configure explicit image references. Native fallback: rerun with --mode native."
   write_status "images" "ok" "Runtime image pull completed"
 
   begin_stage "startup" "Starting panel stack"
-  ROLLBACK_ENABLED=1
   run_with_retry "docker compose up" run_as_root docker compose --env-file "${PANEL_ENV_FILE}" -f "${PANEL_COMPOSE_FILE}" -f "${PANEL_BIND_COMPOSE_FILE}" up -d
   write_status "startup" "ok" "Panel stack started"
 
@@ -1018,19 +1624,50 @@ deploy_panel() {
   write_status "health" "ok" "Panel health endpoint is ready"
 }
 
+deploy_native_panel() {
+  begin_stage "native-release" "Installing Native Release"
+  if run_as_root test -L "${NATIVE_CURRENT_LINK}"; then
+    NATIVE_PREVIOUS_RELEASE="$(readlink -f "${NATIVE_CURRENT_LINK}" || true)"
+  fi
+  ROLLBACK_ENABLED=1
+  install_native_release
+  install_native_steamcmd
+  write_status "native-release" "ok" "Native Release and SteamCMD installed"
+
+  begin_stage "configuration" "Preparing Native systemd service"
+  prepare_native_panel_env
+  write_status "configuration" "ok" "Native configuration prepared"
+
+  begin_stage "startup" "Starting Native panel service"
+  run_as_root systemctl enable --now game-server-hub.service
+  write_status "startup" "ok" "Native panel service started"
+
+  begin_stage "health" "Waiting for Native panel health endpoint"
+  wait_for_panel_health
+  write_status "health" "ok" "Native panel health endpoint is ready"
+}
+
 # 输出最终访问信息与安全提醒。
 print_summary() {
   write_status "install" "ok" "Installation completed"
   INSTALL_COMPLETED=1
   CURRENT_STAGE="complete"
   log_info "Installation completed."
-  log_info "Panel image: ${PANEL_IMAGE}"
-  log_info "DST image: ${GSH_GAME_DST_IMAGE}"
-  log_info "SteamCMD image (panel.env): ${GSH_STEAMCMD_IMAGE}"
-  if [[ "${INSTALL_STEAMCMD_IMAGE}" == "1" ]]; then
-    log_info "SteamCMD pre-pull during install: enabled"
+  log_info "Deployment mode: ${RESOLVED_INSTALL_MODE}"
+  log_info "Network profile: ${RESOLVED_NETWORK_PROFILE}"
+  if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]]; then
+    log_info "Native Release: ${NATIVE_CURRENT_LINK}"
+    log_info "Native SteamCMD: ${NATIVE_STEAMCMD_PATH}"
+    log_info "Panel service: game-server-hub.service"
   else
-    log_info "SteamCMD pre-pull during install: disabled (pull from panel UI)"
+    log_info "Panel image: ${PANEL_IMAGE}"
+    log_info "DST image: ${GSH_GAME_DST_IMAGE}"
+    log_info "SteamCMD image (panel.env): ${GSH_STEAMCMD_IMAGE}"
+    if [[ "${INSTALL_STEAMCMD_IMAGE}" == "1" ]]; then
+      log_info "SteamCMD pre-pull during install: enabled"
+    else
+      log_info "SteamCMD pre-pull during install: disabled (pull from panel UI)"
+    fi
   fi
   log_info "Panel URL: ${PANEL_ACCESS_URL}"
   log_info "Admin username: ${ADMIN_USERNAME}"
@@ -1049,6 +1686,24 @@ print_summary() {
 main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --mode)
+        [[ $# -ge 2 ]] || abort "--mode requires auto, docker or native."
+        INSTALL_MODE="$2"
+        shift 2
+        ;;
+      --mode=*)
+        INSTALL_MODE="${1#*=}"
+        shift
+        ;;
+      --network)
+        [[ $# -ge 2 ]] || abort "--network requires auto, cn or global."
+        NETWORK_PROFILE="$2"
+        shift 2
+        ;;
+      --network=*)
+        NETWORK_PROFILE="${1#*=}"
+        shift
+        ;;
       --open-panel-port)
         OPEN_PANEL_PORT=1
         shift
@@ -1077,12 +1732,24 @@ main() {
   CURRENT_STAGE="platform"
   detect_distro
   ensure_apt
+  resolve_network_profile
+  resolve_install_mode
+  validate_install_mode_transition
 
   begin_stage "dependencies" "Installing base dependencies"
   install_base_packages
-  install_docker
-  add_user_to_docker_group
-  write_status "dependencies" "ok" "Dependencies installed (Docker only, no host Node/SteamCMD)"
+  if [[ "${RESOLVED_INSTALL_MODE}" == "docker" ]]; then
+    if ! install_docker; then
+      abort "Docker installation failed. Fix Docker networking or explicitly retry Native mode with --mode native."
+    fi
+    add_user_to_docker_group
+    write_status "dependencies" "ok" "Docker dependencies installed"
+  else
+    install_native_dependencies
+    ensure_native_service_user
+    write_status "dependencies" "ok" "Native systemd dependencies installed"
+  fi
+  backup_existing_install_state
 
   CURRENT_STAGE="preflight"
   preflight_checks
@@ -1101,10 +1768,14 @@ main() {
   fi
   write_status "network" "ok" "Port and firewall processed"
 
-  begin_stage "configuration" "Preparing panel configuration"
-  prepare_panel_files
-  write_status "configuration" "ok" "Panel configuration prepared"
-  deploy_panel
+  if [[ "${RESOLVED_INSTALL_MODE}" == "docker" ]]; then
+    begin_stage "configuration" "Preparing Docker panel configuration"
+    prepare_panel_files
+    write_status "configuration" "ok" "Docker panel configuration prepared"
+    deploy_panel
+  else
+    deploy_native_panel
+  fi
 
   print_summary
 }

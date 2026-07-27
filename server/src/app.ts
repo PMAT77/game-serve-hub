@@ -13,8 +13,8 @@ import { registerConsoleModule } from './modules/console'
 import { registerInstanceModule } from './modules/instance'
 import { registerNodeModule } from './modules/node'
 import { registerSystemModule } from './modules/system'
-import { isSteamcmdImagePresent } from './infra/container'
 import { getCachedDockerStatus } from './infra/docker'
+import { getCachedRuntimeStatus, isSteamcmdRuntimeReady } from './infra/runtime'
 import { success } from './shared/http/response'
 import { sanitizeRequestUrlForLog } from './shared/http/request-url'
 
@@ -22,7 +22,7 @@ import { sanitizeRequestUrlForLog } from './shared/http/request-url'
  * 创建 Fastify 服务实例。
  * 当前只提供最小可运行能力，后续在此处扩展模块注册与插件。
  */
-export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLevel' | 'port' | 'corsOrigin'>): Promise<FastifyInstance> {
+export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLevel' | 'port' | 'corsOrigin' | 'runtimeMode'>): Promise<FastifyInstance> {
   const logHttpRequests = config.logLevel === 'debug' || config.logLevel === 'trace'
 
   const app = Fastify({
@@ -46,10 +46,16 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
 
   // 最小健康检查接口，用于联调与部署探活。
   app.get('/health', async () => {
-    const dockerStatus = getCachedDockerStatus()
+    const dockerStatus = config.runtimeMode === 'docker' ? getCachedDockerStatus() : 'stopped'
+    const runtimeStatus = getCachedRuntimeStatus()
     return {
       status: 'ok',
       service: 'game-server-hub-backend',
+      runtime: {
+        mode: config.runtimeMode,
+        status: runtimeStatus,
+      },
+      // 保留旧字段，避免 v0.1.4 监控与安装脚本在升级时失效。
       docker: dockerStatus,
       timestamp: new Date().toISOString(),
     }
@@ -87,16 +93,20 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
   }
 
   app.get('/api/meta/runtime', async () => {
-    const dockerStatus = getCachedDockerStatus()
-    const steamcmdImageReady = dockerStatus === 'running' ? await isSteamcmdImagePresent() : false
+    const dockerStatus = config.runtimeMode === 'docker' ? getCachedDockerStatus() : 'stopped'
+    const runtimeStatus = getCachedRuntimeStatus()
+    const steamcmdReady = runtimeStatus === 'running' ? await isSteamcmdRuntimeReady() : false
     return success({
       server: {
         env: config.mode,
         logLevel: config.logLevel,
       },
-      runtimeMode: 'container',
+      runtimeMode: config.runtimeMode,
+      runtimeStatus,
       dockerStatus,
-      steamcmdImageReady,
+      steamcmdReady,
+      // 兼容旧前端字段；Native 模式下表示 SteamCMD 原生运行时是否就绪。
+      steamcmdImageReady: steamcmdReady,
     })
   })
 

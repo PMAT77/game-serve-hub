@@ -36,10 +36,13 @@ import {
 import {
   ensureSteamcmdImage,
   isGameDstImagePresent,
-  isSteamcmdImagePresent,
   pullGameDstImage,
 } from '../../infra/container'
 import { resolveDockerStatus } from '../../infra/docker'
+import {
+  isSteamcmdRuntimeReady,
+  resolveRuntimeStatus,
+} from '../../infra/runtime'
 import { buildSteamcmdImageReadyMessage } from '../../infra/steamcmd'
 import { runSteamcmdDiagnostics } from '../../infra/container/steamcmd-diagnostics'
 import { loadServerConfig } from '../../shared/config'
@@ -209,7 +212,8 @@ export function registerSystemModule(app: FastifyInstance) {
   })
 
   app.get('/app/system/steamcmd/config', async (request): Promise<ApiSuccessResponse<DbSystemSteamcmdConfig & {
-    runtimeMode: 'container'
+    runtimeMode: 'docker' | 'native'
+    runtimeStatus: 'running' | 'stopped'
     steamcmdImage: string
     gameDstImage: string
     isDockerAvailable: boolean
@@ -229,24 +233,34 @@ export function registerSystemModule(app: FastifyInstance) {
     const containerConfig = getServerContainerConfig()
     const config = await getSystemSteamcmdConfig() ?? getDefaultSteamcmdConfig()
     const installRoot = containerConfig.instancesRoot
-    const dockerStatus = await resolveDockerStatus()
+    const runtimeStatus = await resolveRuntimeStatus()
+    const dockerStatus = containerConfig.runtimeMode === 'docker'
+      ? await resolveDockerStatus()
+      : 'stopped'
     const isDockerAvailable = dockerStatus === 'running'
-    const isSteamcmdInstalled = isDockerAvailable && await isSteamcmdImagePresent()
-    const isGameDstImageInstalled = isDockerAvailable && await isGameDstImagePresent()
+    const isSteamcmdInstalled = runtimeStatus === 'running' && await isSteamcmdRuntimeReady()
+    const isGameDstImageInstalled = containerConfig.runtimeMode === 'native'
+      ? runtimeStatus === 'running'
+      : isDockerAvailable && await isGameDstImagePresent()
     const steamcmdImage = containerConfig.steamcmdImage
     const gameDstImage = containerConfig.gameDstImage
     const steamcmdRuntime = loadSteamcmdRuntimeConfig()
     return success({
       ...config,
-      steamcmdPath: steamcmdImage,
+      steamcmdPath: containerConfig.runtimeMode === 'native'
+        ? containerConfig.nativeSteamcmdPath
+        : steamcmdImage,
       installRoot,
-      runtimeMode: 'container' as const,
+      runtimeMode: containerConfig.runtimeMode,
+      runtimeStatus,
       steamcmdImage,
       gameDstImage,
       isDockerAvailable,
       isSteamcmdInstalled,
       isGameDstImageInstalled,
-      detectedSteamcmdPath: isSteamcmdInstalled ? steamcmdImage : '',
+      detectedSteamcmdPath: isSteamcmdInstalled
+        ? (containerConfig.runtimeMode === 'native' ? containerConfig.nativeSteamcmdPath : steamcmdImage)
+        : '',
       downloadRegion: steamcmdRuntime.downloadRegion,
       networkMode: steamcmdRuntime.networkMode,
       installMaxAttempts: steamcmdRuntime.installMaxAttempts,
@@ -279,7 +293,9 @@ export function registerSystemModule(app: FastifyInstance) {
     const containerConfig = getServerContainerConfig()
     const config = {
       ...normalizeSteamcmdConfigBody(body),
-      steamcmdPath: containerConfig.steamcmdImage,
+      steamcmdPath: containerConfig.runtimeMode === 'native'
+        ? containerConfig.nativeSteamcmdPath
+        : containerConfig.steamcmdImage,
       installRoot: containerConfig.instancesRoot,
     }
     const installRootError = validateInstallRootPath(config.installRoot)
@@ -311,17 +327,25 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    if ((await resolveDockerStatus(true)) !== 'running') {
-      return businessError('无法连接 Docker，请确认面板已挂载 docker.sock（或 Windows 下 Docker Desktop 已启动）', request)
+    const runtimeMode = getServerContainerConfig().runtimeMode
+    if ((await resolveRuntimeStatus(true)) !== 'running') {
+      return businessError(
+        runtimeMode === 'native'
+          ? '无法连接 systemd 用户服务管理器，请检查 gsh 用户 linger 和 user bus'
+          : '无法连接 Docker，请确认面板已挂载 docker.sock（或 Windows 下 Docker Desktop 已启动）',
+        request,
+      )
     }
     const pullResult = await ensureSteamcmdImage()
     if (!pullResult.ok) {
       app.log.error({ error: pullResult.error }, 'SteamCMD 镜像拉取失败')
       return businessError(pullResult.error, request)
     }
-    const { steamcmdImage } = getServerContainerConfig()
-    const message = buildSteamcmdImageReadyMessage(steamcmdImage)
-    app.log.info({ steamcmdImage }, 'SteamCMD 镜像已就绪')
+    const runtimeConfig = getServerContainerConfig()
+    const message = runtimeConfig.runtimeMode === 'native'
+      ? `Native SteamCMD 已就绪：${runtimeConfig.nativeSteamcmdPath}`
+      : buildSteamcmdImageReadyMessage(runtimeConfig.steamcmdImage)
+    app.log.info({ runtimeMode, steamcmdPath: runtimeConfig.nativeSteamcmdPath, steamcmdImage: runtimeConfig.steamcmdImage }, 'SteamCMD 运行时已就绪')
     return success({
       isSuccess: true,
       message,
@@ -336,8 +360,20 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    if ((await resolveDockerStatus(true)) !== 'running') {
-      return businessError('无法连接 Docker，请确认面板已挂载 docker.sock（或 Windows 下 Docker Desktop 已启动）', request)
+    const runtimeConfig = getServerContainerConfig()
+    if ((await resolveRuntimeStatus(true)) !== 'running') {
+      return businessError(
+        runtimeConfig.runtimeMode === 'native'
+          ? '无法连接 systemd 用户服务管理器'
+          : '无法连接 Docker，请确认面板已挂载 docker.sock（或 Windows 下 Docker Desktop 已启动）',
+        request,
+      )
+    }
+    if (runtimeConfig.runtimeMode === 'native') {
+      return success({
+        isSuccess: true,
+        message: 'Native 模式直接运行实例目录中的 DST 服务端，不需要运行镜像。',
+      }, request)
     }
     const pullResult = await pullGameDstImage()
     if (!pullResult.ok) {
@@ -366,7 +402,7 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    if ((await resolveDockerStatus(true)) !== 'running') {
+    if (loadServerConfig().runtimeMode === 'docker' && (await resolveDockerStatus(true)) !== 'running') {
       return businessError('无法连接 Docker，暂不能检查 Hub 镜像更新', request)
     }
     const status = await refreshPanelUpdateStatus()
@@ -381,6 +417,9 @@ export function registerSystemModule(app: FastifyInstance) {
     const authError = await requirePermission(request, SYSTEM_MANAGE_PERMISSION)
     if (authError) {
       return authError
+    }
+    if (loadServerConfig().runtimeMode === 'native') {
+      return businessError('裸机模式请使用版本状态中提供的安装命令原地升级，以保留校验和自动回滚能力。', request)
     }
     if ((await resolveDockerStatus(true)) !== 'running') {
       return businessError('无法连接 Docker，暂不能更新 Hub 镜像', request)
@@ -435,6 +474,8 @@ export function registerSystemModule(app: FastifyInstance) {
       hostname: string
     }
     panelVersion: string
+    runtimeMode: 'docker' | 'native'
+    runtimeStatus: 'running' | 'stopped'
     dockerStatus: 'running' | 'stopped'
   }> | ApiErrorResponse> => {
     const authError = await requirePermission(request, SYSTEM_READ_PERMISSION)
@@ -521,7 +562,11 @@ export function registerSystemModule(app: FastifyInstance) {
         hostname: os.hostname(),
       },
       panelVersion: getCachedPanelVersion(),
-      dockerStatus: getCachedDockerStatusForSystem(),
+      runtimeMode: loadServerConfig().runtimeMode,
+      runtimeStatus: await resolveRuntimeStatus(),
+      dockerStatus: loadServerConfig().runtimeMode === 'docker'
+        ? getCachedDockerStatusForSystem()
+        : 'stopped',
     }, request)
   })
 

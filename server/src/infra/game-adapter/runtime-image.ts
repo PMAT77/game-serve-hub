@@ -1,5 +1,6 @@
 import { pullGameDstImage } from '../container/game-dst-image'
 import { DST_APP_ID } from './dst/constants'
+import { getRuntimeMode } from '../runtime'
 
 export type GameRuntimeImageResult = { ok: true } | { ok: false, error: string }
 
@@ -7,6 +8,9 @@ export type GameRuntimeImageResult = { ok: true } | { ok: false, error: string }
 export async function ensureGameRuntimeImageReady(gameCode: string): Promise<GameRuntimeImageResult> {
   const normalized = gameCode.trim()
   if (normalized === DST_APP_ID) {
+    if (getRuntimeMode() === 'native') {
+      return { ok: true }
+    }
     return pullGameDstImage()
   }
   return {

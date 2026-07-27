@@ -85,16 +85,14 @@ function bindProcessLifecycle(app: FastifyInstance, shutdown: (reason: string) =
     void shutdown('disconnect')
   })
 
-  if (process.stdin) {
+  if (process.stdin?.isTTY) {
     process.stdin.once('close', () => {
       void shutdown('stdin close')
     })
     process.stdin.once('end', () => {
       void shutdown('stdin end')
     })
-    if (process.stdin.isTTY) {
-      process.stdin.resume()
-    }
+    process.stdin.resume()
   }
 
   app.log.debug('后端进程生命周期监听已注册')

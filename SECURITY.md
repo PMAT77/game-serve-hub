@@ -8,7 +8,7 @@
 | `main` 分支 HEAD | ✅ 接收报告（修复将随下一版本发布） |
 | 更早版本 / 自行改动的 fork | ❌ 不保证 |
 
-完整版本列表见 [Releases](https://github.com/GameServerHub/game-server-hub/releases)。
+完整版本列表见 [Releases](https://github.com/PMAT77/game-serve-hub/releases)。
 
 ---
 
@@ -18,7 +18,7 @@
 
 请通过以下方式私下报告：
 
-1. [GitHub Security Advisories](https://github.com/GameServerHub/game-server-hub/security/advisories/new)（推荐）
+1. [GitHub Security Advisories](https://github.com/PMAT77/game-serve-hub/security/advisories/new)（推荐）
 2. 或新建 Issue 标题以 `[Security]` 开头并**仅写概要**，在说明中请求维护者私下联系（不推荐，响应可能较慢）
 
 报告请尽量包含：

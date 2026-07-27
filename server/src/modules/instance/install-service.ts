@@ -198,8 +198,10 @@ async function logInstallResourcePhase(
   extra?: Record<string, unknown>,
 ) {
   try {
-    const { dockerHost } = getServerContainerConfig()
-    const docker = new DockerClient(resolveDockerConnectOptions(dockerHost))
+    const { dockerHost, runtimeMode } = getServerContainerConfig()
+    const docker = runtimeMode === 'docker'
+      ? new DockerClient(resolveDockerConnectOptions(dockerHost))
+      : null
     const lines = await appendInstallResourceSnapshot(getInstallLogsDirPath(), docker, {
       instanceId,
       phase,
@@ -352,7 +354,11 @@ async function runInstallPipeline(
     return
   }
 
-  logWriter.appendLine('安装任务启动（已调整安装目录为 SteamCMD 容器用户可写）')
+  logWriter.appendLine(
+    getServerContainerConfig().runtimeMode === 'native'
+      ? '安装任务启动（SteamCMD 将以 gsh 用户直接运行）'
+      : '安装任务启动（已调整安装目录为 SteamCMD 容器用户可写）',
+  )
   await logInstallResourcePhase(logWriter, input.instanceId, 'install_pipeline_start')
   await writeInstallLogMeta(input.instanceId, 'running', null)
   const queueHint = hasOtherActiveInstallJobs(input.instanceId)
@@ -689,10 +695,10 @@ export async function reconcileStaleInstallingInstances(app: FastifyInstance): P
   return reconciled
 }
 
-/** 面板 onReady：清理 tsx watch 热重载后遗留的 SteamCMD 安装容器 */
+/** 面板 onReady：清理重启后遗留的 SteamCMD 安装任务 */
 export async function reconcileOrphanedSteamcmdOnPanelReady(app: FastifyInstance): Promise<void> {
   const removed = await cleanupAllRunningSteamcmdInstallContainers()
   if (removed > 0) {
-    app.log.warn({ removed }, '已终止面板重启后遗留的 SteamCMD 安装容器')
+    app.log.warn({ removed }, '已终止面板重启后遗留的 SteamCMD 安装任务')
   }
 }

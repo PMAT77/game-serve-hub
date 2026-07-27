@@ -45,9 +45,9 @@
 仅在推送 **`v*`** Release tag 时：
 
 1. [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) 先执行发布质量门禁（类型检查、版本一致性、单测、安装脚本 smoke test、生产构建），再构建并推送三类 candidate 镜像：
-   - `ghcr.io/gameserverhub/game-server-hub:<tag>`
-   - `ghcr.io/gameserverhub/game-server-hub-dst:<tag>`
-   - `ghcr.io/gameserverhub/steamcmd-base:<tag>`
+   - `ghcr.io/pmat77/game-server-hub:<tag>`
+   - `ghcr.io/pmat77/game-server-hub-dst:<tag>`
+   - `ghcr.io/pmat77/steamcmd-base:<tag>`
 2. 三个 candidate 均写入成功后才提升正式 tag，避免部分 Release
 3. 自动创建 GitHub Release 并附带 `release-images.json`
 4. Release 创建成功后自动清理本次 candidate 镜像，避免 GHCR 存储持续累积
@@ -70,7 +70,7 @@ PR 仅执行轻量质量检查，不构建或推送容器镜像；`main` 分支�
 
 配置后，外部贡献者的 PR 必须在 CI 通过后才能合并，与 [CONTRIBUTING.md](../CONTRIBUTING.md) 中的本地检查一致。
 
-GHCR 新 Package（当前包括 `steamcmd-base`）还需在 Package settings 的 **Manage Actions access** 中授予 `GameServerHub/game-server-hub` 写权限，并设置为 Public。工作流只使用仓库临时 `GITHUB_TOKEN`，不需要长期 PAT。
+GHCR 新 Package（当前包括 `steamcmd-base`）还需在 Package settings 的 **Manage Actions access** 中授予 `PMAT77/game-serve-hub` 写权限，并设置为 Public。工作流只使用仓库临时 `GITHUB_TOKEN`，不需要长期 PAT。
 
 ---
 

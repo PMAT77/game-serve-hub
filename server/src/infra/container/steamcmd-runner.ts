@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import DockerClient from 'dockerode'
 import { resolveDockerConnectOptions } from '../docker-connect'
 import { getServerContainerConfig } from '../../shared/config/container'
@@ -12,9 +13,22 @@ import { appendInstallResourceSnapshot } from './install-resource-monitor'
 import { formatSteamcmdMemoryLimitForLog, resolveSteamcmdContainerMemoryLimits } from './steamcmd-container-resources'
 import { parseImageRef } from './image-ref'
 import { DST_WORKSHOP_APP_ID } from '../game-adapter/dst/constants'
+import {
+  cancelNativeSteamcmdJob,
+  isNativeSteamcmdJobRunning,
+  runSteamcmdAppInfoNative,
+  runSteamcmdAppUpdateNative,
+  runSteamcmdWorkshopDownloadNative,
+} from './native-steamcmd-runner'
+import {
+  cancelSteamcmdInstallContainer as cancelDockerSteamcmdInstallContainer,
+  cleanupAllRunningSteamcmdInstallContainers as cleanupAllDockerSteamcmdInstallContainers,
+  cleanupOrphanedSteamcmdInstallContainers as cleanupOrphanedDockerSteamcmdInstallContainers,
+  isSteamcmdJobRunning as isDockerSteamcmdJobRunning,
+} from './steamcmd-job'
 
 /** 未配置 SteamCMD 镜像时使用的官方默认仓库。 */
-export const STEAMCMD_OFFICIAL_REPOSITORY = 'ghcr.io/gameserverhub/steamcmd-base'
+export const STEAMCMD_OFFICIAL_REPOSITORY = 'ghcr.io/pmat77/steamcmd-base'
 
 const STEAMCMD_APP_UPDATE_TIMEOUT_MS = 30 * 60 * 1000
 const STEAMCMD_APP_INFO_TIMEOUT_MS = 90_000
@@ -41,12 +55,33 @@ function buildSteamcmdAppInfoArgs(appId: string) {
   ]
 }
 
-export {
-  cancelSteamcmdInstallContainer,
-  cleanupAllRunningSteamcmdInstallContainers,
-  cleanupOrphanedSteamcmdInstallContainers,
-  isSteamcmdJobRunning,
-} from './steamcmd-job'
+export async function cancelSteamcmdInstallContainer(cancelKey: string): Promise<void> {
+  if (getServerContainerConfig().runtimeMode === 'native') {
+    return cancelNativeSteamcmdJob(cancelKey)
+  }
+  return cancelDockerSteamcmdInstallContainer(cancelKey)
+}
+
+export async function cleanupAllRunningSteamcmdInstallContainers(): Promise<number> {
+  if (getServerContainerConfig().runtimeMode === 'native') {
+    return 0
+  }
+  return cleanupAllDockerSteamcmdInstallContainers()
+}
+
+export async function cleanupOrphanedSteamcmdInstallContainers(jobId?: string): Promise<number> {
+  if (getServerContainerConfig().runtimeMode === 'native') {
+    return 0
+  }
+  return cleanupOrphanedDockerSteamcmdInstallContainers(jobId)
+}
+
+export async function isSteamcmdJobRunning(jobId: string): Promise<boolean> {
+  if (getServerContainerConfig().runtimeMode === 'native') {
+    return isNativeSteamcmdJobRunning(jobId)
+  }
+  return isDockerSteamcmdJobRunning(jobId)
+}
 
 export async function runSteamcmdAppUpdateInContainer(input: {
   hostInstallPath: string
@@ -56,6 +91,9 @@ export async function runSteamcmdAppUpdateInContainer(input: {
   onLogLine?: (line: string) => void
   onAwaitingSteamcmdLock?: () => void | Promise<void>
 }): Promise<{ ok: boolean, output: string, cancelled?: boolean }> {
+  if (getServerContainerConfig().runtimeMode === 'native') {
+    return runSteamcmdAppUpdateNative(input)
+  }
   const jobId = input.cancelKey?.trim() || 'anonymous'
   return withSteamcmdAppUpdateLock(
     jobId,
@@ -196,6 +234,9 @@ export async function runSteamcmdWorkshopDownloadInContainer(input: {
   onDownloadStart?: () => void | Promise<void>
   timeoutMs?: number
 }): Promise<{ ok: boolean, output: string, cancelled?: boolean }> {
+  if (getServerContainerConfig().runtimeMode === 'native') {
+    return runSteamcmdWorkshopDownloadNative(input)
+  }
   const jobId = input.cancelKey?.trim() || 'anonymous'
   return withSteamcmdAppUpdateLock(
     jobId,
@@ -279,6 +320,9 @@ async function runSteamcmdWorkshopDownloadInContainerUnlocked(input: {
 }
 
 export async function runSteamcmdAppInfoInContainer(appId: string): Promise<{ ok: boolean, output: string }> {
+  if (getServerContainerConfig().runtimeMode === 'native') {
+    return runSteamcmdAppInfoNative(appId)
+  }
   const { steamcmdImage } = getServerContainerConfig()
   const result = await runSteamcmdJob({
     image: steamcmdImage,
@@ -340,7 +384,7 @@ function formatSteamcmdPullError(raw: string, image: string, triedImages?: strin
       attempted,
       `无法从镜像仓库拉取 SteamCMD 镜像 ${image}（网络超时或被阻断）。`,
       '可尝试：① 在可访问网络下手动 docker pull 后重试；',
-      '② 确认可访问 GHCR（ghcr.io/gameserverhub/steamcmd-base）；',
+      '② 确认可访问 GHCR（ghcr.io/pmat77/steamcmd-base）；',
       '③ 检查 panel.env 中 GSH_STEAMCMD_IMAGE 的 tag 是否与 GHCR 一致。',
       `原始错误：${text}`,
     ].join('')
@@ -412,8 +456,18 @@ export function buildSteamcmdImageCandidates(configuredImage?: string): string[]
 }
 
 export async function isSteamcmdImagePresent(): Promise<boolean> {
+  const config = getServerContainerConfig()
+  if (config.runtimeMode === 'native') {
+    try {
+      fs.accessSync(config.nativeSteamcmdPath, fs.constants.X_OK)
+      return true
+    }
+    catch {
+      return false
+    }
+  }
   try {
-    const { steamcmdImage } = getServerContainerConfig()
+    const { steamcmdImage } = config
     if (await isImagePresentByRef(steamcmdImage)) {
       return true
     }
@@ -433,7 +487,17 @@ function sleep(ms: number): Promise<void> {
 
 /** 仅由用户显式触发（POST .../steamcmd/install），禁止在页面加载/列表轮询中调用 */
 export async function pullSteamcmdImage(): Promise<SteamcmdImagePullResult> {
-  const { steamcmdImage } = getServerContainerConfig()
+  const config = getServerContainerConfig()
+  if (config.runtimeMode === 'native') {
+    if (await isSteamcmdImagePresent()) {
+      return { ok: true }
+    }
+    return {
+      ok: false,
+      error: `Native SteamCMD 未安装：${config.nativeSteamcmdPath}。请重新运行 --mode native 安装器。`,
+    }
+  }
+  const { steamcmdImage } = config
   if (await isImagePresentByRef(steamcmdImage)) {
     return { ok: true }
   }

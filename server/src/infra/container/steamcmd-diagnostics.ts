@@ -1,5 +1,7 @@
 import process from 'node:process'
+import fs from 'node:fs'
 import { resolveDockerStatus } from '../docker'
+import { resolveRuntimeStatus } from '../runtime'
 import { loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
 import { getServerContainerConfig } from '../../shared/config/container'
 
@@ -22,6 +24,8 @@ export interface SteamcmdDiagnosticsResult {
     installMaxAttempts: number
     installRetryDelaysMs: number[]
     steamcmdImage: string
+    steamcmdPath: string
+    runtimeMode: 'docker' | 'native'
   }
   suggestions: string[]
 }
@@ -50,12 +54,15 @@ async function probeSteamCdn(timeoutMs = 10_000): Promise<{ ok: boolean, message
 
 function buildSuggestions(input: {
   cdnOk: boolean
-  dockerOk: boolean
+  runtimeOk: boolean
+  runtimeMode: 'docker' | 'native'
   config: ReturnType<typeof loadSteamcmdRuntimeConfig>
 }): string[] {
   const suggestions: string[] = []
-  if (!input.dockerOk) {
-    suggestions.push('Docker 不可用：请确认 docker.sock 已挂载且 Docker 服务已启动。')
+  if (!input.runtimeOk) {
+    suggestions.push(input.runtimeMode === 'native'
+      ? 'systemd 用户服务管理器不可用：请确认 gsh 用户已启用 linger 且 user bus 正常。'
+      : 'Docker 不可用：请确认 docker.sock 已挂载且 Docker 服务已启动。')
   }
   if (!input.cdnOk) {
     if (!input.config.downloadRegion) {
@@ -81,15 +88,34 @@ function buildSuggestions(input: {
 export async function runSteamcmdDiagnostics(): Promise<SteamcmdDiagnosticsResult> {
   const steamcmdConfig = loadSteamcmdRuntimeConfig()
   const containerConfig = getServerContainerConfig()
-  const dockerStatus = await resolveDockerStatus(true)
+  const dockerStatus = containerConfig.runtimeMode === 'docker'
+    ? await resolveDockerStatus(true)
+    : 'stopped'
   const dockerOk = dockerStatus === 'running'
+  const runtimeStatus = await resolveRuntimeStatus(true)
+  const nativeSteamcmdOk = containerConfig.runtimeMode === 'native'
+    && fs.existsSync(containerConfig.nativeSteamcmdPath)
+  const runtimeOk = runtimeStatus === 'running'
 
-  const cdnProbe = await probeSteamCdn()
+  const cdnProbe = isSteamcmdDiagnosticsOfflineMode()
+    ? { ok: true, message: '已跳过 SteamCDN 外网探测' }
+    : await probeSteamCdn()
   const checks: SteamcmdDiagnosticsCheck[] = [
     {
-      id: 'docker',
-      ok: dockerOk,
-      message: dockerOk ? 'Docker 引擎可用' : `Docker 不可用（${dockerStatus}）`,
+      id: 'runtime',
+      ok: runtimeOk,
+      message: containerConfig.runtimeMode === 'native'
+        ? (runtimeOk ? 'systemd 用户服务管理器可用' : `systemd 用户服务管理器不可用（${runtimeStatus}）`)
+        : (dockerOk ? 'Docker 引擎可用' : `Docker 不可用（${dockerStatus}）`),
+    },
+    {
+      id: 'steamcmd_runtime',
+      ok: containerConfig.runtimeMode === 'docker' ? dockerOk : nativeSteamcmdOk,
+      message: containerConfig.runtimeMode === 'native'
+        ? (nativeSteamcmdOk
+            ? `Native SteamCMD 已安装：${containerConfig.nativeSteamcmdPath}`
+            : `Native SteamCMD 不存在：${containerConfig.nativeSteamcmdPath}`)
+        : `SteamCMD 容器镜像：${containerConfig.steamcmdImage}`,
     },
     {
       id: 'steamcdn',
@@ -111,7 +137,9 @@ export async function runSteamcmdDiagnostics(): Promise<SteamcmdDiagnosticsResul
     {
       id: 'network_mode',
       ok: true,
-      message: `SteamCMD 容器网络模式：${steamcmdConfig.networkMode}`,
+      message: containerConfig.runtimeMode === 'native'
+        ? 'Native SteamCMD 直接使用宿主机网络'
+        : `SteamCMD 容器网络模式：${steamcmdConfig.networkMode}`,
     },
   ]
 
@@ -125,10 +153,13 @@ export async function runSteamcmdDiagnostics(): Promise<SteamcmdDiagnosticsResul
       installMaxAttempts: steamcmdConfig.installMaxAttempts,
       installRetryDelaysMs: steamcmdConfig.installRetryDelaysMs,
       steamcmdImage: containerConfig.steamcmdImage,
+      steamcmdPath: containerConfig.nativeSteamcmdPath,
+      runtimeMode: containerConfig.runtimeMode,
     },
     suggestions: buildSuggestions({
       cdnOk: cdnProbe.ok,
-      dockerOk,
+      runtimeOk,
+      runtimeMode: containerConfig.runtimeMode,
       config: steamcmdConfig,
     }),
   }

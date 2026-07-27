@@ -61,6 +61,10 @@ const canApplyPanelUpdate = computed(() => {
   return updateStatus.value.panel.updateAvailable && updateStatus.value.panelApplySupported
 })
 
+const isNativeRuntime = computed(() => updateStatus.value?.runtimeMode === 'native')
+const panelVersionLabel = computed(() => isNativeRuntime.value ? '面板 Release' : '面板镜像')
+const dstVersionLabel = computed(() => isNativeRuntime.value ? 'DST 原生运行时' : 'DST 运行镜像')
+
 const canApplyDstUpdate = computed(() => {
   if (!updateStatus.value) {
     return false
@@ -191,10 +195,10 @@ async function checkHubUpdate() {
       faToast.warning('无法完成远端版本检查，请查看下方检查提示')
     }
     else if (res.data.panel.updateAvailable || res.data.dst.updateAvailable) {
-      faToast.info('检测到 Hub 镜像有新版本')
+      faToast.info(isNativeRuntime.value ? '检测到 Hub Release 有新版本' : '检测到 Hub 镜像有新版本')
     }
     else {
-      faToast.success('Hub 镜像已是最新版本')
+      faToast.success(isNativeRuntime.value ? 'Hub Release 已是最新版本' : 'Hub 镜像已是最新版本')
     }
   }
   finally {
@@ -257,7 +261,7 @@ async function saveSettings() {
       checkUpdateBeforeStart: form.checkUpdateBeforeStart,
       updateCheckIntervalHours: form.updateCheckIntervalHours,
     })
-    appSettingsStore.setColorScheme(form.theme)
+    appSettingsStore.setColorScheme(form.theme === 'system' ? '' : form.theme)
     faToast.success('系统设置已保存')
     await loadSettings({ silent: true })
   }
@@ -320,11 +324,13 @@ onActivated(async () => {
 
       <AdminSettingsSection
         title="Hub 版本"
-        description="检查并应用面板与 DST 运行镜像更新。应用面板更新会短暂重启管理端。"
+        :description="isNativeRuntime
+          ? '检查面板 Release；裸机模式通过校验安装包并保留旧版本的脚本原地升级。'
+          : '检查并应用面板与 DST 运行镜像更新。应用面板更新会短暂重启管理端。'"
       >
         <div v-if="updateStatus" class="space-y-2 text-sm">
-          <p>{{ formatImageLine('面板镜像', updateStatus.panel) }}</p>
-          <p>{{ formatImageLine('DST 运行镜像', updateStatus.dst) }}</p>
+          <p>{{ formatImageLine(panelVersionLabel, updateStatus.panel) }}</p>
+          <p>{{ formatImageLine(dstVersionLabel, updateStatus.dst) }}</p>
           <p v-if="updateStatus.release" class="text-muted-foreground">
             最新 Release：{{ updateStatus.release.tagName }}
             <span v-if="formattedLastCheckedAt"> · 上次检查 {{ formattedLastCheckedAt }}</span>
@@ -367,13 +373,15 @@ onActivated(async () => {
       </AdminSettingsSection>
 
       <AdminSettingsSection
-        title="Hub 镜像自动检查"
-        description="按间隔自动检查 Hub 镜像是否有新版本。"
+        :title="isNativeRuntime ? 'Hub Release 自动检查' : 'Hub 镜像自动检查'"
+        :description="isNativeRuntime ? '按间隔自动检查 GitHub Release 是否有新版本。' : '按间隔自动检查 Hub 镜像是否有新版本。'"
       >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.autoUpdate" />
           <span class="text-sm text-muted-foreground">
-            {{ form.autoUpdate ? '已启用 Hub 镜像自动检查' : '已关闭 Hub 镜像自动检查' }}
+            {{ form.autoUpdate
+              ? `已启用 Hub ${isNativeRuntime ? 'Release' : '镜像'}自动检查`
+              : `已关闭 Hub ${isNativeRuntime ? 'Release' : '镜像'}自动检查` }}
           </span>
         </div>
         <div class="space-y-2 max-w-80">

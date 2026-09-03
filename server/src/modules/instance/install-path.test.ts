@@ -13,7 +13,7 @@ describe('prepareInstallPathForSteamcmd', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-install-path-'))
     // 非 root（如 CI runner）无法 chown 到 SteamCMD 容器用户 1000:1000：
     // chown 到当前用户保持同一代码路径，仅目标属主自适配
-    if (typeof process.getuid === 'function' && process.getuid() !== 0) {
+    if (typeof process.getuid === 'function' && typeof process.getgid === 'function' && process.getuid() !== 0) {
       process.env.GSH_STEAMCMD_RUN_USER = `${process.getuid()}:${process.getgid()}`
     }
     // instancesRoot 默认 /var/lib/...，CI 无写权限；统一指向临时目录避免污染真实路径

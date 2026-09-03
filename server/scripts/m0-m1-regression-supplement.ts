@@ -3,7 +3,6 @@
  * 用法: tsx server/scripts/m0-m1-regression-supplement.ts
  * 环境: REGRESSION_BASE_URL, REGRESSION_ACCOUNT, REGRESSION_PASSWORD, REGRESSION_INSTANCE_ID（用例 4 可选）
  */
-import { execSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'

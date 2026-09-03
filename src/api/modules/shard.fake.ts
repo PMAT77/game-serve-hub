@@ -99,9 +99,9 @@ export default defineFakeRoute([
         shard.steamMasterPort = payload.steamMasterPort
         shard.worldgenPreset = payload.worldgenPreset
         const merged = {
-          ...(shard.leveldataOverrides ?? {}),
-          ...(payload.worldRuleOverrides ?? {}),
-          ...(payload.worldgenOverrides ?? {}),
+          ...shard.leveldataOverrides,
+          ...payload.worldRuleOverrides,
+          ...payload.worldgenOverrides,
         }
         if (Object.keys(merged).length > 0) {
           shard.leveldataOverrides = merged

@@ -32,7 +32,11 @@
 - `updateGameInstanceRuntime` 支持 `whereStatus` 前置状态守卫，安装管线全部终态写入接入。
 - 登录限流、找回/改密失败计数落 SQLite（新增 `auth_rate_limits` 表，0011 迁移），面板重启后限流状态不再清零，表容量由定期清理保证有界。
 - 业务模块不再直接实例化 dockerode，统一经 infra 层 `createDockerClient` 工厂获取客户端。
-- CI 质量门禁新增 release 引用一致性校验与生产构建；镜像新增 `HEALTHCHECK`（node fetch 探活 `/health`）。
+- CI 质量门禁新增 release 引用一致性校验与生产构建（含服务端打包）；镜像新增 `HEALTHCHECK`（node fetch 探活 `/health`）。
+- 服务端新增 esbuild 打包（`pnpm run build:server`）：Docker 镜像 production 阶段复用打包产物，`node` 直跑不再经 tsx 转译，镜像不再拷贝 server/shared 源码；运行时仓库资源（迁移目录、前端产物、DST leveldata 模板）改为从部署根统一探测定位。
+- 说明：镜像暂不以非 root 用户运行——docker.sock 的宿主 gid 因发行版而异，非 root 需 entrypoint 动态调组或 compose `group_add`，且数据/日志绑定挂载需属主匹配，待部署矩阵验证后启用。
+- 修复 Mod 管理在快速切换实例时旧实例响应覆盖新实例列表的竞态。
+- 引入 oxlint 静态检查（`pnpm run lint:ox`，CI 以 `--deny-warnings` 门禁），清零全部告警：未用导入、多余展开拷贝、正则冗余转义等。
 
 ### Security
 

@@ -124,7 +124,7 @@ export async function requirePermission(
     = typeof permissionsOrOptions === 'string' || Array.isArray(permissionsOrOptions)
       ? {
           permissions: permissionsOrOptions,
-          ...(maybeOptions ?? {}),
+          ...maybeOptions,
         }
       : (permissionsOrOptions ?? {})
 

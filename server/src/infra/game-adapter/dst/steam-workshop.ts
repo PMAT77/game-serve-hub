@@ -1323,7 +1323,7 @@ async function fetchJsonWithTimeout(url: string, headers?: Record<string, string
       headers: {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'User-Agent': 'game-server-hub-mod-fetcher/1.0',
-        ...(headers ?? {}),
+        ...headers,
       },
       signal: controller.signal,
     })

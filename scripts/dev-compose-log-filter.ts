@@ -21,7 +21,7 @@ const DROP_LINE_PATTERNS = [
   /^Gracefully stopping/,
   /^Aborting on container exit/,
   /^Container .* (Created|Starting|Started|Stopping|Stopped|Removed|Healthy|Waiting)/,
-  /^\[[+\-]\]/,
+  /^\[[+-]\]/,
   /^corepack enable/,
   /^pnpm install/,
 ]

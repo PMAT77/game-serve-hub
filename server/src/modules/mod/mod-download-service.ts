@@ -99,7 +99,7 @@ function toJobDto(record: ModInstallJobRecord): ModInstallJobDto {
 function collectDownloadWorkshopIds(payload: ModInstallPayload): string[] {
   const dependencyIds = normalizeDependencyIds(payload.dependencyIds)
   const workshopId = payload.workshopId.trim()
-  const ordered = [...dependencyIds.filter(id => id !== workshopId)]
+  const ordered = dependencyIds.filter(id => id !== workshopId)
   if (workshopId) {
     ordered.push(workshopId)
   }

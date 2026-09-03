@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "rules": {
+    "no-control-regex": "off"
+  },
+  "ignorePatterns": [
+    "dist",
+    "dist-server",
+    "node_modules",
+    "src/layouts",
+    "src/store/modules/app",
+    "src/composables/app",
+    "src/components/AppBackToTop",
+    "packages/copyright",
+    "src/router/guards.ts"
+  ]
+}

@@ -20,6 +20,15 @@ export const userPermissions = sqliteTable('user_permissions', {
   primaryKey({ columns: [table.userId, table.permission] }),
 ])
 
+/** 认证限流状态（登录守卫、找回/改密失败计数）；重启不清零，由应用侧定期清理过期行 */
+export const authRateLimits = sqliteTable('auth_rate_limits', {
+  key: text('key').primaryKey(),
+  failedCount: integer('failed_count').notNull().default(0),
+  windowStart: integer('window_start').notNull(),
+  blockedUntil: integer('blocked_until').notNull().default(0),
+  updatedAt: integer('updated_at').notNull(),
+})
+
 export const authSessions = sqliteTable('auth_sessions', {
   token: text('token').primaryKey(),
   tokenHash: text('token_hash'),

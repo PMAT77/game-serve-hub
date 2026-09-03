@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { deleteRateLimitState, getRateLimitState, saveRateLimitState } from '../../shared/db/rate-limit-store'
 
 export interface LoginGuardState {
   failedCount: number
@@ -26,7 +27,7 @@ interface CaptchaRecord {
   expiresAt: number
 }
 
-const guardStateMap = new Map<string, LoginGuardState>()
+// 登录失败/封锁状态持久化在 SQLite（重启不清零）；验证码挑战短生命周期，保持内存态
 const captchaRecordMap = new Map<string, CaptchaRecord>()
 
 function nowMs() {
@@ -59,9 +60,9 @@ function clearExpiredCaptchas(now: number) {
 
 export function getLoginGuardState(key: string, options: LoginGuardOptions): LoginGuardState {
   const now = nowMs()
-  const state = guardStateMap.get(key) ?? getDefaultState(now)
+  const state = getRateLimitState(key) ?? getDefaultState(now)
   ensureActiveWindow(state, options, now)
-  guardStateMap.set(key, state)
+  saveRateLimitState(key, state)
   return state
 }
 
@@ -121,7 +122,7 @@ export function verifyCaptchaChallenge(
 }
 
 export function clearLoginGuardState(key: string) {
-  guardStateMap.delete(key)
+  deleteRateLimitState(key)
 }
 
 export function recordLoginFailure(key: string, options: LoginGuardOptions): LoginGuardState {
@@ -131,6 +132,6 @@ export function recordLoginFailure(key: string, options: LoginGuardOptions): Log
   if (state.failedCount >= options.maxFailures) {
     state.blockedUntil = now + options.blockMs
   }
-  guardStateMap.set(key, state)
+  saveRateLimitState(key, state)
   return state
 }

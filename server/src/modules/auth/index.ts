@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { timingSafeEqual } from 'node:crypto'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import {
   loginBodySchema,
@@ -34,21 +34,20 @@ import {
   shouldRequireCaptcha,
   verifyCaptchaChallenge,
 } from './login-guard'
-
-interface PasswordChangeRateState {
-  count: number
-  windowStart: number
-  blockedUntil: number
-}
+import {
+  deleteRateLimitState,
+  getRateLimitState,
+  saveRateLimitState,
+} from '../../shared/db/rate-limit-store'
 
 const PASSWORD_CHANGE_ATTEMPT_LIMIT = 5
 const PASSWORD_CHANGE_WINDOW_MS = 10 * 60 * 1000
 const PASSWORD_CHANGE_BLOCK_MS = 15 * 60 * 1000
 const PASSWORD_CHANGE_MIN_INTERVAL_MS = 60 * 1000
-const passwordChangeRateMap = new Map<string, PasswordChangeRateState>()
 const PASSWORD_RECOVERY_ATTEMPT_LIMIT = 5
 const PASSWORD_RECOVERY_WINDOW_MS = 15 * 60 * 1000
-const passwordRecoveryRateMap = new Map<string, { count: number, windowStart: number }>()
+/** 同一找回口令（按内容哈希维度）在窗口内允许的失败次数上限，超过后该口令临时失效 */
+const PASSWORD_RECOVERY_TOKEN_LIMIT = 10
 const LOGIN_GUARD_OPTIONS = {
   maxFailures: 5,
   captchaThreshold: 3,
@@ -135,21 +134,48 @@ function verifyRecoveryToken(expected: string, provided: string): boolean {
 
 function checkPasswordRecoveryRateLimit(clientKey: string): string | undefined {
   const now = Date.now()
-  const state = passwordRecoveryRateMap.get(clientKey)
+  const state = getRateLimitState(clientKey)
   if (!state || now - state.windowStart > PASSWORD_RECOVERY_WINDOW_MS) {
-    passwordRecoveryRateMap.set(clientKey, { count: 1, windowStart: now })
+    saveRateLimitState(clientKey, { failedCount: 1, windowStart: now, blockedUntil: 0 })
     return undefined
   }
-  state.count += 1
-  if (state.count > PASSWORD_RECOVERY_ATTEMPT_LIMIT) {
+  const failedCount = state.failedCount + 1
+  saveRateLimitState(clientKey, { ...state, failedCount })
+  if (failedCount > PASSWORD_RECOVERY_ATTEMPT_LIMIT) {
     return '找回密码尝试过于频繁，请稍后再试'
   }
   return undefined
 }
 
+/** 找回口令按内容哈希维度封锁：攻击者换 IP 也无法继续对同一口令做分布式爆破 */
+function recoveryTokenStateKey(token: string): string {
+  const digest = createHash('sha256').update(token).digest('hex')
+  return `recover-token:${digest}`
+}
+
+function isRecoveryTokenLocked(token: string): boolean {
+  const state = getRateLimitState(recoveryTokenStateKey(token))
+  if (!state) {
+    return false
+  }
+  return state.failedCount >= PASSWORD_RECOVERY_TOKEN_LIMIT
+    && Date.now() - state.windowStart <= PASSWORD_RECOVERY_WINDOW_MS
+}
+
+function recordRecoveryTokenFailure(token: string): void {
+  const key = recoveryTokenStateKey(token)
+  const now = Date.now()
+  const state = getRateLimitState(key)
+  if (!state || now - state.windowStart > PASSWORD_RECOVERY_WINDOW_MS) {
+    saveRateLimitState(key, { failedCount: 1, windowStart: now, blockedUntil: 0 })
+    return
+  }
+  saveRateLimitState(key, { ...state, failedCount: state.failedCount + 1 })
+}
+
 function checkPasswordChangeRateLimit(userId: string): string | undefined {
   const now = Date.now()
-  const state = passwordChangeRateMap.get(userId)
+  const state = getRateLimitState(`pwchange:${userId}`)
   if (!state) {
     return undefined
   }
@@ -158,31 +184,28 @@ function checkPasswordChangeRateLimit(userId: string): string | undefined {
     return `尝试过于频繁，请 ${waitMinutes} 分钟后再试`
   }
   if (now - state.windowStart > PASSWORD_CHANGE_WINDOW_MS) {
-    passwordChangeRateMap.delete(userId)
+    deleteRateLimitState(`pwchange:${userId}`)
   }
   return undefined
 }
 
 function recordPasswordChangeFailure(userId: string) {
   const now = Date.now()
-  const state = passwordChangeRateMap.get(userId)
+  const key = `pwchange:${userId}`
+  const state = getRateLimitState(key)
   if (!state || now - state.windowStart > PASSWORD_CHANGE_WINDOW_MS) {
-    passwordChangeRateMap.set(userId, {
-      count: 1,
-      windowStart: now,
-      blockedUntil: 0,
-    })
+    saveRateLimitState(key, { failedCount: 1, windowStart: now, blockedUntil: 0 })
     return
   }
-  state.count += 1
-  if (state.count >= PASSWORD_CHANGE_ATTEMPT_LIMIT) {
-    state.blockedUntil = now + PASSWORD_CHANGE_BLOCK_MS
-  }
-  passwordChangeRateMap.set(userId, state)
+  const failedCount = state.failedCount + 1
+  const blockedUntil = failedCount >= PASSWORD_CHANGE_ATTEMPT_LIMIT
+    ? now + PASSWORD_CHANGE_BLOCK_MS
+    : state.blockedUntil
+  saveRateLimitState(key, { failedCount, windowStart: state.windowStart, blockedUntil })
 }
 
 function clearPasswordChangeFailures(userId: string) {
-  passwordChangeRateMap.delete(userId)
+  deleteRateLimitState(`pwchange:${userId}`)
 }
 
 /**
@@ -428,7 +451,12 @@ export function registerAuthModule(app: FastifyInstance) {
     if (!isStrongPassword(newPassword)) {
       return businessError('新密码必须为 8-64 位，且包含大小写字母、数字和特殊字符', request)
     }
+    // token 维度封锁：同一找回口令在窗口内失败超限后临时拒绝（与错误文案一致，不暴露封锁状态）
+    if (isRecoveryTokenLocked(recoveryToken)) {
+      return businessError('找回口令错误', request)
+    }
     if (!verifyRecoveryToken(configuredToken, recoveryToken)) {
+      recordRecoveryTokenFailure(recoveryToken)
       return businessError('找回口令错误', request)
     }
 
@@ -437,6 +465,7 @@ export function registerAuthModule(app: FastifyInstance) {
       return businessError('账号不存在', request)
     }
 
+    deleteRateLimitState(recoveryTokenStateKey(recoveryToken))
     await updateUserPassword(user.id, newPassword)
     return success({ isSuccess: true }, request)
   })

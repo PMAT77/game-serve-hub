@@ -41,7 +41,9 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
     origin: config.corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'token', 'Token', 'Accept-Language'],
-    credentials: true,
+    // 反射任意 Origin（CORS_ORIGIN=true/*）时必须禁用凭据，
+    // 否则等于允许任意站点携带凭据跨域调用全部 API。
+    credentials: config.corsOrigin !== true,
   })
 
   // 最小健康检查接口，用于联调与部署探活。

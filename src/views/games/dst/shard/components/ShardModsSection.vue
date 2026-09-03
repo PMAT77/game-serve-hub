@@ -116,19 +116,26 @@ const installedColumns: DataTableColumns<ModItemDto> = [
 ]
 
 async function loadInstalledMods() {
-  if (!hasInstanceId.value) {
+  const targetId = props.instanceId
+  if (!targetId.trim()) {
     installedMods.value = []
     resetState()
     return
   }
   loadingInstalled.value = true
   try {
-    const response = await apiMod.getModList(props.instanceId)
+    const response = await apiMod.getModList(targetId)
+    // 快速切换实例时丢弃过期响应，避免旧实例数据覆盖新实例的 Mod 列表
+    if (props.instanceId !== targetId) {
+      return
+    }
     installedMods.value = response.data.mods
     await restoreInstallJobs({ modList: response.data })
   }
   finally {
-    loadingInstalled.value = false
+    if (props.instanceId === targetId) {
+      loadingInstalled.value = false
+    }
   }
 }
 

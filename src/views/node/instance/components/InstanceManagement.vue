@@ -973,7 +973,7 @@ function syncInstallTerminalNotifications(list: InstanceItem[]) {
       installNotifyPendingIds.add(item.id)
     }
   }
-  for (const id of [...installNotifyPendingIds]) {
+  for (const id of installNotifyPendingIds) {
     const row = list.find(item => item.id === id)
     if (!row) {
       installNotifyPendingIds.delete(id)

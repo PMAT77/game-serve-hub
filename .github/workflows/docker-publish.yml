@@ -164,6 +164,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Require SteamCMD archive checksum
+        if: matrix.name == 'steamcmd-base'
+        shell: bash
+        env:
+          STEAMCMD_ARCHIVE_SHA256: ${{ vars.STEAMCMD_ARCHIVE_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${STEAMCMD_ARCHIVE_SHA256}" ]]; then
+            echo "::error::Repository variable STEAMCMD_ARCHIVE_SHA256 is not set. Refusing to publish an unverified SteamCMD binary; set it to the sha256 of steamcmd_linux.tar.gz." >&2
+            exit 1
+          fi
+          echo "SteamCMD archive checksum pinned: ${STEAMCMD_ARCHIVE_SHA256}"
+
       - name: Build and publish candidate image
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0

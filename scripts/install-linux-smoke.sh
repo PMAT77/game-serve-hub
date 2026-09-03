@@ -17,8 +17,14 @@ source "${SCRIPT_DIR}/install.linux.sh"
 [[ "${PANEL_HEALTHCHECK_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]
 [[ "${PANEL_HEALTHCHECK_INTERVAL_SECONDS}" =~ ^[0-9]+$ ]]
 uses_ghcr_image
-verify_installer_asset_checksum "docker-compose.yml" "${SCRIPT_DIR}/../docker-compose.yml"
-verify_installer_asset_checksum "docker-compose.bind.yml" "${SCRIPT_DIR}/../docker-compose.bind.yml"
+
+# 安装器校验的是镜像源提供的 git blob 原始字节（LF）；Windows 检出经 core.autocrlf
+# 得到的是 CRLF 工作区文件，直接哈希会与 pin 不符。先归一化为 LF 再交给安装器校验。
+SMOKE_ASSET_DIR="$(mktemp -d)"
+tr -d '\r' < "${SCRIPT_DIR}/../docker-compose.yml" > "${SMOKE_ASSET_DIR}/docker-compose.yml"
+tr -d '\r' < "${SCRIPT_DIR}/../docker-compose.bind.yml" > "${SMOKE_ASSET_DIR}/docker-compose.bind.yml"
+verify_installer_asset_checksum "docker-compose.yml" "${SMOKE_ASSET_DIR}/docker-compose.yml"
+verify_installer_asset_checksum "docker-compose.bind.yml" "${SMOKE_ASSET_DIR}/docker-compose.bind.yml"
 
 INSTALL_MODE=native
 resolve_install_mode
@@ -29,7 +35,7 @@ resolve_network_profile
 [[ "${USE_CN_DEBIAN_MIRROR}" == "1" ]]
 
 SMOKE_TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "${SMOKE_TMP_DIR}"' EXIT
+trap 'rm -rf "${SMOKE_TMP_DIR}" "${SMOKE_ASSET_DIR}"' EXIT
 SMOKE_ENV_FILE="${SMOKE_TMP_DIR}/panel.env"
 printf '%s\n' \
   'ADMIN_USERNAME=keep-me' \

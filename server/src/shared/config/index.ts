@@ -36,6 +36,10 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().trim().optional(),
   GSH_SYNC_ADMIN_PASSWORD_FROM_ENV: z.string().trim().optional(),
   GSH_PASSWORD_RECOVERY_TOKEN: z.string().trim().optional(),
+  /** 可信反向代理列表（精确 IP 或 IPv4 CIDR，逗号分隔）；仅命中时才采信 X-Forwarded-For */
+  GSH_TRUST_PROXY: z.string().trim().optional(),
+  /** 实例安装路径策略：instances-root=必须位于 GSH_INSTANCES_ROOT 之下；any=允许任意绝对路径（自担风险） */
+  GSH_INSTALL_PATH_POLICY: z.enum(['instances-root', 'any']).default('instances-root'),
 })
 
 function resolveMode() {
@@ -82,6 +86,10 @@ export interface ServerConfig {
   buildSha: string
   syncAdminPasswordFromEnv: boolean
   passwordRecoveryToken: string
+  /** 可信反向代理列表；空列表 = 永不信任 X-Forwarded-For */
+  trustedProxies: string[]
+  /** 实例安装路径策略 */
+  installPathPolicy: 'instances-root' | 'any'
   /** Fastify @fastify/cors origin 选项；生产默认同源（false） */
   corsOrigin: boolean | string | string[]
 }
@@ -119,6 +127,8 @@ export function loadServerConfig(): ServerConfig {
     CORS_ORIGIN: process.env.CORS_ORIGIN ?? env.CORS_ORIGIN,
     GSH_SYNC_ADMIN_PASSWORD_FROM_ENV: process.env.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV ?? env.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV,
     GSH_PASSWORD_RECOVERY_TOKEN: process.env.GSH_PASSWORD_RECOVERY_TOKEN ?? env.GSH_PASSWORD_RECOVERY_TOKEN,
+    GSH_TRUST_PROXY: process.env.GSH_TRUST_PROXY ?? env.GSH_TRUST_PROXY,
+    GSH_INSTALL_PATH_POLICY: process.env.GSH_INSTALL_PATH_POLICY ?? env.GSH_INSTALL_PATH_POLICY,
   }
   const parsed = envSchema.parse(merged)
   const adminCredentials = resolveAdminCredentials(mode, parsed.ADMIN_USERNAME, parsed.ADMIN_PASSWORD)
@@ -164,6 +174,11 @@ export function loadServerConfig(): ServerConfig {
     buildSha: parsed.GSH_BUILD_SHA?.trim() || '',
     syncAdminPasswordFromEnv: isTruthyEnv(parsed.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV),
     passwordRecoveryToken: parsed.GSH_PASSWORD_RECOVERY_TOKEN?.trim() || '',
+    trustedProxies: (parsed.GSH_TRUST_PROXY?.trim() || '')
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean),
+    installPathPolicy: parsed.GSH_INSTALL_PATH_POLICY,
     corsOrigin: resolveCorsOrigin(mode, parsed.CORS_ORIGIN),
   }
 }

@@ -15,16 +15,28 @@
 
 - 监控与 SteamCMD 页面改用通用运行时语义，不再假定 Docker。
 - 同模式重跑安装器改为原地升级：保留 `panel.env`，并在升级前备份 SQLite 与部署配置。
+- **破坏性**：新增 `GSH_INSTALL_PATH_POLICY`（默认 `instances-root`），创建实例的安装路径必须位于 `GSH_INSTANCES_ROOT` 之下；确需自定义目录请显式设置 `GSH_INSTALL_PATH_POLICY=any` 并自行承担隔离风险。既有实例不受影响，可继续启动与删除。
+- **破坏性**：Node.js 引擎要求收敛为 `^22.13.0 || >=24`。后端使用 Node 内置 `node:sqlite`，Node 20 无法启动后端，此前文档标注的 `^20.19` 支持不成立。
+- **公告补记**：0008 迁移（随 v0.1.4 发布）会把全部已启用的实例 Mod 强制禁用（`UPDATE instance_mods SET enabled = 0`），需要手动重新启用；此行为此前未在变更记录中说明。0010 迁移已把 `instance_mods.enabled` 默认值修正为 0，此后新加入的 Mod 默认禁用。
 
 ### Fixed
 
 - 清除 Native 安装、资源快照、定时更新检查中的隐式 Docker 依赖。
 - 修复已有前端类型错误，使完整 `vue-tsc` 与生产构建重新通过。
+- 新增 0010 迁移补账全部影子 schema（`auth_sessions` 7 列、`game_instances` 12 列、`users.must_change_password`、维护公告两张表），并在 CI 增加 `drizzle-kit generate` 无差异门禁，防止迁移与 schema 再次漂移。
+- 修复删除实例的顺序：先删数据库记录再清理磁盘目录，目录清理失败只告警，不再出现“记录仍在、文件已没”的不一致状态。
+- **公告补记**：修正安装器内置 `docker-compose.yml` 校验和（`eb30aeae…` → `a34665e2…`）。旧 pin 与 tag 内文件 blob 不匹配，v0.1.4 的 Docker 安装在默认严格校验（`STRICT_INSTALLER_ASSET_CHECKSUM=1`）下会因校验失败中止；此前未被发现是因为 `install-linux-smoke.sh` 直接哈希工作区文件，Windows CRLF 检出下不会暴露真实差异。smoke 现已先归一化为 LF 再校验。
 
 ### Security
 
 - Compose 安装资源使用安装器内置 SHA256，校验过程不再强制二次访问 GitHub Raw。
 - Native systemd 服务采用专用无登录用户、只读 Release、受限可写路径和权限受控的控制台 FIFO。
+- 登录限流不再无条件信任 `X-Forwarded-For`：仅当连接对端命中 `GSH_TRUST_PROXY` 配置的可信代理列表时才采信，并新增不可伪造的 socket 地址限流维度，阻断伪造请求头的密码喷洒。
+- 自动生成的管理员初始密码不再写入日志，改为写入数据库同目录的 `admin-credentials.txt`（0600 权限），首次登录改密后自动删除。
+- 前端“记住我”不再把明文密码写入 localStorage（历史遗留值会在下次访问登录页时自动清除），密码请交给浏览器密码管理器。
+- 安装器写入 `panel.env` 改为 printf 逐行写入后原子落盘：环境变量传入的凭证含 `$`、反引号、引号时不再被 shell 展开破坏。
+- 镜像发布流水线强制要求仓库变量 `STEAMCMD_ARCHIVE_SHA256` 非空，拒绝发布未校验的 SteamCMD 二进制。
+- 安装器管理员密码回退生成改用 `/dev/urandom`（约 128 bit 熵），移除秒级时间戳弱熵回退。
 
 ## [0.1.4] - 2026-07-26
 

@@ -24,6 +24,7 @@ declare global {
   const h: typeof import('vue').h
   const inject: typeof import('vue').inject
   const instanceSupportsDstRoom: typeof import('../composables/useGameInstance').instanceSupportsDstRoom
+  const isAbortError: typeof import('../composables/useLatestRequest').isAbortError
   const isInstallableGameInstance: typeof import('../composables/useGameInstance').isInstallableGameInstance
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
@@ -83,6 +84,7 @@ declare global {
   const useAppTabbar: typeof import('../composables/app/tabbar').useAppTabbar
   const useAppTabbarStore: typeof import('../store/modules/app/tabbar').useAppTabbarStore
   const useAttrs: typeof import('vue').useAttrs
+  const useConfigDraft: typeof import('../composables/useConfigDraft').useConfigDraft
   const useCssModule: typeof import('vue').useCssModule
   const useCssVars: typeof import('vue').useCssVars
   const useFaDrawer: typeof import('@fantastic-admin/components').useFaDrawer
@@ -91,11 +93,14 @@ declare global {
   const useHostMemoryGuidance: typeof import('../composables/useHostMemoryGuidance').useHostMemoryGuidance
   const useId: typeof import('vue').useId
   const useInstanceModState: typeof import('../composables/useInstanceModState').useInstanceModState
+  const useLatestRequest: typeof import('../composables/useLatestRequest').useLatestRequest
   const useLink: typeof import('vue-router').useLink
   const useModContentLocale: typeof import('../composables/useModContentLocale').useModContentLocale
   const useModel: typeof import('vue').useModel
   const useNarrowFormLayout: typeof import('../composables/useNarrowFormLayout').useNarrowFormLayout
+  const useOperationState: typeof import('../composables/useOperationState').useOperationState
   const usePanelUpdateNotifier: typeof import('../composables/usePanelUpdateNotifier').usePanelUpdateNotifier
+  const usePollingTask: typeof import('../composables/usePollingTask').usePollingTask
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
   const useSlots: typeof import('vue').useSlots
@@ -116,4 +121,10 @@ declare global {
   // @ts-ignore
   export type { ModInstallHandlers } from '../composables/useInstanceModState'
   import('../composables/useInstanceModState')
+  // @ts-ignore
+  export type { OperationStatus, OperationState, StartOperationOptions } from '../composables/useOperationState'
+  import('../composables/useOperationState')
+  // @ts-ignore
+  export type { PollingTaskOptions } from '../composables/usePollingTask'
+  import('../composables/usePollingTask')
 }

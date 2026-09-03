@@ -10,7 +10,7 @@
 
 | 项 | 要求 |
 |----|------|
-| Node.js | `^20.19` / `^22.13` / `>=24` |
+| Node.js | `^22.13` / `>=24`（后端使用内置 `node:sqlite`，Node 20 无法启动） |
 | 包管理 | pnpm `10.33+`（见 `packageManager` 字段） |
 | Docker | 实例安装/启停依赖 Docker Engine（开发 Compose 模式亦需要） |
 | 数据库 | SQLite（`pnpm run dev:prepare` 自动初始化） |

@@ -9,7 +9,9 @@ SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
 GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.4}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
 INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@${GSH_RELEASE_TAG},https://ghproxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${GSH_RELEASE_TAG},https://raw.githubusercontent.com/PMAT77/game-serve-hub/${GSH_RELEASE_TAG}}" # 安装资源镜像池（按顺序回退）。
-INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-eb30aeae543d7bb6bf989684eee700fb7b85174540badba6871b4fc59b4d570d}"
+# 校验对象是镜像源提供的 git blob 原始字节（LF）；改动 compose 后必须同步更新此处。
+# 历史 pin eb30aeae... 与 v0.1.4 tag 内 compose blob（a34665e2...）不匹配，导致严格校验必然失败。
+INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-a34665e20997ac9ad86a6f35423399f5c380e7e52ebe4a80684ddd056df19a38}"
 INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML:-525eaf74e17df33887fe47248f414c0de3e6cd94a8d20e072ab5d66284c760ae}"
 INSTALL_MODE="${GSH_INSTALL_MODE:-auto}" # auto | docker | native
 NETWORK_PROFILE="${GSH_NETWORK_PROFILE:-auto}" # auto | cn | global
@@ -1093,32 +1095,37 @@ prepare_native_panel_env() {
     detect_host_ip
     PANEL_ACCESS_URL="${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}"
     generate_admin_credentials
-    run_as_root bash -c "cat > \"${PANEL_ENV_FILE}\" <<EOF
-NODE_ENV=production
-SERVER_HOST=0.0.0.0
-SERVER_PORT=${PANEL_PORT}
-DB_PATH=${PANEL_DATA_DIR}/game-server-hub.sqlite
-SERVER_LOG_DIR=${PANEL_LOG_DIR}
-PANEL_PUBLIC_URL=${PANEL_ACCESS_URL}
-ADMIN_USERNAME=${ADMIN_USERNAME}
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
-FORCE_PASSWORD_CHANGE=1
-GSH_EDITION=community
-GSH_RUNTIME_MODE=native
-GSH_INSTANCES_ROOT=${PANEL_INSTANCES_DIR}
-GSH_BACKUPS_ROOT=${PANEL_BACKUPS_DIR}
-GSH_NATIVE_RUNTIME_DIR=${PANEL_DATA_DIR}/runtime
-GSH_NATIVE_STEAMCMD_PATH=${NATIVE_STEAMCMD_PATH}
-GSH_NATIVE_SYSTEMD_UNIT_DIR=${NATIVE_USER_HOME}/.config/systemd/user
-GSH_STEAMCMD_DOWNLOAD_REGION=${steamcmd_region}
-GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=${steamcmd_attempts}
-GSH_GITHUB_REPO=PMAT77/game-serve-hub
-GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}
-TZ=UTC
-EOF"
+    # 用 printf 逐行写入再以 root 原子落盘：环境变量传入的凭证含 $、反引号、引号时
+    # 不会被 shell 展开（旧无引号 heredoc 会破坏凭证甚至注入任意行）。
+    local panel_env_tmp
+    panel_env_tmp="$(mktemp)"
+    {
+      printf '%s\n' \
+        "NODE_ENV=production" \
+        "SERVER_HOST=0.0.0.0" \
+        "SERVER_PORT=${PANEL_PORT}" \
+        "DB_PATH=${PANEL_DATA_DIR}/game-server-hub.sqlite" \
+        "SERVER_LOG_DIR=${PANEL_LOG_DIR}" \
+        "PANEL_PUBLIC_URL=${PANEL_ACCESS_URL}" \
+        "ADMIN_USERNAME=${ADMIN_USERNAME}" \
+        "ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
+        "FORCE_PASSWORD_CHANGE=1" \
+        "GSH_EDITION=community" \
+        "GSH_RUNTIME_MODE=native" \
+        "GSH_INSTANCES_ROOT=${PANEL_INSTANCES_DIR}" \
+        "GSH_BACKUPS_ROOT=${PANEL_BACKUPS_DIR}" \
+        "GSH_NATIVE_RUNTIME_DIR=${PANEL_DATA_DIR}/runtime" \
+        "GSH_NATIVE_STEAMCMD_PATH=${NATIVE_STEAMCMD_PATH}" \
+        "GSH_NATIVE_SYSTEMD_UNIT_DIR=${NATIVE_USER_HOME}/.config/systemd/user" \
+        "GSH_STEAMCMD_DOWNLOAD_REGION=${steamcmd_region}" \
+        "GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=${steamcmd_attempts}" \
+        "GSH_GITHUB_REPO=PMAT77/game-serve-hub" \
+        "GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}" \
+        "TZ=UTC"
+    } > "${panel_env_tmp}"
+    run_as_root install -m 0640 -o root -g "${NATIVE_SERVICE_GROUP}" "${panel_env_tmp}" "${PANEL_ENV_FILE}"
+    rm -f "${panel_env_tmp}"
   fi
-  run_as_root chown root:"${NATIVE_SERVICE_GROUP}" "${PANEL_ENV_FILE}"
-  run_as_root chmod 0640 "${PANEL_ENV_FILE}"
 
   run_as_root bash -c "cat > \"${NATIVE_SYSTEMD_UNIT}\" <<EOF
 [Unit]
@@ -1290,7 +1297,8 @@ generate_admin_credentials() {
     if command -v openssl >/dev/null 2>&1; then
       ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-18)"
     else
-      ADMIN_PASSWORD="$(date +%s | sha256sum | cut -c1-18)"
+      # /dev/urandom 是始终存在的内核熵源；旧回退用秒级时间戳（约 30 bit 熵）可被离线枚举。
+      ADMIN_PASSWORD="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
     fi
   fi
 }
@@ -1503,35 +1511,40 @@ prepare_panel_files() {
     log_info "Preserved existing Docker panel.env and updated release/image keys."
   else
     generate_admin_credentials
-    run_as_root bash -c "cat > \"${PANEL_ENV_FILE}\" <<EOF
-PANEL_PORT=${PANEL_PORT}
-PANEL_DATA_DIR=${PANEL_DATA_DIR}
-PANEL_LOG_DIR=${PANEL_LOG_DIR}
-PANEL_INSTANCES_DIR=${PANEL_INSTANCES_DIR}
-PANEL_BACKUPS_DIR=${PANEL_BACKUPS_DIR}
-PANEL_IMAGE=${PANEL_IMAGE}
-PANEL_PUBLIC_URL=${PANEL_ACCESS_URL}
-ADMIN_USERNAME=${ADMIN_USERNAME}
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
-FORCE_PASSWORD_CHANGE=1
-GSH_EDITION=community
-GSH_RUNTIME_MODE=docker
-DOCKER_HOST=unix:///var/run/docker.sock
-GSH_GAME_DST_IMAGE=${GSH_GAME_DST_IMAGE}
-GSH_STEAMCMD_IMAGE=${GSH_STEAMCMD_IMAGE}
-GSH_STEAMCMD_DOWNLOAD_REGION=${steamcmd_region}
-GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=${steamcmd_attempts}
-# GSH_STEAMCMD_INSTALL_RETRY_DELAYS_MS=5000,10000,15000,20000,25000,30000,35000
-# STEAMCMD_USERNAME=
-# STEAMCMD_PASSWORD=
-GSH_STACK_DIR=${PANEL_INSTALL_DIR}
-GSH_COMPOSE_FILES=docker-compose.yml:docker-compose.bind.yml
-GSH_GITHUB_REPO=PMAT77/game-serve-hub
-GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}
-TZ=UTC
-EOF"
+    # 同 native：printf 逐行写入，凭证值不会被 shell 二次展开。
+    local panel_env_tmp
+    panel_env_tmp="$(mktemp)"
+    {
+      printf '%s\n' \
+        "PANEL_PORT=${PANEL_PORT}" \
+        "PANEL_DATA_DIR=${PANEL_DATA_DIR}" \
+        "PANEL_LOG_DIR=${PANEL_LOG_DIR}" \
+        "PANEL_INSTANCES_DIR=${PANEL_INSTANCES_DIR}" \
+        "PANEL_BACKUPS_DIR=${PANEL_BACKUPS_DIR}" \
+        "PANEL_IMAGE=${PANEL_IMAGE}" \
+        "PANEL_PUBLIC_URL=${PANEL_ACCESS_URL}" \
+        "ADMIN_USERNAME=${ADMIN_USERNAME}" \
+        "ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
+        "FORCE_PASSWORD_CHANGE=1" \
+        "GSH_EDITION=community" \
+        "GSH_RUNTIME_MODE=docker" \
+        "DOCKER_HOST=unix:///var/run/docker.sock" \
+        "GSH_GAME_DST_IMAGE=${GSH_GAME_DST_IMAGE}" \
+        "GSH_STEAMCMD_IMAGE=${GSH_STEAMCMD_IMAGE}" \
+        "GSH_STEAMCMD_DOWNLOAD_REGION=${steamcmd_region}" \
+        "GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=${steamcmd_attempts}" \
+        "# GSH_STEAMCMD_INSTALL_RETRY_DELAYS_MS=5000,10000,15000,20000,25000,30000,35000" \
+        "# STEAMCMD_USERNAME=" \
+        "# STEAMCMD_PASSWORD=" \
+        "GSH_STACK_DIR=${PANEL_INSTALL_DIR}" \
+        "GSH_COMPOSE_FILES=docker-compose.yml:docker-compose.bind.yml" \
+        "GSH_GITHUB_REPO=PMAT77/game-serve-hub" \
+        "GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}" \
+        "TZ=UTC"
+    } > "${panel_env_tmp}"
+    run_as_root install -m 0600 -o root "${panel_env_tmp}" "${PANEL_ENV_FILE}"
+    rm -f "${panel_env_tmp}"
   fi
-  run_as_root chmod 600 "${PANEL_ENV_FILE}"
 
   if [[ "${is_upgrade}" -eq 0 ]]; then
     local host_mem_total_mb preset_name

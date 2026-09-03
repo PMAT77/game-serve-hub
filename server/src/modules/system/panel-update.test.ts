@@ -51,6 +51,8 @@ function buildConfig(partial: Partial<ServerConfig>): ServerConfig {
     stackDir: '',
     composeFiles: ['docker-compose.yml', 'docker-compose.bind.yml'],
     panelContainerName: 'game-server-hub-panel',
+    trustedProxies: [],
+    installPathPolicy: 'instances-root',
     githubRepo: 'PMAT77/game-serve-hub',
     releaseVersion: '',
     buildSha: '',

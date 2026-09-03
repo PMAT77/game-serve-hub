@@ -46,7 +46,20 @@ jobs:
       - name: Unit tests
         env:
           GSH_UNIT_TEST: '1'
-        run: pnpm test:unit
+        run: |
+          pnpm test:unit 2>&1 | tee unit-tests.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Publish unit test failure summary
+        if: failure()
+        run: |
+          {
+            echo '### Unit test failures'
+            echo ''
+            echo '```'
+            grep -E '✖|not ok|AssertionError|Error [|failing tests' unit-tests.log | head -80
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Release reference consistency
         run: pnpm run release:verify

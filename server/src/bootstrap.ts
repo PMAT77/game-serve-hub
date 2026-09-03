@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
 import process from 'node:process'
-import { fileURLToPath } from 'node:url'
 import { createServerApp } from './app'
 import { syncPanelPortSettingIfStale } from './modules/system/panel-port'
 import { writeAdminCredentialsFile } from './shared/config/credentials-file'
 import { ensureServerRuntimeDirs, loadServerConfig } from './shared/config'
 import { initDatabase } from './shared/db/index'
+import { resolveRepoRoot } from './shared/repo-root'
 
 /**
  * 后端启动入口。
@@ -42,7 +42,8 @@ export async function bootstrap() {
 
   bindProcessLifecycle(app, gracefulShutdown)
 
-  const migrationsFolder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../drizzle')
+  // 打包后 bundle 位于 dist-server/，固定相对路径失效；改从仓库根定位（server/drizzle）
+  const migrationsFolder = path.resolve(resolveRepoRoot(), 'server/drizzle')
   const dbFilePath = await initDatabase(config.dbPath, migrationsFolder, {
     forcePasswordChange: config.forcePasswordChange,
     adminUsername: config.adminUsername,

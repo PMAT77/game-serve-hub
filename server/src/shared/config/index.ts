@@ -3,9 +3,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import { loadModeEnv } from './env-file'
+import { resolveRepoRoot } from '../repo-root'
 
 const envSchema = z.object({
   SERVER_HOST: z.string().trim().min(1).default('0.0.0.0'),
@@ -51,7 +51,8 @@ function resolveMode() {
 }
 
 function getServerRootDir() {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+  // 打包后模块位于 dist-server/，固定相对层级失效；统一由仓库根探测定位
+  return resolveRepoRoot()
 }
 
 export interface ServerConfig {

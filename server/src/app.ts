@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { ServerConfig } from './shared/config'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import fastifyStatic from '@fastify/static'
@@ -17,6 +16,7 @@ import { getCachedDockerStatus } from './infra/docker'
 import { getCachedRuntimeStatus, isSteamcmdRuntimeReady } from './infra/runtime'
 import { success } from './shared/http/response'
 import { sanitizeRequestUrlForLog } from './shared/http/request-url'
+import { resolveRepoRoot } from './shared/repo-root'
 
 /**
  * 创建 Fastify 服务实例。
@@ -123,7 +123,8 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
   registerConsoleModule(app)
 
   if (config.mode === 'production') {
-    const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dist')
+    // 打包后 bundle 位于 dist-server/，改从仓库根定位前端产物
+    const distDir = path.resolve(resolveRepoRoot(), 'dist')
     void app.register(fastifyStatic, {
       root: distDir,
       prefix: '/',

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type { ShardId } from '../../../../../shared/contracts/shard'
 import { isCavesShardConfigured, resolveShardLeveldataPath } from './shard-layout'
 import { writeFileAtomic } from './atomic-write'
+import { resolveFirstExisting, resolveRepoRoot } from '../../../shared/repo-root'
 
 const OVERRIDE_ENTRY_RE = /^\s*([a-zA-Z0-9_]+)\s*=\s*["']([^"']*)["']\s*,?\s*$/
 const OVERRIDE_KEY_RE = /^[a-z][a-z0-9_]*$/
@@ -42,7 +43,11 @@ export function isValidLeveldataStructure(content: string): boolean {
 
 function resolveLeveldataTemplatePath(shardId: ShardId): string {
   const fileName = shardId === 'master' ? 'master-leveldataoverride.lua' : 'caves-leveldataoverride.lua'
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'templates', fileName)
+  // tsx 直跑源码时模板与模块同目录；esbuild 打包后 build 脚本把 templates 拷到 dist-server/
+  return resolveFirstExisting(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'templates', fileName),
+    path.join(resolveRepoRoot(), 'dist-server', 'templates', fileName),
+  )
 }
 
 export function loadLeveldataTemplate(shardId: ShardId): string {

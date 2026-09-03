@@ -40,6 +40,9 @@ jobs:
       - name: Type check
         run: pnpm run lint
 
+      - name: Lint (oxlint)
+        run: pnpm run lint:ox
+
       - name: Unit tests
         env:
           GSH_UNIT_TEST: '1'
@@ -49,7 +52,7 @@ jobs:
         run: pnpm run release:verify
 
       - name: Production build
-        run: pnpm run build
+        run: pnpm run build && pnpm run build:server
 
       - name: Database schema drift check
         run: |

@@ -1,4 +1,14 @@
 import process from 'node:process'
+import type Docker from 'dockerode'
+import DockerClient from 'dockerode'
+
+/**
+ * 业务模块统一经此工厂获取 Docker 客户端，不得直接实例化 dockerode——
+ * dockerode 依赖只允许出现在 infra 层。
+ */
+export function createDockerClient(dockerHost?: string): Docker {
+  return new DockerClient(resolveDockerConnectOptions(dockerHost))
+}
 
 export function resolveDockerConnectOptions(dockerHost?: string) {
   const raw = dockerHost?.trim() || process.env.DOCKER_HOST?.trim() || defaultDockerHost()

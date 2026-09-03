@@ -177,6 +177,10 @@ export class DockerContainerRuntime implements ContainerRuntime {
       notify?.()
       notify = undefined
     }
+    const finish = () => {
+      done = true
+      wake()
+    }
     stream.on('data', (chunk: Buffer) => {
       const decoded = decodeDockerMultiplexLogChunk(frameCarry, chunk)
       frameCarry = decoded.carry
@@ -188,26 +192,40 @@ export class DockerContainerRuntime implements ContainerRuntime {
       }
       wake()
     })
-    stream.on('end', () => {
-      done = true
-      wake()
-    })
+    stream.on('end', finish)
+    stream.on('close', finish)
     stream.on('error', (err: Error) => {
       error = err
-      done = true
-      wake()
+      finish()
     })
-    while (!done || queue.length > 0) {
-      if (error) {
-        throw error
+    if (opts.signal) {
+      const signal = opts.signal
+      if (signal.aborted) {
+        finish()
       }
-      if (queue.length === 0) {
-        await new Promise<void>((resolve) => {
-          notify = resolve
-        })
-        continue
+      else {
+        signal.addEventListener('abort', finish, { once: true })
       }
-      yield queue.shift()!
+    }
+    try {
+      while (!done || queue.length > 0) {
+        if (error) {
+          throw error
+        }
+        if (queue.length === 0) {
+          await new Promise<void>((resolve) => {
+            notify = resolve
+          })
+          continue
+        }
+        yield queue.shift()!
+      }
+    }
+    finally {
+      // 消费方 break/return/异常退出时必须销毁底层流，否则 docker 连接句柄泄漏
+      // dockerode 的 ReadableStream 类型声明缺失 destroy（运行时为 Node 流），此处收窄
+      ;(stream as unknown as { destroy?: () => void }).destroy?.()
+      opts.signal?.removeEventListener('abort', finish)
     }
   }
 

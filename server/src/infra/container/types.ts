@@ -31,6 +31,8 @@ export interface LogOpts {
   tail?: number
   follow?: boolean
   since?: number
+  /** follow 模式下中止信号：abort 时立即销毁底层流，避免连接泄漏 */
+  signal?: AbortSignal
 }
 
 export interface LogLine {

@@ -1,9 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import type { HostMemoryPressureFailure } from '../../infra/container/host-resource-guard'
 import path from 'node:path'
-import DockerClient from 'dockerode'
 import { resolveDockerStatus } from '../../infra/docker'
-import { resolveDockerConnectOptions } from '../../infra/docker-connect'
+import { createDockerClient } from '../../infra/docker-connect'
 import {
   assessHostMemoryForHeavyOperation,
   ensureSteamcmdImage,
@@ -138,7 +137,7 @@ function startShardLogFollow(instanceId: string, ref: ContainerRef, shard: Conso
   void (async () => {
     const runtime = getContainerRuntime()
     try {
-      for await (const line of runtime.logs(ref, { follow: true, tail: 100 })) {
+      for await (const line of runtime.logs(ref, { follow: true, tail: 100, signal: controller.signal })) {
         if (controller.signal.aborted) {
           break
         }
@@ -277,12 +276,12 @@ export async function startInstanceContainer(
   if (!memoryPressure.ok) {
     return { ok: false, message: memoryPressure.detail, hostMemoryPressure: memoryPressure }
   }
-  const { gameDstImage, instancesRoot, dockerHost, runtimeMode } = getServerContainerConfig()
+  const { gameDstImage, instancesRoot, runtimeMode } = getServerContainerConfig()
   let containerGameRoot = input.installPath
   let hostBinds: string[] = []
   let bindMode = 'native'
   if (runtimeMode === 'docker') {
-    const docker = new DockerClient(resolveDockerConnectOptions(dockerHost))
+    const docker = createDockerClient()
     const bindPlan = await resolveInstanceContainerBind(docker, input.installPath, instancesRoot)
     if (bindPlan.error) {
       return { ok: false, message: bindPlan.error }

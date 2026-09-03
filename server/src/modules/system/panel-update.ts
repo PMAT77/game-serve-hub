@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify'
-import DockerClient from 'dockerode'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pullGameDstImage } from '../../infra/container'
@@ -9,7 +8,7 @@ import {
   shortDigest,
 } from '../../infra/container/image-ref'
 import { fetchRemoteImageDigest } from '../../infra/container/registry-manifest'
-import { resolveDockerConnectOptions } from '../../infra/docker-connect'
+import { createDockerClient } from '../../infra/docker-connect'
 import { loadServerConfig } from '../../shared/config'
 import { getSystemPanelSettings } from '../../shared/db/index'
 import { getDefaultPanelSettings } from './defaults'
@@ -94,8 +93,7 @@ function normalizeErrorMessages(messages: Array<string | null | undefined>): str
 }
 
 function resolveDocker() {
-  const { dockerHost } = loadServerConfig()
-  return new DockerClient(resolveDockerConnectOptions(dockerHost))
+  return createDockerClient()
 }
 
 function resolveReleaseVersionFromEnv(): string | null {

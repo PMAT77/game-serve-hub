@@ -85,9 +85,8 @@ async function runNativeSteamcmdJob(input: NativeSteamcmdJobInput): Promise<{
     input.onLogLine?.(line)
   }
   const jobId = input.cancelKey?.trim()
-  if (jobId) {
-    cancelledNativeSteamcmdJobs.delete(jobId)
-  }
+  // 取消标记不在这里清除：排队取消依赖锁出队时检查（取消标记存活到出队）；
+  // 重试场景的残留标记由 install-service.startInstallJob 在新任务启动时清理。
   const child = spawn(nativeSteamcmdPath, input.args, {
     cwd: path.dirname(nativeSteamcmdPath),
     env: buildSteamcmdEnv(),
@@ -168,6 +167,11 @@ export async function runSteamcmdAppUpdateNative(input: {
 }): Promise<{ ok: boolean, output: string, cancelled?: boolean }> {
   const jobId = input.cancelKey?.trim() || 'anonymous'
   return withSteamcmdAppUpdateLock(jobId, async () => {
+    if (input.cancelKey && cancelledNativeSteamcmdJobs.has(input.cancelKey)) {
+      // 出队即检查：排队期间被取消的任务直接跳过并消费取消标记（保证后续重试不受影响）。
+      cancelledNativeSteamcmdJobs.delete(input.cancelKey)
+      return { ok: false, output: 'SteamCMD 任务已取消（排队期间被取消）', cancelled: true }
+    }
     const steamcmdConfig = loadSteamcmdRuntimeConfig()
     input.onLogLine?.(`使用 Native SteamCMD: ${getServerContainerConfig().nativeSteamcmdPath}`)
     input.onLogLine?.(`安装目录: ${input.hostInstallPath}`)
@@ -205,6 +209,11 @@ export async function runSteamcmdWorkshopDownloadNative(input: {
   }
   const jobId = input.cancelKey?.trim() || 'anonymous'
   return withSteamcmdAppUpdateLock(jobId, async () => {
+    if (input.cancelKey && cancelledNativeSteamcmdJobs.has(input.cancelKey)) {
+      // 出队即检查：排队期间被取消的任务直接跳过并消费取消标记（保证后续重试不受影响）。
+      cancelledNativeSteamcmdJobs.delete(input.cancelKey)
+      return { ok: false, output: 'SteamCMD 任务已取消（排队期间被取消）', cancelled: true }
+    }
     await input.onDownloadStart?.()
     const config = loadSteamcmdRuntimeConfig()
     const result = await runNativeSteamcmdJob({
@@ -236,6 +245,10 @@ export async function runSteamcmdAppInfoNative(appId: string): Promise<{ ok: boo
     ok: (result.ok || /"appid"\s+"/i.test(result.output)) && !result.timedOut,
     output: result.output,
   }
+}
+
+export function clearNativeSteamcmdCancelFlag(cancelKey: string): void {
+  cancelledNativeSteamcmdJobs.delete(cancelKey)
 }
 
 export async function cancelNativeSteamcmdJob(cancelKey: string): Promise<void> {

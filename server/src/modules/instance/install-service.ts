@@ -18,12 +18,13 @@ import {
   cancelSteamcmdInstallContainer,
   cleanupAllRunningSteamcmdInstallContainers,
   cleanupOrphanedSteamcmdInstallContainers,
+  clearNativeSteamcmdCancelFlag,
+  clearSteamcmdJobCancelFlag,
   isSteamcmdJobRunning,
   runSteamcmdAppUpdateInContainer,
 } from '../../infra/container'
 import { isSteamcmdAppUpdateBusy } from '../../infra/container/steamcmd-app-update-queue'
-import DockerClient from 'dockerode'
-import { resolveDockerConnectOptions } from '../../infra/docker-connect'
+import { createDockerClient } from '../../infra/docker-connect'
 import { getServerContainerConfig } from '../../shared/config/container'
 import { appendInstallResourceSnapshot } from '../../infra/container/install-resource-monitor'
 import {
@@ -146,6 +147,8 @@ export async function markInstallInterrupted(
     lastCommand: null,
     lastError: detail ?? INSTALL_INTERRUPTED_MESSAGE,
     installPercent: null,
+    // 状态机守卫：管线已落终态（成功/失败）时取消不得回头覆盖
+    whereStatus: ['pending_install', 'installing'],
   })
 }
 
@@ -198,10 +201,8 @@ async function logInstallResourcePhase(
   extra?: Record<string, unknown>,
 ) {
   try {
-    const { dockerHost, runtimeMode } = getServerContainerConfig()
-    const docker = runtimeMode === 'docker'
-      ? new DockerClient(resolveDockerConnectOptions(dockerHost))
-      : null
+    const { runtimeMode } = getServerContainerConfig()
+    const docker = runtimeMode === 'docker' ? createDockerClient() : null
     const lines = await appendInstallResourceSnapshot(getInstallLogsDirPath(), docker, {
       instanceId,
       phase,
@@ -300,6 +301,8 @@ async function finalizeSuccessfulInstall(
       ? (runtimeImageFailed ? '运行环境镜像未就绪，启动实例时将自动重试拉取' : null)
       : startScriptResult.message ?? null,
     installPercent: startScriptResult.ok ? 100 : null,
+    // 状态机守卫：仅当仍在安装中时落终态，避免与取消并发时覆盖取消结果
+    whereStatus: 'installing',
   })
 }
 
@@ -484,6 +487,7 @@ async function runInstallPipeline(
       lastCommand: null,
       lastError: failureMessage,
       installPercent: null,
+      whereStatus: 'installing',
     })
     return
   }
@@ -577,6 +581,7 @@ async function runInstallPipeline(
     lastCommand: null,
     lastError: failureMessage,
     installPercent: null,
+    whereStatus: 'installing',
   })
 }
 
@@ -602,6 +607,7 @@ async function runInstallJobInBackground(
       lastCommand: null,
       lastError: message,
       installPercent: null,
+      whereStatus: 'installing',
     })
   }
 }
@@ -620,6 +626,9 @@ export function startInstallJob(
     return 'blocked'
   }
   cancelledInstallInstanceIds.delete(input.instanceId)
+  // 新任务从零开始：清掉上一次取消遗留的 runner 级取消标记，保证重试不受历史取消影响。
+  clearSteamcmdJobCancelFlag(input.instanceId)
+  clearNativeSteamcmdCancelFlag(input.instanceId)
   installingInstanceIds.add(input.instanceId)
   const logWriter = new InstanceInstallLogWriter(getInstallLogsDirPath(), input.instanceId)
   logWriter.clear()
@@ -633,7 +642,9 @@ export function startInstallJob(
 export async function cancelInstallJob(instanceId: string): Promise<void> {
   cancelledInstallInstanceIds.add(instanceId)
   await cancelSteamcmdInstallContainer(instanceId)
-  installingInstanceIds.delete(instanceId)
+  // 注意：这里不能删除 installingInstanceIds 标记——后台任务可能仍在运行，
+  // 过早放行会让 startInstallJob 立即启动第二个并发安装管线（取消-重启竞态）。
+  // 标记由 runInstallJobInBackground 的 finally 统一删除。
   const logWriter = new InstanceInstallLogWriter(getInstallLogsDirPath(), instanceId)
   await markInstallInterrupted(instanceId, logWriter)
 }

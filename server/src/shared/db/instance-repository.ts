@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import {
   gameInstances,
   instanceMods,
@@ -487,10 +487,18 @@ export async function updateGameInstanceRuntime(
   if (typeof input.updateCheckedAt !== 'undefined') {
     setPayload.updateCheckedAt = input.updateCheckedAt?.trim() || null
   }
+  const condition = input.whereStatus
+    ? and(
+        eq(gameInstances.id, id),
+        Array.isArray(input.whereStatus)
+          ? inArray(gameInstances.status, input.whereStatus)
+          : eq(gameInstances.status, input.whereStatus),
+      )
+    : eq(gameInstances.id, id)
   await drizzleDb
     .update(gameInstances)
     .set(setPayload)
-    .where(eq(gameInstances.id, id))
+    .where(condition)
   return getGameInstanceById(id)
 }
 

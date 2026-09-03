@@ -237,23 +237,30 @@ async function followContainerLogs(
   })
   let buffer = ''
   let frameCarry: Buffer = Buffer.alloc(0)
-  await new Promise<void>((resolve, reject) => {
-    stream.on('data', (chunk: Buffer) => {
-      const decoded = decodeDockerMultiplexLogChunk(frameCarry, chunk)
-      frameCarry = decoded.carry
-      buffer += decoded.text
-      const lines = buffer.split(/\r?\n/)
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        const text = line.trim()
-        if (text) {
-          pushLine(text)
+  try {
+    await new Promise<void>((resolve, reject) => {
+      stream.on('data', (chunk: Buffer) => {
+        const decoded = decodeDockerMultiplexLogChunk(frameCarry, chunk)
+        frameCarry = decoded.carry
+        buffer += decoded.text
+        const lines = buffer.split(/\r?\n/)
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          const text = line.trim()
+          if (text) {
+            pushLine(text)
+          }
         }
-      }
+      })
+      stream.on('end', () => resolve())
+      stream.on('error', reject)
     })
-    stream.on('end', () => resolve())
-    stream.on('error', reject)
-  })
+  }
+  finally {
+    // 容器被强杀/移除等异常路径下同样要销毁日志流，避免连接泄漏
+    // dockerode 的 ReadableStream 类型声明缺失 destroy（运行时为 Node 流），此处收窄
+    ;(stream as unknown as { destroy?: () => void }).destroy?.()
+  }
   const tail = buffer.trim()
   if (tail) {
     pushLine(tail)
@@ -278,8 +285,18 @@ export async function runSteamcmdJob(spec: SteamcmdJobSpec): Promise<SteamcmdJob
   const jobId = spec.jobId?.trim()
   const kind = spec.kind ?? 'app-update'
 
+  if (jobId && cancelledSteamcmdInstallKeys.has(jobId)) {
+    // 出队即检查：排队期间被取消的任务直接跳过并消费取消标记（保证后续重试不受影响）。
+    cancelledSteamcmdInstallKeys.delete(jobId)
+    return {
+      ok: false,
+      exitCode: -1,
+      output: 'SteamCMD 任务已取消（排队期间被取消）',
+      cancelled: true,
+    }
+  }
+
   if (jobId) {
-    clearSteamcmdJobCancelFlag(jobId)
     await cleanupOrphanedSteamcmdInstallContainers(jobId)
   }
   else if (kind === 'app-info') {

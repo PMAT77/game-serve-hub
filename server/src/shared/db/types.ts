@@ -1,4 +1,4 @@
-﻿export interface SessionTokenBundle {
+export interface SessionTokenBundle {
   accessToken: string
   refreshToken: string
   accessExpiresAt: string
@@ -109,6 +109,11 @@ export interface CreateGameInstanceInput {
 
 export interface UpdateGameInstanceRuntimeInput {
   status?: DbGameInstanceStatus
+  /**
+   * 前置状态守卫：仅当当前行 status 命中给定值时才执行更新（状态机竞态保护）。
+   * 未命中时静默放弃写入（返回当前行），用于“安装完成/失败只允许覆盖 installing”这类约束。
+   */
+  whereStatus?: DbGameInstanceStatus | DbGameInstanceStatus[]
   containerId?: string | null
   runtimePid?: number | null
   runtimeStartedAt?: string | null

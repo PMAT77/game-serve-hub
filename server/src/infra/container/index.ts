@@ -35,6 +35,8 @@ export {
   isSteamcmdImagePresent,
   pullSteamcmdImage,
 } from './steamcmd-runner'
+export { clearSteamcmdJobCancelFlag } from './steamcmd-job'
+export { clearNativeSteamcmdCancelFlag } from './native-steamcmd-runner'
 export {
   assessHostMemoryForHeavyOperation,
   readHostMemoryAvailableMb,

@@ -45,6 +45,12 @@ jobs:
           GSH_UNIT_TEST: '1'
         run: pnpm test:unit
 
+      - name: Release reference consistency
+        run: pnpm run release:verify
+
+      - name: Production build
+        run: pnpm run build
+
       - name: Database schema drift check
         run: |
           pnpm exec drizzle-kit generate --config server/drizzle.config.ts

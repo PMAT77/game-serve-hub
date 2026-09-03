@@ -26,6 +26,13 @@
 - 新增 0010 迁移补账全部影子 schema（`auth_sessions` 7 列、`game_instances` 12 列、`users.must_change_password`、维护公告两张表），并在 CI 增加 `drizzle-kit generate` 无差异门禁，防止迁移与 schema 再次漂移。
 - 修复删除实例的顺序：先删数据库记录再清理磁盘目录，目录清理失败只告警，不再出现“记录仍在、文件已没”的不一致状态。
 - **公告补记**：修正安装器内置 `docker-compose.yml` 校验和（`eb30aeae…` → `a34665e2…`）。旧 pin 与 tag 内文件 blob 不匹配，v0.1.4 的 Docker 安装在默认严格校验（`STRICT_INSTALLER_ASSET_CHECKSUM=1`）下会因校验失败中止；此前未被发现是因为 `install-linux-smoke.sh` 直接哈希工作区文件，Windows CRLF 检出下不会暴露真实差异。smoke 现已先归一化为 LF 再校验。
+- 修复"取消安装后立即重新安装"竞态：取消不再提前清除进行中标记，取消与完成两个方向的终态写入均加前置状态守卫，任何一方都不会覆盖另一方的结果。
+- SteamCMD 排队任务在获得锁时检查取消标记：排队期间被取消的任务直接跳过执行，且不再污染后续重试。
+- Docker 日志 follow 流补齐销毁逻辑并接入中止信号，消费方退出时不再泄漏 docker 连接句柄。
+- `updateGameInstanceRuntime` 支持 `whereStatus` 前置状态守卫，安装管线全部终态写入接入。
+- 登录限流、找回/改密失败计数落 SQLite（新增 `auth_rate_limits` 表，0011 迁移），面板重启后限流状态不再清零，表容量由定期清理保证有界。
+- 业务模块不再直接实例化 dockerode，统一经 infra 层 `createDockerClient` 工厂获取客户端。
+- CI 质量门禁新增 release 引用一致性校验与生产构建；镜像新增 `HEALTHCHECK`（node fetch 探活 `/health`）。
 
 ### Security
 
@@ -37,6 +44,8 @@
 - 安装器写入 `panel.env` 改为 printf 逐行写入后原子落盘：环境变量传入的凭证含 `$`、反引号、引号时不再被 shell 展开破坏。
 - 镜像发布流水线强制要求仓库变量 `STEAMCMD_ARCHIVE_SHA256` 非空，拒绝发布未校验的 SteamCMD 二进制。
 - 安装器管理员密码回退生成改用 `/dev/urandom`（约 128 bit 熵），移除秒级时间戳弱熵回退。
+- 找回密码接口新增找回口令哈希维度的失败封锁：攻击者更换 IP 也无法对同一口令持续爆破，超限后该口令在窗口内临时失效。
+- CORS 反射任意 Origin（`CORS_ORIGIN=true/*`）时自动禁用凭据，消除"反射 + 凭据"组合放行任意站点携带凭据跨域调用的风险。
 
 ## [0.1.4] - 2026-07-26
 

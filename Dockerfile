@@ -31,4 +31,7 @@ ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=3000
 ENV DB_PATH=/app/data/game-server-hub.sqlite
 ENV SERVER_LOG_DIR=/app/logs
+# 镜像内无 curl/wget，用 node 内置 fetch 探活 /health
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.SERVER_PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["pnpm", "exec", "tsx", "server/src/main.ts"]

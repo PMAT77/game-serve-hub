@@ -17,7 +17,9 @@ import type {
   SuccessResponse,
 } from '../../../../shared/contracts/auth'
 import { ErrorCode } from '../../../../shared/constants/error-code'
+import { deleteAdminCredentialsFile } from '../../shared/config/credentials-file'
 import { loadServerConfig } from '../../shared/config'
+import { resolveClientIp } from '../../shared/http/client-ip'
 import { createSessionTokens, findPermissionsByUserId, findUserByAccount, findUserByToken, revokeSession, rotateSessionByRefreshToken, updateUserPassword, userMustChangePassword, verifyPassword } from '../../shared/db/index'
 import { businessError, success, unauthorized } from '../../shared/http/response'
 import type { MenuRouteItem } from '../../shared/menu-routes'
@@ -70,15 +72,18 @@ function getTokenByRequest(request: FastifyRequest): string | undefined {
   return token
 }
 
+// 可信代理列表在进程内缓存一次（config 校验结果不随请求变化）。
+let cachedTrustedProxies: string[] | undefined
+
+function getTrustedProxies(): string[] {
+  cachedTrustedProxies ??= loadServerConfig().trustedProxies
+  return cachedTrustedProxies
+}
+
 function getClientIp(request: FastifyRequest): string {
-  const forwardedFor = request.headers['x-forwarded-for']
-  if (typeof forwardedFor === 'string' && forwardedFor.trim().length > 0) {
-    const first = forwardedFor.split(',')[0]?.trim()
-    if (first) {
-      return first
-    }
-  }
-  return request.ip || 'unknown'
+  // 仅当 socket 对端命中 GSH_TRUST_PROXY 时才采信 X-Forwarded-For，
+  // 防止伪造请求头绕过基于 IP 的登录限流。
+  return resolveClientIp(request, getTrustedProxies())
 }
 
 function getLoginGuardKey(request: FastifyRequest, account: string): string {
@@ -89,10 +94,13 @@ function getLoginGuardKey(request: FastifyRequest, account: string): string {
 
 function getLoginGuardKeys(request: FastifyRequest, account: string): string[] {
   const ip = getClientIp(request)
+  // request.ip 是 TCP 对端地址，无法通过请求头伪造，作为兜底限流维度。
+  const socketIp = request.ip || 'unknown'
   const normalizedAccount = account.trim().toLowerCase()
   return [
     `${ip}:${normalizedAccount}`,
     `ip:${ip}`,
+    `socket:${socketIp}`,
     `account:${normalizedAccount}`,
   ]
 }
@@ -373,6 +381,10 @@ export function registerAuthModule(app: FastifyInstance) {
       keepSessions: forcingPasswordChange,
     })
     clearPasswordChangeFailures(user.id)
+    if (forcingPasswordChange) {
+      // 初始密码已被替换，清理启动阶段写入的 0600 初始凭据文件。
+      deleteAdminCredentialsFile(loadServerConfig().dbPath)
+    }
 
     return success({
       isSuccess: true,

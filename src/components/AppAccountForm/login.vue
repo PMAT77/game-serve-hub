@@ -45,7 +45,7 @@ function resolveLoginInitialValues() {
   const saved = readSavedLoginCredentials()
   return {
     account: props.account ?? saved.account,
-    password: saved.password,
+    password: '',
     remember: saved.remember,
     challengeAnswer: '',
   }
@@ -56,14 +56,9 @@ function restoreSavedCredentials() {
     return
   }
   const saved = readSavedLoginCredentials()
-  form.resetForm({
-    values: {
-      ...form.values,
-      account: props.account ?? saved.account,
-      password: saved.password,
-      remember: saved.remember,
-    },
-  })
+  // 只恢复账号与记住状态，不触碰密码输入框。
+  form.setFieldValue('account', props.account ?? saved.account)
+  form.setFieldValue('remember', saved.remember)
 }
 
 interface LoginErrorPayload {
@@ -138,7 +133,6 @@ const onSubmit = form.handleSubmit(async (values) => {
     })
     saveLoginCredentials({
       account: values.account,
-      password: values.password,
       remember: values.remember === true,
     })
     captchaRequired.value = false
@@ -253,7 +247,7 @@ function testAccount(account: string) {
                     :model-value="value === true"
                     @update:model-value="handleChange"
                   >
-                    记住账号和密码
+                    记住账号
                   </FaCheckbox>
                 </FormControl>
               </FormItem>

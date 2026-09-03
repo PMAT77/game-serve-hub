@@ -4,6 +4,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { createServerApp } from './app'
 import { syncPanelPortSettingIfStale } from './modules/system/panel-port'
+import { writeAdminCredentialsFile } from './shared/config/credentials-file'
 import { ensureServerRuntimeDirs, loadServerConfig } from './shared/config'
 import { initDatabase } from './shared/db/index'
 
@@ -50,8 +51,10 @@ export async function bootstrap() {
     seedDevelopmentUsers: config.mode !== 'production',
   })
   if (config.adminPasswordGenerated) {
+    // 初始密码只落 0600 凭据文件，绝不写入日志（journald/日志采集管道不可信）。
+    const credentialsFile = writeAdminCredentialsFile(config.dbPath, config.adminUsername, config.adminPassword)
     app.log.warn(
-      `生产环境未配置 ADMIN_PASSWORD，已为管理员「${config.adminUsername}」自动生成初始密码（仅此一次日志，请立即保存）: ${config.adminPassword}`,
+      `生产环境未配置 ADMIN_PASSWORD，已为管理员「${config.adminUsername}」自动生成初始密码，已写入 0600 权限凭据文件（请立即读取保存，首次登录改密后可删除）: ${credentialsFile}`,
     )
   }
   await syncPanelPortSettingIfStale(config.port)

@@ -5,6 +5,7 @@ node_modules/
 # Build outputs
 dist/
 dist-*/
+.ci-node22/
 dist-test/
 *.tsbuildinfo
 packages/*/dist/

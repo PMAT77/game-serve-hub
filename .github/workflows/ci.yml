@@ -57,9 +57,18 @@ jobs:
             echo '### Unit test failures'
             echo ''
             echo '```'
-            grep -E '✖|not ok|AssertionError|Error [|failing tests' unit-tests.log | head -80
+            grep -E '✖|not ok|AssertionError|failing tests' unit-tests.log | head -80
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
+          # 同步输出为 annotations（匿名 API 可读，便于远程诊断）
+          grep -E '✖|not ok|AssertionError|failing tests' unit-tests.log | head -30 | cut -c1-240 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+          # 失败测试的完整 TAP 块（含期望/实际值）
+          awk '/^not ok|^✖/{p=1} p{print; n++} n>60{exit}' unit-tests.log > unit-fail-block.txt
+          if [ -s unit-fail-block.txt ]; then
+            head -c 6000 unit-fail-block.txt
+          fi
 
       - name: Release reference consistency
         run: pnpm run release:verify

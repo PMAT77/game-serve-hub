@@ -1078,8 +1078,8 @@ async function createInstance() {
       nodeId: createForm.nodeId,
       name: createForm.name.trim(),
       gameCode: createForm.gameCode,
-      installPath: createForm.installPath?.trim(),
-      configPath: createForm.configPath?.trim(),
+      installPath: createForm.installPath?.trim() || undefined,
+      configPath: createForm.configPath?.trim() || undefined,
     })
     faToast.success('实例创建成功，已进入后台安装流程')
     createModalVisible.value = false

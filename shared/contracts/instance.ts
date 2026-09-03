@@ -20,12 +20,18 @@ export type InstanceListQuery = z.infer<typeof instanceListQuerySchema>
 
 const portSchema = z.number().int().min(1).max(65535)
 
+// 可选路径字段：空字符串（含纯空白）视为未提供，避免表单提交空值被 min(1) 拒绝
+const optionalPathSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().trim().min(1).max(1024).optional(),
+)
+
 export const createInstanceBodySchema = z.object({
   nodeId: z.string().trim().min(1).max(128),
   name: z.string().trim().min(1).max(128),
   gameCode: z.string().trim().min(1).max(64),
-  installPath: z.string().trim().min(1).max(1024).optional(),
-  configPath: z.string().trim().min(1).max(1024).optional(),
+  installPath: optionalPathSchema,
+  configPath: optionalPathSchema,
   queryPort: portSchema.optional(),
   gamePort: portSchema.optional(),
   rconPort: portSchema.optional(),

@@ -44,4 +44,26 @@ describe('instance API contracts', () => {
       ids: ['instance-1', ' '],
     }).success, false)
   })
+
+  it('treats empty optional paths on create payload as absent', () => {
+    const parsed = createInstanceBodySchema.safeParse({
+      nodeId: ' local-node ',
+      name: ' 饥荒联机 ',
+      gameCode: '343050',
+      installPath: '   ',
+      configPath: '',
+    })
+    assert.equal(parsed.success, true)
+    assert.deepEqual(parsed.success ? {
+      nodeId: parsed.data.nodeId,
+      name: parsed.data.name,
+      installPath: parsed.data.installPath,
+      configPath: parsed.data.configPath,
+    } : null, {
+      nodeId: 'local-node',
+      name: '饥荒联机',
+      installPath: undefined,
+      configPath: undefined,
+    })
+  })
 })

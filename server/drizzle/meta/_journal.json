@@ -71,6 +71,13 @@
       "when": 1779552000000,
       "tag": "0009_instance_mod_install_status",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788441699785,
+      "tag": "0010_lumpy_phalanx",
+      "breakpoints": true
     }
   ]
 }

@@ -45,6 +45,11 @@ jobs:
           GSH_UNIT_TEST: '1'
         run: pnpm test:unit
 
+      - name: Database schema drift check
+        run: |
+          pnpm exec drizzle-kit generate --config server/drizzle.config.ts
+          git diff --exit-code -- server/drizzle
+
       - name: Installer syntax and smoke test
         run: |
           bash -n scripts/install.linux.sh

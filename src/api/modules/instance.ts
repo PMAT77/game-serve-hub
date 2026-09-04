@@ -22,6 +22,8 @@ import type {
   InstancePortConflictData,
   InstanceRuntimeMetrics,
   InstanceStatus,
+  InstanceStatusCounts,
+  InstanceStatusCountsQuery,
   InstanceUpdateCheckJobPayload,
   InstallableGameItem,
 } from '../../../shared/contracts/instance'
@@ -50,6 +52,8 @@ export type {
   InstancePortConflictData,
   InstanceRuntimeMetrics,
   InstanceStatus,
+  InstanceStatusCounts,
+  InstanceStatusCountsQuery,
   InstanceUpdateCheckJobPayload,
   InstallableGameItem,
 }
@@ -64,6 +68,7 @@ export type InstanceMaintenancePushResult = InstanceMaintenancePushResultDto
 
 export default {
   getInstanceList: (data?: InstanceListQuery) => api.post('app/instance/list', data),
+  getInstanceStatusCounts: (data?: InstanceStatusCountsQuery) => api.post('app/instance/status-counts', data) as Promise<{ data: InstanceStatusCounts }>,
   getInstanceMetrics: (ids?: string[]) => api.post('app/instance/metrics', ids?.length ? { ids } : {}) as Promise<{ data: InstanceMetricsPayload }>,
   getInstallableGames: () => api.get('app/instance/games') as Promise<{ data: InstallableGameItem[] }>,
   getInstanceInstallLog: (id: string) => api.get('app/instance/install-log', {

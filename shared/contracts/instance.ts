@@ -18,6 +18,24 @@ export const instanceListQuerySchema = z.object({
 })
 export type InstanceListQuery = z.infer<typeof instanceListQuerySchema>
 
+/** 统计卡各状态计数（全量口径，不受 status 筛选影响） */
+export const instanceStatusCountsSchema = z.object({
+  total: z.number().int().nonnegative(),
+  pendingInstall: z.number().int().nonnegative(),
+  running: z.number().int().nonnegative(),
+  stopped: z.number().int().nonnegative(),
+  installing: z.number().int().nonnegative(),
+  error: z.number().int().nonnegative(),
+})
+export type InstanceStatusCounts = z.infer<typeof instanceStatusCountsSchema>
+
+/** 统计计数查询范围：跟随节点与关键词，刻意不含 status */
+export const instanceStatusCountsQuerySchema = z.object({
+  nodeId: z.string().trim().min(1).max(128).optional(),
+  keyword: z.string().trim().min(1).max(256).optional(),
+})
+export type InstanceStatusCountsQuery = z.infer<typeof instanceStatusCountsQuerySchema>
+
 const portSchema = z.number().int().min(1).max(65535)
 
 // 可选路径字段：空字符串（含纯空白）视为未提供，避免表单提交空值被 min(1) 拒绝

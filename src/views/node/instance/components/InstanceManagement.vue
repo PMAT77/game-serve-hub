@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DataTableColumns, FormInst, FormRules } from 'naive-ui'
-import type { CreateInstancePayload, InstallableGameItem, InstanceItem, InstanceStatus, InstanceUpdateCheckJobPayload } from '@/api/modules/instance'
+import type { CreateInstancePayload, InstallableGameItem, InstanceItem, InstanceStatus, InstanceStatusCounts, InstanceUpdateCheckJobPayload } from '@/api/modules/instance'
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
@@ -116,7 +116,7 @@ const UPDATE_NOTIFY_DISMISSED_KEY = 'gsh-instance-update-dismissed'
 /** @deprecated 旧版在弹出 toast 时即写入，会阻止通知显示，挂载时清理 */
 const UPDATE_NOTIFY_STORAGE_KEY_LEGACY = 'gsh-instance-update-notified'
 
-/** 统计卡：key 对应 statusCount 字段与状态筛选值，点击即筛选 */
+/** 统计卡：key 对应 statusCounts 字段与状态筛选值，点击即筛选 */
 const STAT_CARDS = [
   { key: 'total' as const, label: '全部', filter: 'all' },
   { key: 'pendingInstall' as const, label: '未安装', filter: 'pending_install' },
@@ -201,38 +201,29 @@ const createFormRules: FormRules = {
   ],
 }
 
-/** 按状态单次遍历统计实例数量 */
-const statusCount = computed(() => {
-  const counts = {
-    total: 0,
-    pendingInstall: 0,
-    running: 0,
-    stopped: 0,
-    installing: 0,
-    error: 0,
-  }
-  for (const item of instances.value) {
-    counts.total++
-    switch (item.status) {
-      case 'pending_install':
-        counts.pendingInstall++
-        break
-      case 'running':
-        counts.running++
-        break
-      case 'stopped':
-        counts.stopped++
-        break
-      case 'installing':
-        counts.installing++
-        break
-      case 'error':
-        counts.error++
-        break
-    }
-  }
-  return counts
+/** 统计卡计数：由后端按节点/关键词范围全量统计，不受状态筛选影响，切换标签时数字保持稳定 */
+const statusCounts = ref<InstanceStatusCounts>({
+  total: 0,
+  pendingInstall: 0,
+  running: 0,
+  stopped: 0,
+  installing: 0,
+  error: 0,
 })
+
+/** 拉取统计卡计数（跟随节点/关键词范围，刻意不含状态筛选） */
+async function fetchStatusCounts() {
+  try {
+    const res = await apiInstance.getInstanceStatusCounts({
+      nodeId: selectedNodeId.value !== 'all' ? selectedNodeId.value : undefined,
+      keyword: keywordFilter.value.trim() || undefined,
+    })
+    statusCounts.value = res.data
+  }
+  catch {
+    // 全局拦截器已提示错误原因；失败时保留旧计数
+  }
+}
 
 const instancesWithUpdate = computed(() =>
   instances.value.filter(item => item.updateAvailable),
@@ -1046,11 +1037,14 @@ async function fetchInstances(options?: { silent?: boolean }) {
     instanceLoading.value = true
   }
   try {
-    const res = await apiInstance.getInstanceList({
-      nodeId: selectedNodeId.value !== 'all' ? selectedNodeId.value : undefined,
-      status: statusFilter.value !== 'all' ? statusFilter.value : undefined,
-      keyword: keywordFilter.value.trim() || undefined,
-    })
+    const [res] = await Promise.all([
+      apiInstance.getInstanceList({
+        nodeId: selectedNodeId.value !== 'all' ? selectedNodeId.value : undefined,
+        status: statusFilter.value !== 'all' ? statusFilter.value : undefined,
+        keyword: keywordFilter.value.trim() || undefined,
+      }),
+      fetchStatusCounts(),
+    ])
     instances.value = res.data
     syncInstallTerminalNotifications(instances.value)
     syncRuntimeObservabilityPolling()
@@ -1403,7 +1397,7 @@ onBeforeUnmount(() => {
                   'text-red-600 dark:text-red-400': card.key === 'error',
                 }"
               >
-                {{ statusCount[card.key] }}
+                {{ statusCounts[card.key] }}
               </span>
             </template>
           </NStatistic>

@@ -7,10 +7,12 @@ import {
   instanceIdsBodySchema,
   instanceInstallLogQuerySchema,
   instanceListQuerySchema,
+  instanceStatusCountsQuerySchema,
 } from '../../../../shared/contracts/instance'
 import type {
   InstanceInstallLogPayload,
   InstanceListQuery,
+  InstanceStatusCounts,
   InstallableGameItem,
 } from '../../../../shared/contracts/instance'
 import { randomUUID } from 'node:crypto'
@@ -304,6 +306,41 @@ async function handleListInstances(
   return success(instances, request)
 }
 
+/** 单次遍历统计各状态实例数（全量口径，供统计卡使用） */
+function countInstanceStatus(
+  instances: Awaited<ReturnType<typeof listGameInstances>>,
+): InstanceStatusCounts {
+  const counts: InstanceStatusCounts = {
+    total: 0,
+    pendingInstall: 0,
+    running: 0,
+    stopped: 0,
+    installing: 0,
+    error: 0,
+  }
+  for (const item of instances) {
+    counts.total++
+    switch (item.status) {
+      case 'pending_install':
+        counts.pendingInstall++
+        break
+      case 'running':
+        counts.running++
+        break
+      case 'stopped':
+        counts.stopped++
+        break
+      case 'installing':
+        counts.installing++
+        break
+      case 'error':
+        counts.error++
+        break
+    }
+  }
+  return counts
+}
+
 /**
  * instance 模块注册入口
  * 负责游戏实例生命周期管理（创建、启动、停止、重启、删除）。
@@ -325,6 +362,24 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       return businessError('请求参数无效', request)
     }
     return handleListInstances(app, request, body.data)
+  })
+
+  // 统计卡计数：跟随节点/关键词范围，不受 status 筛选影响，前端切换状态标签时数字保持稳定
+  app.post('/app/instance/status-counts', async (request): Promise<ApiSuccessResponse<InstanceStatusCounts> | ApiErrorResponse> => {
+    const body = instanceStatusCountsQuerySchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const authError = await verifyAuthorized(request)
+    if (authError) {
+      return authError
+    }
+    await reconcileInstanceRuntimeState(app)
+    const instances = await listGameInstances({
+      nodeId: body.data.nodeId?.trim() || undefined,
+      keyword: body.data.keyword?.trim() || undefined,
+    })
+    return success(countInstanceStatus(instances), request)
   })
 
   app.post('/app/instance/dst-summaries', async (request): Promise<ApiSuccessResponse<DstInstanceSummariesDto> | ApiErrorResponse> => {

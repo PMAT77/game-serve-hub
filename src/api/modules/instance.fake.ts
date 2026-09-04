@@ -219,6 +219,49 @@ export default defineFakeRoute([
     },
   },
   {
+    // 统计卡计数：跟随节点/关键词范围，不受 status 筛选影响
+    url: '/fake/app/instance/status-counts',
+    method: 'post',
+    response: ({ body }) => {
+      const nodeId = typeof body.nodeId === 'string' ? body.nodeId.trim() : ''
+      const keyword = typeof body.keyword === 'string' ? body.keyword.trim().toLowerCase() : ''
+      const scoped = instanceList.filter((item) => {
+        if (nodeId && item.nodeId !== nodeId) {
+          return false
+        }
+        if (!keyword) {
+          return true
+        }
+        return item.name.toLowerCase().includes(keyword) || item.gameCode.toLowerCase().includes(keyword)
+      })
+      const counts = { total: scoped.length, pendingInstall: 0, running: 0, stopped: 0, installing: 0, error: 0 }
+      for (const item of scoped) {
+        switch (item.status) {
+          case 'pending_install':
+            counts.pendingInstall++
+            break
+          case 'running':
+            counts.running++
+            break
+          case 'stopped':
+            counts.stopped++
+            break
+          case 'installing':
+            counts.installing++
+            break
+          case 'error':
+            counts.error++
+            break
+        }
+      }
+      return {
+        error: '',
+        status: 1,
+        data: counts,
+      }
+    },
+  },
+  {
     url: '/fake/app/instance/create',
     method: 'post',
     response: ({ body }) => {

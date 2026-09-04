@@ -14,7 +14,9 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+  # GHCR 镜像路径必须全小写：github.repository_owner 为 PMAT77，会导致 buildx 报 repository name must be lowercase。
+  # 与一致性检查、compose、文档中硬编码的 ghcr.io/pmat77 保持一致。
+  IMAGE_PREFIX: ghcr.io/pmat77
 
 jobs:
   quality:

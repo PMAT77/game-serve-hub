@@ -16,12 +16,10 @@ const props = defineProps<{
 
 const emits = defineEmits<{
   onLogin: [account?: string]
-  onRegister: [account?: string]
   onResetPassword: [account?: string]
 }>()
 
 const appAccountStore = useAppAccountStore()
-const SHOW_REGISTER_ENTRY = false
 const SHOW_DEMO_ACCOUNT_ENTRY = false
 
 const title = APP_TITLE
@@ -29,9 +27,6 @@ const loading = ref(false)
 const captchaRequired = ref(false)
 const challengeToken = ref('')
 const challengeQuestion = ref('')
-
-// 登录方式，default 账号密码登录，qrcode 扫码登录
-const type = ref<'default' | 'qrcode'>('default')
 
 function resolveLoginInitialValues() {
   if (import.meta.env.DEV) {
@@ -169,15 +164,7 @@ function testAccount(account: string) {
         {{ title }}
       </p>
     </div>
-    <div class="mb-4">
-      <FaTabs
-        v-model="type" :list="[
-          { label: '账号密码登录', value: 'default' },
-          { label: '扫码登录', value: 'qrcode' },
-        ]" class="inline-flex"
-      />
-    </div>
-    <div v-show="type === 'default'">
+    <div>
       <form @submit="onSubmit">
         <FormField v-slot="{ componentField, errors }" name="account">
           <FormItem class="pb-6 relative space-y-0">
@@ -209,20 +196,22 @@ function testAccount(account: string) {
         </FormField>
         <FormField v-if="captchaRequired" v-slot="{ componentField, errors }" name="challengeAnswer">
           <FormItem class="pb-6 relative space-y-0">
+            <p class="mb-2 flex items-center gap-2 text-sm text-foreground">
+              <FaIcon name="i-lucide:shield-check" class="size-4 text-primary" />
+              <span class="font-medium">验证问题：</span>
+              <span>{{ challengeQuestion || '请输入验证码' }}</span>
+            </p>
             <FormControl>
               <FaInput
                 type="text"
-                :placeholder="challengeQuestion || '请输入验证码'"
+                placeholder="请输入计算结果"
                 class="w-full"
                 :class="{ 'border-destructive': errors.length }"
                 v-bind="componentField"
               >
-                <template #start>
-                  <FaIcon name="i-lucide:shield-check" />
-                </template>
                 <template #end>
                   <FaButton variant="link" class="h-auto p-0 text-xs" type="button" @click="refreshCaptchaChallenge">
-                    刷新
+                    换一题
                   </FaButton>
                 </template>
               </FaInput>
@@ -260,12 +249,6 @@ function testAccount(account: string) {
         <FaButton :loading="loading" size="lg" class="w-full" type="submit">
           登录
         </FaButton>
-        <div v-if="SHOW_REGISTER_ENTRY" class="text-sm mt-4 flex-center gap-2">
-          <span class="text-secondary-foreground op-50">还没有帐号?</span>
-          <FaButton variant="link" class="p-0 h-auto" type="button" @click="emits('onRegister', form.values.account)">
-            注册新帐号
-          </FaButton>
-        </div>
       </form>
       <div v-if="SHOW_DEMO_ACCOUNT_ENTRY" class="mt-4 text-center -mb-4">
         <FaDivider>演示账号一键登录</FaDivider>
@@ -276,14 +259,6 @@ function testAccount(account: string) {
           <FaButton variant="outline" size="sm" plain @click="testAccount('test')">
             test
           </FaButton>
-        </div>
-      </div>
-    </div>
-    <div v-show="type === 'qrcode'">
-      <div class="flex-col-center">
-        <img src="https://s2.loli.net/2024/04/26/GsahtuIZ9XOg5jr.png" class="h-[250px] w-[250px]">
-        <div class="text-sm text-secondary-foreground mt-2 op-50">
-          请使用微信扫码登录
         </div>
       </div>
     </div>

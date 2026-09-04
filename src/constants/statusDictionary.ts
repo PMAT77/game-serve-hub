@@ -1,0 +1,130 @@
+import type { ShardContainerStatus } from '@/api/modules/shard'
+
+/**
+ * 全站状态词典（唯一出处）。
+ *
+ * 规则：
+ * 1. 同一状态在全站只有一个中文词、一个语义色（label + tone）；
+ * 2. 展示端通过 statusTagType()/statusBadgeClass() 取用，禁止在页面内自造颜色或叫法；
+ * 3. 新状态先入词典再上界面。
+ */
+
+export type StatusTone = 'neutral' | 'info' | 'success' | 'warning' | 'error'
+
+export interface StatusDescriptor {
+  /** 用户可见的中文词（一词一义） */
+  label: string
+  /** 语义色 */
+  tone: StatusTone
+  /** lucide 图标名（i-lucide:*） */
+  icon: string
+}
+
+/** tone → naive-ui NTag type */
+const TAG_TYPE_BY_TONE = {
+  neutral: 'default',
+  info: 'info',
+  success: 'success',
+  warning: 'warning',
+  error: 'error',
+} as const
+
+export function statusTagType(tone: StatusTone): (typeof TAG_TYPE_BY_TONE)[StatusTone] {
+  return TAG_TYPE_BY_TONE[tone]
+}
+
+const BADGE_CLASS_BY_TONE: Record<StatusTone, string> = {
+  neutral: 'bg-slate-500/10 text-slate-600 dark:text-slate-300',
+  info: 'bg-sky-500/10 text-sky-600 dark:text-sky-300',
+  success: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  warning: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
+  error: 'bg-red-500/10 text-red-600 dark:text-red-300',
+}
+
+export function statusBadgeClass(tone: StatusTone): string {
+  return BADGE_CLASS_BY_TONE[tone]
+}
+
+/** tone → 行内文本色（用于列表中的纯文本状态） */
+export function statusTextClass(tone: StatusTone): string {
+  switch (tone) {
+    case 'success':
+      return 'text-emerald-600 dark:text-emerald-400'
+    case 'warning':
+      return 'text-amber-600 dark:text-amber-400'
+    case 'error':
+      return 'text-red-600 dark:text-red-400'
+    case 'info':
+      return 'text-sky-600 dark:text-sky-400'
+    default:
+      return 'text-muted-foreground'
+  }
+}
+
+/* ---------------------------------- 实例 ---------------------------------- */
+
+/**
+ * 实例展示状态（error 在展示层拆分为 install_failed / runtime_error，
+ * 由 instanceDisplay.getInstanceState 依据 lastCommand/lastError 判定）。
+ */
+export type InstanceDisplayState =
+  | 'pending_install'
+  | 'installing'
+  | 'running'
+  | 'stopped'
+  | 'install_failed'
+  | 'runtime_error'
+
+export const INSTANCE_STATE: Record<InstanceDisplayState, StatusDescriptor> = {
+  pending_install: { label: '未安装', tone: 'warning', icon: 'i-lucide:package-open' },
+  installing: { label: '安装中', tone: 'info', icon: 'i-lucide:loader-circle' },
+  running: { label: '运行中', tone: 'success', icon: 'i-lucide:play' },
+  stopped: { label: '已停止', tone: 'neutral', icon: 'i-lucide:square' },
+  install_failed: { label: '安装失败', tone: 'error', icon: 'i-lucide:package-x' },
+  runtime_error: { label: '运行异常', tone: 'error', icon: 'i-lucide:triangle-alert' },
+}
+
+/** 仅有原始枚举（无 lastCommand/lastError 上下文）时的兜底：error 展示为运行异常 */
+export const INSTANCE_STATUS: Record<InstanceDisplayState | 'error', StatusDescriptor> = {
+  ...INSTANCE_STATE,
+  error: INSTANCE_STATE.runtime_error,
+}
+
+/* ------------------------------ 世界（分片） ------------------------------ */
+
+export const SHARD_CONTAINER_STATUS: Record<ShardContainerStatus, StatusDescriptor> = {
+  running: { label: '运行中', tone: 'success', icon: 'i-lucide:play' },
+  stopped: { label: '未运行', tone: 'neutral', icon: 'i-lucide:square' },
+  not_created: { label: '未配置', tone: 'warning', icon: 'i-lucide:circle-dashed' },
+  unknown: { label: '未知', tone: 'neutral', icon: 'i-lucide:circle-help' },
+}
+
+export const SHARD_UNCONFIGURED: StatusDescriptor = SHARD_CONTAINER_STATUS.not_created
+
+/* ---------------------------------- 模组 ---------------------------------- */
+
+export const MOD_INSTALL_STATUS: Record<'pending' | 'ready' | 'failed', StatusDescriptor> = {
+  pending: { label: '下载中', tone: 'info', icon: 'i-lucide:download' },
+  ready: { label: '已下载·待开启', tone: 'success', icon: 'i-lucide:package-check' },
+  failed: { label: '下载失败', tone: 'error', icon: 'i-lucide:download-x' },
+}
+
+export const MOD_ENABLED_STATUS: Record<'enabled' | 'disabled', StatusDescriptor> = {
+  enabled: { label: '已开启', tone: 'success', icon: 'i-lucide:toggle-right' },
+  disabled: { label: '已关闭', tone: 'neutral', icon: 'i-lucide:toggle-left' },
+}
+
+/* -------------------------------- 洞穴功能 -------------------------------- */
+
+export const CAVES_FEATURE_STATUS: Record<'off' | 'on' | 'error', StatusDescriptor> = {
+  off: { label: '未开启', tone: 'neutral', icon: 'i-lucide:circle-off' },
+  on: { label: '已开启', tone: 'success', icon: 'i-lucide:circle-check' },
+  error: { label: '配置异常', tone: 'warning', icon: 'i-lucide:triangle-alert' },
+}
+
+/** 房间/世界配置读取失败时的展示态（与「运行异常」「安装失败」区分命名与颜色） */
+export const CONFIG_ERROR_STATUS: StatusDescriptor = {
+  label: '配置异常',
+  tone: 'warning',
+  icon: 'i-lucide:triangle-alert',
+}

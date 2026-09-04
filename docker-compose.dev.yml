@@ -5,6 +5,8 @@ services:
     build: !reset null
     image: node:22-bookworm-slim
     container_name: game-server-hub-panel
+    # 单容器被 OOM/误杀（exit 137）后自动恢复；docker stop 不会触发重启
+    restart: unless-stopped
     working_dir: /app
     command: ["sh", "-c", "corepack enable && if [ ! -f node_modules/.modules.yaml ]; then pnpm install; fi && pnpm run dev:server:watch"]
     environment:
@@ -49,6 +51,7 @@ services:
 
   web:
     image: node:22-bookworm-slim
+    restart: unless-stopped
     working_dir: /app
     command: ["sh", "-c", "corepack enable && if [ ! -f node_modules/.modules.yaml ]; then pnpm install; fi && pnpm run dev:web"]
     environment:

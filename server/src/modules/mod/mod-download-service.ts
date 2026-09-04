@@ -20,6 +20,8 @@ export interface ModDownloadJobInput {
   instanceId: string
   installPath: string
   payload: ModInstallPayload
+  /** 为 true 时跳过「已就绪且文件存在」短路，强制重新下载 */
+  force?: boolean
 }
 
 interface ModInstallJobRecord {
@@ -410,7 +412,7 @@ export async function enqueueModDownload(input: ModDownloadJobInput): Promise<Mo
     const existingMod = await getInstanceModByWorkshopIdFn(input.instanceId, workshopId)
     const filesReady = downloadIds.every(id => isDstWorkshopModPresent(input.installPath, id))
 
-    if (existingMod?.installStatus === 'ready' && filesReady) {
+    if (!input.force && existingMod?.installStatus === 'ready' && filesReady) {
       const now = new Date().toISOString()
       const record: ModInstallJobRecord = {
         instanceId: input.instanceId,

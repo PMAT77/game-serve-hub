@@ -201,6 +201,7 @@ function mapDbInstanceMod(row: {
   version: string | null
   installStatus: string
   installError: string | null
+  config: string | null
   createdAt: string
   updatedAt: string
 }): DbInstanceMod {
@@ -235,6 +236,7 @@ export async function listInstanceMods(instanceId: string): Promise<DbInstanceMo
       version: instanceMods.version,
       installStatus: instanceMods.installStatus,
       installError: instanceMods.installError,
+      config: instanceMods.config,
       createdAt: instanceMods.createdAt,
       updatedAt: instanceMods.updatedAt,
     })
@@ -258,6 +260,7 @@ export async function getInstanceModByWorkshopId(instanceId: string, workshopId:
       version: instanceMods.version,
       installStatus: instanceMods.installStatus,
       installError: instanceMods.installError,
+      config: instanceMods.config,
       createdAt: instanceMods.createdAt,
       updatedAt: instanceMods.updatedAt,
     })
@@ -281,6 +284,7 @@ export async function upsertInstanceMod(input: {
   version?: string | null
   installStatus?: 'pending' | 'ready' | 'failed'
   installError?: string | null
+  config?: string | null
 }): Promise<DbInstanceMod> {
   const { drizzleDb } = ensureDb()
   const now = nowIso()
@@ -292,6 +296,9 @@ export async function upsertInstanceMod(input: {
   const installError = typeof input.installError === 'undefined'
     ? undefined
     : (input.installError?.trim() || null)
+  const config = typeof input.config === 'undefined'
+    ? undefined
+    : (input.config?.trim() || null)
   await drizzleDb
     .insert(instanceMods)
     .values({
@@ -305,6 +312,7 @@ export async function upsertInstanceMod(input: {
       version: input.version?.trim() || null,
       installStatus,
       installError: installError ?? null,
+      config: config ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -318,6 +326,7 @@ export async function upsertInstanceMod(input: {
         version: input.version?.trim() || null,
         installStatus,
         ...(typeof installError !== 'undefined' ? { installError } : {}),
+        ...(typeof config !== 'undefined' ? { config } : {}),
         updatedAt: now,
       },
     })
@@ -339,6 +348,7 @@ export async function updateInstanceModByWorkshopId(
     version?: string | null
     installStatus?: 'pending' | 'ready' | 'failed'
     installError?: string | null
+    config?: string | null
   },
 ): Promise<DbInstanceMod | undefined> {
   const { drizzleDb } = ensureDb()
@@ -350,6 +360,7 @@ export async function updateInstanceModByWorkshopId(
     version?: string | null
     installStatus?: 'pending' | 'ready' | 'failed'
     installError?: string | null
+    config?: string | null
     updatedAt: string
   } = {
     updatedAt: nowIso(),
@@ -374,6 +385,9 @@ export async function updateInstanceModByWorkshopId(
   }
   if (typeof patch.installError !== 'undefined') {
     payload.installError = patch.installError?.trim() || null
+  }
+  if (typeof patch.config !== 'undefined') {
+    payload.config = patch.config?.trim() || null
   }
   await drizzleDb
     .update(instanceMods)

@@ -17,20 +17,24 @@ import {
   NTabPane,
   NTabs,
   NTag,
-  NTooltip,
   useDialog,
   useMessage,
+  useNotification,
 } from 'naive-ui'
 import { computed, h, onActivated, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
 import apiShard from '@/api/modules/shard'
 import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
 import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
+import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
+import ConfigActionBar from '@/components/ConfigActionBar.vue'
 import {
   routeToDstRoomSettings,
   routeToDstWorldList,
 } from '@/navigation/game-routes'
 import { isInstanceInstallingStatus } from '@/views/node/instance/instanceDisplay'
+import { tryNotifyHostMemoryPressure } from '@/utils/hostMemoryPressure'
+import { shardSavePayloadSchema } from '@/api/modules/shard'
 import {
   formatPortConflictDetail,
   getPortConflictDialogLabels,
@@ -57,6 +61,7 @@ const route = useRoute()
 const router = useRouter()
 const dialog = useDialog()
 const message = useMessage()
+const notification = useNotification()
 
 const { formLabelPlacement, formLabelWidth } = useNarrowFormLayout(140)
 const { guidance: hostMemoryGuidance } = useHostMemoryGuidance()
@@ -65,10 +70,6 @@ const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
 const activeSaveOperation = shallowRef<ShardSaveOperation | null>(null)
 const isSaving = computed(() => activeSaveOperation.value !== null)
-const savingMaster = computed(() => activeSaveOperation.value === 'master:save')
-const savingMasterRestart = computed(() => activeSaveOperation.value === 'master:restart')
-const savingCaves = computed(() => activeSaveOperation.value === 'caves:save')
-const savingCavesRestart = computed(() => activeSaveOperation.value === 'caves:restart')
 const shardList = ref<ShardListDto | null>(null)
 
 const saveAndRestartDisabled = computed(() =>
@@ -88,6 +89,10 @@ const masterWorldRules = ref<Record<string, string>>({})
 const cavesWorldRules = ref<Record<string, string>>({})
 const masterWorldgenConfig = ref<Record<string, string>>({})
 const cavesWorldgenConfig = ref<Record<string, string>>({})
+
+/** 服务端当前已保存的世界规则快照，用于保存时做差异提交（未修改项不下发） */
+const persistedMasterOverrides = ref<Record<string, string>>({})
+const persistedCavesOverrides = ref<Record<string, string>>({})
 
 const masterFormRef = ref<FormInst | null>(null)
 const cavesFormRef = ref<FormInst | null>(null)
@@ -109,6 +114,27 @@ const cavesForm = reactive({
 const pageTitle = computed(() => shardList.value
   ? `世界设置 · ${shardList.value.instanceName}`
   : '世界设置')
+
+/** 远端快照：加载/保存成功后更新，用于脏状态判定与一键重置 */
+const savedSnapshot = ref('')
+
+function buildFormSnapshot(): string {
+  return JSON.stringify({
+    masterForm: { ...masterForm },
+    cavesForm: { ...cavesForm },
+    masterWorldRules: masterWorldRules.value,
+    cavesWorldRules: cavesWorldRules.value,
+    masterWorldgenConfig: masterWorldgenConfig.value,
+    cavesWorldgenConfig: cavesWorldgenConfig.value,
+  })
+}
+
+const formDirty = computed(() => savedSnapshot.value !== '' && buildFormSnapshot() !== savedSnapshot.value)
+
+useUnsavedChangesGuard(formDirty)
+
+/** 底部保存栏作用于当前激活的分片（模组页签不保存） */
+const currentShardId = computed<ShardId>(() => (mainTab.value === 'caves' ? 'caves' : 'master'))
 
 const clusterShardEnabled = computed(() => Boolean(shardList.value?.clusterShardEnabled))
 const masterShard = computed(() => shardList.value?.shards.find(s => s.id === 'master'))
@@ -160,14 +186,19 @@ function resetLocalWorldRules() {
   cavesWorldRules.value = {}
   masterWorldgenConfig.value = {}
   cavesWorldgenConfig.value = {}
+  persistedMasterOverrides.value = {}
+  persistedCavesOverrides.value = {}
 }
 
 function applyShardToForm(shard: ShardSummaryDto) {
+  const persisted = { ...shard.leveldataOverrides }
   if (shard.id === 'master') {
+    persistedMasterOverrides.value = persisted
     applyLeveldataOverridesFromServer(masterWorldRules.value, 'rules', 'master', shard.leveldataOverrides)
     applyLeveldataOverridesFromServer(masterWorldgenConfig.value, 'worldgen', 'master', shard.leveldataOverrides)
   }
   else {
+    persistedCavesOverrides.value = persisted
     applyLeveldataOverridesFromServer(cavesWorldRules.value, 'rules', 'caves', shard.leveldataOverrides)
     applyLeveldataOverridesFromServer(cavesWorldgenConfig.value, 'worldgen', 'caves', shard.leveldataOverrides)
   }
@@ -203,6 +234,7 @@ async function loadConfig() {
     for (const shard of response.data.shards) {
       applyShardToForm(shard)
     }
+    savedSnapshot.value = buildFormSnapshot()
   }
   catch {
     message.error('加载世界配置失败，请确认实例已安装且后端服务正常')
@@ -225,13 +257,46 @@ function buildSavePayload(shard: ShardId, restart: boolean): ShardSavePayload {
     steamAuthPort: form.steamAuthPort,
     steamMasterPort: form.steamMasterPort,
     worldgenPreset: form.worldgenPreset,
-    worldRuleOverrides: buildLeveldataOverridesPayload(shard, 'rules', worldRules),
+    worldRuleOverrides: buildLeveldataOverridesPayload(
+      shard,
+      'rules',
+      worldRules,
+      shard === 'master' ? persistedMasterOverrides.value : persistedCavesOverrides.value,
+    ),
     restart,
   }
   if (!summary?.worldGenerated) {
-    payload.worldgenOverrides = buildLeveldataOverridesPayload(shard, 'worldgen', worldgenConfig)
+    payload.worldgenOverrides = buildLeveldataOverridesPayload(
+      shard,
+      'worldgen',
+      worldgenConfig,
+      shard === 'master' ? persistedMasterOverrides.value : persistedCavesOverrides.value,
+    )
   }
   return payload
+}
+
+/** 保存前客户端预校验：把 zod 问题翻译成可定位的提示，避免后端原始报错直出 */
+function describePayloadIssues(payload: ShardSavePayload): string | null {
+  const parsed = shardSavePayloadSchema.safeParse(payload)
+  if (parsed.success) {
+    return null
+  }
+  for (const issue of parsed.error.issues) {
+    const path = issue.path.map(p => String(p)).join('.')
+    if (path.startsWith('worldRuleOverrides.') || path.startsWith('worldgenOverrides.')) {
+      const key = String(issue.path[1] ?? '')
+      return `世界规则项 ${key} 的值无效，请检查世界规则设置`
+    }
+    if (path === 'worldgenPreset') {
+      return issue.message
+    }
+    if (path.endsWith('Port')) {
+      return '端口须为 1–65535 的整数，请检查网络设置'
+    }
+    return issue.message
+  }
+  return '保存失败，请检查填写内容'
 }
 
 function getSaveOperation(shard: ShardId, restart: boolean): ShardSaveOperation {
@@ -249,10 +314,20 @@ async function saveShard(shard: ShardId, restart: boolean) {
   catch {
     return
   }
+  if (shard === 'caves' && cavesForm.serverPort === masterForm.serverPort) {
+    message.error('洞穴游戏端口不能与地上世界相同，请在「网络」页签中修改后保存')
+    return
+  }
+  const payload = buildSavePayload(shard, restart)
+  const payloadIssue = describePayloadIssues(payload)
+  if (payloadIssue) {
+    message.error(payloadIssue)
+    return
+  }
   const operation = getSaveOperation(shard, restart)
   activeSaveOperation.value = operation
   try {
-    await apiShard.saveShardConfig(buildSavePayload(shard, restart))
+    await apiShard.saveShardConfig(payload)
     message.success(restart ? '世界配置已保存并触发重启' : '世界配置已保存')
     await loadConfig()
   }
@@ -284,10 +359,18 @@ async function saveShard(shard: ShardId, restart: boolean) {
           }
         },
         onNegativeClick: () => {
-          mainTab.value = 'surface'
-          surfaceSubTab.value = 'network'
+          mainTab.value = shard === 'caves' ? 'caves' : 'surface'
+          if (shard === 'caves') {
+            cavesSubTab.value = 'network'
+          }
+          else {
+            surfaceSubTab.value = 'network'
+          }
         },
       })
+      return
+    }
+    if (tryNotifyHostMemoryPressure(notification, error)) {
       return
     }
     const msg = error instanceof Error
@@ -507,24 +590,6 @@ onActivated(() => {
               </NTabs>
             </NForm>
 
-            <div class="flex flex-wrap justify-center gap-2 mt-4 pt-4 border-t border-border">
-              <NButton type="primary" size="small" :loading="savingMaster" :disabled="isSaving" @click="saveShard('master', false)">
-                保存地上
-              </NButton>
-              <NTooltip :disabled="!saveAndRestartDisabled">
-                <template #trigger>
-                  <NButton
-                    size="small"
-                    :loading="savingMasterRestart"
-                    :disabled="saveAndRestartDisabled || isSaving"
-                    @click="confirmSaveAndRestart('master')"
-                  >
-                    保存并重启
-                  </NButton>
-                </template>
-                {{ saveAndRestartDisabledTitle }}
-              </NTooltip>
-            </div>
           </NTabPane>
 
           <NTabPane name="caves">
@@ -592,24 +657,6 @@ onActivated(() => {
                 </NTabs>
               </NForm>
 
-              <div class="flex flex-wrap justify-center gap-2 mt-4 pt-4 border-t border-border">
-                <NButton type="primary" size="small" :loading="savingCaves" :disabled="isSaving" @click="saveShard('caves', false)">
-                  保存洞穴
-                </NButton>
-                <NTooltip :disabled="!saveAndRestartDisabled">
-                  <template #trigger>
-                    <NButton
-                      size="small"
-                      :loading="savingCavesRestart"
-                      :disabled="saveAndRestartDisabled || isSaving"
-                      @click="confirmSaveAndRestart('caves')"
-                    >
-                      保存并重启
-                    </NButton>
-                  </template>
-                  {{ saveAndRestartDisabledTitle }}
-                </NTooltip>
-              </div>
             </template>
           </NTabPane>
 
@@ -620,6 +667,17 @@ onActivated(() => {
             />
           </NTabPane>
         </NTabs>
+
+        <ConfigActionBar
+          :dirty="formDirty"
+          :saving="isSaving"
+          :restart-disabled="saveAndRestartDisabled"
+          :restart-disabled-title="saveAndRestartDisabledTitle"
+          :save-label="mainTab === 'caves' ? '保存洞穴' : '保存地上'"
+          @reset="loadConfig"
+          @save="saveShard(currentShardId, false)"
+          @save-and-restart="confirmSaveAndRestart(currentShardId)"
+        />
       </div>
     </template>
   </FaPageMain>

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  modConfigPayloadSchema,
   modInstallPayloadSchema,
   modReorderPayloadSchema,
   steamModListQuerySchema,
@@ -23,5 +24,13 @@ describe('mod API contracts', () => {
     assert.equal(modInstallPayloadSchema.safeParse({ workshopId: '' }).success, false)
     assert.equal(modReorderPayloadSchema.safeParse({ workshopIds: '123' }).success, false)
     assert.equal(steamModListQuerySchema.safeParse({ page: {} }).success, false)
+  })
+
+  it('validates mod config payload option value types', () => {
+    assert.deepEqual(modConfigPayloadSchema.safeParse({ options: { a: 'x', b: 2, c: true } }).success, true)
+    assert.deepEqual(modConfigPayloadSchema.safeParse({ options: {} }).success, true)
+    assert.equal(modConfigPayloadSchema.safeParse({ options: { a: [1] } }).success, false)
+    assert.equal(modConfigPayloadSchema.safeParse({ options: { a: { nested: 1 } } }).success, false)
+    assert.equal(modConfigPayloadSchema.safeParse({ options: { '': 1 } }).success, false)
   })
 })

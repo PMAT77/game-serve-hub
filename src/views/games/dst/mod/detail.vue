@@ -10,6 +10,7 @@ import {
   NImage,
   NScrollbar,
   NTag,
+  useDialog,
   useMessage,
 } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -18,7 +19,7 @@ import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import apiMod from '@/api/modules/mod'
 import { useInstanceModState } from '@/composables/useInstanceModState'
 import { useModContentLocale } from '@/composables/useModContentLocale'
-import { routeToDstModList } from '@/navigation/game-routes'
+import { routeToDstModList, routeToDstWorldSettings } from '@/navigation/game-routes'
 import DstModDetailSkeleton from './components/DstModDetailSkeleton.vue'
 
 defineOptions({
@@ -33,7 +34,9 @@ interface BusinessErrorLike {
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 const { locale: contentLocale } = useModContentLocale()
+const unsubscribing = ref(false)
 
 const loading = ref(true)
 const detail = ref<SteamModDetailDto | null>(null)
@@ -69,12 +72,16 @@ const displayDescription = computed(() => {
   return resolved.value || detail.value.description
 })
 
+const isSubscribedReady = computed(() =>
+  Boolean(detail.value && (detail.value.installed || detail.value.subscribeStatus === 'ready')),
+)
+
 const installButtonText = computed(() => {
   if (!detail.value) {
     return '订阅'
   }
-  if (detail.value.installed || detail.value.subscribeStatus === 'ready') {
-    return '已订阅'
+  if (isSubscribedReady.value) {
+    return '去开启 Mod'
   }
   if (isDownloading.value || detail.value.subscribeStatus === 'pending') {
     return '订阅中'
@@ -88,15 +95,8 @@ const installButtonText = computed(() => {
 const installButtonDisabled = computed(() =>
   !detail.value
   || !instanceId.value
-  || detail.value.installed
-  || detail.value.subscribeStatus === 'ready'
   || isDownloading.value
   || detail.value.subscribeStatus === 'pending',
-)
-
-const installButtonLoading = computed(() =>
-  (isDownloading.value || detail.value?.subscribeStatus === 'pending')
-  && !detail.value?.installed,
 )
 
 function formatDateTime(value: string | null): string {
@@ -140,8 +140,42 @@ function isAuthUnauthorizedError(error: unknown): boolean {
 }
 
 function showSubscribeSuccessGuide() {
-  message.success('订阅成功。请到世界设置开启 Mod，并在实例控制台重启实例后生效。', {
-    duration: 6000,
+  message.success('订阅成功。点击「去开启 Mod」前往世界设置开启，重启实例后生效。')
+}
+
+/** 已订阅时主按钮 → 前往世界设置开启 */
+function goToEnableMod() {
+  if (instanceId.value) {
+    router.push(routeToDstWorldSettings(instanceId.value))
+  }
+}
+
+function confirmUnsubscribe() {
+  if (!detail.value || !instanceId.value) {
+    return
+  }
+  dialog.warning({
+    title: '取消订阅',
+    content: `确定从当前实例取消订阅「${displayTitle.value}」吗？`,
+    positiveText: '取消订阅',
+    negativeText: '保留',
+    onPositiveClick: async () => {
+      unsubscribing.value = true
+      try {
+        await apiMod.deleteMod(instanceId.value, detail.value!.workshopId)
+        message.success('已取消订阅')
+        router.push(routeToDstModList())
+      }
+      catch (error: unknown) {
+        if (isAuthUnauthorizedError(error)) {
+          return
+        }
+        message.error(getErrorMessage(error, '取消订阅失败，请稍后重试'))
+      }
+      finally {
+        unsubscribing.value = false
+      }
+    },
   })
 }
 
@@ -235,6 +269,10 @@ async function loadDetail() {
 
 async function installModAction() {
   if (!detail.value || !instanceId.value || installButtonDisabled.value) {
+    return
+  }
+  if (isSubscribedReady.value) {
+    goToEnableMod()
     return
   }
   if (detail.value.subscribeStatus !== 'failed') {
@@ -458,10 +496,16 @@ watch(contentLocale, () => {
           <NButton
             type="primary"
             :disabled="installButtonDisabled"
-            :loading="installButtonLoading"
             @click="installModAction"
           >
             {{ installButtonText }}
+          </NButton>
+          <NButton
+            v-if="isSubscribedReady"
+            :loading="unsubscribing"
+            @click="confirmUnsubscribe"
+          >
+            取消订阅
           </NButton>
           <NButton
             tag="a"

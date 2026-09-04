@@ -14,10 +14,6 @@ watch(() => props.initialTab, (tab) => {
 })
 const tabs = ref([
   {
-    title: '基本设置',
-    description: '账号的基本信息，头像、昵称等',
-  },
-  {
     title: '安全设置',
     description: '定期修改密码可以提高帐号安全性',
   },
@@ -37,10 +33,7 @@ const tabs = ref([
       </div>
     </div>
     <div class="p-10 pt-20 flex-col-center min-h-full md:(ms-40 pt-10)">
-      <div v-if="active === 0">
-        请开发者自行扩展
-      </div>
-      <EditPassword v-if="active === 1" />
+      <EditPassword v-if="active === 0" />
     </div>
   </div>
 </template>

@@ -36,6 +36,7 @@ function createMockMod(input: Partial<DbInstanceMod> & Pick<DbInstanceMod, 'inst
     version: input.version ?? null,
     installStatus: input.installStatus ?? 'ready',
     installError: input.installError ?? null,
+    config: input.config ?? null,
     createdAt: input.createdAt ?? now,
     updatedAt: input.updatedAt ?? now,
     ...input,
@@ -193,6 +194,43 @@ describe('mod-download-service', () => {
 
     assert.equal(job.status, 'success')
     assert.equal(upsertCalls.length, 0)
+  })
+
+  it('force re-downloads a ready mod even when files already exist', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    writeWorkshopMod(installPath, '77777')
+    listedMods = [createMockMod({
+      instanceId: 'instance-c',
+      workshopId: '77777',
+      name: 'Existing Mod',
+      installStatus: 'ready',
+      enabled: true,
+    })]
+    let downloadCount = 0
+    setModDownloadExecutorForTest(async () => {
+      downloadCount += 1
+      return { ok: true }
+    })
+
+    const job = await enqueueModDownload({
+      instanceId: 'instance-c',
+      installPath,
+      payload: {
+        workshopId: '77777',
+        name: 'Existing Mod',
+      },
+      force: true,
+    })
+    assert.equal(job.status, 'downloading')
+    await waitForModInstallJob('instance-c', '77777')
+
+    const finished = getModInstallJob('instance-c', '77777')
+    assert.equal(finished.status, 'success')
+    assert.equal(downloadCount, 1)
+    assert.equal(upsertCalls.some(call => call.installStatus === 'pending'), true)
+    assert.equal(listedMods[0]?.installStatus, 'ready')
+    assert.equal(listedMods[0]?.enabled, true)
   })
 
   it('deduplicates in-flight download jobs for the same workshop id', async () => {

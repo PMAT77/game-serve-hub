@@ -67,6 +67,18 @@ export function isRetriableSteamcmdInstallOutput(output: string): boolean {
   return classifySteamcmdInstallFailure(output) === 'network'
 }
 
+/**
+ * Steam 本地状态损坏特征（Missing configuration / 0x602 / worker thread 异常终止）。
+ * 仅这类失败需要清空半成品 Steam 目录后重试；普通网络中断必须保留
+ * steamapps/downloading 下载缓存，否则会失去 SteamCMD 的断点续传。
+ */
+export function isSteamcmdCorruptStateOutput(output: string): boolean {
+  const text = sanitizeSteamcmdLogLine(output) || output.trim()
+  return /Missing configuration/i.test(text)
+    || /state is 0x602/i.test(text)
+    || /Illegal termination of worker thread/i.test(text)
+}
+
 function extractSteamcmdFailureSnippet(output: string): string {
   const sanitized = sanitizeSteamcmdLogLine(output) || output.trim()
   if (!sanitized) {

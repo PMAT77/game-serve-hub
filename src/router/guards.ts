@@ -2,6 +2,7 @@ import type { Router } from 'vue-router'
 import { useNProgress } from '@vueuse/integrations/useNProgress'
 import { warnKeepAliveComponentNameMissing } from 'virtual:fantastic-admin/turbo-console'
 import { ensureDynamicRoutes } from './ensure-dynamic-routes'
+import { FRONTEND_ROUTE_PATHS } from '../../shared/constants/frontend-routes'
 import '@/assets/styles/nprogress.css'
 
 function setupRoutes(router: Router) {
@@ -13,6 +14,7 @@ function setupRoutes(router: Router) {
     // 是否已登录
     if (appAccountStore.isLogin) {
       if (appAccountStore.mustChangePassword && to.name !== 'forceChangePassword') {
+        faToast.warning('为了账号安全，请先修改初始密码后再使用面板')
         return {
           name: 'forceChangePassword',
           replace: true,
@@ -20,7 +22,7 @@ function setupRoutes(router: Router) {
       }
       if (to.name === 'forceChangePassword' && !appAccountStore.mustChangePassword) {
         return {
-          path: appSettingsStore.settings.app.home.fullPath,
+          path: FRONTEND_ROUTE_PATHS.nodeInstance,
           replace: true,
         }
       }
@@ -33,14 +35,14 @@ function setupRoutes(router: Router) {
           return {
             path: appAccountStore.mustChangePassword
               ? '/force-change-password'
-              : appSettingsStore.settings.app.home.fullPath,
+              : FRONTEND_ROUTE_PATHS.nodeInstance,
             replace: true,
           }
         }
         // 如果未开启主页，但进入的是主页，则会进入侧边栏导航第一个模块
         else if (!appSettingsStore.settings.app.home.enable && to.fullPath === appSettingsStore.settings.app.home.fullPath && appMenuStore.sidebarMenus.length > 0) {
           return {
-            path: appMenuStore.sidebarMenusFirstDeepestPath,
+            path: FRONTEND_ROUTE_PATHS.nodeInstance,
             replace: true,
           }
         }

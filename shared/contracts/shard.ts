@@ -32,7 +32,9 @@ export type ShardInstanceStatus = z.infer<typeof instanceStatusSchema>
 
 const portSchema = z.number().int().min(1).max(65535)
 const overrideKeySchema = z.string().regex(/^[a-z][a-z0-9_]*$/).max(64)
-const overrideValueSchema = z.string().regex(/^[a-zA-Z0-9_.+-]+$/).max(64)
+// 允许空格：DST 官方档位值存在 'highly random'（prefabswaps_start），写入 Lua 时带引号安全
+/** 世界规则档位值的公共校验（允许空格：DST 官方值存在 'highly random'） */
+export const overrideValueSchema = z.string().regex(/^[a-zA-Z0-9_.+ -]+$/).max(64)
 const worldOverridesSchema = z.record(overrideKeySchema, overrideValueSchema).refine(
   value => Object.keys(value).length <= 128,
   '世界规则项不能超过 128 条',

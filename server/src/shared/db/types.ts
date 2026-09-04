@@ -141,6 +141,8 @@ export interface DbInstanceMod {
   version: string | null
   installStatus: 'pending' | 'ready' | 'failed'
   installError: string | null
+  /** JSON 序列化的 modoverrides.lua configuration_options；null = 未配置 */
+  config: string | null
   createdAt: string
   updatedAt: string
 }

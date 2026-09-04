@@ -1,4 +1,8 @@
 import type {
+  ModBatchUpdatePayload,
+  ModConfigDto,
+  ModConfigPayload,
+  ModConfigSaveResult,
   ModDeleteResult,
   ModInstallJobDto,
   ModInstallPayload,
@@ -16,6 +20,13 @@ import type {
 import api from '../index'
 
 export type {
+  ModBatchUpdatePayload,
+  ModConfigDefinition,
+  ModConfigDto,
+  ModConfigOption,
+  ModConfigPayload,
+  ModConfigSaveResult,
+  ModConfigValues,
   ModDeleteResult,
   ModInstallJobDto,
   ModInstallJobPhase,
@@ -101,6 +112,8 @@ export default {
   }) as Promise<{ data: SteamModDetailDto }>,
   installMod: (instanceId: string, payload: ModInstallPayload) =>
     api.post(`app/instances/${instanceId}/mods/install`, payload) as Promise<{ data: ModInstallJobDto }>,
+  batchUpdateMods: (instanceId: string, payload: ModBatchUpdatePayload) =>
+    api.post(`app/instances/${instanceId}/mods/batch-update`, payload) as Promise<{ data: ModInstallJobDto[] }>,
   getModInstallJob: (instanceId: string, workshopId: string) =>
     api.get(`app/instances/${instanceId}/mods/install-jobs/${workshopId}`) as Promise<{ data: ModInstallJobDto }>,
   listModInstallJobs: (instanceId: string, workshopIds?: string[]) =>
@@ -131,6 +144,10 @@ export default {
   },
   updateMod: (instanceId: string, modId: string, payload: ModUpdatePayload) =>
     api.put(`app/instances/${instanceId}/mods/${modId}`, payload) as Promise<{ data: ModMutationResult }>,
+  getModConfig: (instanceId: string, modId: string) =>
+    api.get(`app/instances/${instanceId}/mods/${modId}/config`) as Promise<{ data: ModConfigDto }>,
+  updateModConfig: (instanceId: string, modId: string, payload: ModConfigPayload) =>
+    api.put(`app/instances/${instanceId}/mods/${modId}/config`, payload) as Promise<{ data: ModConfigSaveResult }>,
   reorderMods: (instanceId: string, payload: ModReorderPayload) =>
     api.put(`app/instances/${instanceId}/mods/reorder`, payload) as Promise<{ data: ModReorderResult }>,
   deleteMod: (instanceId: string, modId: string) =>

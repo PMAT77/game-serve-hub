@@ -12,7 +12,7 @@ const args = [
   '--test-concurrency=1',
   'server/src/**/*.test.ts',
   'scripts/**/*.test.ts',
-  'src/views/node/instance/instanceStartGuide.test.ts',
+  'src/views/**/*.test.ts',
 ]
 
 const result = spawnSync(process.execPath, args, {

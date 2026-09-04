@@ -10,6 +10,9 @@ const STEAMCMD_ARTIFACT_DIRS = ['steamapps', 'Steam', 'steamcmd'] as const
 
 /**
  * 无 DST 可执行文件时清理半成品 Steam 状态，避免 Missing configuration / 0x602 重试失败。
+ * 仅供安装重试在检测到 Steam 本地状态损坏时调用（见 isSteamcmdCorruptStateOutput）；
+ * 不得在每次重试/修复安装前无条件调用，否则会删掉 steamapps/downloading 下载缓存、
+ * 失去 SteamCMD 对已下载文件的断点续传。
  */
 export function cleanupIncompleteSteamcmdInstallDir(installPath: string): boolean {
   if (findDstServerBinary(installPath)) {
@@ -119,9 +122,10 @@ function ensureInstallDirectoryOwnership(installPath: string): string | undefine
 /**
  * 为 SteamCMD 安装准备目录：Docker 赋予容器用户权限，Native 保持 gsh 用户所有权。
  * 若目录内已有游戏文件，仅调整实例目录本身，避免递归 chmod 去掉二进制 +x。
+ * 注意：这里刻意不清理半成品 Steam 目录——损坏状态由安装失败输出检测后
+ * 在重试中清理（isSteamcmdCorruptStateOutput），无条件清理会破坏断点续传。
  */
 export function prepareInstallPathForSteamcmd(installPath: string): string | undefined {
-  cleanupIncompleteSteamcmdInstallDir(installPath)
   return ensureInstallDirectoryOwnership(installPath)
 }
 

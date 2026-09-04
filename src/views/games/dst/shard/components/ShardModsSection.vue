@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { DataTableColumns } from 'naive-ui'
 import type { ModItemDto } from '@/api/modules/mod'
-import { NButton, NDataTable, NSelect, NTag, NTooltip, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDataTable, NSelect, NTag, NTooltip, useMessage } from 'naive-ui'
 import { computed, h, ref, watch } from 'vue'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import apiMod from '@/api/modules/mod'
+import { MOD_ENABLED_STATUS, MOD_INSTALL_STATUS, statusTagType } from '@/constants/statusDictionary'
 import { useInstanceModState } from '@/composables/useInstanceModState'
 
 type ModEnabledFilter = 'all' | 'enabled' | 'disabled'
@@ -16,6 +17,7 @@ const props = defineProps<{
 
 const message = useMessage()
 const loadingInstalled = ref(false)
+const loadError = ref<string | null>(null)
 const mutatingWorkshopIds = ref<Set<string>>(new Set())
 const modEnabledFilter = ref<ModEnabledFilter>('all')
 
@@ -30,29 +32,28 @@ const hasInstanceId = computed(() => Boolean(props.instanceId.trim()))
 const modEnabledFilterOptions = [
   { label: '全部', value: 'all' as const },
   { label: '已开启', value: 'enabled' as const },
-  { label: '未开启', value: 'disabled' as const },
+  { label: '已关闭', value: 'disabled' as const },
 ]
-const readyInstalledMods = computed(() =>
-  installedMods.value.filter(row => row.installStatus === 'ready'),
-)
+// 筛选只作用于已下载的 Mod；下载中/失败行始终可见，避免凭空消失
 const filteredInstalledMods = computed(() => {
-  if (modEnabledFilter.value === 'enabled') {
-    return readyInstalledMods.value.filter(row => row.enabled)
+  if (modEnabledFilter.value === 'all') {
+    return installedMods.value
   }
-  if (modEnabledFilter.value === 'disabled') {
-    return readyInstalledMods.value.filter(row => !row.enabled)
-  }
-  return installedMods.value
+  return installedMods.value.filter((row) => {
+    if (row.installStatus !== 'ready') {
+      return true
+    }
+    return modEnabledFilter.value === 'enabled' ? row.enabled : !row.enabled
+  })
 })
 
 function renderInstallStatus(row: ModItemDto) {
-  if (row.installStatus === 'pending') {
-    return h(NTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '下载中' })
-  }
-  if (row.installStatus === 'failed') {
-    return h(NTag, { size: 'small', bordered: false, type: 'error' }, { default: () => '下载失败' })
-  }
-  return h(NTag, { size: 'small', bordered: false, type: 'success' }, { default: () => '已就绪' })
+  const state = MOD_INSTALL_STATUS[row.installStatus]
+  return h(
+    NTag,
+    { size: 'small', bordered: false, type: statusTagType(state.tone) },
+    { default: () => state.label },
+  )
 }
 
 const installedColumns: DataTableColumns<ModItemDto> = [
@@ -72,14 +73,11 @@ const installedColumns: DataTableColumns<ModItemDto> = [
       if (row.installStatus !== 'ready') {
         return h('span', { class: 'text-xs text-muted-foreground' }, '-')
       }
+      const state = row.enabled ? MOD_ENABLED_STATUS.enabled : MOD_ENABLED_STATUS.disabled
       return h(
         NTag,
-        {
-          size: 'small',
-          bordered: false,
-          type: row.enabled ? 'success' : 'default',
-        },
-        { default: () => (row.enabled ? '已开启' : '已关闭') },
+        { size: 'small', bordered: false, type: statusTagType(state.tone) },
+        { default: () => state.label },
       )
     },
   },
@@ -108,8 +106,8 @@ const installedColumns: DataTableColumns<ModItemDto> = [
           { default: () => (row.enabled ? '关闭' : '开启') },
         ),
         default: () => (row.installStatus === 'failed'
-          ? '下载失败，请前往 Mod 管理重试'
-          : '下载完成后方可开启'),
+          ? '下载失败，请在 Mod 管理页重试'
+          : '下载完成后才能开启'),
       },
     ),
   },
@@ -123,6 +121,7 @@ async function loadInstalledMods() {
     return
   }
   loadingInstalled.value = true
+  loadError.value = null
   try {
     const response = await apiMod.getModList(targetId)
     // 快速切换实例时丢弃过期响应，避免旧实例数据覆盖新实例的 Mod 列表
@@ -131,6 +130,12 @@ async function loadInstalledMods() {
     }
     installedMods.value = response.data.mods
     await restoreInstallJobs({ modList: response.data })
+  }
+  catch {
+    // 全局拦截器已提示错误原因，这里提供可重试的内联错误态
+    if (props.instanceId === targetId) {
+      loadError.value = '已订阅 Mod 加载失败，请检查实例状态后重试。'
+    }
   }
   finally {
     if (props.instanceId === targetId) {
@@ -151,7 +156,7 @@ async function toggleModEnabled(item: ModItemDto) {
       enabled: !item.enabled,
     })
     const riskTip = response.data.riskTip?.trim()
-    message.success(`${item.enabled ? '已关闭' : '已开启'}该 Mod，需手动重启实例后生效`)
+    message.success(`${item.enabled ? '已关闭' : '已开启'}该 Mod，重启实例后生效（可在实例管理执行重启）`)
     if (riskTip) {
       message.warning(riskTip)
     }
@@ -173,6 +178,7 @@ async function toggleModEnabled(item: ModItemDto) {
 
 watch(() => props.instanceId, (value) => {
   resetState()
+  loadError.value = null
   if (!value.trim()) {
     installedMods.value = []
     return
@@ -205,7 +211,19 @@ watch(() => props.instanceId, (value) => {
       </NButton>
     </div>
 
+    <NAlert
+      v-if="loadError"
+      type="error"
+      class="mb-3"
+      title="加载失败"
+    >
+      {{ loadError }}
+      <NButton size="tiny" class="ml-2" @click="loadInstalledMods">
+        重试
+      </NButton>
+    </NAlert>
     <NDataTable
+      v-else
       :bordered="false"
       :single-line="false"
       :columns="installedColumns"

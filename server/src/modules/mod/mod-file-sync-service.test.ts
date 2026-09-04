@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import type { DbInstanceMod } from '../../shared/db/index'
+import { resolveClusterPaths } from '../../infra/game-adapter/dst/cluster-service'
 import {
   resetModFileSyncDbHooksForTest,
   setModFileSyncDbHooksForTest,
@@ -25,6 +26,7 @@ function createMockMod(partial: Partial<DbInstanceMod> & Pick<DbInstanceMod, 'wo
     version: partial.version ?? null,
     installStatus: partial.installStatus ?? 'ready',
     installError: partial.installError ?? null,
+    config: partial.config ?? null,
     createdAt: partial.createdAt ?? now,
     updatedAt: partial.updatedAt ?? now,
   }
@@ -66,5 +68,23 @@ describe('syncInstanceModFilesFromDb', () => {
     })
     await syncInstanceModFilesFromDb('inst-1', '/nonexistent/path')
     assert.equal(called, false)
+  })
+
+  it('writes configuration_options into modoverrides.lua and keeps plain mods intact', async () => {
+    const installPath = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-mod-sync-'))
+    tempDirs.push(installPath)
+    setModFileSyncDbHooksForTest({
+      listReadyInstanceMods: async () => [
+        createMockMod({ workshopId: '111', enabled: true, loadOrder: 0, config: JSON.stringify({ opt_a: 'x', opt_b: 2 }) }),
+        createMockMod({ workshopId: '222', enabled: false, loadOrder: 1 }),
+      ],
+    })
+
+    await syncInstanceModFilesFromDb('inst-1', installPath)
+
+    const { clusterRoot } = resolveClusterPaths(installPath)
+    const overridesContent = fs.readFileSync(path.join(clusterRoot, 'Master', 'modoverrides.lua'), 'utf8')
+    assert.match(overridesContent, /\["workshop-111"\]=\{ enabled=true, configuration_options=\{ opt_a="x", opt_b=2 \} \}/)
+    assert.match(overridesContent, /\["workshop-222"\]=\{ enabled=false \}/)
   })
 })

@@ -1,35 +1,43 @@
 import type { InstanceInstallLogPayload, InstanceInstallLogSource, InstanceItem, InstanceStatus } from '@/api/modules/instance'
 
-/** 实例状态中文标签 */
+import { INSTANCE_STATE, INSTANCE_STATUS, statusBadgeClass, type StatusDescriptor } from '@/constants/statusDictionary'
+
+/** 实例原始状态中文标签（无上下文时的兜底；列表页请优先用 getInstanceState） */
 export function getStatusLabel(status: InstanceStatus) {
-  switch (status) {
-    case 'pending_install':
-      return '未安装'
-    case 'running':
-      return '运行中'
-    case 'stopped':
-      return '已停止'
-    case 'installing':
-      return '安装中'
-    case 'error':
-      return '异常'
-  }
+  return INSTANCE_STATUS[status].label
 }
 
-/** 实例状态徽章 UnoCSS 类名 */
+/** 实例状态徽章 UnoCSS 类名（无上下文时的兜底） */
 export function getStatusBadgeClass(status: InstanceStatus) {
-  switch (status) {
-    case 'pending_install':
-      return 'bg-amber-500/10 text-amber-600 dark:text-amber-300'
-    case 'running':
-      return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-    case 'stopped':
-      return 'bg-slate-500/10 text-slate-600 dark:text-slate-300'
-    case 'installing':
-      return 'bg-sky-500/10 text-sky-600 dark:text-sky-300'
-    case 'error':
-      return 'bg-red-500/10 text-red-600 dark:text-red-300'
+  return statusBadgeClass(INSTANCE_STATUS[status].tone)
+}
+
+/** 判定 error 是否源于运行期失败（而非安装失败） */
+function looksLikeRuntimeFailure(instance: Pick<InstanceItem, 'status' | 'lastError' | 'lastCommand'>) {
+  const error = instance.lastError?.trim() ?? ''
+  const command = instance.lastCommand?.trim() ?? ''
+  if (error.includes('安装失败') || command.includes('安装失败')) {
+    return false
   }
+  if (looksLikeRuntimeCommand(command)) {
+    return true
+  }
+  return error.includes('启动') && !error.includes('Steam') && !error.includes('steamcmd')
+}
+
+/**
+ * 实例展示状态：将 error 拆分为「安装失败 / 运行异常」，
+ * 其余状态直接映射词典。列表/详情/通知应统一使用本函数。
+ */
+export function getInstanceState(
+  instance: Pick<InstanceItem, 'status' | 'lastError' | 'lastCommand'>,
+): StatusDescriptor & { key: keyof typeof INSTANCE_STATE } {
+  if (instance.status === 'error') {
+    return looksLikeRuntimeFailure(instance)
+      ? { ...INSTANCE_STATE.runtime_error, key: 'runtime_error' }
+      : { ...INSTANCE_STATE.install_failed, key: 'install_failed' }
+  }
+  return { ...INSTANCE_STATE[instance.status], key: instance.status }
 }
 
 /** 判断 lastCommand 是否为运行时启动命令（非安装日志） */
@@ -37,9 +45,9 @@ export function looksLikeRuntimeCommand(text: string | null | undefined) {
   if (!text?.trim()) {
     return false
   }
+  // 注意：dontstarve_dedicated_server 是下划线连接符，\b 在词内不生效，需直接匹配标识符
   return /\.(?:sh|bat|cmd)\b/i.test(text)
-    || /\bdontstarve\b/i.test(text)
-    || /\bdedicated_server\b/i.test(text)
+    || /dontstarve|dedicated_server/i.test(text)
 }
 
 /** 从实例状态与 lastCommand/lastError 解析安装阶段文案 */

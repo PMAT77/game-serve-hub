@@ -239,6 +239,16 @@ async function applyMigrations(migrationsFolder: string) {
   ensureColumn(sqliteDb, 'game_instances', 'local_build_id', 'text')
   ensureColumn(sqliteDb, 'game_instances', 'remote_build_id', 'text')
   ensureColumn(sqliteDb, 'game_instances', 'update_checked_at', 'text')
+  // instance_mods 建表在 0000 迁移；旧库若从未建过该表则跳过补列，避免 ALTER 崩初始化
+  const instanceModsTableExists = sqliteDb.prepare(`
+    SELECT 1 AS ok
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'instance_mods'
+    LIMIT 1
+  `).get() as { ok: number } | undefined
+  if (instanceModsTableExists) {
+    ensureColumn(sqliteDb, 'instance_mods', 'config', 'text')
+  }
   await runPostMigration0008ModFileSync()
 }
 

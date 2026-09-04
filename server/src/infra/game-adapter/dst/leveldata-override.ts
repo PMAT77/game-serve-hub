@@ -8,7 +8,8 @@ import { resolveFirstExisting, resolveRepoRoot } from '../../../shared/repo-root
 
 const OVERRIDE_ENTRY_RE = /^\s*([a-zA-Z0-9_]+)\s*=\s*["']([^"']*)["']\s*,?\s*$/
 const OVERRIDE_KEY_RE = /^[a-z][a-z0-9_]*$/
-const OVERRIDE_VALUE_RE = /^[a-zA-Z0-9_.+-]+$/
+// 与 shared/contracts/shard.ts overrideValueSchema 保持一致（允许空格：'highly random'）
+const OVERRIDE_VALUE_RE = /^[a-zA-Z0-9_.+ -]+$/
 
 const templateCache = new Map<ShardId, string>()
 

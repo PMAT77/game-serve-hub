@@ -9,7 +9,8 @@ import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
 import apiDstSummary from '@/api/modules/dst-summary'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 import { routeToDstWorldSettings, routeToNodeInstance } from '@/navigation/game-routes'
-import { getStatusBadgeClass, getStatusLabel } from '@/views/node/instance/instanceDisplay'
+import { CONFIG_ERROR_STATUS, SHARD_CONTAINER_STATUS, SHARD_UNCONFIGURED, statusTagType } from '@/constants/statusDictionary'
+import { getInstanceState } from '@/views/node/instance/instanceDisplay'
 
 defineOptions({
   name: 'DstWorldList',
@@ -32,19 +33,12 @@ const {
   runLoad,
 } = useAdminPageState(rows)
 
-const containerStatusLabel: Record<ShardContainerStatus, string> = {
-  running: '运行中',
-  stopped: '已停止',
-  not_created: '未创建',
-  unknown: '未知',
-}
-
 function renderShardStatusTag(status: ShardContainerStatus) {
-  const type = status === 'running' ? 'success' : status === 'stopped' ? 'warning' : 'default'
+  const descriptor = SHARD_CONTAINER_STATUS[status]
   return h(
     NTag,
-    { size: 'small', bordered: false, type },
-    { default: () => containerStatusLabel[status] },
+    { size: 'small', bordered: false, type: statusTagType(descriptor.tone) },
+    { default: () => descriptor.label },
   )
 }
 
@@ -54,9 +48,9 @@ function shardStatusText(row: DstInstanceSummaryDto, shardId: 'master' | 'caves'
     return '—'
   }
   if (!shard.configured) {
-    return '待配置'
+    return SHARD_UNCONFIGURED.label
   }
-  return containerStatusLabel[shard.containerStatus]
+  return SHARD_CONTAINER_STATUS[shard.containerStatus].label
 }
 
 const filteredRows = computed(() => {
@@ -82,16 +76,16 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
     title: '运行状态',
     key: 'status',
     render: (row) => {
-      const status = row.instance.status
+      const state = getInstanceState(row.instance)
       return h(
         NTag,
-        { size: 'small', bordered: false, class: getStatusBadgeClass(status) },
-        { default: () => getStatusLabel(status) },
+        { size: 'small', bordered: false, type: statusTagType(state.tone) },
+        { default: () => state.label },
       )
     },
   },
   {
-    title: '洞穴',
+    title: '洞穴功能',
     key: 'clusterShard',
     render: (row) => {
       const enabled = row.world.clusterShardEnabled
@@ -101,7 +95,11 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
             NTooltip,
             { trigger: 'hover' },
             {
-              trigger: () => h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '异常' }),
+              trigger: () => h(
+                NTag,
+                { size: 'small', type: statusTagType(CONFIG_ERROR_STATUS.tone), bordered: false },
+                { default: () => CONFIG_ERROR_STATUS.label },
+              ),
               default: () => row.world.error,
             },
           )
@@ -110,13 +108,13 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
       }
       return h(
         NTag,
-        { size: 'small', bordered: false, type: enabled ? 'info' : 'default' },
+        { size: 'small', bordered: false, type: statusTagType(enabled ? 'success' : 'neutral') },
         { default: () => (enabled ? '已开启' : '未开启') },
       )
     },
   },
   {
-    title: '主世界',
+    title: '地上世界',
     key: 'master',
     render: (row) => {
       const master = row.world.master
@@ -124,13 +122,17 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
         return '—'
       }
       if (!master.configured) {
-        return h(NTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '待修复' })
+        return h(
+          NTag,
+          { size: 'small', bordered: false, type: statusTagType(SHARD_UNCONFIGURED.tone) },
+          { default: () => SHARD_UNCONFIGURED.label },
+        )
       }
       return renderShardStatusTag(master.containerStatus)
     },
   },
   {
-    title: '洞穴分片',
+    title: '洞穴服务器',
     key: 'caves',
     render: (row) => {
       const caves = row.world.caves
@@ -138,7 +140,11 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
         return '—'
       }
       if (!caves.configured) {
-        return h(NTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '待修复' })
+        return h(
+          NTag,
+          { size: 'small', bordered: false, type: statusTagType(SHARD_UNCONFIGURED.tone) },
+          { default: () => SHARD_UNCONFIGURED.label },
+        )
       }
       return renderShardStatusTag(caves.containerStatus)
     },
@@ -193,7 +199,7 @@ onMounted(() => {
         世界列表
       </h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        查看地上与洞穴分片状态。洞穴开启后在此调整端口、地图与世界规则。
+        查看地上与洞穴世界的运行状态；洞穴开启后可在此调整端口、地图与世界规则。
       </p>
     </div>
 
@@ -242,21 +248,21 @@ onMounted(() => {
               <h2 class="min-w-0 truncate font-medium">
                 {{ row.instance.name }}
               </h2>
-              <NTag size="small" :bordered="false" :class="getStatusBadgeClass(row.instance.status)">
-                {{ getStatusLabel(row.instance.status) }}
+              <NTag size="small" :bordered="false" :type="statusTagType(getInstanceState(row.instance).tone)">
+                {{ getInstanceState(row.instance).label }}
               </NTag>
             </div>
             <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
               <div>
-                <dt class="text-muted-foreground">洞穴</dt>
-                <dd>{{ row.world.clusterShardEnabled === null ? '—' : row.world.clusterShardEnabled ? '已启用' : '未启用' }}</dd>
+                <dt class="text-muted-foreground">洞穴功能</dt>
+                <dd>{{ row.world.clusterShardEnabled === null ? '—' : row.world.clusterShardEnabled ? '已开启' : '未开启' }}</dd>
               </div>
               <div>
                 <dt class="text-muted-foreground">地上世界</dt>
                 <dd>{{ shardStatusText(row, 'master') }}</dd>
               </div>
               <div>
-                <dt class="text-muted-foreground">洞穴分片</dt>
+                <dt class="text-muted-foreground">洞穴服务器</dt>
                 <dd>{{ shardStatusText(row, 'caves') }}</dd>
               </div>
               <div v-if="row.world.error" class="col-span-2 text-amber-600 dark:text-amber-400">

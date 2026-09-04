@@ -2,6 +2,22 @@ import type { HostMemoryPressureData } from '../../shared/contracts/host-memory-
 import type { NotificationApi } from 'naive-ui'
 import { h } from 'vue'
 
+/** 通知动作：跳转监控台查看主机内存占用（动态引入 router，避免模块初始化顺序问题） */
+function renderMonitorAction() {
+  return h(
+    'button',
+    {
+      class: 'text-sm text-primary underline cursor-pointer bg-transparent border-none p-0',
+      type: 'button',
+      onClick: async () => {
+        const { default: router } = await import('@/router/index')
+        await router.push('/console/monitor')
+      },
+    },
+    '查看主机内存占用',
+  )
+}
+
 /** 与 shared/constants/error-code.ts 中 HOST_MEMORY_PRESSURE 保持一致 */
 export const HOST_MEMORY_PRESSURE_CODE = 'HOST_MEMORY_PRESSURE'
 
@@ -40,6 +56,7 @@ export function showHostMemoryPressureNotification(
     ]),
     duration: 0,
     closable: true,
+    action: () => renderMonitorAction(),
   })
 }
 

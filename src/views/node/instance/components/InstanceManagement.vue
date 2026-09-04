@@ -4,8 +4,9 @@ import type { CreateInstancePayload, InstallableGameItem, InstanceItem, Instance
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
-import { NButton, NCheckbox, NDropdown, NEmpty, NProgress, NStatistic, NTag, useDialog, useNotification } from 'naive-ui'
+import { NButton, NCheckbox, NDropdown, NProgress, NStatistic, NTag, NTooltip, useDialog, useNotification } from 'naive-ui'
 import AdminListToolbar from '@/components/AdminListToolbar.vue'
+import { statusBadgeClass } from '@/constants/statusDictionary'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
 import apiInstance from '@/api/modules/instance'
@@ -42,9 +43,9 @@ import {
   extractInstallProgressPercent,
   formatMemoryMb,
   formatUptime,
-  getStatusBadgeClass,
-  getStatusLabel,
+  getInstanceState,
   isInstanceInstallingStatus,
+  resolveInstallPhase,
   shouldShowInstallDetail,
 } from '../instanceDisplay'
 import {
@@ -107,18 +108,22 @@ const installNotifyPendingIds = new Set<string>()
 
 // --- 常量 ---
 /** 列宽总和，启用横向滚动，避免中间列被挤压为 0（操作列移动端收拢为「更多」） */
-const INSTANCE_TABLE_SCROLL_X = computed(() => (isMobileMode.value ? 1210 : 1542))
-const INSTANCE_INSTALL_POLL_MS = 1000
+const INSTANCE_TABLE_SCROLL_X = computed(() => (isMobileMode.value ? 1210 : 1330))
+const INSTANCE_INSTALL_POLL_MS = 2000
 /** 用户手动关闭通知后记录签名，避免同一批更新反复弹出 */
 const UPDATE_NOTIFY_DISMISSED_KEY = 'gsh-instance-update-dismissed'
+/** 记录手动关闭通知，跨会话生效（localStorage） */
 /** @deprecated 旧版在弹出 toast 时即写入，会阻止通知显示，挂载时清理 */
 const UPDATE_NOTIFY_STORAGE_KEY_LEGACY = 'gsh-instance-update-notified'
 
+/** 统计卡：key 对应 statusCount 字段与状态筛选值，点击即筛选 */
 const STAT_CARDS = [
-  { key: 'total' as const, label: '实例总数' },
-  { key: 'running' as const, label: '运行中' },
-  { key: 'stopped' as const, label: '已停止' },
-  { key: 'error' as const, label: '异常' },
+  { key: 'total' as const, label: '全部', filter: 'all' },
+  { key: 'pendingInstall' as const, label: '未安装', filter: 'pending_install' },
+  { key: 'installing' as const, label: '安装中', filter: 'installing' },
+  { key: 'running' as const, label: '运行中', filter: 'running' },
+  { key: 'stopped' as const, label: '已停止', filter: 'stopped' },
+  { key: 'error' as const, label: '异常', filter: 'error' },
 ] as const
 
 const instanceUpdateNotificationRef = ref<NotificationReactive | null>(null)
@@ -130,8 +135,10 @@ const createForm = reactive<CreateInstancePayload>({
   name: '',
   gameCode: '',
   installPath: '',
-  configPath: '',
 })
+
+/** 单节点部署（本面板的常态）：隐藏「节点」概念，避免新用户困惑 */
+const isSingleNode = computed(() => nodes.value.length <= 1)
 
 const nodeOptions = computed(() => {
   return [
@@ -231,6 +238,12 @@ const instancesWithUpdate = computed(() =>
   instances.value.filter(item => item.updateAvailable),
 )
 
+/** 点击统计卡 → 应用对应状态筛选 */
+function applyStatusFilter(filter: 'all' | InstanceStatus) {
+  statusFilter.value = filter
+  void fetchInstances()
+}
+
 const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
   return [
     {
@@ -252,24 +265,19 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
       key: 'gameCode',
       width: 140,
     },
-    {
-      title: '节点',
-      key: 'nodeId',
-      width: 180,
-      render: row => getNodeName(row.nodeId),
-    },
+    ...isSingleNode.value
+      ? []
+      : [{
+          title: '节点',
+          key: 'nodeId',
+          width: 180,
+          render: (row: InstanceItem) => getNodeName(row.nodeId),
+        }],
     {
       title: '状态',
       key: 'status',
       width: 110,
-      render: row =>
-        h(
-          'span',
-          {
-            class: `text-xs px-2 py-0.5 rounded-full ${getStatusBadgeClass(row.status)}`,
-          },
-          getStatusLabel(row.status),
-        ),
+      render: row => renderInstanceStateColumn(row),
     },
     {
       title: 'CPU',
@@ -323,7 +331,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '操作',
       key: 'actions',
-      width: isMobileMode.value ? 88 : 420,
+      width: isMobileMode.value ? 88 : 210,
       fixed: 'right',
       render: row => renderInstanceRowActions(row),
     },
@@ -355,11 +363,12 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
   const stopAction = row.status === 'installing' || row.status === 'pending_install' ? 'cancel_install' : 'stop'
   const stopLabel = stopAction === 'cancel_install' ? '取消安装' : '停止'
   const instanceActionRunning = isInstanceActionRunning(row.id)
+  const installFailed = getInstanceState(row).key === 'install_failed'
   return [
     {
       key: 'room',
       label: '房间设置',
-      disabled: instanceActionRunning || row.status === 'pending_install' || !instanceSupportsDstRoom(row),
+      disabled: instanceActionRunning || !instanceSupportsDstRoom(row),
       title: !instanceSupportsDstRoom(row) ? '当前仅 DST 实例支持房间配置' : undefined,
       onClick: () => router.push(routeToDstRoomSettings(row.id)),
     },
@@ -371,7 +380,7 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
     },
     {
       key: 'update',
-      label: '更新服务端',
+      label: installFailed ? '修复安装' : '更新服务端',
       loading: isActionLoading(row.id, 'update'),
       disabled: instanceActionRunning || !canUpdateInstance(row),
       title: getUpdateInstanceButtonTitle(row),
@@ -509,7 +518,31 @@ function createTextActionButton(options: {
   )
 }
 
-/** 渲染安装列：安装中显示进度条（随列表轮询更新） */
+/** 状态列：词典化标签 + 失败原因摘要（tooltip） */
+function renderInstanceStateColumn(row: InstanceItem) {
+  const state = getInstanceState(row)
+  const tag = h(
+    'span',
+    {
+      class: `text-xs px-2 py-0.5 rounded-full ${statusBadgeClass(state.tone)}`,
+    },
+    state.label,
+  )
+  const errorText = row.lastError?.trim()
+  if (!errorText || isInstanceInstallingStatus(row.status)) {
+    return tag
+  }
+  return h(
+    NTooltip,
+    { trigger: 'hover' },
+    {
+      trigger: () => tag,
+      default: () => errorText.length > 160 ? `${errorText.slice(0, 160)}…` : errorText,
+    },
+  )
+}
+
+/** 渲染安装列：安装中显示进度条 + 阶段文案（随列表轮询更新） */
 function renderInstallColumn(instance: InstanceItem) {
   if (instance.status === 'running' || instance.status === 'stopped') {
     return h('span', { class: 'text-sm text-muted-foreground' }, '已安装')
@@ -526,7 +559,7 @@ function renderInstallColumn(instance: InstanceItem) {
 
   if (isActiveInstall || progress !== null) {
     const percentage = progress ?? 0
-    return h('div', { class: 'w-full min-w-0 max-w-full box-border' }, [
+    return h('div', { class: 'w-full min-w-0 max-w-full box-border space-y-1' }, [
       h(NProgress, {
         percentage,
         height: 10,
@@ -534,11 +567,12 @@ function renderInstallColumn(instance: InstanceItem) {
         processing: isActiveInstall && (progress === null || progress < 100),
         borderRadius: 4,
         class: 'w-full',
-      }), 
+      }),
+      h('span', { class: 'block text-xs text-muted-foreground' }, resolveInstallPhase(instance)),
     ])
   }
 
-  return h('span', { class: 'text-sm text-muted-foreground' }, '—')
+  return h('span', { class: 'text-sm text-muted-foreground' }, resolveInstallPhase(instance))
 }
 
 /** 根据节点 ID 解析节点名称 */
@@ -667,9 +701,12 @@ function getUpdateInstanceButtonTitle(instance: InstanceItem) {
 
 function confirmUpdateInstance(row: InstanceItem) {
   blurFocusedElement()
+  const isRepair = getInstanceState(row).key === 'install_failed'
   dialog.warning({
-    title: '确认更新服务端',
-    content: `将拉取「${row.name}」的最新游戏服务端文件。更新前请确保实例已停止，过程可在「查看日志」中查看进度。`,
+    title: isRepair ? '确认修复安装' : '确认更新服务端',
+    content: isRepair
+      ? `上次安装未完成。将重新拉取「${row.name}」的游戏服务端文件，已有配置会保留，过程可在「查看日志」中查看进度。`
+      : `将拉取「${row.name}」的最新游戏服务端文件。更新前请确保实例已停止，过程可在「查看日志」中查看进度。`,
     positiveText: '开始更新',
     negativeText: '取消',
     positiveButtonProps: {
@@ -682,7 +719,7 @@ function confirmUpdateInstance(row: InstanceItem) {
 function suppressInstanceUpdateNotificationForCurrentBatch() {
   const signature = buildUpdateNotifySignature(instances.value)
   if (signature) {
-    sessionStorage.setItem(UPDATE_NOTIFY_DISMISSED_KEY, signature)
+    localStorage.setItem(UPDATE_NOTIFY_DISMISSED_KEY, signature)
   }
   dismissInstanceUpdateNotification()
 }
@@ -761,7 +798,6 @@ function resetCreateForm() {
   createForm.name = ''
   createForm.gameCode = ''
   createForm.installPath = ''
-  createForm.configPath = ''
 }
 
 function openCreateModal() {
@@ -934,7 +970,7 @@ function syncInstanceUpdateNotification(pending: InstanceItem[]) {
   if (!signature) {
     return
   }
-  if (sessionStorage.getItem(UPDATE_NOTIFY_DISMISSED_KEY) === signature) {
+  if (localStorage.getItem(UPDATE_NOTIFY_DISMISSED_KEY) === signature) {
     dismissInstanceUpdateNotification()
     return
   }
@@ -954,7 +990,7 @@ function syncInstanceUpdateNotification(pending: InstanceItem[]) {
     duration: 0,
     closable: true,
     onClose: () => {
-      sessionStorage.setItem(UPDATE_NOTIFY_DISMISSED_KEY, signature)
+      localStorage.setItem(UPDATE_NOTIFY_DISMISSED_KEY, signature)
       dismissInstanceUpdateNotification()
     },
   })
@@ -1019,6 +1055,9 @@ async function fetchInstances(options?: { silent?: boolean }) {
     syncInstallTerminalNotifications(instances.value)
     syncRuntimeObservabilityPolling()
   }
+  catch {
+    // 全局拦截器已提示错误原因；轮询/刷新失败时保留旧列表，避免安装进度闪空
+  }
   finally {
     if (!options?.silent) {
       instanceLoading.value = false
@@ -1032,11 +1071,8 @@ async function searchInstances() {
 }
 
 async function checkAllInstanceUpdates() {
-  if (!steamcmdInstalled.value) {
-    faToast.error('请先拉取游戏安装镜像（见上方容器镜像面板）')
-    return
-  }
-  if (instances.value.length === 0) {
+  // 按钮在未就绪时已禁用并带说明；此处仅兜底
+  if (!steamcmdInstalled.value || instances.value.length === 0) {
     return
   }
   updateCheckLoading.value = true
@@ -1079,7 +1115,6 @@ async function createInstance() {
       name: createForm.name.trim(),
       gameCode: createForm.gameCode,
       installPath: createForm.installPath?.trim() || undefined,
-      configPath: createForm.configPath?.trim() || undefined,
     })
     faToast.success('实例创建成功，已进入后台安装流程')
     createModalVisible.value = false
@@ -1171,7 +1206,9 @@ async function confirmStartInstance(row: InstanceItem) {
     guideContext = buildInstanceStartGuideContext(row, clusterRes.data, shardRes.data)
   }
   catch {
-    faToast.error('暂时无法读取房间与世界配置，请稍后再试')
+    // 引导信息读取失败不阻塞启动：直接启动并提示用户稍后可配置
+    faToast.warning('房间配置读取失败，已直接启动；可稍后在「房间设置」中检查配置')
+    await quickStart()
     return
   }
 
@@ -1313,6 +1350,7 @@ function isInstanceActionRunning(instanceId: string) {
 
 onMounted(async () => {
   sessionStorage.removeItem(UPDATE_NOTIFY_STORAGE_KEY_LEGACY)
+  localStorage.removeItem(UPDATE_NOTIFY_STORAGE_KEY_LEGACY)
   await Promise.all([
     fetchInstallableGames(),
     fetchInstances(),
@@ -1344,11 +1382,15 @@ onBeforeUnmount(() => {
 <template>
   <FaPageMain title="实例管理">
     <section class="p-4 border border-border rounded-xl bg-card space-y-4">
-      <div class="gap-3 grid md:grid-cols-4">
-        <div
+      <div class="gap-3 grid grid-cols-3 md:grid-cols-6">
+        <button
           v-for="card in STAT_CARDS"
           :key="card.key"
-          class="p-3 rounded-md bg-muted/40"
+          type="button"
+          class="p-3 rounded-md bg-muted/40 text-left transition-colors hover:bg-muted/70 cursor-pointer"
+          :class="{ 'ring-2 ring-primary/60': statusFilter === card.filter }"
+          :title="`只看「${card.label}」实例`"
+          @click="applyStatusFilter(card.filter)"
         >
           <NStatistic :label="card.label" tabular-nums>
             <template #default>
@@ -1356,7 +1398,8 @@ onBeforeUnmount(() => {
                 class="text-lg font-semibold"
                 :class="{
                   'text-emerald-600 dark:text-emerald-400': card.key === 'running',
-                  'text-slate-600 dark:text-slate-300': card.key === 'stopped',
+                  'text-sky-600 dark:text-sky-400': card.key === 'installing',
+                  'text-slate-600 dark:text-slate-300': card.key === 'stopped' || card.key === 'pendingInstall',
                   'text-red-600 dark:text-red-400': card.key === 'error',
                 }"
               >
@@ -1364,7 +1407,7 @@ onBeforeUnmount(() => {
               </span>
             </template>
           </NStatistic>
-        </div>
+        </button>
       </div>
 
       <AdminListToolbar
@@ -1377,6 +1420,7 @@ onBeforeUnmount(() => {
       >
         <template #filters>
           <NSelect
+            v-if="!isSingleNode"
             v-model:value="selectedNodeId"
             :options="nodeOptions"
             class="w-full md:w-44"
@@ -1416,13 +1460,19 @@ onBeforeUnmount(() => {
       </AdminListToolbar>
 
       <div v-if="isMobileMode" class="min-h-80 space-y-3" :aria-busy="instanceLoading">
-        <NEmpty v-if="!instanceLoading && instances.length === 0" description="暂无实例">
-          <template #extra>
-            <NButton type="primary" @click="openCreateModal">
-              创建实例
-            </NButton>
-          </template>
-        </NEmpty>
+        <div v-if="!instanceLoading && instances.length === 0" class="py-10 px-4 mx-auto max-w-md text-center space-y-3">
+          <p class="text-base font-medium">
+            三步开启你的饥荒服务器
+          </p>
+          <ol class="list-decimal list-inside space-y-1 text-sm text-muted-foreground text-left">
+            <li>创建实例 —— 选择游戏，自动完成安装</li>
+            <li>配置房间与世界 —— 服务器名、密码、地图</li>
+            <li>启动实例 —— 把服务器名告诉朋友即可加入</li>
+          </ol>
+          <NButton type="primary" @click="openCreateModal">
+            创建第一个实例
+          </NButton>
+        </div>
         <article
           v-for="instance in instances"
           :key="instance.id"
@@ -1437,8 +1487,8 @@ onBeforeUnmount(() => {
                 {{ getNodeName(instance.nodeId) }} · {{ instance.gameCode }}
               </p>
             </div>
-            <NTag size="small" :bordered="false" :class="getStatusBadgeClass(instance.status)">
-              {{ getStatusLabel(instance.status) }}
+            <NTag size="small" :bordered="false" :class="statusBadgeClass(getInstanceState(instance).tone)">
+              {{ getInstanceState(instance).label }}
             </NTag>
           </div>
           <div v-if="shouldShowInstallDetail(instance)" class="space-y-1">
@@ -1502,13 +1552,19 @@ onBeforeUnmount(() => {
           class="w-full"
         >
           <template #empty>
-            <NEmpty description="暂无实例">
-              <template #extra>
-                <NButton type="primary" @click="openCreateModal">
-                  创建实例
-                </NButton>
-              </template>
-            </NEmpty>
+            <div class="py-10 mx-auto max-w-md text-center space-y-3">
+              <p class="text-base font-medium">
+                三步开启你的饥荒服务器
+              </p>
+              <ol class="list-decimal list-inside space-y-1 text-sm text-muted-foreground text-left">
+                <li>创建实例 —— 选择游戏，自动完成安装</li>
+                <li>配置房间与世界 —— 服务器名、密码、地图</li>
+                <li>启动实例 —— 把服务器名告诉朋友即可加入</li>
+              </ol>
+              <NButton type="primary" @click="openCreateModal">
+                创建第一个实例
+              </NButton>
+            </div>
           </template>
         </NDataTable>
       </div>
@@ -1527,7 +1583,7 @@ onBeforeUnmount(() => {
         label-placement="left"
         class="space-y-3"
       >
-        <NFormItem label="目标节点" path="nodeId">
+        <NFormItem v-if="!isSingleNode" label="目标节点" path="nodeId">
           <NSelect
             v-model:value="createForm.nodeId"
             :options="createNodeOptions"
@@ -1537,16 +1593,23 @@ onBeforeUnmount(() => {
         <NFormItem label="实例名称" path="name">
           <NInput v-model:value="createForm.name" placeholder="如：饥荒联机#1" />
         </NFormItem>
-        <NFormItem label="Steam AppID" path="gameCode">
+        <NFormItem label="游戏" path="gameCode">
           <NSelect
             v-model:value="createForm.gameCode"
             :options="createGameOptions"
-            placeholder="请选择可安装游戏"
+            placeholder="请选择要安装的游戏"
           />
         </NFormItem>
-        <NFormItem label="安装目录（可选）" path="installPath">
-          <NInput v-model:value="createForm.installPath" placeholder="默认：&lt;instancesRoot&gt;/&lt;instanceId&gt;" />
-        </NFormItem>
+        <NCollapse class="mt-1">
+          <NCollapseItem title="高级选项" name="advanced">
+            <p class="mb-2 text-xs text-muted-foreground">
+              保持默认即可；如需自定义安装目录再填写。
+            </p>
+            <NFormItem label="安装目录" path="installPath">
+              <NInput v-model:value="createForm.installPath" placeholder="默认自动分配" />
+            </NFormItem>
+          </NCollapseItem>
+        </NCollapse>
       </NForm>
 
       <template #footer>
@@ -1570,10 +1633,10 @@ onBeforeUnmount(() => {
     >
       <div class="space-y-3 text-sm leading-relaxed text-foreground">
         <p>
-          实例「{{ createGuideTarget?.name || 'DST 实例' }}」正在后台安装，首次安装可能需要较长时间。
+          实例「{{ createGuideTarget?.name || 'DST 实例' }}」正在后台安装，首次安装可能需要几分钟，完成后会自动提醒。
         </p>
         <p>
-          你可以先去配置房间和世界参数，安装会在后台静默继续；安装完成后会在右上角提醒。
+          等待期间可以先配置房间与世界参数，配置会随安装完成后自动生效。
         </p>
       </div>
       <template #footer>

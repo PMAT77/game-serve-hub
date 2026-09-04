@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { diffTwoObj } from '@fantastic-admin/settings'
 import Login from '@/components/AppAccountForm/login.vue'
-import Register from '@/components/AppAccountForm/register.vue'
 import ResetPassword from '@/components/AppAccountForm/reset-password.vue'
 import ColorScheme from '@/layouts/components/Topbar/Toolbar/ColorScheme/index.vue'
 import { ensureDynamicRoutes } from '@/router/ensure-dynamic-routes'
+import { routeToNodeInstance } from '@/navigation/game-routes'
 import settingsDefault from '@/settings'
 
 defineOptions({
@@ -15,13 +15,14 @@ const route = useRoute()
 const router = useRouter()
 const appSettingsStore = useAppSettingsStore()
 
-const redirect = ref(route.query.redirect?.toString() ?? appSettingsStore.settings.app.home.fullPath)
+// 登录后默认直达实例管理（带 redirect 参数时以参数为准）
+const redirect = ref(route.query.redirect?.toString() ?? routeToNodeInstance())
 
 // 布局对齐方式
 const layoutAlign = ref<'left' | 'center' | 'right'>('right')
 // 表单相关
 const account = ref<string>()
-const formType = ref<'login' | 'register' | 'resetPassword'>('login')
+const formType = ref<'login' | 'resetPassword'>('login')
 
 async function handleLogin() {
   const data = diffTwoObj(settingsDefault, appSettingsStore.settings)
@@ -55,24 +56,6 @@ async function handleLogin() {
 <template>
   <div class="bg-banner" />
   <div class="text-base p-1 border rounded-lg bg-background flex-center right-4 top-4 absolute z-1">
-    <FaDropdown
-      v-if="appSettingsStore.mode === 'pc'"
-      :items="[[
-        { label: '左侧布局', disabled: layoutAlign === 'left', handle: () => { layoutAlign = 'left' } },
-        { label: '居中布局', disabled: layoutAlign === 'center', handle: () => { layoutAlign = 'center' } },
-        { label: '右侧布局', disabled: layoutAlign === 'right', handle: () => { layoutAlign = 'right' } },
-      ]]"
-    >
-      <FaButton variant="ghost" size="icon-sm">
-        <FaIcon
-          :name="{
-            left: 'i-icon-park-outline:left-bar',
-            center: 'i-icon-park-outline:square',
-            right: 'i-icon-park-outline:right-bar',
-          }[layoutAlign]" class="size-4"
-        />
-      </FaButton>
-    </FaDropdown>
     <ColorScheme v-if="appSettingsStore.settings.toolbar.colorScheme" />
   </div>
   <div class="login-box" :class="layoutAlign">
@@ -87,14 +70,7 @@ async function handleLogin() {
           :key="`login-${account ?? ''}`"
           :account
           @on-login="handleLogin"
-          @on-register="(val) => { formType = 'register'; account = val }"
           @on-reset-password="(val) => { formType = 'resetPassword'; account = val }"
-        />
-        <Register
-          v-else-if="formType === 'register'"
-          :account
-          @on-register="(val) => { formType = 'login'; account = val }"
-          @on-login="formType = 'login'"
         />
         <ResetPassword
           v-else

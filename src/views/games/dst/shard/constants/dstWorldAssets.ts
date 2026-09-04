@@ -15,10 +15,27 @@ export interface DstWorldOption {
   ruleKey?: string
 }
 
-const ruleImageModules = import.meta.glob<string>(
-  '@/assets/images/dst/*.webp',
-  { eager: true, import: 'default' },
-)
+/**
+ * 图片索引：import.meta.glob 是 Vite 专属 API（构建期静态替换）。
+ * 这里惰性求值 + try/catch，使模块在非 Vite 环境（如 tsx 单测）加载时
+ * 降级为空索引（无图片，但纯逻辑断言不受影响），Vite 构建行为不变。
+ */
+let ruleImageModulesCache: Record<string, string> | null = null
+
+function getRuleImageModules(): Record<string, string> {
+  if (ruleImageModulesCache === null) {
+    try {
+      ruleImageModulesCache = import.meta.glob<string>(
+        '@/assets/images/dst/*.webp',
+        { eager: true, import: 'default' },
+      )
+    }
+    catch {
+      ruleImageModulesCache = {}
+    }
+  }
+  return ruleImageModulesCache
+}
 
 const CAVES_RULE_ID_PATTERN = /cave|depths|darkness|earthquake|bat_cave|bunnyman|dart_trap|moleworm|bioluminescence|ancient_gateway|ancient_spirit|enlightenment/
 
@@ -36,7 +53,7 @@ function parseRuleFilename(filePath: string, imageUrl: string): DstWorldOption {
   }
 }
 
-const allRuleOptions: DstWorldOption[] = Object.entries(ruleImageModules)
+const allRuleOptions: DstWorldOption[] = Object.entries(getRuleImageModules())
   .map(([path, url]) => parseRuleFilename(path, url))
   .sort((a, b) => a.id.localeCompare(b.id))
 

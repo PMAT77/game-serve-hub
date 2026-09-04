@@ -9,7 +9,8 @@ import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
 import apiDstSummary from '@/api/modules/dst-summary'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 import { routeToDstRoomSettings, routeToNodeInstance } from '@/navigation/game-routes'
-import { getStatusBadgeClass, getStatusLabel } from '@/views/node/instance/instanceDisplay'
+import { CAVES_FEATURE_STATUS, CONFIG_ERROR_STATUS, statusTagType } from '@/constants/statusDictionary'
+import { getInstanceState } from '@/views/node/instance/instanceDisplay'
 
 defineOptions({
   name: 'DstRoomList',
@@ -71,11 +72,11 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
     title: '运行状态',
     key: 'status',
     render: (row) => {
-      const status = row.instance.status
+      const state = getInstanceState(row.instance)
       return h(
         NTag,
-        { size: 'small', bordered: false, class: getStatusBadgeClass(status) },
-        { default: () => getStatusLabel(status) },
+        { size: 'small', bordered: false, type: statusTagType(state.tone) },
+        { default: () => state.label },
       )
     },
   },
@@ -98,7 +99,11 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
           NTooltip,
           { trigger: 'hover' },
           {
-            trigger: () => h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '异常' }),
+            trigger: () => h(
+              NTag,
+              { size: 'small', type: statusTagType(CONFIG_ERROR_STATUS.tone), bordered: false },
+              { default: () => CONFIG_ERROR_STATUS.label },
+            ),
             default: () => row.room.error,
           },
         )
@@ -109,24 +114,36 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
   {
     title: '洞穴',
     key: 'caves',
-    render: row => buildCavesSummary(row.room.shardEnabled, row.world.caves?.configured),
+    render: (row) => {
+      const summary = buildCavesSummary(row.room.shardEnabled, row.world.caves?.configured)
+      return h(NTag, { size: 'small', bordered: false, type: summary.type }, { default: () => summary.label })
+    },
   },
   {
     title: '操作',
     key: 'actions',
     width: 120,
     fixed: 'right',
-    render: row => h(
-      NButton,
-      {
-        size: 'small',
-        type: 'info',
-        text: true,
-        disabled: row.instance.status === 'pending_install',
-        onClick: () => openSettings(row.instance.id),
-      },
-      { default: () => '配置房间' },
-    ),
+    render: (row) => {
+      const installing = row.instance.status === 'pending_install' || row.instance.status === 'installing'
+      return h(
+        NTooltip,
+        { disabled: !installing },
+        {
+          trigger: () => h(
+            NButton,
+            {
+              size: 'small',
+              type: 'info',
+              text: true,
+              onClick: () => openSettings(row.instance.id),
+            },
+            { default: () => '配置房间' },
+          ),
+          default: () => '实例安装中也可以先配置，安装完成后自动生效',
+        },
+      )
+    },
   },
 ]
 
@@ -138,14 +155,18 @@ function goToInstanceManagement() {
   router.push(routeToNodeInstance())
 }
 
-function buildCavesSummary(shardEnabled: boolean | null, cavesConfigured: boolean | undefined): string {
+/** 洞穴功能三态：未开启（用户没开）/ 已开启 / 配置异常（开了但配置缺失） */
+function buildCavesSummary(shardEnabled: boolean | null, cavesConfigured: boolean | undefined): { label: string, type: ReturnType<typeof statusTagType> } {
   if (shardEnabled === null) {
-    return '—'
+    return { label: '—', type: 'default' }
   }
   if (!shardEnabled) {
-    return cavesConfigured ? '未启用' : '未开启'
+    return { label: CAVES_FEATURE_STATUS.off.label, type: statusTagType(CAVES_FEATURE_STATUS.off.tone) }
   }
-  return cavesConfigured ? '已开启' : '待修复'
+  if (!cavesConfigured) {
+    return { label: CAVES_FEATURE_STATUS.error.label, type: statusTagType(CAVES_FEATURE_STATUS.error.tone) }
+  }
+  return { label: CAVES_FEATURE_STATUS.on.label, type: statusTagType(CAVES_FEATURE_STATUS.on.tone) }
 }
 
 function formatOnlinePlayers(row: DstInstanceSummaryDto): string {
@@ -165,10 +186,6 @@ async function loadRows() {
   })
 }
 
-function searchRows() {
-  // 客户端筛选，keyword 已绑定 filteredRows
-}
-
 function resetFilters() {
   keywordFilter.value = ''
 }
@@ -185,16 +202,15 @@ onMounted(() => {
         房间列表
       </h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        汇总各 DST 实例的房间配置。安装完成后在此进入联网与房间设置。
+        让朋友加入你的服务器：先在这里配置房间名称、密码与联机方式；公网联机需要 Klei 令牌。
       </p>
     </div>
 
     <AdminListToolbar
       v-model:keyword="keywordFilter"
       keyword-placeholder="实例名称 / 房间名称"
-      :search-loading="loading"
+      :show-search="false"
       :reset-disabled="!keywordFilter"
-      @search="searchRows"
       @reset="resetFilters"
     >
       <template #actions>
@@ -239,8 +255,8 @@ onMounted(() => {
                   {{ row.room.clusterName || '尚未配置房间名称' }}
                 </p>
               </div>
-              <NTag size="small" :bordered="false" :class="getStatusBadgeClass(row.instance.status)">
-                {{ getStatusLabel(row.instance.status) }}
+              <NTag size="small" :bordered="false" :type="statusTagType(getInstanceState(row.instance).tone)">
+                {{ getInstanceState(row.instance).label }}
               </NTag>
             </div>
             <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
@@ -254,13 +270,13 @@ onMounted(() => {
               </div>
               <div>
                 <dt class="text-muted-foreground">洞穴</dt>
-                <dd>{{ buildCavesSummary(row.room.shardEnabled, row.world.caves?.configured) }}</dd>
+                <dd>{{ buildCavesSummary(row.room.shardEnabled, row.world.caves?.configured).label }}</dd>
               </div>
               <div v-if="row.room.error" class="col-span-2 text-amber-600 dark:text-amber-400">
                 {{ row.room.error }}
               </div>
             </dl>
-            <NButton block :disabled="row.instance.status === 'pending_install'" @click="openSettings(row.instance.id)">
+            <NButton block @click="openSettings(row.instance.id)">
               配置房间
             </NButton>
           </article>

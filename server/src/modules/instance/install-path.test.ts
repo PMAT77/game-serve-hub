@@ -36,6 +36,32 @@ describe('prepareInstallPathForSteamcmd', () => {
       fs.rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('keeps leftover steamapps downloading cache (resume support)', () => {
+    if (process.platform === 'win32') {
+      return
+    }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-install-path-resume-'))
+    if (typeof process.getuid === 'function' && typeof process.getgid === 'function' && process.getuid() !== 0) {
+      process.env.GSH_STEAMCMD_RUN_USER = `${process.getuid()}:${process.getgid()}`
+    }
+    process.env.GSH_INSTANCES_ROOT = path.join(root, 'instances-root')
+    try {
+      const installPath = path.join(root, 'instance-resume')
+      const downloadingDir = path.join(installPath, 'steamapps', 'downloading', '343050')
+      fs.mkdirSync(downloadingDir, { recursive: true })
+      fs.writeFileSync(path.join(downloadingDir, 'chunk.tmp'), 'partial')
+
+      const error = prepareInstallPathForSteamcmd(installPath)
+      assert.equal(error, undefined)
+      assert.ok(fs.existsSync(path.join(downloadingDir, 'chunk.tmp')), 'downloading cache must survive install preparation')
+    }
+    finally {
+      delete process.env.GSH_STEAMCMD_RUN_USER
+      delete process.env.GSH_INSTANCES_ROOT
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('prepareInstallPathForRuntime', () => {

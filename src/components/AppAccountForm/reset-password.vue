@@ -26,7 +26,7 @@ const form = useForm({
   validationSchema: toTypedSchema(z.object({
     account: z.string().min(1, '请输入用户名'),
     recoveryToken: z.string().optional(),
-    newPassword: z.string().min(1, '请输入新密码').min(8, '密码至少 8 位').max(64, '密码最多 64 位'),
+    newPassword: z.string().min(1, '请输入新密码').min(8, '密码长度为 8 到 64 位').max(64, '密码长度为 8 到 64 位').regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/, '需包含大小写字母、数字和特殊字符'),
     confirmPassword: z.string().min(1, '请再次输入新密码'),
   }).superRefine((values, ctx) => {
     if (values.newPassword !== values.confirmPassword) {
@@ -175,23 +175,24 @@ onMounted(() => {
         {{ recoveryEnabled ? '重置密码' : '查看说明' }}
       </FaButton>
 
-      <div v-if="!statusLoading && !recoveryEnabled" class="text-xs text-muted-foreground mt-4 space-y-2">
-        <p class="font-medium text-foreground">
-          服务器命令行重置（推荐）
-        </p>
-        <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md whitespace-pre-wrap">cd /opt/game-server-hub
+      <NCollapse v-if="!statusLoading && !recoveryEnabled" class="mt-4">
+        <NCollapseItem title="服务器命令行重置说明（管理员）" name="cli">
+          <div class="text-xs text-muted-foreground space-y-2">
+            <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md whitespace-pre-wrap">cd /opt/game-server-hub
 docker compose --env-file panel.env exec panel \
   pnpm exec tsx server/scripts/reset-admin-password.ts \
   --account=superadmin --password='YourNewPass#123'</pre>
-        <p>
-          或在 <code class="text-xs">panel.env</code> 中设置 <code class="text-xs">ADMIN_PASSWORD</code> 与
-          <code class="text-xs">GSH_SYNC_ADMIN_PASSWORD_FROM_ENV=1</code> 后重启面板（用完后请改回 0）。
-        </p>
-        <p>
-          启用在线找回：在 <code class="text-xs">panel.env</code> 添加至少 16 位的
-          <code class="text-xs">GSH_PASSWORD_RECOVERY_TOKEN</code> 并重启面板。
-        </p>
-      </div>
+            <p>
+              或在 <code class="text-xs">panel.env</code> 中设置 <code class="text-xs">ADMIN_PASSWORD</code> 与
+              <code class="text-xs">GSH_SYNC_ADMIN_PASSWORD_FROM_ENV=1</code> 后重启面板（用完后请改回 0）。
+            </p>
+            <p>
+              启用在线找回：在 <code class="text-xs">panel.env</code> 添加至少 16 位的
+              <code class="text-xs">GSH_PASSWORD_RECOVERY_TOKEN</code> 并重启面板。
+            </p>
+          </div>
+        </NCollapseItem>
+      </NCollapse>
 
       <div class="text-sm mt-4 flex-center gap-2">
         <FaButton variant="link" class="p-0 h-auto" type="button" @click="emits('onLogin', form.values.account)">

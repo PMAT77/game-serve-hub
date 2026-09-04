@@ -16,14 +16,16 @@ const props = withDefaults(defineProps<{
 })
 
 const runtimeMode = computed(() => props.info?.runtimeMode ?? 'docker')
-const runtimeStatus = computed(() => props.info?.runtimeStatus ?? props.info?.dockerStatus ?? 'stopped')
+const runtimeStatus = computed(() => props.info?.runtimeStatus ?? props.info?.dockerStatus ?? null)
 const runtimeLabel = computed(() => runtimeMode.value === 'native' ? 'systemd' : 'Docker')
 const runtimeDescription = computed(() => runtimeMode.value === 'native' ? '原生进程运行时' : '容器运行时')
 const isRunning = computed(() => runtimeStatus.value === 'running')
+/** 无数据（接口失败/未加载）时展示「未知」，不伪装成「未运行」 */
+const hasData = computed(() => runtimeStatus.value !== null)
 const statusPercent = computed(() => (isRunning.value ? 100 : 0))
-const statusColor = computed(() => (isRunning.value ? '#10b981' : '#f59e0b'))
-const statusText = computed(() => (isRunning.value ? '运行中' : '未运行'))
-const statusClass = computed(() => (isRunning.value ? 'text-emerald-600' : 'text-amber-600'))
+const statusColor = computed(() => (isRunning.value ? '#10b981' : hasData.value ? '#f59e0b' : '#94a3b8'))
+const statusText = computed(() => (isRunning.value ? '运行中' : hasData.value ? '未运行' : '未知'))
+const statusClass = computed(() => (isRunning.value ? 'text-emerald-600' : hasData.value ? 'text-amber-600' : 'text-muted-foreground'))
 </script>
 
 <template>
@@ -39,7 +41,7 @@ const statusClass = computed(() => (isRunning.value ? 'text-emerald-600' : 'text
     </div>
   </div>
 
-  <div v-if="props.mode === 'charts'" class="p-3 rounded-lg flex flex-col cursor-pointer items-center justify-center">
+  <div v-if="props.mode === 'charts'" class="p-3 rounded-lg flex flex-col items-center justify-center">
     <NProgress
       type="circle"
       :percentage="statusPercent"

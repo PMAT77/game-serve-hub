@@ -3,6 +3,7 @@ import type { InstanceConnectInfo, InstanceConsoleLogLine, InstanceItem, Instanc
 import apiInstance from '@/api/modules/instance'
 import { routeToNodeInstance } from '@/navigation/game-routes'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
+import { getStatusLabel } from './instanceDisplay'
 import { consoleLogShardLabel, formatConsoleLogLineForCopy } from './consoleLogDisplay'
 import { formatDateTime } from './utils'
 import type { InstanceConsoleCommandShard } from '@/api/modules/instance'
@@ -640,11 +641,11 @@ onBeforeUnmount(() => {
   <FaPageMain :title="pageTitle">
     <div class="space-y-4">
       <p class="text-xs text-muted-foreground max-w-3xl">
-        面向<strong>已启动实例</strong>的饥荒运行时：连接信息、运行日志，以及面板消息与 Lua 控制。实例启停请返回
+        查看连接信息、运行日志，并使用面板消息与 Lua 命令控制<strong>正在运行</strong>的实例。实例的启动与停止请返回
         <NButton text type="primary" size="tiny" class="align-baseline px-0" @click="goBack">
-          实例列表
+          实例管理
         </NButton>
-        ；主机资源请使用监控台。
+        ；主机资源使用情况见「监控台」。
       </p>
 
       <div class="flex flex-wrap gap-2 items-center justify-between">
@@ -652,7 +653,7 @@ onBeforeUnmount(() => {
           <NTag :type="running ? 'success' : 'default'" size="small">
             {{ running ? '运行中' : '未运行' }}
           </NTag>
-          <span v-if="instanceStatus" class="text-xs text-muted-foreground">实例状态：{{ instanceStatus }}</span>
+          <span v-if="instanceStatus" class="text-xs text-muted-foreground">实例状态：{{ getStatusLabel(instanceStatus) }}</span>
         </NSpace>
         <FaButton variant="outline" size="sm" @click="goBack">
           返回实例列表
@@ -809,7 +810,7 @@ onBeforeUnmount(() => {
                 size="small"
                 type="warning"
                 :disabled="!running || commandSending"
-                @click="confirmDangerousCommand('c_reset()', '重置世界', '确认执行？')"
+                @click="confirmDangerousCommand('c_reset()', '确认重置世界？', '将立即重新生成一个全新世界：当前世界的地形、建筑与玩家物品都会丢失且不可恢复（已保存的回档快照除外）。真的要继续吗？')"
               >
                 重置世界
               </NButton>

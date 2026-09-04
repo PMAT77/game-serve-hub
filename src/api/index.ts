@@ -17,6 +17,21 @@ declare module 'axios' {
 
 let refreshingAuthPromise: Promise<boolean> | null = null
 
+/** 同文案业务错误 8 秒内只提示一次，避免轮询期间 toast 刷屏 */
+let lastToastMessage = ''
+let lastToastAt = 0
+function toastBusinessErrorOnce(message: string) {
+  const now = Date.now()
+  if (message === lastToastMessage && now - lastToastAt < 8000) {
+    return
+  }
+  lastToastMessage = message
+  lastToastAt = now
+  faToast.warning('操作失败', {
+    description: message,
+  })
+}
+
 const api = axios.create({
   baseURL: (import.meta.env.DEV && import.meta.env.VITE_ENABLE_PROXY) ? '/proxy/' : import.meta.env.VITE_APP_API_BASEURL,
   timeout: 1000 * 60,
@@ -63,7 +78,7 @@ function handleError(error: any) {
     useAppAccountStore().requestLogout()
   }
   else {
-    faToast.error('Error', {
+    faToast.error('请求失败', {
       description: error.message,
     })
   }
@@ -116,9 +131,7 @@ api.interceptors.response.use(
             response.data.code !== 'INSTANCE_PORT_CONFLICT'
             && response.data.code !== 'HOST_MEMORY_PRESSURE'
           ) {
-            faToast.warning('Warning', {
-              description: response.data.error,
-            })
+            toastBusinessErrorOnce(response.data.error)
           }
           return Promise.reject(response.data)
         }

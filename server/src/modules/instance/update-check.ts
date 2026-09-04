@@ -285,6 +285,9 @@ export async function refreshStaleInstanceUpdateChecks(
 }
 
 export function scheduleInstanceUpdateChecks(app: FastifyInstance) {
+  if (process.env.GSH_UNIT_TEST === '1') {
+    return
+  }
   const run = async () => {
     try {
       if ((await resolveRuntimeStatus()) !== 'running') {

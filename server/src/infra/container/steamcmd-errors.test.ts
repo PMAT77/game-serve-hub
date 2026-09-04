@@ -4,6 +4,7 @@ import {
   classifySteamcmdInstallFailure,
   formatSteamcmdAppUpdateFailureMessage,
   isRetriableSteamcmdInstallOutput,
+  isSteamcmdCorruptStateOutput,
   sanitizeSteamcmdLogLine,
 } from './steamcmd-errors.ts'
 
@@ -92,5 +93,19 @@ describe('isRetriableSteamcmdInstallOutput', () => {
     assert.equal(isRetriableSteamcmdInstallOutput('Missing configuration'), true)
     assert.equal(isRetriableSteamcmdInstallOutput('Missing file permissions'), false)
     assert.equal(isRetriableSteamcmdInstallOutput('No subscription'), false)
+  })
+})
+
+describe('isSteamcmdCorruptStateOutput', () => {
+  it('flags corrupt local Steam state that needs directory cleanup', () => {
+    assert.equal(isSteamcmdCorruptStateOutput("ERROR! Failed to install app '343050' (Missing configuration)"), true)
+    assert.equal(isSteamcmdCorruptStateOutput("Error! App '343050' state is 0x602 after update job"), true)
+    assert.equal(isSteamcmdCorruptStateOutput('Illegal termination of worker thread, individuals can ignore'), true)
+  })
+
+  it('does not flag transient network errors (keep downloading cache for resume)', () => {
+    assert.equal(isSteamcmdCorruptStateOutput('Error! ... timed out'), false)
+    assert.equal(isSteamcmdCorruptStateOutput('Check your network connection and try again'), false)
+    assert.equal(isSteamcmdCorruptStateOutput(''), false)
   })
 })

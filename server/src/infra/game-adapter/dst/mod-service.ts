@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { backupFile, writeFileAtomic } from './atomic-write'
 import { ensureClusterDirectory, resolveClusterPaths } from './cluster-service'
+import { buildLuaConfigurationOptionsInline } from './mod-config'
 
 const MOD_SETUP_FILE_NAME = 'dedicated_server_mods_setup.lua'
 const MOD_OVERRIDES_FILE_NAME = 'modoverrides.lua'
@@ -11,6 +12,8 @@ export interface DstModEntry {
   workshopId: string
   enabled: boolean
   loadOrder: number
+  /** modoverrides.lua 的 configuration_options；空/undefined 不输出该字段 */
+  configurationOptions?: Record<string, string | number | boolean> | null
 }
 
 export type DstModDependencyMap = Record<string, string[]>
@@ -53,7 +56,8 @@ function buildModOverridesContent(mods: DstModEntry[]): string {
     return 'return {}\n'
   }
   const rows = sorted.map((mod) => {
-    return `  ["${toWorkshopKey(mod.workshopId)}"]={ enabled=${mod.enabled ? 'true' : 'false'} },`
+    const configInline = buildLuaConfigurationOptionsInline(mod.configurationOptions ?? {})
+    return `  ["${toWorkshopKey(mod.workshopId)}"]={ enabled=${mod.enabled ? 'true' : 'false'}${configInline} },`
   })
   return ['return {', ...rows, '}'].join('\n') + '\n'
 }

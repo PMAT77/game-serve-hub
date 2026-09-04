@@ -24,6 +24,7 @@ const normalizedLoad = computed(() => {
   return oneMinuteLoad / cores
 })
 
+const hasLoadData = computed(() => Boolean(props.info?.load))
 const loadPercent = computed(() => {
   const usageRate = props.info?.load?.usageRate
   // 兼容后端旧数据未返回 usageRate 的场景，前端按 1m 负载兜底换算。
@@ -37,34 +38,34 @@ const isWindowsSyntheticLoad = computed(() => props.info?.load?.isSynthetic === 
 
 const loadStatusText = computed(() => {
   if (!props.info || props.loading) {
-    return '不可用'
+    return '暂无数据'
   }
   if (loadPercent.value < 40) {
-    return '运行流畅'
+    return '负载较低'
   }
   if (loadPercent.value < 70) {
-    return '轻微负载'
+    return '负载适中'
   }
   if (loadPercent.value < 100) {
-    return '负载较高'
+    return '负载偏高'
   }
-  return '运行卡顿'
+  return '接近满载'
 })
 
 const loadStatusColor = computed(() => {
-  if (loadStatusText.value === '运行流畅') {
+  if (!hasLoadData.value) {
+    return '#94a3b8'
+  }
+  if (loadPercent.value < 40) {
     return '#10b981'
   }
-  if (loadStatusText.value === '轻微负载') {
+  if (loadPercent.value < 70) {
     return '#f59e0b'
   }
-  if (loadStatusText.value === '负载较高') {
+  if (loadPercent.value < 100) {
     return '#f97316'
   }
-  if (loadStatusText.value === '运行卡顿') {
-    return '#ef4444'
-  }
-  return '#94a3b8'
+  return '#ef4444'
 })
 </script>
 
@@ -92,7 +93,7 @@ const loadStatusColor = computed(() => {
     </div>
   </div>
 
-  <div v-if="mode === 'charts'" class="p-3 rounded-lg flex flex-col cursor-pointer items-center justify-center">
+  <div v-if="mode === 'charts'" class="p-3 rounded-lg flex flex-col items-center justify-center">
     <NProgress
       type="circle"
       :percentage="loadPercent"
@@ -104,7 +105,7 @@ const loadStatusColor = computed(() => {
     >
       <n-space vertical align="center">
         <span class="text-lg text-muted-foreground">
-          {{ loadPercent.toFixed(2) }}%
+          {{ hasLoadData ? `${loadPercent.toFixed(2)}%` : '--' }}
         </span>
         <span class="text-xs text-muted-foreground">
           负载

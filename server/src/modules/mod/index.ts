@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import type { FastifyInstance } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import type {
+  ModConfigDto,
+  ModConfigSaveResult,
   ModDeleteResult,
   ModInstallJobDto,
   ModInstallStatus,
@@ -26,10 +28,17 @@ import {
   modInstallPayloadSchema,
   modUpdatePayloadSchema,
   modReorderPayloadSchema,
+  modBatchUpdatePayloadSchema,
+  modConfigPayloadSchema,
   modInstallJobsQuerySchema,
 } from '../../../../shared/contracts/mod'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
+import {
+  parseModInfoConfigurations,
+  parseModOverridesConfigurations,
+  parseStoredModConfig,
+} from '../../infra/game-adapter/dst/mod-config'
 import {
   readModDependencyMap,
   writeModDependencyMap,
@@ -535,8 +544,61 @@ export function registerModModule(app: FastifyInstance) {
       instanceId,
       installPath: resolved.instance.installPath,
       payload: body,
+      force: body.force === true,
     })
     return success(await enrichInstallJobDto(instanceId, job), request)
+  })
+
+  app.post('/app/instances/:instanceId/mods/batch-update', async (request): Promise<ApiSuccessResponse<ModInstallJobDto[]> | ApiErrorResponse> => {
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
+    if (authError) {
+      return authError
+    }
+    const parsedParams = modInstanceParamsSchema.safeParse(request.params)
+    const parsedBody = modBatchUpdatePayloadSchema.safeParse(request.body ?? {})
+    if (!parsedParams.success || !parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
+    const resolved = await resolveLocalDstInstance(instanceId, request, {
+      messages: {
+        wrongNode: '当前仅支持本地节点实例 Mod 管理',
+        wrongGame: '当前仅支持 DST 实例 Mod 管理',
+        missingInstallPath: '实例安装目录不存在，请先完成安装',
+      },
+    })
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    const workshopIds = [...new Set(parsedBody.data.workshopIds.map(id => id.trim()).filter(Boolean))]
+    const jobs: ModInstallJobDto[] = []
+    for (const workshopId of workshopIds) {
+      const mod = await getInstanceModByWorkshopId(instanceId, workshopId)
+      if (!mod) {
+        jobs.push({
+          instanceId,
+          workshopId,
+          status: 'not_found',
+          phase: null,
+          error: 'Mod 不存在',
+          startedAt: null,
+          finishedAt: null,
+        })
+        continue
+      }
+      const job = await enqueueModDownload({
+        instanceId,
+        installPath: resolved.instance.installPath,
+        payload: {
+          workshopId,
+          name: mod.name,
+          previewImage: mod.previewImage ?? undefined,
+        },
+        force: true,
+      })
+      jobs.push(await enrichInstallJobDto(instanceId, job))
+    }
+    return success(jobs, request)
   })
 
   app.get('/app/instances/:instanceId/mods/install-jobs/:workshopId', async (request): Promise<ApiSuccessResponse<ModInstallJobDto> | ApiErrorResponse> => {
@@ -698,6 +760,94 @@ export function registerModModule(app: FastifyInstance) {
       saved: true,
       riskTip: payload.riskTip,
       mods: payload.mods,
+    }, request)
+  })
+
+  app.get('/app/instances/:instanceId/mods/:modId/config', async (request): Promise<ApiSuccessResponse<ModConfigDto> | ApiErrorResponse> => {
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
+    if (authError) {
+      return authError
+    }
+    const parsedParams = modItemParamsSchema.safeParse(request.params)
+    if (!parsedParams.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
+    const workshopId = parsedParams.data.modId
+    const resolved = await resolveLocalDstInstance(instanceId, request, {
+      messages: {
+        wrongNode: '当前仅支持本地节点实例 Mod 管理',
+        wrongGame: '当前仅支持 DST 实例 Mod 管理',
+        missingInstallPath: '实例安装目录不存在，请先完成安装',
+      },
+    })
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    if (!workshopId) {
+      return businessError('Mod ID 不能为空', request)
+    }
+    const mod = await getInstanceModByWorkshopId(instanceId, workshopId)
+    if (!mod) {
+      return businessError('Mod 不存在', request)
+    }
+    const stored = parseStoredModConfig(mod.config)
+    const options = stored
+      ?? parseModOverridesConfigurations(resolved.instance.installPath).get(workshopId)
+      ?? {}
+    const definitions = parseModInfoConfigurations(resolved.instance.installPath, workshopId)
+    const payload: ModConfigDto = {
+      instanceId,
+      workshopId,
+      options,
+      definitions,
+    }
+    return success(payload, request)
+  })
+
+  app.put('/app/instances/:instanceId/mods/:modId/config', async (request): Promise<ApiSuccessResponse<ModConfigSaveResult> | ApiErrorResponse> => {
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
+    if (authError) {
+      return authError
+    }
+    const parsedParams = modItemParamsSchema.safeParse(request.params)
+    const parsedBody = modConfigPayloadSchema.safeParse(request.body ?? {})
+    if (!parsedParams.success || !parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
+    const workshopId = parsedParams.data.modId
+    const resolved = await resolveLocalDstInstance(instanceId, request, {
+      messages: {
+        wrongNode: '当前仅支持本地节点实例 Mod 管理',
+        wrongGame: '当前仅支持 DST 实例 Mod 管理',
+        missingInstallPath: '实例安装目录不存在，请先完成安装',
+      },
+    })
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    if (!workshopId) {
+      return businessError('Mod ID 不能为空', request)
+    }
+    const mod = await getInstanceModByWorkshopId(instanceId, workshopId)
+    if (!mod) {
+      return businessError('Mod 不存在', request)
+    }
+    if (mod.installStatus !== 'ready') {
+      return businessError('Mod 尚未下载完成，请等待订阅完成后再配置', request)
+    }
+    const options = parsedBody.data.options
+    const updated = await updateInstanceModByWorkshopId(instanceId, workshopId, {
+      config: Object.keys(options).length > 0 ? JSON.stringify(options) : null,
+    })
+    if (!updated) {
+      return businessError('Mod 配置保存失败', request)
+    }
+    await syncInstanceModFilesFromDb(instanceId, resolved.instance.installPath)
+    return success({
+      saved: true,
+      riskTip: getRuntimeRiskTip(resolved.instance.status),
     }, request)
   })
 

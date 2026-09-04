@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { routeToNodeInstance } from '@/navigation/game-routes'
 const router = useRouter()
 
 const LINKS = {
@@ -63,7 +64,14 @@ function open(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+const appAccountStore = useAppAccountStore()
+
 function goLogin() {
+  // 已登录时原跳 /login 会被守卫弹回主页，直接进入实例管理
+  if (appAccountStore.isLogin) {
+    router.push(routeToNodeInstance())
+    return
+  }
   router.push('/login')
 }
 </script>
@@ -101,7 +109,7 @@ function goLogin() {
           </p>
           <div class="flex flex-wrap gap-3">
             <FaButton size="lg" @click="goLogin">
-              进入面板
+              {{ appAccountStore.isLogin ? '进入实例管理' : '进入面板' }}
             </FaButton>
             <FaButton variant="outline" size="lg" @click="open(LINKS.docs)">
               项目文档

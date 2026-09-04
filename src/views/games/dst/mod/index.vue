@@ -9,14 +9,18 @@ import type {
 } from '@/api/modules/mod'
 import type { InstanceItem } from '@/api/modules/instance'
 import { useDebounceFn } from '@vueuse/core'
-import { NButton, NCard, NDataTable, NEmpty, NImage, NPagination, NRate, NSelect, NTabPane, NTabs, NTag, useDialog, useMessage } from 'naive-ui'
+import type { NotificationReactive } from 'naive-ui'
+import { NAlert, NButton, NCard, NDataTable, NEmpty, NImage, NInput, NPagination, NRate, NSelect, NSwitch, NTabPane, NTabs, NTag, NTooltip, useDialog, useMessage, useNotification } from 'naive-ui'
 import AdminListToolbar from '@/components/AdminListToolbar.vue'
 import { computed, h, onMounted, ref, shallowRef, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
 import apiMod from '@/api/modules/mod'
 import { isInstallableGameInstance } from '@/composables/useGameInstance'
 import { useInstanceModState } from '@/composables/useInstanceModState'
-import { routeToDstModDetail, routeToNodeInstance } from '@/navigation/game-routes'
+import ModConfigModal from '@/views/games/dst/mod/components/ModConfigModal.vue'
+import { routeToDstModDetail, routeToDstWorldSettings, routeToNodeInstance } from '@/navigation/game-routes'
+import { MOD_INSTALL_STATUS } from '@/constants/statusDictionary'
+import { getInstanceState } from '@/views/node/instance/instanceDisplay'
 
 defineOptions({
   name: 'DstModList',
@@ -25,8 +29,16 @@ defineOptions({
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
+const notification = useNotification()
 const appSettingsStore = useAppSettingsStore()
 const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
+
+/** 订阅成功引导卡：持久展示，引导用户去世界设置开启 Mod */
+const subscribeGuideNotificationRef = ref<NotificationReactive | null>(null)
+/** 服务端下发的 Mod 风险提示横幅（加载列表/切换开关时更新） */
+const riskTipBanner = ref<string | null>(null)
+/** Steam 列表加载失败原因：与空列表区分 */
+const steamLoadError = ref<string | null>(null)
 
 interface BusinessErrorLike {
   error?: string
@@ -50,6 +62,10 @@ const loadingInstances = ref(false)
 const loadingSteam = ref(false)
 const loadingInstalled = ref(false)
 const unsubscribingWorkshopIds = ref<Set<string>>(new Set())
+const checkedRowKeys = ref<Array<string | number>>([])
+const batchUpdating = ref(false)
+const configModalShow = ref(false)
+const configTarget = ref<{ workshopId: string, name: string } | null>(null)
 const instances = ref<InstanceItem[]>([])
 const selectedInstanceId = ref('')
 const {
@@ -170,10 +186,14 @@ function changeSteamPage(page: number) {
 }
 
 const instanceOptions = computed(() => {
-  return instances.value.map(instance => ({
-    label: instance.name,
-    value: instance.id,
-  }))
+  return instances.value.map((instance) => {
+    const state = getInstanceState(instance)
+    const needsHint = !['running', 'stopped'].includes(state.key)
+    return {
+      label: needsHint ? `${instance.name}（${state.label}）` : instance.name,
+      value: instance.id,
+    }
+  })
 })
 
 const isSteamTrendSort = computed(() => steamSort.value === 'trend')
@@ -193,6 +213,9 @@ const marketEmptyDescription = computed(() => {
   if (!selectedInstanceId.value) {
     return '请先选择实例'
   }
+  if (steamLoadError.value) {
+    return steamLoadError.value
+  }
   if (steamKeyword.value.trim()) {
     return '未找到符合条件的 Mod'
   }
@@ -203,11 +226,18 @@ const subscribedEmptyDescription = computed(() => {
     return '请先选择实例'
   }
   if (downloadingMods.value.length > 0) {
-    return '暂无已就绪 Mod，请等待下载完成'
+    return '订阅的 Mod 下载中，完成后会出现在列表里'
   }
   return '暂无已订阅 Mod'
 })
 const subscribedTabCount = computed(() => installedMods.value.length)
+const selectedUpdatableMods = computed(() =>
+  installedMods.value.filter(mod =>
+    checkedRowKeys.value.includes(mod.workshopId)
+    && mod.installStatus !== 'pending'
+    && !isPendingWorkshop(mod.workshopId),
+  ),
+)
 
 function resolveMarketSubscribeStatus(row: SteamModListQueryResultItem): ModInstallStatus | null {
   if (row.subscribeStatus) {
@@ -239,9 +269,13 @@ function marketStatusType(row: SteamModListQueryResultItem): 'default' | 'succes
 }
 
 function subscribedStatusLabel(row: ModItemDto): string {
-  if (row.installStatus === 'pending' || isPendingWorkshop(row.workshopId)) return '下载中'
-  if (row.installStatus === 'failed') return '下载失败'
-  return '已就绪'
+  if (row.installStatus === 'pending' || isPendingWorkshop(row.workshopId)) {
+    return MOD_INSTALL_STATUS.pending.label
+  }
+  if (row.installStatus === 'failed') {
+    return MOD_INSTALL_STATUS.failed.label
+  }
+  return MOD_INSTALL_STATUS.ready.label
 }
 
 function subscribedStatusType(row: ModItemDto): 'success' | 'warning' | 'error' {
@@ -411,8 +445,31 @@ function sleep(ms: number): Promise<void> {
 }
 
 function showSubscribeSuccessGuide() {
-  message.success('订阅成功。请到世界设置开启 Mod，并在实例控制台重启实例后生效。', {
-    duration: 6000,
+  subscribeGuideNotificationRef.value?.destroy()
+  subscribeGuideNotificationRef.value = notification.success({
+    title: '订阅成功',
+    content: 'Mod 已下载完成。请到「世界与洞穴」开启该 Mod，重启实例后生效。',
+    duration: 0,
+    closable: true,
+    onClose: () => {
+      subscribeGuideNotificationRef.value = null
+    },
+    action: () => h(
+      NButton,
+      {
+        size: 'small',
+        type: 'primary',
+        secondary: true,
+        onClick: () => {
+          subscribeGuideNotificationRef.value?.destroy()
+          subscribeGuideNotificationRef.value = null
+          if (selectedInstanceId.value) {
+            router.push(routeToDstWorldSettings(selectedInstanceId.value))
+          }
+        },
+      },
+      { default: () => '去开启 Mod' },
+    ),
   })
 }
 
@@ -501,8 +558,7 @@ const marketColumns: DataTableColumns<SteamModListQueryResultItem> = [
           disabled: !hasSelectedInstance.value
             || (unsubscribingWorkshopIds.value.has(row.workshopId))
             || (resolveMarketSubscribeStatus(row) === 'pending'),
-          loading: isPendingWorkshop(row.workshopId)
-            || unsubscribingWorkshopIds.value.has(row.workshopId),
+          loading: unsubscribingWorkshopIds.value.has(row.workshopId),
           class: 'min-w-[4.5rem]',
           onClick: () => {
             const status = resolveMarketSubscribeStatus(row)
@@ -551,6 +607,9 @@ const marketColumns: DataTableColumns<SteamModListQueryResultItem> = [
 
 const subscribedColumns: DataTableColumns<ModItemDto> = [
   {
+    type: 'selection',
+  },
+  {
     title: '缩略图',
     key: 'previewImage',
     width: 72,
@@ -577,22 +636,69 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
   {
     title: '状态',
     key: 'installStatus',
-    width: 110,
+    width: 130,
     render: (row) => {
-      if (row.installStatus === 'pending' || isPendingWorkshop(row.workshopId)) {
-        return h(NTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '下载中' })
+      const pending = row.installStatus === 'pending' || isPendingWorkshop(row.workshopId)
+      const label = pending
+        ? MOD_INSTALL_STATUS.pending.label
+        : row.installStatus === 'failed' ? MOD_INSTALL_STATUS.failed.label : MOD_INSTALL_STATUS.ready.label
+      const type = pending ? 'warning' : row.installStatus === 'failed' ? 'error' : 'success'
+      const tag = h(NTag, { size: 'small', bordered: false, type }, { default: () => label })
+      const errorText = row.installError?.trim()
+      if (!errorText) {
+        return tag
       }
-      if (row.installStatus === 'failed') {
-        return h(NTag, { size: 'small', bordered: false, type: 'error' }, { default: () => '下载失败' })
-      }
-      return h(NTag, { size: 'small', bordered: false, type: 'success' }, { default: () => '已就绪' })
+      return h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () => tag,
+          default: () => errorText.length > 160 ? `${errorText.slice(0, 160)}…` : errorText,
+        },
+      )
     },
+  },
+  {
+    title: '启用',
+    key: 'enabled',
+    width: 90,
+    render: row => h(NSwitch, {
+      size: 'small',
+      value: row.enabled,
+      disabled: !hasSelectedInstance.value
+        || row.installStatus !== 'ready'
+        || isPendingWorkshop(row.workshopId)
+        || unsubscribingWorkshopIds.value.has(row.workshopId),
+      'onUpdate:value': () => void toggleSubscribedMod(row),
+    }),
   },
   {
     title: '操作',
     key: 'actions',
-    width: 190,
+    width: 310,
     render: row => h('div', { class: 'flex items-center gap-3' }, [
+      ...(row.installStatus === 'ready'
+        ? [h(
+            NButton,
+            {
+              size: 'tiny',
+              disabled: !hasSelectedInstance.value || isPendingWorkshop(row.workshopId),
+              class: 'w-14',
+              onClick: () => void updateInstalledMod(row),
+            },
+            { default: () => '更新' },
+          ),
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              disabled: !hasSelectedInstance.value || isPendingWorkshop(row.workshopId),
+              class: 'w-14',
+              onClick: () => openModConfig(row),
+            },
+            { default: () => '配置' },
+          )]
+        : []),
       h(
         NButton,
         {
@@ -602,8 +708,7 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
             || unsubscribingWorkshopIds.value.has(row.workshopId)
             || row.installStatus === 'pending'
             || isPendingWorkshop(row.workshopId),
-          loading: unsubscribingWorkshopIds.value.has(row.workshopId)
-            || (row.installStatus === 'failed' && isPendingWorkshop(row.workshopId)),
+          loading: unsubscribingWorkshopIds.value.has(row.workshopId),
           class: 'w-16',
           onClick: () => {
             if (row.installStatus === 'failed') {
@@ -665,6 +770,7 @@ async function loadInstalledMods() {
   try {
     const response = await apiMod.getModList(selectedInstanceId.value)
     installedMods.value = response.data.mods
+    riskTipBanner.value = response.data.riskTip?.trim() || null
     void restoreInstallJobs({
       modList: response.data,
       onTerminal: job => void handleInstallJobTerminal(job),
@@ -709,6 +815,42 @@ async function handleInstallJobTerminal(job: Awaited<ReturnType<typeof apiMod.po
   }
 }
 
+/** 已订阅列表的启用/关闭开关（与 ShardModsSection 一致：重启后生效） */
+async function toggleSubscribedMod(item: ModItemDto) {
+  if (!selectedInstanceId.value || unsubscribingWorkshopIds.value.has(item.workshopId) || item.installStatus !== 'ready') {
+    return
+  }
+  const nextMutating = new Set(unsubscribingWorkshopIds.value)
+  nextMutating.add(item.workshopId)
+  unsubscribingWorkshopIds.value = nextMutating
+  try {
+    const response = await apiMod.updateMod(selectedInstanceId.value, item.workshopId, {
+      enabled: !item.enabled,
+    })
+    const riskTip = response.data.riskTip?.trim()
+    message.success(`${item.enabled ? '已关闭' : '已开启'}该 Mod，重启实例后生效（可在实例管理执行重启）`)
+    if (riskTip) {
+      riskTipBanner.value = riskTip
+    }
+    installedMods.value = installedMods.value.map(row => (
+      row.workshopId === item.workshopId
+        ? { ...row, enabled: !row.enabled }
+        : row
+    ))
+  }
+  catch (error: unknown) {
+    if (isAuthUnauthorizedError(error)) {
+      return
+    }
+    message.error(getErrorMessage(error, '更新 Mod 状态失败，请稍后重试'))
+  }
+  finally {
+    const next = new Set(unsubscribingWorkshopIds.value)
+    next.delete(item.workshopId)
+    unsubscribingWorkshopIds.value = next
+  }
+}
+
 async function retryFromMarket(row: SteamModListQueryResultItem) {
   if (!selectedInstanceId.value || isPendingWorkshop(row.workshopId)) {
     return
@@ -750,6 +892,83 @@ async function retryFailedInstall(row: ModItemDto) {
       return
     }
     message.error(getErrorMessage(error, '重试订阅失败，请稍后重试'))
+  }
+}
+
+function openModConfig(row: ModItemDto) {
+  if (!selectedInstanceId.value || row.installStatus !== 'ready') {
+    return
+  }
+  configTarget.value = { workshopId: row.workshopId, name: row.name }
+  configModalShow.value = true
+}
+
+function onModConfigSaved(riskTip: string | null) {
+  if (riskTip?.trim()) {
+    riskTipBanner.value = riskTip.trim()
+  }
+  void loadInstalledMods()
+}
+
+/** 单独更新：强制重新下载已就绪的 Mod（订阅保持不变） */
+async function updateInstalledMod(row: ModItemDto) {
+  if (!selectedInstanceId.value || isPendingWorkshop(row.workshopId)) {
+    return
+  }
+  try {
+    await installMod({
+      workshopId: row.workshopId,
+      name: row.name,
+      previewImage: row.previewImage ?? undefined,
+      force: true,
+    }, {
+      onTerminal: job => void handleInstallJobTerminal(job),
+    })
+  }
+  catch (error: unknown) {
+    if (isAuthUnauthorizedError(error)) {
+      return
+    }
+    message.error(getErrorMessage(error, '更新 Mod 失败，请稍后重试'))
+  }
+}
+
+/** 批量更新选中的 Mod：订阅入列，后台逐个重新下载 */
+async function batchUpdateSelectedMods() {
+  const targets = selectedUpdatableMods.value
+  if (!selectedInstanceId.value || targets.length === 0 || batchUpdating.value) {
+    return
+  }
+  const skippedCount = checkedRowKeys.value.length - targets.length
+  batchUpdating.value = true
+  try {
+    const response = await apiMod.batchUpdateMods(selectedInstanceId.value, {
+      workshopIds: targets.map(mod => mod.workshopId),
+    })
+    const downloadingIds = response.data
+      .filter(job => job.status === 'downloading')
+      .map(job => job.workshopId)
+    syncPendingWorkshopIds(downloadingIds, {
+      onTerminal: job => void handleInstallJobTerminal(job),
+    })
+    const notFoundCount = response.data.filter(job => job.status === 'not_found').length
+    message.success('已开始更新 ' + downloadingIds.length + ' 个 Mod，可在列表中查看进度')
+    if (notFoundCount > 0) {
+      message.warning(notFoundCount + ' 个 Mod 不存在，已跳过')
+    }
+    if (skippedCount > 0) {
+      message.info(skippedCount + ' 个 Mod 正在下载中，本次已跳过')
+    }
+    checkedRowKeys.value = []
+  }
+  catch (error: unknown) {
+    if (isAuthUnauthorizedError(error)) {
+      return
+    }
+    message.error(getErrorMessage(error, '批量更新失败，请稍后重试'))
+  }
+  finally {
+    batchUpdating.value = false
   }
 }
 
@@ -799,6 +1018,7 @@ async function loadSteamMods(
       return
     }
     steamUpstreamHint.value = null
+    steamLoadError.value = null
     steamMods.value = mergeSteamRowsWithInstalled(response.data.items, installedMods.value)
     steamSourceUrl.value = response.data.sourceUrl
     steamHasMore.value = response.data.hasMore
@@ -831,6 +1051,7 @@ async function loadSteamMods(
     if (isAuthUnauthorizedError(error)) {
       return
     }
+    steamLoadError.value = getErrorMessage(error, 'Steam 创意工坊列表加载失败，请点击重试')
     if (!options?.suppressErrorToast) {
       message.error(getErrorMessage(error, '加载 Steam 创意工坊列表失败'))
     }
@@ -993,9 +1214,59 @@ async function unsubscribeMod(workshopId: string) {
   }
 }
 
+const manualWorkshopInput = ref('')
+
+/** 从工坊详情页链接或纯数字输入中提取 Workshop ID */
+function extractWorkshopId(input: string): string | null {
+  const trimmed = input.trim()
+  if (!trimmed) {
+    return null
+  }
+  const urlMatch = trimmed.match(/filedetails\?id=(\d+)/i)
+  if (urlMatch) {
+    return urlMatch[1]
+  }
+  return /^\d+$/.test(trimmed) ? trimmed : null
+}
+
+/** 粘贴工坊 ID/链接直接订阅（不依赖创意工坊列表可用） */
+async function subscribeManualWorkshop() {
+  const workshopId = extractWorkshopId(manualWorkshopInput.value)
+  if (!workshopId) {
+    message.warning('请输入有效的创意工坊 ID（纯数字）或 Mod 详情页链接')
+    return
+  }
+  if (!selectedInstanceId.value) {
+    message.warning('请先选择实例')
+    return
+  }
+  const existing = installedMods.value.find(mod => mod.workshopId === workshopId)
+  if (existing && existing.installStatus === 'ready') {
+    message.info('该 Mod 已在订阅列表中')
+    return
+  }
+  ensurePendingInInstalledList({ workshopId, title: `工坊 ${workshopId}`, previewImage: null })
+  try {
+    await installMod({
+      workshopId,
+      name: `工坊 ${workshopId}`,
+    }, {
+      onTerminal: job => void handleInstallJobTerminal(job),
+    })
+    manualWorkshopInput.value = ''
+  }
+  catch (error: unknown) {
+    if (isAuthUnauthorizedError(error)) {
+      return
+    }
+    message.error(getErrorMessage(error, '订阅失败，请稍后重试'))
+  }
+}
+
 function onInstanceChange(value: string) {
   selectedInstanceId.value = value
   activeTab.value = 'market'
+  checkedRowKeys.value = []
   resetState()
   void Promise.all([loadSteamMods(true), loadInstalledMods()])
 }
@@ -1052,7 +1323,7 @@ onMounted(async () => {
       main-class="flex min-h-0 flex-1 flex-col"
     >
     <p class="mb-4 shrink-0 text-sm text-muted-foreground">
-      浏览 Steam 创意工坊中的服务器 Mod 并订阅到目标实例；在“已订阅”页签可快速查看当前列表中的已订阅 Mod。
+      订阅服务器 Mod：在「Mod 市场」浏览 Steam 创意工坊，或在「已订阅」页签管理当前实例的 Mod 并控制开启状态。开启后需重启实例生效。
     </p>
 
     <NCard size="small" title="实例选择" class="mb-4 shrink-0">
@@ -1078,6 +1349,16 @@ onMounted(async () => {
         </span>
       </div>
     </NCard>
+
+    <NAlert
+      v-if="riskTipBanner"
+      type="warning"
+      class="mb-4 shrink-0"
+      closable
+      @close="riskTipBanner = null"
+    >
+      {{ riskTipBanner }}
+    </NAlert>
 
     <NCard
       size="small"
@@ -1119,6 +1400,16 @@ onMounted(async () => {
               />
             </template>
             <template #actions>
+              <NInput
+                v-model:value="manualWorkshopInput"
+                class="w-full md:w-56"
+                placeholder="粘贴工坊 ID 或详情页链接"
+                clearable
+                @keydown.enter="subscribeManualWorkshop"
+              />
+              <NButton :disabled="!selectedInstanceId" @click="subscribeManualWorkshop">
+                直接订阅
+              </NButton>
               <NButton type="primary" :disabled="!selectedInstanceId" @click="loadSteamMods(true)">
                 刷新列表
               </NButton>
@@ -1152,12 +1443,24 @@ onMounted(async () => {
             >
               <template #empty>
                 <div class="dst-mod-table-empty">
-                  <NEmpty size="small" :description="marketEmptyDescription" />
+                  <NEmpty size="small" :description="marketEmptyDescription">
+                    <template v-if="steamLoadError" #extra>
+                      <NButton size="small" @click="loadSteamMods(true)">
+                        重试
+                      </NButton>
+                    </template>
+                  </NEmpty>
                 </div>
               </template>
             </NDataTable>
             <div v-else class="space-y-3 overflow-y-auto pr-1" :aria-busy="loadingSteam">
-              <NEmpty v-if="!loadingSteam && steamMods.length === 0" size="small" :description="marketEmptyDescription" />
+              <NEmpty v-if="!loadingSteam && steamMods.length === 0" size="small" :description="marketEmptyDescription">
+                <template v-if="steamLoadError" #extra>
+                  <NButton size="small" @click="loadSteamMods(true)">
+                    重试
+                  </NButton>
+                </template>
+              </NEmpty>
               <article
                 v-for="mod in steamMods"
                 :key="mod.workshopId"
@@ -1185,7 +1488,7 @@ onMounted(async () => {
                   <NButton
                     class="flex-1"
                     type="primary"
-                    :loading="isPendingWorkshop(mod.workshopId) || unsubscribingWorkshopIds.has(mod.workshopId)"
+                    :loading="unsubscribingWorkshopIds.has(mod.workshopId)"
                     :disabled="marketActionDisabled(mod)"
                     @click="handleMarketAction(mod)"
                   >
@@ -1216,7 +1519,22 @@ onMounted(async () => {
             <template #tab>
               已订阅 ({{ subscribedTabCount }})
             </template>
-            <div class="h-full min-h-0">
+            <div class="flex h-full min-h-0 flex-col">
+              <div v-if="!isMobileMode" class="flex shrink-0 items-center gap-3 pb-2">
+                <span class="text-xs text-muted-foreground">
+                  已选 {{ checkedRowKeys.length }} 项
+                </span>
+                <NButton
+                  size="small"
+                  type="primary"
+                  secondary
+                  :loading="batchUpdating"
+                  :disabled="selectedUpdatableMods.length === 0"
+                  @click="batchUpdateSelectedMods"
+                >
+                  批量更新
+                </NButton>
+              </div>
               <NDataTable
                 v-if="!isMobileMode"
                 :key="`subscribed-${selectedInstanceId}`"
@@ -1226,9 +1544,12 @@ onMounted(async () => {
                 :data="installedMods"
                 :loading="loadingInstalled"
                 :pagination="false"
-                class="dst-mod-table h-full"
+                :row-key="(row: ModItemDto) => row.workshopId"
+                :checked-row-keys="checkedRowKeys"
+                class="dst-mod-table min-h-0 flex-1"
                 flex-height
                 :scroll-x="1090"
+                @update:checked-row-keys="(keys: Array<string | number>) => checkedRowKeys = keys"
               >
                 <template #empty>
                   <div class="dst-mod-table-empty">
@@ -1236,7 +1557,7 @@ onMounted(async () => {
                   </div>
                 </template>
               </NDataTable>
-              <div v-else class="space-y-3 overflow-y-auto pr-1" :aria-busy="loadingInstalled">
+              <div v-else class="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1" :aria-busy="loadingInstalled">
                 <NEmpty v-if="!loadingInstalled && installedMods.length === 0" size="small" :description="subscribedEmptyDescription" />
                 <article
                   v-for="mod in installedMods"
@@ -1264,8 +1585,24 @@ onMounted(async () => {
                   <p v-if="mod.installError" class="text-sm text-rose-600 dark:text-rose-400">{{ mod.installError }}</p>
                   <div class="flex gap-2">
                     <NButton
+                      v-if="mod.installStatus === 'ready'"
                       class="flex-1"
-                      :loading="unsubscribingWorkshopIds.has(mod.workshopId) || (mod.installStatus === 'failed' && isPendingWorkshop(mod.workshopId))"
+                      :disabled="!hasSelectedInstance || isPendingWorkshop(mod.workshopId)"
+                      @click="updateInstalledMod(mod)"
+                    >
+                      更新
+                    </NButton>
+                    <NButton
+                      v-if="mod.installStatus === 'ready'"
+                      class="flex-1"
+                      :disabled="!hasSelectedInstance || isPendingWorkshop(mod.workshopId)"
+                      @click="openModConfig(mod)"
+                    >
+                      配置
+                    </NButton>
+                    <NButton
+                      class="flex-1"
+                      :loading="unsubscribingWorkshopIds.has(mod.workshopId)"
                       :disabled="!hasSelectedInstance || mod.installStatus === 'pending' || isPendingWorkshop(mod.workshopId)"
                       @click="handleSubscribedAction(mod)"
                     >
@@ -1282,6 +1619,14 @@ onMounted(async () => {
         </NTabs>
       </div>
     </NCard>
+
+    <ModConfigModal
+      v-model:show="configModalShow"
+      :instance-id="selectedInstanceId"
+      :workshop-id="configTarget?.workshopId ?? ''"
+      :mod-name="configTarget?.name ?? ''"
+      @saved="onModConfigSaved"
+    />
     </FaPageMain>
   </div>
 </template>

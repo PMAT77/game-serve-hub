@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { PanelSettingsPayload } from '@/api/modules/system'
-import { NAlert, NInputNumber, NSelect, NSkeleton } from 'naive-ui'
+import { NAlert, NInputNumber, NSelect, NSkeleton, useDialog } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
+import ConfigActionBar from '@/components/ConfigActionBar.vue'
 import apiSystem from '@/api/modules/system'
 
 defineOptions({
@@ -9,6 +10,7 @@ defineOptions({
 })
 
 const loading = ref(false)
+const dialog = useDialog()
 const appSettingsStore = useAppSettingsStore()
 const settingsLoaded = ref(false)
 const settingsLoadError = ref<string | null>(null)
@@ -53,6 +55,12 @@ const themeOptions = [
   { label: '浅色', value: 'light' },
   { label: '深色', value: 'dark' },
 ]
+
+/** 远端快照：加载/保存成功后更新，用于脏状态判定 */
+const savedSnapshot = ref('')
+const settingsDirty = computed(() =>
+  savedSnapshot.value !== '' && JSON.stringify({ ...form }) !== savedSnapshot.value,
+)
 
 const canApplyPanelUpdate = computed(() => {
   if (!updateStatus.value) {
@@ -156,6 +164,7 @@ async function loadSettings(options?: { silent?: boolean }) {
     form.autoUpdate = data.autoUpdate
     form.checkUpdateBeforeStart = data.checkUpdateBeforeStart ?? false
     form.updateCheckIntervalHours = data.updateCheckIntervalHours ?? 3
+    savedSnapshot.value = JSON.stringify({ ...form })
     settingsLoaded.value = true
     settingsLoadError.value = null
   }
@@ -195,15 +204,27 @@ async function checkHubUpdate() {
       faToast.warning('无法完成远端版本检查，请查看下方检查提示')
     }
     else if (res.data.panel.updateAvailable || res.data.dst.updateAvailable) {
-      faToast.info(isNativeRuntime.value ? '检测到 Hub Release 有新版本' : '检测到 Hub 镜像有新版本')
+      faToast.info(isNativeRuntime.value ? '检测到面板 Release 有新版本' : '检测到面板镜像有新版本')
     }
     else {
-      faToast.success(isNativeRuntime.value ? 'Hub Release 已是最新版本' : 'Hub 镜像已是最新版本')
+      faToast.success(isNativeRuntime.value ? '面板已是最新版本' : '面板镜像已是最新版本')
     }
   }
   finally {
     updateStatusLoading.value = false
   }
+}
+
+function confirmApplyHubUpdate() {
+  dialog.warning({
+    title: '确认应用更新',
+    content: isNativeRuntime.value
+      ? '将原地升级面板；升级过程中面板会短暂不可用。是否继续？'
+      : '应用更新会拉取新镜像并短暂重启面板；游戏实例不受影响。是否继续？',
+    positiveText: '立即更新',
+    negativeText: '取消',
+    onPositiveClick: () => applyHubUpdate(),
+  })
 }
 
 async function applyHubUpdate() {
@@ -307,10 +328,10 @@ onActivated(async () => {
         <NInputNumber v-model:value="form.panelPort" :min="1" :max="65535" class="max-w-80 mt-3" placeholder="请输入对外发布端口" />
         <p class="text-xs text-muted-foreground mt-2">
           <template v-if="isSplitDevMode">
-            开发环境请用 {{ browserAccessPort }} 打开面板；生产端口保存后下次重启 dev:compose 生效。
+            开发环境请用 {{ browserAccessPort }} 打开面板；修改端口保存后需重启面板服务生效。
           </template>
           <template v-else>
-            端口范围 1-65535，保存后由网关编排统一生效。
+            端口范围 1-65535，保存后需重启面板服务生效。
           </template>
         </p>
       </AdminSettingsSection>
@@ -323,7 +344,7 @@ onActivated(async () => {
       </AdminSettingsSection>
 
       <AdminSettingsSection
-        title="Hub 版本"
+        title="面板与游戏版本"
         :description="isNativeRuntime
           ? '检查面板 Release；裸机模式通过校验安装包并保留旧版本的脚本原地升级。'
           : '检查并应用面板与 DST 运行镜像更新。应用面板更新会短暂重启管理端。'"
@@ -362,7 +383,7 @@ onActivated(async () => {
           <FaButton
             :loading="applyLoading"
             :disabled="!canApplyUpdate"
-            @click="applyHubUpdate"
+            @click="confirmApplyHubUpdate"
           >
             应用更新
           </FaButton>
@@ -373,15 +394,15 @@ onActivated(async () => {
       </AdminSettingsSection>
 
       <AdminSettingsSection
-        :title="isNativeRuntime ? 'Hub Release 自动检查' : 'Hub 镜像自动检查'"
-        :description="isNativeRuntime ? '按间隔自动检查 GitHub Release 是否有新版本。' : '按间隔自动检查 Hub 镜像是否有新版本。'"
+        :title="isNativeRuntime ? '面板自动检查更新' : '面板镜像自动检查更新'"
+        :description="isNativeRuntime ? '按间隔自动检查 GitHub Release 是否有新版本。' : '按间隔自动检查面板镜像是否有新版本。'"
       >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.autoUpdate" />
           <span class="text-sm text-muted-foreground">
             {{ form.autoUpdate
-              ? `已启用 Hub ${isNativeRuntime ? 'Release' : '镜像'}自动检查`
-              : `已关闭 Hub ${isNativeRuntime ? 'Release' : '镜像'}自动检查` }}
+              ? `已启用面板${isNativeRuntime ? ' Release' : '镜像'}自动检查`
+              : `已关闭面板${isNativeRuntime ? ' Release' : '镜像'}自动检查` }}
           </span>
         </div>
         <div class="space-y-2 max-w-80">
@@ -402,11 +423,14 @@ onActivated(async () => {
         </div>
       </AdminSettingsSection>
 
-      <div class="pt-2">
-        <FaButton :loading="saveLoading" @click="saveSettings">
-          保存设置
-        </FaButton>
-      </div>
+        <ConfigActionBar
+          :dirty="settingsDirty"
+          :saving="saveLoading"
+          :show-restart="false"
+          save-label="保存设置"
+          @reset="loadSettings"
+          @save="saveSettings"
+        />
     </div>
   </FaPageMain>
 </template>

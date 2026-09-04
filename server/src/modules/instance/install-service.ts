@@ -30,6 +30,7 @@ import { appendInstallResourceSnapshot } from '../../infra/container/install-res
 import {
   formatSteamcmdAppUpdateFailureMessage,
   isRetriableSteamcmdInstallOutput,
+  isSteamcmdCorruptStateOutput,
   resolveSteamcmdInstallMaxAttempts,
   resolveSteamcmdInstallRetryDelaysMs,
 } from '../../infra/container/steamcmd-errors'
@@ -515,8 +516,9 @@ async function runInstallPipeline(
       lastError: null,
     })
     await sleep(delayMs)
-    if (cleanupIncompleteSteamcmdInstallDir(input.installPath)) {
-      logWriter.appendLine('已清理半成品 Steam 目录后重试')
+    // 仅状态损坏时才清理：普通网络中断保留下载缓存，靠 app_update validate 断点续传
+    if (isSteamcmdCorruptStateOutput(anonymousResult.output) && cleanupIncompleteSteamcmdInstallDir(input.installPath)) {
+      logWriter.appendLine('检测到 Steam 本地状态损坏（0x602/Missing configuration），已清理半成品 Steam 目录后重试')
     }
     anonymousResult = await runAnonymousInstall()
   }

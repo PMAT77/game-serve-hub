@@ -23,14 +23,20 @@ import {
   NTooltip,
   useDialog,
   useMessage,
+  useNotification,
 } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
+import ConfigActionBar from '@/components/ConfigActionBar.vue'
+import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import { computed, nextTick, onActivated, reactive, ref, shallowRef, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
+import apiInstance from '@/api/modules/instance'
 import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
 import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
 import { routeToDstRoomList } from '@/navigation/game-routes'
 import { isInstanceInstallingStatus } from '@/views/node/instance/instanceDisplay'
+import { getPortConflictDialogLabels, isInstancePortConflictError } from '@/utils/instancePortConflict'
+import { tryNotifyHostMemoryPressure } from '@/utils/hostMemoryPressure'
 
 defineOptions({
   name: 'DstRoomSettings',
@@ -40,6 +46,7 @@ const route = useRoute()
 const router = useRouter()
 const dialog = useDialog()
 const message = useMessage()
+const notification = useNotification()
 
 const { formLabelPlacement, formLabelWidth } = useNarrowFormLayout(120)
 const { guidance: hostMemoryGuidance } = useHostMemoryGuidance()
@@ -56,8 +63,6 @@ const loading = ref(false)
 const loadError = shallowRef<string | null>(null)
 const activeSaveOperation = shallowRef<'save' | 'restart' | null>(null)
 const isSaving = computed(() => activeSaveOperation.value !== null)
-const saving = computed(() => activeSaveOperation.value === 'save')
-const savingAndRestart = computed(() => activeSaveOperation.value === 'restart')
 const formRef = ref<FormInst | null>(null)
 const serverConfig = ref<ClusterConfigDto | null>(null)
 
@@ -92,9 +97,27 @@ const gameModeOptions = [
   { label: '暗无天日', value: 'darkandwildernes' },
 ]
 
+/** 游戏模式选择后的说明（随选择联动展示在表单反馈区） */
+const gameModeHint = computed(() => ({
+  survival: '默认模式：死亡后变为幽灵，可通过触摸试金石等方式复活。',
+  endless: '无尽模式：死亡后可无限重生，适合休闲联机。',
+  wilderness: '荒野模式：随机地点出生、无法复活，死亡后需重新生成角色。',
+  easy: '轻松模式：生存压力更小，适合新手。',
+  darkandwildernes: '暗无天日：永夜环境 + 荒野规则，高难度挑战。',
+}[formModel.gameMode] ?? ''))
+
 const pageTitle = computed(() => serverConfig.value
   ? `房间设置 · ${serverConfig.value.instanceName}`
   : '房间设置')
+
+/** 远端快照：加载/保存成功后更新，用于脏状态判定与一键重置 */
+const savedSnapshot = ref('')
+
+const formDirty = computed(() =>
+  savedSnapshot.value !== '' && JSON.stringify({ ...formModel }) !== savedSnapshot.value,
+)
+
+useUnsavedChangesGuard(formDirty)
 
 const showPublicTokenSection = computed(() => formModel.networkMode === 'public')
 
@@ -105,6 +128,7 @@ const saveAndRestartDisabled = computed(() =>
 const saveAndRestartDisabledTitle = computed(() =>
   saveAndRestartDisabled.value ? '实例安装完成后才可保存并重启' : undefined,
 )
+
 
 const clusterTokenPlaceholder = computed(() => {
   if (serverConfig.value?.clusterTokenConfigured && serverConfig.value.clusterTokenMasked) {
@@ -231,6 +255,7 @@ function applyConfig(config: ClusterConfigDto) {
   formModel.steamGroupId = config.steamGroupId === '0' ? '' : config.steamGroupId
   formModel.steamGroupAdmins = config.steamGroupAdmins
   formModel.clusterToken = ''
+  savedSnapshot.value = JSON.stringify({ ...formModel })
 }
 
 async function loadConfig() {
@@ -302,6 +327,32 @@ async function saveConfig(restart = false) {
     message.success(restart ? '房间配置已保存并触发重启' : '房间配置已保存')
     formModel.clusterToken = ''
     await loadConfig()
+  }
+  catch (error: unknown) {
+    if (restart && isInstancePortConflictError(error)) {
+      const labels = getPortConflictDialogLabels('restart')
+      dialog.warning({
+        title: labels.title,
+        content: '房间配置已保存，但重启实例时端口被占用。',
+        positiveText: labels.positiveText,
+        negativeText: '取消',
+        onPositiveClick: async () => {
+          try {
+            await apiInstance.restartInstance(instanceId.value, { autoAllocatePorts: true })
+            message.success('已自动分配端口并完成重启')
+            await loadConfig()
+          }
+          catch {
+            message.error('重启失败，请稍后重试')
+          }
+        },
+      })
+      return
+    }
+    if (tryNotifyHostMemoryPressure(notification, error)) {
+      return
+    }
+    // 其余业务错误由全局拦截器统一提示，这里仅避免未处理的 Promise 拒绝
   }
   finally {
     if (activeSaveOperation.value === operation) {
@@ -416,7 +467,7 @@ onActivated(() => {
                     仅局域网 
                   </NRadio>
                   <NRadio value="public">
-                    联机 
+                    公网联机
                   </NRadio>
                 </NSpace>
               </NRadioGroup>
@@ -446,7 +497,7 @@ onActivated(() => {
               生成令牌（一行，以 pds- 开头）
             </p> 
             <NFormItem
-              label="服务器令牌"
+              label="Klei 集群令牌"
               path="clusterToken"
               :required="formModel.networkMode === 'public' && !serverConfig?.clusterTokenConfigured"
             >
@@ -484,6 +535,9 @@ onActivated(() => {
           <NCard title="玩法设置" size="small" class="mt-4">
             <NFormItem label="游戏模式">
               <NSelect v-model:value="formModel.gameMode" :options="gameModeOptions" class="max-w-xs" />
+              <template v-if="gameModeHint" #feedback>
+                {{ gameModeHint }}
+              </template>
             </NFormItem>
             <NFormItem label="最大玩家" path="maxPlayers">
               <NInputNumber v-model:value="formModel.maxPlayers" :min="1" :max="64" class="w-40" />
@@ -531,7 +585,7 @@ onActivated(() => {
             </NFormItem>
           </NCard>
 
-          <NCard title="杂项设置" size="small" class="mt-4">
+          <NCard title="存档与快照" size="small" class="mt-4">
             <NFormItem label="最大快照数">
               <NInputNumber v-model:value="formModel.maxSnapshots" :min="1" :max="99" class="w-40" />
               <NTooltip :style="{ maxWidth: '300px' }" >
@@ -626,23 +680,15 @@ onActivated(() => {
           </NCard>
         </NForm>
 
-        <div class="flex flex-wrap items-center justify-center gap-3">
-          <NButton type="primary" :loading="saving" :disabled="isSaving" @click="saveConfig(false)">
-            保存配置
-          </NButton>
-          <NTooltip :disabled="!saveAndRestartDisabled">
-            <template #trigger>
-              <NButton
-                :loading="savingAndRestart"
-                :disabled="saveAndRestartDisabled || isSaving"
-                @click="confirmSaveAndRestart"
-              >
-                保存并重启
-              </NButton>
-            </template>
-            {{ saveAndRestartDisabledTitle }}
-          </NTooltip>
-        </div>
+        <ConfigActionBar
+          :dirty="formDirty"
+          :saving="isSaving"
+          :restart-disabled="saveAndRestartDisabled"
+          :restart-disabled-title="saveAndRestartDisabledTitle"
+          @reset="loadConfig"
+          @save="saveConfig(false)"
+          @save-and-restart="confirmSaveAndRestart"
+        />
       </div>
     </div>
   </FaPageMain>

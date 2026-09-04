@@ -41,6 +41,8 @@ export interface ModInstallPayload {
   version?: string
   enabled?: boolean
   dependencyIds?: string[]
+  /** 为 true 时忽略已就绪状态，强制重新下载（用于更新已订阅 Mod） */
+  force?: boolean
 }
 
 export interface ModUpdatePayload {
@@ -83,6 +85,36 @@ export interface ModReorderResult {
 
 export interface ModDeleteResult {
   deleted: true
+  riskTip: string | null
+}
+
+export interface ModConfigOption {
+  description: string
+  data: string | number | boolean
+}
+
+/** modinfo.lua 中单个配置项定义 */
+export interface ModConfigDefinition {
+  name: string
+  label: string | null
+  hover: string | null
+  options: ModConfigOption[]
+  default: string | number | boolean | null
+}
+
+export type ModConfigValues = Record<string, string | number | boolean>
+
+export interface ModConfigDto {
+  instanceId: string
+  workshopId: string
+  /** 当前生效配置值：DB 优先，为空时从现有 modoverrides.lua 导入预填 */
+  options: ModConfigValues
+  /** modinfo.lua 解析出的配置定义；无定义或解析失败为空数组 */
+  definitions: ModConfigDefinition[]
+}
+
+export interface ModConfigSaveResult {
+  saved: true
   riskTip: string | null
 }
 
@@ -255,6 +287,8 @@ export const modInstallPayloadSchema = z.object({
   version: optionalTextSchema,
   enabled: z.boolean().optional(),
   dependencyIds: z.array(workshopIdSchema).max(128).optional(),
+  /** 为 true 时忽略已就绪状态，强制重新下载（用于更新已订阅 Mod） */
+  force: z.boolean().optional(),
 })
 
 export const modUpdatePayloadSchema = z.object({
@@ -267,6 +301,19 @@ export const modUpdatePayloadSchema = z.object({
 export const modReorderPayloadSchema = z.object({
   workshopIds: z.array(workshopIdSchema).max(512),
 })
+
+export const modBatchUpdatePayloadSchema = z.object({
+  workshopIds: z.array(workshopIdSchema).min(1).max(512),
+})
+export type ModBatchUpdatePayload = z.infer<typeof modBatchUpdatePayloadSchema>
+
+export const modConfigPayloadSchema = z.object({
+  options: z.record(
+    z.string().trim().min(1).max(128),
+    z.union([z.string().max(4096), z.number().finite(), z.boolean()]),
+  ).refine(options => Object.keys(options).length <= 256, '配置项数量超出上限'),
+})
+export type ModConfigPayload = z.infer<typeof modConfigPayloadSchema>
 
 export const modInstallJobsQuerySchema = z.object({
   workshopIds: z.union([

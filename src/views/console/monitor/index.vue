@@ -57,6 +57,24 @@ function savePollSettings(settings: MonitorPollSettings) {
 }
 
 const pollSettings = ref(loadPollSettings())
+
+/** 常用轮询档位：快（近实时）/ 标准（默认）/ 慢（低开销） */
+const POLL_PRESETS = [
+  { label: '快', systemPollMs: 5_000, networkPollMs: 4_000 },
+  { label: '标准', systemPollMs: 10_000, networkPollMs: 5_000 },
+  { label: '慢', systemPollMs: 30_000, networkPollMs: 15_000 },
+] as const
+
+const activePresetLabel = computed(() =>
+  POLL_PRESETS.find(p => p.systemPollMs === pollSettings.value.systemPollMs && p.networkPollMs === pollSettings.value.networkPollMs)?.label ?? null,
+)
+
+function applyPollPreset(preset: (typeof POLL_PRESETS)[number]) {
+  pollSettings.value = { systemPollMs: preset.systemPollMs, networkPollMs: preset.networkPollMs }
+  savePollSettings(pollSettings.value)
+  restartSystemPolling()
+  restartNetworkPolling()
+}
 const systemPollMs = computed({
   get: () => pollSettings.value.systemPollMs,
   set: (value: number | null) => {
@@ -301,23 +319,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div>
-    <FaPageMain title="轮询设置">
-      <p class="mb-4 text-sm text-muted-foreground">
-        调整主机与网络数据的刷新频率。网络采样间隔建议不低于 4 秒。
-      </p>
-      <NForm label-placement="left" :label-width="160" class="max-w-2xl">
-        <NFormItem label="系统信息间隔">
-          <NInputNumber v-model:value="systemPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" class="w-40" />
-          <span class="ml-2 text-xs text-muted-foreground">毫秒</span>
-        </NFormItem>
-        <NFormItem label="网络采样间隔">
-          <NInputNumber v-model:value="networkPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" class="w-40" />
-          <span class="ml-2 text-xs text-muted-foreground">毫秒</span>
-        </NFormItem>
-      </NForm>
-    </FaPageMain>
-
+  <div class="space-y-4">
     <FaPageMain title="实时状态">
       <div v-if="systemError" class="mb-4 space-y-2">
         <NAlert type="error" :title="systemError" />
@@ -330,7 +332,7 @@ onUnmounted(() => {
     <FaPageMain title="系统详情" class="min-w-0">
       <MonitorSystemInfo :loading="loading" :info="systemInfo" />
     </FaPageMain>
-    
+
     <FaPageMain title="网络监控" class="min-w-0">
       <div v-if="networkError" class="space-y-2">
         <NAlert type="warning" :title="networkError">
@@ -349,5 +351,37 @@ onUnmounted(() => {
         :chart-data-map="networkChartDataMap"
       />
     </FaPageMain>
-  </div> 
+
+    <FaPageMain title="刷新频率">
+      <p class="mb-4 text-sm text-muted-foreground">
+        调整主机与网络数据的刷新频率；数值越小数据越实时、开销越高。网络采样建议不低于 4 秒。
+      </p>
+      <div class="mb-4 flex flex-wrap items-center gap-2">
+        <NButton
+          v-for="preset in POLL_PRESETS"
+          :key="preset.label"
+          size="small"
+          :type="activePresetLabel === preset.label ? 'primary' : 'default'"
+          :secondary="activePresetLabel !== preset.label"
+          @click="applyPollPreset(preset)"
+        >
+          {{ preset.label }}
+          <span class="ml-1 text-xs opacity-70">{{ preset.systemPollMs / 1000 }}s</span>
+        </NButton>
+        <span class="text-xs text-muted-foreground">
+          当前：系统 {{ systemPollMs / 1000 }} 秒 / 网络 {{ networkPollMs / 1000 }} 秒
+        </span>
+      </div>
+      <NForm label-placement="left" :label-width="160" class="max-w-2xl">
+        <NFormItem label="系统信息间隔">
+          <NInputNumber v-model:value="systemPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" class="w-40" />
+          <span class="ml-2 text-xs text-muted-foreground">毫秒</span>
+        </NFormItem>
+        <NFormItem label="网络采样间隔">
+          <NInputNumber v-model:value="networkPollMs" :min="MIN_POLL_MS" :max="MAX_POLL_MS" :step="1000" class="w-40" />
+          <span class="ml-2 text-xs text-muted-foreground">毫秒</span>
+        </NFormItem>
+      </NForm>
+    </FaPageMain>
+  </div>
 </template>

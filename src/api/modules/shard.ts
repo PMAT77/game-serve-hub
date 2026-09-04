@@ -18,6 +18,8 @@ export type {
   MasterWorldgenPreset,
 } from '../../../shared/contracts/shard'
 
+export { shardSavePayloadSchema } from '../../../shared/contracts/shard'
+
 export default {
   getShardList: (instanceId: string) => api.get('app/instance/shards', {
     params: { instanceId },

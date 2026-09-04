@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
 import { writeInstanceModFiles } from '../../infra/game-adapter/dst/mod-service'
+import { parseStoredModConfig } from '../../infra/game-adapter/dst/mod-config'
 import { LOCAL_NODE_ID } from '../../shared/dst/local-dst-instance'
 import { listGameInstances, listReadyInstanceMods } from '../../shared/db/index'
 
@@ -31,6 +32,7 @@ export async function syncInstanceModFilesFromDb(instanceId: string, installPath
     workshopId: mod.workshopId,
     enabled: mod.enabled,
     loadOrder: mod.loadOrder,
+    configurationOptions: parseStoredModConfig(mod.config),
   })))
 }
 

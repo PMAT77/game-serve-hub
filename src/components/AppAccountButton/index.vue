@@ -91,8 +91,8 @@ onBeforeUnmount(() => {
           <div class="text-base lh-none truncate">
             {{ appAccountStore.account }}
           </div>
-          <div class="text-xs text-secondary-foreground/50 font-normal">
-            [ {{ appAccountStore.email || 'xyz@xyz.com' }} ]
+          <div v-if="appAccountStore.email" class="text-xs text-secondary-foreground/50 font-normal">
+            {{ appAccountStore.email }}
           </div>
         </div>
       </div>

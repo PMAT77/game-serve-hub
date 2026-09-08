@@ -4,12 +4,19 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-08
+
+### Fixed
+
+- **安装器**：移除多仓库探测与阿里云 ACR / Docker Hub 中转（`--registry` 参数删除）。统一镜像仅发布 GHCR；此前 `--registry auto` 在国内会默认探测并指向从未发布镜像的 ACR 仓库，导致 `docker pull` 失败。国内安装路径改为 Release 离线镜像包、`GSH_IMAGE_MIRRORS` 自配镜像代理或 `PANEL_IMAGE` 覆盖。
+- **数据库迁移**：补齐 0012/0013 迁移遗漏的 drizzle 快照（新增 0014 迁移，重复列由迁移执行器的 duplicate-column 容错保证幂等），修复 CI schema 漂移检查失败。
+
 ## [0.2.0] - 2026-09-08
 
 ### Added
 
 - **统一镜像**：面板（Node.js）+ DST 运行库 + SteamCMD 合并为单一 `game-server-hub` 镜像（Debian 12 基础），镜像保持中性（无 ENTRYPOINT/HEALTHCHECK/USER），面板入口由 compose 提供，健康检查移至 compose。镜像更新只需拉取应用代码层。
-- **国内可达分发**：安装器新增 `--registry auto|ghcr|aliyun|dockerhub`（自动探测可用 registry）；CI 支持 GHCR 之外同步推送阿里云 ACR / Docker Hub 并附带离线 `docker save` 压缩包；native 安装与安装资源镜像池更新国内加速节点并支持 `GSH_GITHUB_PROXY` 强制指定。
+- **国内可达分发**：Release 附带离线 `docker save` 压缩镜像包（加速代理可下载，`docker load` 导入）；安装资源镜像池更新国内加速节点（gh-proxy.com/ghfast.top 等）并支持 `GSH_GITHUB_PROXY` 强制指定；镜像仅发布 GHCR，面板侧支持 `GSH_IMAGE_MIRRORS` 自选镜像代理。
 - 新增 `gsh` 装后管理命令（`scripts/gsh.sh`）：status/start/stop/restart/logs/update/doctor/setup-swap 与交互菜单，Docker/Native 双模式适配；`doctor` 一键收集脱敏诊断，`setup-swap` 缓解小内存机 OOM。
 - 新增 `GSH_IMAGE_MIRRORS`：面板拉取镜像的备选 registry 候选（泛化自 `GSH_STEAMCMD_IMAGE_MIRRORS`，后者保留兼容）。
 

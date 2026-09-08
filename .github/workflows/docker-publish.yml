@@ -349,64 +349,6 @@ jobs:
 
             统一镜像的不可变 digest 见附件 `release-images.json`；Native 包与离线镜像包使用同名 `.sha256` 校验。安装与升级请使用版本 tag 或附件中的 digest，不要依赖 `latest`。
 
-  push-mirrors:
-    name: Push mirror registries (Docker Hub / ACR)
-    needs: promote-images
-    if: ${{ needs.promote-images.result == 'success' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: read
-    env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
-      ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
-      ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
-      ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
-    steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
-
-      - name: Log in to GHCR (read source)
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Mirror to Docker Hub
-        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          source="${IMAGE_PREFIX}/game-server-hub:${GITHUB_REF_NAME}"
-          target="docker.io/${DOCKERHUB_USERNAME}/game-server-hub:${GITHUB_REF_NAME}"
-          echo "${DOCKERHUB_TOKEN}" | docker login docker.io -u "${DOCKERHUB_USERNAME}" --password-stdin
-          docker buildx imagetools create --prefer-index=false --tag "${target}" "${source}"
-          echo "Mirrored ${source} -> ${target}"
-
-      - name: Mirror to Alibaba Cloud ACR
-        if: env.ACR_REGISTRY != '' && env.ACR_NAMESPACE != '' && env.ACR_PASSWORD != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          source="${IMAGE_PREFIX}/game-server-hub:${GITHUB_REF_NAME}"
-          target="${ACR_REGISTRY}/${ACR_NAMESPACE}/game-server-hub:${GITHUB_REF_NAME}"
-          echo "${ACR_PASSWORD}" | docker login "${ACR_REGISTRY}" -u "${ACR_USERNAME}" --password-stdin
-          docker buildx imagetools create --prefer-index=false --tag "${target}" "${source}"
-          source_digest="$(docker buildx imagetools inspect "${source}" --format '{{json .Manifest}}' | jq -r '.digest // empty')"
-          target_digest="$(docker buildx imagetools inspect "${target}" --format '{{json .Manifest}}' | jq -r '.digest // empty')"
-          if [[ -z "${target_digest}" ]]; then
-            echo "Mirror target digest unresolved: ${target}" >&2
-            exit 1
-          fi
-          echo "Mirrored ${source}@${source_digest} -> ${target}@${target_digest}"
-
-      - name: Mirror skipped (no mirror secrets configured)
-        if: env.DOCKERHUB_USERNAME == '' && (env.ACR_REGISTRY == '' || env.ACR_NAMESPACE == '' || env.ACR_PASSWORD == '')
-        run: echo "No mirror registry secrets configured; skipped."
   cleanup-candidates:
     name: Clean up promoted candidate images
     needs: release

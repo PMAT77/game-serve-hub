@@ -46,7 +46,7 @@ Native 不安装、不调用 Docker，不支持 tmux、screen 或 PM2。两种�
 ### 3.1 Docker
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.1/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/script
 ### 3.2 Native systemd
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.1/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -80,7 +80,7 @@ Native Release 内置 Node.js Linux x64 运行时，宿主机无需另装 Node.j
 ### 3.3 国内网络档位
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.2.0/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.2.1/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 
@@ -93,12 +93,16 @@ curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.2.0/scripts/inst
 
 安装资源默认从 jsDelivr、GitHub 资源代理、GitHub Raw 依次回退。Compose 使用安装器内置 SHA256，不会为了校验再次访问 Raw。
 
-v0.2.0 起官方提供国内容器仓库发布（阿里云 ACR，与 GHCR 同 tag 同构建）。安装器 `--registry auto` 按网络探测自动选择；中国服务器通常命中 `registry.cn-hangzhou.aliyuncs.com`，一次拉取即包含面板、DST 运行库与 SteamCMD。也可显式指定 `--registry ghcr|aliyun|dockerhub`。
+v0.2.0 起官方容器镜像仅发布 GHCR（`ghcr.io/pmat77/game-server-hub`），一次拉取即包含面板、DST 运行库与 SteamCMD。GHCR 不可达时的国内安装路径（按优先级）：
+
+1. **离线镜像包**：从 GitHub Release 下载 `game-server-hub-<tag>-docker-image.tar.gz`（可用 GitHub 加速代理），`docker load` 导入后运行安装器（镜像已存在，跳过在线拉取）；
+2. **自选镜像代理**：在 `panel.env` 配置 `GSH_IMAGE_MIRRORS`（逗号分隔的 registry 主机名，面板按序回退拉取）；
+3. **PANEL_IMAGE 覆盖**：安装时设置 `PANEL_IMAGE=<你控制的镜像仓库引用>`。
 
 ### 3.4 本地安装
 
 ```bash
-git clone --branch v0.2.0 --depth 1 https://github.com/PMAT77/game-serve-hub.git
+git clone --branch v0.2.1 --depth 1 https://github.com/PMAT77/game-serve-hub.git
 cd game-server-hub
 sudo bash ./scripts/install.linux.sh --mode native --network auto
 ```
@@ -162,7 +166,7 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
 也可以在首次安装时显式设置：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.1/scripts/install.linux.sh \
   | sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='替换为强密码' \
       bash -s -- --mode native
 ```
@@ -231,9 +235,9 @@ Docker 模式若无法访问 GHCR，请优先使用自己控制的仓库：
 
 ```bash
 sudo docker login registry.example.com
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.1/scripts/install.linux.sh \
   | sudo env \
-      PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.2.0 \
+      PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.2.1 \
       bash -s -- --mode docker --network cn
 ```
 

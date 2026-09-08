@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.2.0}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
+GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.2.1}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
 # GitHub 资源加速代理（前缀拼接型）：安装资源与 Native 包共用；GSH_GITHUB_PROXY 可强制指定单一节点。
 GITHUB_PROXY_SITES="${GITHUB_PROXY_SITES:-https://gh-proxy.com/,https://ghfast.top/,https://ghproxy.com/}"
@@ -14,7 +14,7 @@ GSH_GITHUB_PROXY="${GSH_GITHUB_PROXY:-}" # 强制指定 GitHub 加速代理（�
 INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-}" # 安装资源镜像池；为空时由 init_installer_repo_pool 按代理清单生成。
 # 校验对象是镜像源提供的 git blob 原始字节（LF）；改动 compose 后必须同步更新此处。
 # 历史 pin eb30aeae... 与 v0.1.4 tag 内 compose blob（a34665e2...）不匹配，导致严格校验必然失败。
-INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-b66d24d6a032343903fca0bea215d991b5f45be52b6f5cae04ebbe7a04af1823}"
+INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-4d334e88055b3aa8d05efd4d90bc39d3da2f08917dba0fc7dbdecda6510de172}"
 INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML:-525eaf74e17df33887fe47248f414c0de3e6cd94a8d20e072ab5d66284c760ae}"
 INSTALL_MODE="${GSH_INSTALL_MODE:-auto}" # auto | docker | native
 NETWORK_PROFILE="${GSH_NETWORK_PROFILE:-auto}" # auto | cn | global
@@ -51,12 +51,9 @@ PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境�
 PANEL_PORT="${PANEL_PORT:-9527}" # 面板对外暴露端口（默认使用高位端口以降低备案拦截影响）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
 INSTALL_STEAMCMD_IMAGE="${INSTALL_STEAMCMD_IMAGE:-1}" # 安装阶段是否预拉 SteamCMD 镜像（默认拉取，安装完成后可直接创建实例）。
-# v0.2.0 起三镜像合一：面板/DST/SteamCMD 共用同一统一镜像引用。
-IMAGE_REGISTRY_CHOICE="${GSH_IMAGE_REGISTRY:-${GSH_REGISTRY:-auto}}" # auto | ghcr | aliyun | dockerhub；auto 按网络探测选择。
-RESOLVED_IMAGE_REGISTRY="" # 解析后的 registry 主机名。
-PANEL_IMAGE_OVERRIDE="${PANEL_IMAGE:-}" # 完整面板镜像引用；设置后跳过 registry 解析直接采用。
-PANEL_IMAGE_OFFICIAL_REPOSITORY="game-server-hub" # 统一镜像仓库名（各 registry 同名）。
-ALIYUN_ACR_NAMESPACE="${ALIYUN_ACR_NAMESPACE:-gsh_release}" # 阿里云 ACR 命名空间（可被环境变量覆盖）。
+# v0.2.0 起三镜像合一：面板/DST/SteamCMD 共用同一统一镜像引用（仅 GHCR 官方源；
+# 国内拉取失败时优先使用 Release 离线镜像包，或在 panel.env 配置 GSH_IMAGE_MIRRORS 自选镜像代理）。
+PANEL_IMAGE_OVERRIDE="${PANEL_IMAGE:-}" # 完整面板镜像引用；设置后直接采用（不再拼接 GHCR 引用）。
 PANEL_INSTALL_DIR="${PANEL_INSTALL_DIR:-/opt/game-server-hub}" # 安装目录（放置 env/compose）。
 PANEL_DATA_DIR="${PANEL_DATA_DIR:-/var/lib/game-server-hub}" # 面板持久化数据目录。
 PANEL_LOG_DIR="${PANEL_LOG_DIR:-/var/log/game-server-hub}" # 面板日志与安装状态目录。
@@ -654,64 +651,6 @@ check_ghcr_reachability() {
   check_registry_reachability "ghcr.io"
 }
 
-# 解析统一镜像 registry：auto 时按网络档位排序探测，取首个可用端点。
-resolve_image_registry() {
-  local -a order=()
-  case "${IMAGE_REGISTRY_CHOICE}" in
-    ghcr)
-      order=(ghcr.io)
-      ;;
-    aliyun)
-      order=("registry.cn-hangzhou.aliyuncs.com")
-      ;;
-    dockerhub)
-      order=(docker.io)
-      ;;
-    auto)
-      if [[ "${RESOLVED_NETWORK_PROFILE}" == "cn" ]]; then
-        order=("registry.cn-hangzhou.aliyuncs.com" "ghcr.io" "docker.io")
-      else
-        order=("ghcr.io" "docker.io" "registry.cn-hangzhou.aliyuncs.com")
-      fi
-      ;;
-    *)
-      abort "Invalid image registry choice: ${IMAGE_REGISTRY_CHOICE}. Expected auto, ghcr, aliyun or dockerhub."
-      ;;
-  esac
-
-  if [[ "${IMAGE_REGISTRY_CHOICE}" != "auto" ]]; then
-    RESOLVED_IMAGE_REGISTRY="${order[0]}"
-    log_info "Image registry (explicit): ${RESOLVED_IMAGE_REGISTRY}"
-    return
-  fi
-  local registry
-  for registry in "${order[@]}"; do
-    if check_registry_reachability "${registry}"; then
-      RESOLVED_IMAGE_REGISTRY="${registry}"
-      log_info "Image registry (auto): ${RESOLVED_IMAGE_REGISTRY}"
-      return
-    fi
-  done
-  RESOLVED_IMAGE_REGISTRY="${order[0]}"
-  log_warn "No registry endpoint reachable; falling back to ${RESOLVED_IMAGE_REGISTRY}."
-}
-
-# 生成统一镜像完整引用：GHCR/Docker Hub 带 maintainer 命名空间，ACR 带可配置命名空间。
-resolve_unified_image_ref() {
-  local tag="${PANEL_IMAGE_TAG}"
-  case "${RESOLVED_IMAGE_REGISTRY}" in
-    ghcr.io)
-      printf "ghcr.io/pmat77/game-server-hub:%s" "${tag}"
-      ;;
-    docker.io)
-      printf "pmat77/game-server-hub:%s" "${tag}"
-      ;;
-    *)
-      printf "%s/%s/game-server-hub:%s" "${RESOLVED_IMAGE_REGISTRY}" "${ALIYUN_ACR_NAMESPACE}" "${tag}"
-      ;;
-  esac
-}
-
 # 生成三个镜像键（v0.2.0 统一镜像：三键同值；PANEL_IMAGE_OVERRIDE 设置时直接采用）。
 finalize_image_refs() {
   if [[ -n "${PANEL_IMAGE_OVERRIDE}" ]]; then
@@ -722,7 +661,7 @@ finalize_image_refs() {
     log_info "Image override in effect: ${PANEL_IMAGE}"
     return
   fi
-  PANEL_IMAGE="$(resolve_unified_image_ref)"
+  PANEL_IMAGE="ghcr.io/pmat77/game-server-hub:${PANEL_IMAGE_TAG}"
   GSH_GAME_DST_IMAGE="${PANEL_IMAGE}"
   GSH_STEAMCMD_IMAGE="${PANEL_IMAGE}"
   INSTALL_STEAMCMD_PULL_IMAGE="${PANEL_IMAGE}"
@@ -1377,7 +1316,6 @@ Usage: ${SCRIPT_NAME} [options]
 Options:
   --mode MODE         Deployment mode: auto, docker or native
   --network PROFILE   Network profile: auto, cn or global
-  --registry REG      Container registry: auto, ghcr, aliyun or dockerhub (default: auto)
   --open-panel-port  Open panel TCP port (${PANEL_PORT}) via ufw/firewalld
   --open-dst-ports   Open default DST UDP ports (${DST_GAME_PORT}, ${DST_AUTH_PORT}, ${DST_MASTER_PORT}) via ufw/firewalld
   -h, --help         Show this help
@@ -1386,12 +1324,10 @@ Environment (optional):
   GSH_INSTALL_MODE=MODE          Same as --mode
   GSH_NETWORK_PROFILE=PROFILE    Same as --network
   INSTALL_STEAMCMD_IMAGE=0      Skip SteamCMD pre-pull (default: pre-pull so the panel is ready to create instances)
-  PANEL_IMAGE=REF               Full unified image reference (tag or digest); overrides --registry
+  PANEL_IMAGE=REF               Full unified image reference (tag or digest); overrides the GHCR default
   GSH_GAME_DST_IMAGE=REF        Kept for compatibility; defaults to PANEL_IMAGE (v0.2.0 unified image)
   GSH_STEAMCMD_IMAGE=REF        Kept for compatibility; defaults to PANEL_IMAGE (v0.2.0 unified image)
-  GSH_IMAGE_REGISTRY=REG        Same as --registry
   GSH_GITHUB_PROXY=URL          Force one GitHub accelerator (e.g. https://gh-proxy.com/)
-  ALIYUN_ACR_NAMESPACE=NS       Alibaba Cloud ACR namespace (default: gsh_release)
   PANEL_HEALTHCHECK_TIMEOUT_SECONDS=90  Maximum wait for panel /health after startup
   PANEL_HEALTHCHECK_INTERVAL_SECONDS=3  Panel /health polling interval
   USE_CN_DEBIAN_MIRROR=1        Enable CN Debian/Ubuntu mirror
@@ -1561,11 +1497,11 @@ preflight_checks() {
     abort "Insufficient disk space on /. Require >= ${MIN_FREE_DISK_MB} MB."
   fi
 
-  if [[ "${RESOLVED_INSTALL_MODE}" == "docker" && -z "${PANEL_IMAGE_OVERRIDE}" ]] && ! check_registry_reachability "${RESOLVED_IMAGE_REGISTRY}"; then
+  if [[ "${RESOLVED_INSTALL_MODE}" == "docker" && -z "${PANEL_IMAGE_OVERRIDE}" ]] && ! check_registry_reachability "ghcr.io"; then
     if [[ "${STRICT_GHCR_CHECK}" == "1" ]]; then
-      abort "Cannot reach registry endpoint https://${RESOLVED_IMAGE_REGISTRY}/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Please check outbound network or rerun with --registry auto."
+      abort "Cannot reach GHCR endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Check outbound network, use the offline image archive from the Release page, or set PANEL_IMAGE to a mirror you control."
     fi
-    log_warn "Cannot reach registry endpoint https://${RESOLVED_IMAGE_REGISTRY}/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s during preflight. Continue and rely on docker pull retries."
+    log_warn "Cannot reach GHCR endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s during preflight. Consider the offline image archive (Release assets) or PANEL_IMAGE override."
   fi
   if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]] && ! command -v systemctl >/dev/null 2>&1; then
     abort "Native mode requires systemd/systemctl."
@@ -1866,15 +1802,7 @@ main() {
         OPEN_DST_PORTS=1
         shift
         ;;
-      --registry)
-        [[ $# -ge 2 ]] || abort "--registry requires auto, ghcr, aliyun or dockerhub."
-        IMAGE_REGISTRY_CHOICE="$2"
-        shift 2
-        ;;
-      --registry=*)
-        IMAGE_REGISTRY_CHOICE="${1#*=}"
-        shift
-        ;;
+
       -h|--help)
         print_usage
         exit 0
@@ -1899,7 +1827,6 @@ main() {
   resolve_install_mode
   validate_install_mode_transition
   if [[ "${RESOLVED_INSTALL_MODE}" == "docker" ]]; then
-    resolve_image_registry
     finalize_image_refs
   fi
 

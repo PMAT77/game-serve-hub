@@ -36,7 +36,7 @@ const panelPort = process.env.PANEL_PORT?.trim() || readEnvFileVar('PANEL_PORT')
 const webPort = process.env.VITE_DEV_WEB_PORT?.trim() || readEnvFileVar('VITE_DEV_WEB_PORT') || '9527'
 const panelUrl = `http://127.0.0.1:${panelPort}`
 const webUrl = `http://127.0.0.1:${webPort}`
-const steamcmdImage = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'ghcr.io/pmat77/steamcmd-base:v0.1.3'
+const steamcmdImage = process.env.GSH_STEAMCMD_IMAGE?.trim() || 'ghcr.io/pmat77/game-server-hub:v0.2.2'
 const account = process.env.ADMIN_USERNAME?.trim() || 'superadmin'
 const password = process.env.ADMIN_PASSWORD ?? '123456'
 
@@ -48,6 +48,12 @@ const POLL_INTERVAL_MS = 2_000
 const IMAGE_PULL_ATTEMPTS = 3
 const IMAGE_PULL_RETRY_DELAY_MS = 3_000
 const DEV_BASE_IMAGES = ['node:22-bookworm-slim']
+// Docker Hub 基础镜像的拉取候选（逗号分隔 registry 主机名，拉取成功后 tag 回标准名）；
+// 设为空字符串可禁用候选、强制直连 Docker Hub。
+const DEV_PULL_MIRRORS = (process.env.GSH_DEV_PULL_MIRRORS ?? 'docker.m.daocloud.io,docker.1ms.run,dockerproxy.net')
+  .split(',')
+  .map(item => item.trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''))
+  .filter(Boolean)
 
 interface BannerConfig {
   panelUrlTemplate?: string
@@ -101,26 +107,75 @@ function commandErrorMessage(error: unknown): string {
   return String(error)
 }
 
+function dockerImageExists(image: string): boolean {
+  try {
+    execFileSync('docker', ['image', 'inspect', image], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
+async function pullDockerImage(image: string): Promise<void> {
+  for (let attempt = 1; attempt <= IMAGE_PULL_ATTEMPTS; attempt++) {
+    try {
+      execFileSync('docker', ['pull', image], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'inherit', 'pipe'],
+      })
+      return
+    }
+    catch (error) {
+      const message = commandErrorMessage(error)
+      if (attempt === IMAGE_PULL_ATTEMPTS || !isRetryableRegistryError(message)) {
+        throw new Error(`无法拉取镜像 ${image}。\n${message.trim()}`)
+      }
+      console.warn(`[dev:compose] 镜像拉取发生临时网络错误，${IMAGE_PULL_RETRY_DELAY_MS / 1000}s 后重试…`)
+      await wait(IMAGE_PULL_RETRY_DELAY_MS)
+    }
+  }
+}
+
 async function ensureDevBaseImages() {
   for (const image of DEV_BASE_IMAGES) {
-    for (let attempt = 1; attempt <= IMAGE_PULL_ATTEMPTS; attempt++) {
+    if (dockerImageExists(image)) {
+      console.log(`[dev:compose] 开发基础镜像已存在，跳过: ${image}`)
+      continue
+    }
+
+    const candidates = [
+      ...DEV_PULL_MIRRORS.map(mirror => `${mirror}/${image}`),
+      image,
+    ]
+    let lastError: unknown = null
+    for (const candidate of candidates) {
       try {
-        console.log(`[dev:compose] 准备开发基础镜像 (${attempt}/${IMAGE_PULL_ATTEMPTS}): ${image}`)
-        execFileSync('docker', ['pull', image], {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          stdio: ['ignore', 'inherit', 'pipe'],
-        })
+        console.log(`[dev:compose] 准备开发基础镜像: ${candidate}`)
+        await pullDockerImage(candidate)
+        if (candidate !== image) {
+          console.log(`[dev:compose] 拉取成功，标记为标准引用: ${image}`)
+          execFileSync('docker', ['tag', candidate, image], {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+        }
+        lastError = null
         break
       }
       catch (error) {
-        const message = commandErrorMessage(error)
-        if (attempt === IMAGE_PULL_ATTEMPTS || !isRetryableRegistryError(message)) {
-          throw new Error(`无法拉取开发基础镜像 ${image}。请检查 Docker 网络或代理后重试；也可先手动执行 docker pull ${image}。\n${message.trim()}`)
-        }
-        console.warn(`[dev:compose] 镜像拉取发生临时网络错误，${IMAGE_PULL_RETRY_DELAY_MS / 1000}s 后重试…`)
-        await wait(IMAGE_PULL_RETRY_DELAY_MS)
+        lastError = error
       }
+    }
+    if (lastError) {
+      const message = lastError instanceof Error ? lastError.message : String(lastError)
+      throw new Error(`无法拉取开发基础镜像 ${image}（已尝试镜像源：${DEV_PULL_MIRRORS.join(', ') || '无'}）。请检查 Docker 网络或代理后重试；也可先手动执行 docker pull ${image}。\n${message.trim()}`)
     }
   }
 }

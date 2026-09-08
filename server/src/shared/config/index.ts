@@ -9,7 +9,7 @@ import { resolveRepoRoot } from '../repo-root'
 
 const envSchema = z.object({
   SERVER_HOST: z.string().trim().min(1).default('0.0.0.0'),
-  SERVER_PORT: z.coerce.number().int().min(1).max(65535).default(9527),
+  SERVER_PORT: z.coerce.number().int().min(1).max(65535).default(8888),
   DB_PATH: z.string().trim().min(1).default('./data/game-server-hub.sqlite'),
   SERVER_LOG_DIR: z.string().trim().min(1).default('./logs'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),

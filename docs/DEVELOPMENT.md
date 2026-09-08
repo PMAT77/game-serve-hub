@@ -35,7 +35,7 @@ cp .env.development.example .env.development
 cp server/.env.development.example server/.env.development
 ```
 
-按需修改 `VITE_APP_API_BASEURL`（默认 `http://127.0.0.1:9527`）与后端 `SERVER_PORT`（默认 `9527`）。
+按需修改 `VITE_APP_API_BASEURL`（默认 `http://127.0.0.1:8888`）与后端 `SERVER_PORT`（默认 `8888`）。前端开发端口默认 `9527`，可用 `VITE_DEV_WEB_PORT` 覆盖。
 
 Docker Compose 开发模式使用 `panel.env.example`：
 
@@ -63,9 +63,9 @@ pnpm run dev
 
 | 服务 | 地址 | 说明 |
 |------|------|------|
-| 前端 | `http://127.0.0.1:9000` | Vite 开发服务器 |
-| 后端 | `http://127.0.0.1:9527` | Fastify API |
-| 健康检查 | `GET http://127.0.0.1:9527/health` | 含 Docker 状态 |
+| 前端 | `http://127.0.0.1:9527` | Vite 开发服务器 |
+| 后端 | `http://127.0.0.1:8888` | Fastify API |
+| 健康检查 | `GET http://127.0.0.1:8888/health` | 含 Docker 状态 |
 
 默认管理员（`panel.env` / 开发预填）：账号 `superadmin`，密码 `123456`（亦可在 `panel.env` 或 `.env.development` 中覆盖）。
 
@@ -86,13 +86,51 @@ pnpm run dev:compose             # 启动 panel + web 容器
 pnpm run dev:compose:down
 ```
 
-Compose 开发栈下面板端口见 `panel.env` 中 `PANEL_PORT`（示例默认 `3000`）。
+Compose 开发栈下面板端口见 `panel.env` 中 `PANEL_PORT`（示例默认 `8888`）。
 
 端口说明（避免与安装文档混淆）：
 
-- **源码开发（`pnpm run dev`）**：前端 `9000`，后端 `9527`（`SERVER_PORT` 默认值）。
-- **Compose 开发栈（`pnpm run dev:compose`）**：容器内服务监听 `3000`，宿主机映射由 `PANEL_PORT` 控制（示例默认 `3000`）。
+- **源码开发（`pnpm run dev`）**：前端 `9527`（`VITE_DEV_WEB_PORT` 可覆盖），后端 `8888`（`SERVER_PORT` 默认值）。
+- **Compose 开发栈（`pnpm run dev:compose`）**：容器内服务监听 `8888`，宿主机映射由 `PANEL_PORT` 控制（示例默认 `8888`）。
 - **安装脚本（生产安装）**：默认对外端口为 `9527`（见 `INSTALL.md` 与 `scripts/install.linux.sh`）。
+
+---
+
+## 已知问题（Windows 开发环境）
+
+### `pnpm run dev` 下后端日志中文乱码
+
+pino 输出是 UTF-8，PowerShell 默认按系统区域（GBK）解码显示。任选其一修复：
+
+- **仅当前终端**（每次开 shell 先执行）：
+
+  ```powershell
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+  chcp 65001 > $null
+  ```
+
+- **所有新终端**：把上面两行写进 PowerShell 配置文件（`notepad $PROFILE`；文件不存在先 `New-Item -Force $PROFILE`）。
+- **系统级一劳永逸**：设置 → 时间和语言 → 语言和区域 → 管理语言设置 → 更改系统区域设置 → 勾选 **“Beta: 使用 Unicode UTF-8 提供全球语言支持”** 后重启。副作用：极少数依赖 GBK 的旧程序可能反向乱码。
+
+### 端口被本机软件"精确环回绑定"静默劫持（案例：127.0.0.1:3000）
+
+症状：后端日志正常显示 `Server listening at http://0.0.0.0:3000`，但 `curl http://127.0.0.1:3000/health` 返回**别人的**纯文本 `Not Found`（404）——Fastify 的 404 是 JSON，纯文本说明应答的不是后端；前端经 vite 代理的登录请求同样 404。
+
+原理：Windows 允许 `0.0.0.0:PORT` 与 `127.0.0.1:PORT` 被不同进程同时绑定，且**环回流量优先交给绑定精确地址的进程**。本机常驻软件（案例：Mineradio.exe 绑定 `127.0.0.1:3000`）会静默截走后端（绑定 `0.0.0.0`）的全部环回流量，后端日志却毫无异常。
+
+诊断（注意：普通权限的 `netstat -ano` 可能漏报，**必须用管理员**）：
+
+```powershell
+# 管理员 PowerShell
+netstat -abno | findstr :3000     # LISTENING 行的 PID 即真凶
+Get-Process -Id <PID>             # 看进程名与路径
+```
+
+修复：结束/卸载占用软件，或后端换端口（`server.env.development` 设 `SERVER_PORT`，并同步 `.env.development` 的 `VITE_APP_API_BASEURL`）。排查时不要被表象带偏：重启 Docker/WSL/Rancher Desktop 均无效，因为劫持者只是个普通用户态进程。若占用者本身是开发环境依赖的组件（如 DSH 前端）不能结束，换端口是正确做法——**本仓库后端默认端口即因此从 3000 迁至 8888**。
+
+### `dev:compose` 下前端容器冷启动慢
+
+Rancher Desktop（WSL2 后端）把 Windows 源码目录 bind mount 进容器，文件 IO 走跨 VM 通道（实测同目录遍历慢约 35 倍）。vite 冷启动 ready 需要 70~80 秒，期间浏览器打开 `localhost:9527` 无响应**属正常现象**，等日志出现 `VITE ready in ...` 再访问。日常改前端代码建议直接用 `pnpm run dev`（原生 NTFS，约 13 秒 ready，HMR 也更可靠）。
 
 ---
 

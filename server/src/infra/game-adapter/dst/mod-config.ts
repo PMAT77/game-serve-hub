@@ -363,6 +363,56 @@ export function parseModOverridesConfigurations(installPath: string): Map<string
   }
 }
 
+export interface ParsedModOverridesEntry {
+  workshopId: string
+  /** modoverrides.lua 中 enabled 字段；缺省按 DST 语义视为 false */
+  enabled: boolean
+  configurationOptions: Record<string, string | number | boolean>
+}
+
+/**
+ * 解析任意路径的 modoverrides.lua 为有序 Mod 条目（存档导入反向入库用）。
+ * 文件不存在或解析失败返回空数组，绝不抛错；键序即文件出现序。
+ */
+export function parseModOverridesEntries(filePath: string): ParsedModOverridesEntry[] {
+  const entries: ParsedModOverridesEntry[] = []
+  try {
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).size > MAX_LUA_PARSE_LENGTH) {
+      return entries
+    }
+    const content = fs.readFileSync(filePath, 'utf8')
+    const table = parseLuaTableLiteral(content.replace(/^\s*return\s*/, ''))
+    if (!table) {
+      return entries
+    }
+    for (const [key, value] of table.entries) {
+      if (typeof key !== 'string' || !isLuaTable(value)) {
+        continue
+      }
+      const workshopId = key.replace(/^workshop-/, '').trim()
+      if (!workshopId) {
+        continue
+      }
+      const enabledValue = value.entries.get('enabled')
+      const enabled = enabledValue === true
+      const configurationOptions: Record<string, string | number | boolean> = {}
+      const configRaw = value.entries.get('configuration_options')
+      if (isLuaTable(configRaw)) {
+        for (const [configKey, configValue] of configRaw.entries) {
+          if (typeof configKey === 'string' && isLuaScalar(configValue)) {
+            configurationOptions[configKey] = configValue
+          }
+        }
+      }
+      entries.push({ workshopId, enabled, configurationOptions })
+    }
+    return entries
+  }
+  catch {
+    return entries
+  }
+}
+
 /** 序列化 Lua 表键：合法标识符直接使用，否则用 ["key"] 形式 */
 function serializeLuaConfigKey(key: string): string {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? key : '["' + key.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]'

@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { drizzle } from 'drizzle-orm/sqlite-proxy'
 import { migrate } from 'drizzle-orm/sqlite-proxy/migrator'
-import { SYSTEM_MANAGE_PERMISSION, SYSTEM_READ_PERMISSION } from '../menu-routes'
+import { OPS_MANAGE_PERMISSION, OPS_READ_PERMISSION, SYSTEM_MANAGE_PERMISSION, SYSTEM_READ_PERMISSION } from '../menu-routes'
 import {
   systemSettings,
   userPermissions,
@@ -46,6 +46,8 @@ const ADMIN_DEFAULT_PERMISSIONS = [
   'pages.node.instance:manage',
   SYSTEM_READ_PERMISSION,
   SYSTEM_MANAGE_PERMISSION,
+  OPS_READ_PERMISSION,
+  OPS_MANAGE_PERMISSION,
 ]
 const defaultUserSeeds: DbDefaultUserSeed[] = [
   {
@@ -61,6 +63,8 @@ const defaultUserSeeds: DbDefaultUserSeed[] = [
       'pages.node.instance:manage',
       SYSTEM_READ_PERMISSION,
       SYSTEM_MANAGE_PERMISSION,
+      OPS_READ_PERMISSION,
+      OPS_MANAGE_PERMISSION,
     ],
   },
   {

@@ -12,6 +12,7 @@ import { registerConsoleModule } from './modules/console'
 import { registerInstanceModule } from './modules/instance'
 import { registerNodeModule } from './modules/node'
 import { registerSystemModule } from './modules/system'
+import { registerBackupModule } from './modules/backup'
 import { getCachedDockerStatus } from './infra/docker'
 import { getCachedRuntimeStatus, isSteamcmdRuntimeReady } from './infra/runtime'
 import { success } from './shared/http/response'
@@ -112,7 +113,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
     })
   })
 
-  // 注册业务模块路由（config / backup / file 仍为占位，待实现后再注册）
+  // 注册业务模块路由（config / file 仍为占位，待实现后再注册；backup 已实现）
   registerAuthModule(app)
   registerSystemModule(app)
   registerNodeModule(app)
@@ -121,6 +122,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
   registerShardModule(app)
   registerModModule(app)
   registerConsoleModule(app)
+  registerBackupModule(app)
 
   if (config.mode === 'production') {
     // 打包后 bundle 位于 dist-server/，改从仓库根定位前端产物

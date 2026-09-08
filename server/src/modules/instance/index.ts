@@ -43,6 +43,8 @@ import {
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { ensureDstLayout } from '../../infra/game-adapter/dst/cluster-config'
 import { syncInstanceModFilesFromDb } from '../mod/mod-file-sync-service'
+import { createInstanceBackup } from '../backup/backup-service'
+import { getSystemBackupSettings } from '../../shared/db/index'
 import { allocateDstGamePort } from './dst-port-service'
 import { registerDstContainerCommandPort } from '../../shared/instance/dst-container-command-port'
 import { applyDstPortAutoAllocate, probeDstPortConflictForStart, resolveDstGamePortForStart } from './dst-port-sync'
@@ -698,6 +700,23 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
     if (memoryPressure) {
       return hostMemoryPressureError(memoryPressure, request)
     }
+    // 更新前自动备份存档（系统设置可关闭；失败仅告警，不阻断更新）
+    const backupSettings = await getSystemBackupSettings()
+    if (backupSettings.autoBackupBeforeUpdate && fs.existsSync(path.join(installPath, 'klei-storage'))) {
+      const backupResult = await createInstanceBackup({
+        app,
+        instanceId: id,
+        kind: 'pre_update',
+        note: `更新服务端前自动备份（Build ${localBuildId ?? '未知'}）`,
+        saveBeforeArchive: false,
+      })
+      if (backupResult.ok) {
+        app.log.info({ instanceId: id, backupId: backupResult.backup?.id }, '更新前自动备份完成')
+      }
+      else {
+        app.log.warn({ instanceId: id, message: backupResult.message }, '更新前自动备份失败，继续执行更新')
+      }
+    }
     // 须在 startInstallJob 之前写入 installing：本地复制可在数百毫秒内完成，
     // 若后置写入会覆盖 finalize 已设置的 stopped，重启后面板会误判为安装中断。
     await updateGameInstanceRuntime(id, {
@@ -1129,6 +1148,23 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
     const installPathError = validateInstallPath(installPath)
     if (installPathError) {
       return businessError(installPathError, request)
+    }
+    // 删除前自动备份存档（系统设置可关闭；失败仅告警，不阻断删除）
+    const backupSettings = await getSystemBackupSettings()
+    if (backupSettings.autoBackupBeforeDelete && fs.existsSync(path.join(installPath, 'klei-storage'))) {
+      const backupResult = await createInstanceBackup({
+        app,
+        instanceId: id,
+        kind: 'pre_delete',
+        note: `删除实例前自动备份（${current.name}）`,
+        saveBeforeArchive: false,
+      })
+      if (backupResult.ok) {
+        app.log.info({ instanceId: id, backupId: backupResult.backup?.id }, '删除前自动备份完成')
+      }
+      else {
+        app.log.warn({ instanceId: id, message: backupResult.message }, '删除前自动备份失败，继续执行删除')
+      }
     }
     // 先删数据库记录，再删磁盘目录：目录清理失败时最多留下孤儿文件，
     // 不会出现"记录还在、游戏文件已没"的无法自洽状态。

@@ -87,6 +87,7 @@ import {
 } from './panel-update'
 import { resolveActualPanelPortFromRequest } from './panel-port'
 import { syncDevComposeWebPort } from './dev-compose-env'
+import { registerDatabaseBackupRoutes } from './db-backup-routes'
 
 /**
  * system 模块注册入口
@@ -679,4 +680,6 @@ export function registerSystemModule(app: FastifyInstance) {
       message: '配置已受理，等待网关编排模块接入',
     }, request)
   })
+
+  registerDatabaseBackupRoutes(app)
 }

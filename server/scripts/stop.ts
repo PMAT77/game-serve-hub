@@ -48,7 +48,7 @@ function getPort(): number {
   if (filePort) {
     return filePort
   }
-  return 9527
+  return 8888
 }
 
 function getPidsByPort(port: number): number[] {

@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const BASE = 'http://127.0.0.1:9527'
+const BASE = 'http://127.0.0.1:8888'
 const INSTANCE_ID = process.argv[2]
 if (!INSTANCE_ID) {
   console.error('Usage: tsx regression-case4.ts <instanceId>')

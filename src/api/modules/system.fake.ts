@@ -63,7 +63,7 @@ export default defineFakeRoute([
       status: 1,
       data: {
         ...panelSettings,
-        apiPort: 9527,
+        apiPort: 8888,
       },
     }),
   },

@@ -414,6 +414,19 @@ export async function deleteInstanceModByWorkshopId(instanceId: string, workshop
   return true
 }
 
+/** 清空实例的全部 Mod 记录（存档导入时以源档 modoverrides 为准重建），返回删除条数 */
+export async function deleteInstanceModsByInstanceId(instanceId: string): Promise<number> {
+  const { drizzleDb } = ensureDb()
+  const rows = await drizzleDb
+    .select({ id: instanceMods.id })
+    .from(instanceMods)
+    .where(eq(instanceMods.instanceId, instanceId))
+  await drizzleDb
+    .delete(instanceMods)
+    .where(eq(instanceMods.instanceId, instanceId))
+  return rows.length
+}
+
 export async function updateGameInstanceStatus(id: string, status: DbGameInstanceStatus): Promise<DbGameInstance | undefined> {
   const { drizzleDb } = ensureDb()
   await drizzleDb

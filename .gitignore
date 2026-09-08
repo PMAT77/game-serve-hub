@@ -39,6 +39,9 @@ logs/
 debug-*.log
 *.ndjson
 
+# 历史测试残留（bug 产物：路径变量为 undefined 时落盘的目录）
+undefined/
+
 # Environment & secrets (track only *.example templates)
 .env
 .env.*

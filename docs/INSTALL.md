@@ -280,6 +280,18 @@ sudo systemctl start game-server-hub.service
 
 Docker 回滚时，把 `/opt/game-server-hub/panel.env` 中三个镜像 tag 改回同一旧版本，再执行 `docker compose pull && docker compose up -d`。不要执行带 `-v` 的 `docker compose down`。
 
+### 面板内备份与恢复（v0.2.0 起）
+
+日常备份不再需要 SSH。面板「备份与恢复」页提供：
+
+- **存档备份**：对单个实例的 `klei-storage`（世界数据、房间配置、集群令牌）打 tar.gz。实例运行中会先发送 `c_save()` 保存世界再打包；恢复前会自动创建一份安全备份。恢复要求实例已停止，恢复后可启动实例验证世界状态。
+- **自动备份钩子**：更新服务端前、删除实例前自动创建备份（系统级开关，默认开启）。
+- **保留策略**：每实例默认保留最近 10 份存档备份，超出自动淘汰最旧。
+- **数据库快照**：面板 SQLite 的 `VACUUM INTO` 一致性快照，默认保留 5 份；升级前的数据库备份仍由安装脚本完成。
+- **下载**：备份包可从面板直接下载到本地异地留存。
+
+备份文件落在 `/var/lib/game-server-hub/backups/`（Docker 卷 `gsh-backups`）。面板内备份不覆盖异地容灾：重要服建议配合定时下载或自行 rsync。
+
 ## 10. 诊断文件
 
 安装器按阶段写入：

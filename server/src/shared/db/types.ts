@@ -32,6 +32,17 @@ export interface DbSystemSteamcmdConfig {
   installRoot: string
 }
 
+export interface DbSystemBackupSettings {
+  /** 每实例存档备份保留上限（含自动钩子备份，0 = 不限制） */
+  perInstanceRetention: number
+  /** 数据库快照保留上限（0 = 不限制） */
+  dbSnapshotRetention: number
+  /** 更新服务端前自动备份 */
+  autoBackupBeforeUpdate: boolean
+  /** 删除实例前自动备份 */
+  autoBackupBeforeDelete: boolean
+}
+
 export interface DbServerNode {
   id: string
   name: string
@@ -171,4 +182,33 @@ export interface InsertMaintenancePushLogInput {
   operatorAccount: string
   status: DbMaintenancePushStatus
   errorMessage?: string | null
+}
+
+export type DbBackupKind = 'manual' | 'scheduled' | 'pre_update' | 'pre_delete' | 'pre_restore' | 'pre_import' | 'database'
+export type DbBackupStatus = 'completed' | 'failed' | 'stale'
+
+export interface DbBackup {
+  id: string
+  instanceId: string
+  filePath: string
+  sizeBytes: number
+  note: string
+  kind: DbBackupKind
+  status: DbBackupStatus
+  /** JSON 序列化的分片列表（如 ["master","caves"]），数据库快照为 null */
+  shards: string | null
+  createdBy: string
+  createdAt: string
+}
+
+export interface CreateBackupInput {
+  id: string
+  instanceId: string
+  filePath: string
+  sizeBytes: number
+  note?: string
+  kind?: DbBackupKind
+  status?: DbBackupStatus
+  shards?: string | null
+  createdBy?: string
 }

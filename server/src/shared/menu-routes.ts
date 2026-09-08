@@ -19,6 +19,8 @@ export interface MenuRouteItem {
 export const NODE_INSTANCE_MANAGE_PERMISSION = 'pages.node.instance:manage'
 export const SYSTEM_READ_PERMISSION = 'system:read'
 export const SYSTEM_MANAGE_PERMISSION = 'system:manage'
+export const OPS_READ_PERMISSION = 'ops:read'
+export const OPS_MANAGE_PERMISSION = 'ops:manage'
 
 /**
  * 后端驱动的动态菜单与路由（component 为 views/ 下相对路径）。
@@ -273,6 +275,41 @@ export const menuRouteList: MenuRouteItem[] = [
               menu: false,
               breadcrumb: false,
               activeMenu: '/system',
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    meta: {
+      title: '备份与恢复',
+      icon: 'ri:archive-line',
+    },
+    children: [
+      {
+        path: '/ops',
+        component: 'Layout',
+        name: 'ops',
+        redirect: FRONTEND_ROUTE_PATHS.opsBackups,
+        meta: {
+          title: '备份与恢复',
+          icon: 'ri:archive-line',
+          auth: OPS_READ_PERMISSION,
+        },
+        children: [
+          {
+            path: 'backups',
+            name: 'opsBackups',
+            component: 'ops/backups/index.vue',
+            meta: {
+              title: '备份与恢复',
+              icon: 'ri:archive-line',
+              auth: OPS_READ_PERMISSION,
+              menu: false,
+              breadcrumb: false,
+              activeMenu: FRONTEND_ROUTE_PATHS.opsBackups,
+              keepAlive: true,
             },
           },
         ],

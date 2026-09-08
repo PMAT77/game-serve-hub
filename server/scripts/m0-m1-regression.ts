@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const BASE = process.env.REGRESSION_BASE_URL ?? 'http://127.0.0.1:9527'
+const BASE = process.env.REGRESSION_BASE_URL ?? 'http://127.0.0.1:8888'
 const ACCOUNT = process.env.REGRESSION_ACCOUNT ?? 'superadmin'
 const PASSWORD = process.env.REGRESSION_PASSWORD ?? '123456'
 

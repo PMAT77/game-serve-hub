@@ -11,6 +11,7 @@ export const ROUTE_NAMES = {
   dstWorldSettings: 'dstWorldSettings',
   dstModList: 'dstModList',
   dstModDetail: 'dstModDetail',
+  opsBackups: 'opsBackups',
 } as const
 
 export { FRONTEND_ROUTE_PATHS }
@@ -52,4 +53,8 @@ export function routeToDstModDetail(workshopId: string, instanceId: string): Rou
     params: { workshopId },
     query: { instanceId },
   }
+}
+
+export function routeToOpsBackups(): RouteLocationRaw {
+  return { name: ROUTE_NAMES.opsBackups }
 }

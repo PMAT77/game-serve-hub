@@ -7,14 +7,14 @@ services:
     container_name: game-server-hub-panel
     restart: unless-stopped
     ports:
-      - "${PANEL_PORT:-3000}:3000"
+      - "${PANEL_PORT:-8888}:8888"
     # 可选：复制 panel.env.example 为 panel.env；安装脚本亦可通过 --env-file 注入
     environment:
       NODE_ENV: production
       GSH_PANEL_CONTAINER_NAME: game-server-hub-panel
       SERVER_HOST: 0.0.0.0
-      SERVER_PORT: "3000"
-      GSH_PANEL_PUBLISHED_PORT: ${PANEL_PORT:-3000}
+      SERVER_PORT: "8888"
+      GSH_PANEL_PUBLISHED_PORT: ${PANEL_PORT:-8888}
       DB_PATH: /app/data/game-server-hub.sqlite
       SERVER_LOG_DIR: /app/logs
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances

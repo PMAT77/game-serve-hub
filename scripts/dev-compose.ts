@@ -32,7 +32,7 @@ function readEnvFileVar(key: string): string | undefined {
   return undefined
 }
 
-const panelPort = process.env.PANEL_PORT?.trim() || readEnvFileVar('PANEL_PORT') || '3000'
+const panelPort = process.env.PANEL_PORT?.trim() || readEnvFileVar('PANEL_PORT') || '8888'
 const webPort = process.env.VITE_DEV_WEB_PORT?.trim() || readEnvFileVar('VITE_DEV_WEB_PORT') || '9527'
 const panelUrl = `http://127.0.0.1:${panelPort}`
 const webUrl = `http://127.0.0.1:${webPort}`

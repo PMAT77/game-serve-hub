@@ -34,6 +34,8 @@ export default defineConfig(({ mode, command }) => {
     server: {
       open: false,
       host: true,
+      // 前端默认 9527；后端默认 8888（server/src/shared/config），互不冲突。
+      // 显式设置 VITE_DEV_WEB_PORT 时优先生效（dev:compose 栈同样为 9527）
       port: resolveDevPort(9527),
       strictPort: true,
       clearScreen: false,

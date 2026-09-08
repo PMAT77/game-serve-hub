@@ -4,7 +4,7 @@
  */
 import { execSync } from 'node:child_process'
 
-const BASE = process.env.REGRESSION_BASE_URL ?? 'http://127.0.0.1:3000'
+const BASE = process.env.REGRESSION_BASE_URL ?? 'http://127.0.0.1:8888'
 const ACCOUNT = process.env.REGRESSION_ACCOUNT ?? 'superadmin'
 const PASSWORD = process.env.REGRESSION_PASSWORD ?? '123456'
 const INSTANCE_NAME = process.env.REGRESSION_INSTANCE_NAME ?? 'reg-m1-shard'

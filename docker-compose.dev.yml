@@ -16,8 +16,8 @@ services:
       NODE_NO_WARNINGS: "1"
       LOG_LEVEL: ${LOG_LEVEL:-info}
       SERVER_HOST: 0.0.0.0
-      SERVER_PORT: "3000"
-      GSH_PANEL_PUBLISHED_PORT: ${PANEL_PORT:-3000}
+      SERVER_PORT: "8888"
+      GSH_PANEL_PUBLISHED_PORT: ${PANEL_PORT:-8888}
       DB_PATH: /app/data/game-server-hub.sqlite
       SERVER_LOG_DIR: /app/logs
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
@@ -43,7 +43,7 @@ services:
       - gsh-instances:/var/lib/game-server-hub/instances
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "${PANEL_PORT:-3000}:3000"
+      - "${PANEL_PORT:-8888}:8888"
     deploy:
       resources:
         limits:
@@ -55,7 +55,7 @@ services:
     working_dir: /app
     command: ["sh", "-c", "corepack enable && if [ ! -f node_modules/.modules.yaml ]; then pnpm install; fi && pnpm run dev:web"]
     environment:
-      VITE_APP_API_BASEURL: http://panel:3000
+      VITE_APP_API_BASEURL: http://panel:8888
       VITE_ENABLE_PROXY: "true"
       VITE_DEV_WEB_PORT: ${VITE_DEV_WEB_PORT:-9527}
       GSH_DEV_COMPOSE_QUIET: "1"

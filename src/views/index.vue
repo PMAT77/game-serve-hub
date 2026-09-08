@@ -51,13 +51,23 @@ const products = ref([
       '地图与规则可视化编辑',
     ],
   },
+  {
+    name: '备份与恢复',
+    tagline: '单机完整生命周期管理的安全网',
+    url: LINKS.docs,
+    features: [
+      '存档一键备份 / 恢复（tar.gz）',
+      '更新、删除实例前自动备份',
+      '面板数据库一致性快照',
+    ],
+  },
 ])
 
 const useCases = ref([
   { title: '个人开服', description: 'VPS 或家用 Linux 一条命令拉起面板与 DST 实例' },
   { title: '小圈子联机', description: '控制台看日志、下发命令，减少 SSH 维护' },
   { title: '社区服运营', description: '监控台掌握 CPU、内存、磁盘与 Docker 状态' },
-  { title: '进阶运维', description: 'Mod、备份、计划任务等能力按版本路线图发布' },
+  { title: '进阶运维', description: 'Mod、备份恢复已内置；计划任务、告警等能力按版本路线图发布' },
 ])
 
 function open(url: string) {

@@ -50,6 +50,13 @@ export const backups = sqliteTable('backups', {
   filePath: text('file_path').notNull(),
   sizeBytes: integer('size_bytes').notNull().default(0),
   note: text('note').notNull().default(''),
+  /** 备份来源：manual/scheduled/pre_update/pre_delete/pre_restore/database */
+  kind: text('kind').notNull().default('manual'),
+  /** completed=文件完整；failed=创建失败残留；stale=文件已丢失 */
+  status: text('status').notNull().default('completed'),
+  /** 打包时的分片结构快照（JSON 数组，如 ["master","caves"]），数据库快照为 null */
+  shards: text('shards'),
+  createdBy: text('created_by').notNull().default(''),
   createdAt: text('created_at').notNull(),
 })
 

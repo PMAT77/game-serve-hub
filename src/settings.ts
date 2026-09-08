@@ -9,6 +9,7 @@ export default setSettings({
     "dynamicTitle": true
   },
   "menu": {
+    "mode": "single",
     "mainMenuClickMode": "smart"
   },
   "topbar": {

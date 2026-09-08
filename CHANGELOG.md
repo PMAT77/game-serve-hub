@@ -6,6 +6,14 @@
 
 ### Added
 
+- 新增「存档导入」：将外部 Klei DST 集群存档目录（支持集群目录、`DoNotStarveTogether/<用户ID>/Cluster_N` 等层级）一键导入为指定实例的世界存档。导入前自动创建「导入前」安全备份；世界数据与房间设置保留源档，端口自动重写为本实例配置并同步数据库，避免多实例端口冲突；源档 Mod 反向写入面板 Mod 列表（`pre_import` 备份类型，工作坊内容缺失时提示）；导入与恢复共用实例级互斥锁。入口在「备份与恢复」页。
+
+- 新增「备份与恢复」：实例存档一键备份/恢复（klei-storage 全量 tar.gz）、流式下载、保留策略（默认每实例 10 份）、更新/删除实例前自动备份钩子；面板 SQLite 数据库快照（VACUUM INTO，默认保留 5 份）。恢复前自动创建安全备份，运行中实例拒绝恢复。配套新增 `ops:read`/`ops:manage` 权限点与导航「备份与恢复」页。
+
+### Changed
+
+- 后端默认监听端口从 `3000` 迁移至 `8888`（避免与本机常驻开发环境服务冲突，详见 `docs/DEVELOPMENT.md` 已知问题）；生产安装的对外端口仍为 `9527`（安装脚本显式写入 `SERVER_PORT`），不受影响。
+
 - 新增 Docker / Native systemd 双运行时；Native 模式下的面板、SteamCMD 和 DST 分片均不依赖 Docker。
 - Linux 安装器新增 `--mode auto|docker|native` 与 `--network auto|cn|global`，支持国内 apt 镜像、SteamCMD 重试和多源安装资源回退。
 - GitHub Release 流程新增 Linux x64 Native 包与同名 SHA256 文件。

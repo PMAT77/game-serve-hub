@@ -13,6 +13,20 @@ export const ErrorCode = {
   INSTANCE_PORT_CONFLICT: 'INSTANCE_PORT_CONFLICT',
   /** 宿主机可用内存不足，无法执行安装/启动等重操作 */
   HOST_MEMORY_PRESSURE: 'HOST_MEMORY_PRESSURE',
+  /** 备份记录不存在（或文件已丢失且无法操作） */
+  BACKUP_NOT_FOUND: 'BACKUP_NOT_FOUND',
+  /** 备份对应的实例必须处于停止状态才能执行（恢复场景） */
+  BACKUP_REQUIRES_STOPPED: 'BACKUP_REQUIRES_STOPPED',
+  /** 备份包文件在磁盘上已丢失 */
+  BACKUP_FILE_MISSING: 'BACKUP_FILE_MISSING',
+  /** 备份创建失败 */
+  BACKUP_CREATE_FAILED: 'BACKUP_CREATE_FAILED',
+  /** 存档恢复失败 */
+  BACKUP_RESTORE_FAILED: 'BACKUP_RESTORE_FAILED',
+  /** 存档导入源目录无效（缺失 cluster.ini 等） */
+  BACKUP_IMPORT_SOURCE_INVALID: 'BACKUP_IMPORT_SOURCE_INVALID',
+  /** 存档导入执行失败 */
+  BACKUP_IMPORT_FAILED: 'BACKUP_IMPORT_FAILED',
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

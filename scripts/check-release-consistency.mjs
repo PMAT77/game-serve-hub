@@ -6,7 +6,7 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json
 const version = String(packageJson.version)
 const tag = `v${version}`
 
-// v0.2.1 起面板/DST/SteamCMD 合并为同一统一镜像；dst/steamcmd 引用默认与面板一致。
+// v0.2.0 起面板/DST/SteamCMD 合并为同一统一镜像；dst/steamcmd 引用默认与面板一致。
 const unifiedImage = `ghcr.io/pmat77/game-server-hub:${tag}`
 
 const requiredReferences = new Map([

@@ -73,8 +73,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <FaPageMain title="游戏运行时">
-    <p class="mb-4 text-sm text-muted-foreground">
+  <div class="space-y-4">
+    <p class="text-sm text-muted-foreground">
       <template v-if="isNativeMode">
         SteamCMD 与游戏进程直接运行在宿主机，由 systemd 管理启动、自恢复、日志和资源限制。
       </template>
@@ -171,5 +171,5 @@ onMounted(() => {
           : '面板无法连接 Docker。请确认 Docker 已启动，且 Compose 部署时已挂载 Docker 套接字。' }}
       </p>
     </div>
-  </FaPageMain>
+  </div>
 </template>

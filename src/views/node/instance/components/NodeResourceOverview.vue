@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { NodeListItem } from '@/api/modules/node'
-import { NButton, NStatistic, NTag } from 'naive-ui'
+import { NAlert, NButton, NEmpty, NStatistic, NTag } from 'naive-ui'
 import { onMounted, ref } from 'vue'
-import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
 import apiNode from '@/api/modules/node'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 import { formatDateTime, formatPercent } from '../utils'
@@ -21,7 +20,6 @@ const nodes = ref<NodeListItem[]>([])
 const {
   loading,
   error,
-  showPageSkeleton,
   showEmpty,
   showError,
   runLoad,
@@ -53,8 +51,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <FaPageMain title="节点资源概览">
-    <p class="mb-4 text-sm text-muted-foreground">
+  <div class="space-y-4">
+    <p class="text-sm text-muted-foreground">
       查看各节点 CPU、内存与磁盘占用。节点离线时请先重注册本地节点。
     </p>
     <section class="p-4 border border-border rounded-xl bg-card space-y-4">
@@ -69,68 +67,75 @@ onMounted(() => {
         </div>
       </div>
 
-      <AdminPageFeedback
-        :show-skeleton="showPageSkeleton"
-        :show-error="showError"
-        :error-message="error"
-        :show-empty="showEmpty"
-        empty-description="暂无可用节点"
-        empty-action-label="重注册本地节点"
-        @retry="fetchNodes"
-        @empty-action="registerLocalNode"
+      <div v-if="showError" class="space-y-3" role="alert">
+        <NAlert type="error" title="加载失败">
+          {{ error }}
+        </NAlert>
+        <NButton size="small" @click="fetchNodes">
+          重试
+        </NButton>
+      </div>
+      <NEmpty
+        v-else-if="showEmpty"
+        description="暂无可用节点"
       >
-        <div class="gap-3 grid md:grid-cols-2 xl:grid-cols-3">
-          <article
-            v-for="node in nodes"
-            :key="node.id"
-            class="p-4 border border-border/80 rounded-lg bg-background"
-          >
-            <div class="flex gap-2 items-start justify-between">
-              <div>
-                <p class="text-sm font-semibold">
-                  {{ node.name }}
-                </p>
-                <p class="text-xs text-muted-foreground mt-1">
-                  {{ node.host }}:{{ node.sshPort }}
-                </p>
-              </div>
-              <NTag
-                size="small"
-                :bordered="false"
-                :type="node.status === 'online' ? 'success' : 'error'"
-              >
-                {{ node.status === 'online' ? '在线' : '离线' }}
-              </NTag>
+        <template #extra>
+          <NButton type="primary" @click="registerLocalNode">
+            重注册本地节点
+          </NButton>
+        </template>
+      </NEmpty>
+      <div v-else class="gap-3 grid md:grid-cols-2 xl:grid-cols-3">
+        <article
+          v-for="node in nodes"
+          :key="node.id"
+          class="p-4 border border-border/80 rounded-lg bg-background"
+        >
+          <div class="flex gap-2 items-start justify-between">
+            <div>
+              <p class="text-sm font-semibold">
+                {{ node.name }}
+              </p>
+              <p class="text-xs text-muted-foreground mt-1">
+                {{ node.host }}:{{ node.sshPort }}
+              </p>
             </div>
-            <div class="text-xs mt-3 gap-2 grid grid-cols-3">
-              <div class="p-2 rounded-md bg-muted/50">
-                <NStatistic label="CPU" tabular-nums>
-                  <template #default>
-                    <span class="text-sm font-semibold">{{ formatPercent(node.resources.cpu.usageRate) }}</span>
-                  </template>
-                </NStatistic>
-              </div>
-              <div class="p-2 rounded-md bg-muted/50">
-                <NStatistic label="内存" tabular-nums>
-                  <template #default>
-                    <span class="text-sm font-semibold">{{ formatPercent(node.resources.memory.usageRate) }}</span>
-                  </template>
-                </NStatistic>
-              </div>
-              <div class="p-2 rounded-md bg-muted/50">
-                <NStatistic label="磁盘" tabular-nums>
-                  <template #default>
-                    <span class="text-sm font-semibold">{{ formatPercent(node.resources.disk.usageRate) }}</span>
-                  </template>
-                </NStatistic>
-              </div>
+            <NTag
+              size="small"
+              :bordered="false"
+              :type="node.status === 'online' ? 'success' : 'error'"
+            >
+              {{ node.status === 'online' ? '在线' : '离线' }}
+            </NTag>
+          </div>
+          <div class="text-xs mt-3 gap-2 grid grid-cols-3">
+            <div class="p-2 rounded-md bg-muted/50">
+              <NStatistic label="CPU" tabular-nums>
+                <template #default>
+                  <span class="text-sm font-semibold">{{ formatPercent(node.resources.cpu.usageRate) }}</span>
+                </template>
+              </NStatistic>
             </div>
-            <p class="text-xs text-muted-foreground mt-3">
-              最近心跳：{{ formatDateTime(node.lastHeartbeatAt) }}
-            </p>
-          </article>
-        </div>
-      </AdminPageFeedback>
+            <div class="p-2 rounded-md bg-muted/50">
+              <NStatistic label="内存" tabular-nums>
+                <template #default>
+                  <span class="text-sm font-semibold">{{ formatPercent(node.resources.memory.usageRate) }}</span>
+                </template>
+              </NStatistic>
+            </div>
+            <div class="p-2 rounded-md bg-muted/50">
+              <NStatistic label="磁盘" tabular-nums>
+                <template #default>
+                  <span class="text-sm font-semibold">{{ formatPercent(node.resources.disk.usageRate) }}</span>
+                </template>
+              </NStatistic>
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground mt-3">
+            最近心跳：{{ formatDateTime(node.lastHeartbeatAt) }}
+          </p>
+        </article>
+      </div>
     </section>
-  </FaPageMain>
+  </div>
 </template>

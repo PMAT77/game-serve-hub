@@ -9,6 +9,7 @@ import {
   NEmpty,
   NImage,
   NScrollbar,
+  NSpin,
   NTag,
   useDialog,
   useMessage,
@@ -20,7 +21,6 @@ import apiMod from '@/api/modules/mod'
 import { useInstanceModState } from '@/composables/useInstanceModState'
 import { useModContentLocale } from '@/composables/useModContentLocale'
 import { routeToDstModList, routeToDstWorldSettings } from '@/navigation/game-routes'
-import DstModDetailSkeleton from './components/DstModDetailSkeleton.vue'
 
 defineOptions({
   name: 'DstModDetail',
@@ -367,7 +367,7 @@ watch(contentLocale, () => {
         </div>
       </template>
 
-      <DstModDetailSkeleton v-if="loading" class="flex min-h-0 flex-1 flex-col" />
+      <NSpin v-if="loading" size="large" class="mx-auto my-8" />
 
       <NEmpty
         v-else-if="!instanceId"

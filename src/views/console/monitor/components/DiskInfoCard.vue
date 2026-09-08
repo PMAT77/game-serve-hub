@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemInfoData } from './types'
-import { NProgress, NSkeleton } from 'naive-ui'
+import { NProgress } from 'naive-ui'
 
 defineOptions({
   name: 'DiskInfoCard',
@@ -33,16 +33,10 @@ const diskPercent = computed(() => {
     </div>
     <div>
       <div class="font-semibold">
-        <NSkeleton v-if="loading" text animated :sharp="false" width="180px" />
-        <template v-else>
-          {{ info?.disk.usedGb ?? '--' }} / {{ info?.disk.totalGb ?? '--' }} GB
-        </template>
+        {{ info?.disk.usedGb ?? '--' }} / {{ info?.disk.totalGb ?? '--' }} GB
       </div>
       <div class="text-xs text-muted-foreground mt-1">
-        <NSkeleton v-if="loading" text animated :repeat="1" :sharp="false" width="120px" />
-        <template v-else>
-          可用 {{ info?.disk.freeGb ?? '--' }} GB
-        </template>
+        可用 {{ info?.disk.freeGb ?? '--' }} GB
       </div>
     </div>
   </div>

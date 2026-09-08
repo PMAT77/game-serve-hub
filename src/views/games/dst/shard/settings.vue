@@ -13,7 +13,7 @@ import {
   NCard,
   NEmpty,
   NForm,
-  NSkeleton,
+  NSpin,
   NTabPane,
   NTabs,
   NTag,
@@ -475,9 +475,7 @@ onActivated(() => {
       </div>
     </template>
 
-    <div v-if="loading && !shardList" class="space-y-3" aria-busy="true">
-      <NSkeleton v-for="i in 6" :key="i" text />
-    </div>
+    <NSpin v-if="loading && !shardList" size="large" class="block mx-auto my-8" />
     <template v-else>
       <NEmpty
         v-if="!shardList"

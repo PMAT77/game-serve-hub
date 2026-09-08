@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemInfoData } from './types'
-import { NPopover, NProgress, NSkeleton, NSpace } from 'naive-ui'
+import { NPopover, NProgress, NSpace } from 'naive-ui'
 
 defineOptions({
   name: 'MemoryInfoCard',
@@ -29,16 +29,10 @@ const memoryGuidance = computed(() => props.info?.memoryGuidance ?? null)
     </div>
     <div>
       <div class="font-semibold">
-        <NSkeleton v-if="loading" text animated :sharp="false" width="160px" />
-        <template v-else>
-          {{ info?.memory.usedGb ?? '--' }} / {{ info?.memory.totalGb ?? '--' }} GB
-        </template>
+        {{ info?.memory.usedGb ?? '--' }} / {{ info?.memory.totalGb ?? '--' }} GB
       </div>
       <div class="text-xs text-muted-foreground mt-1">
-        <NSkeleton v-if="loading" text animated :repeat="1" :sharp="false" width="96px" />
-        <template v-else>
-          使用率 {{ info?.memory.usageRate ?? '--' }}%
-        </template>
+        使用率 {{ info?.memory.usageRate ?? '--' }}%
       </div>
     </div>
   </div>

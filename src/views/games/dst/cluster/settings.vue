@@ -17,8 +17,8 @@ import {
   NRadio,
   NRadioGroup,
   NSelect,
-  NSkeleton,
   NSpace,
+  NSpin,
   NSwitch,
   NTooltip,
   useDialog,
@@ -413,9 +413,7 @@ onActivated(() => {
       </div>
     </template>
 
-    <div v-if="loading && !serverConfig" class="space-y-3" aria-busy="true">
-      <NSkeleton v-for="i in 8" :key="i" text />
-    </div>
+    <NSpin v-if="loading && !serverConfig" size="large" class="block mx-auto my-8" />
     <div v-else-if="loadError || !serverConfig" class="space-y-4" role="alert">
       <NAlert type="error" title="无法加载房间配置">
         {{ loadError ?? '当前配置不可用，请重新加载后再编辑。' }}

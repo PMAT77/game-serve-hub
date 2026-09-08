@@ -2,10 +2,9 @@
 import type { DataTableColumns } from 'naive-ui'
 import type { ClusterNetworkMode } from '@/api/modules/cluster'
 import type { DstInstanceSummaryDto } from '@/api/modules/dst-summary'
-import { NButton, NDataTable, NTag, NTooltip } from 'naive-ui'
+import { NAlert, NButton, NDataTable, NEmpty, NTag, NTooltip } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
 import AdminListToolbar from '@/components/AdminListToolbar.vue'
-import AdminPageFeedback from '@/components/AdminPageFeedback.vue'
 import apiDstSummary from '@/api/modules/dst-summary'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 import { routeToDstRoomSettings, routeToNodeInstance } from '@/navigation/game-routes'
@@ -25,8 +24,6 @@ const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
 const {
   loading,
   error,
-  showPageSkeleton,
-  showTableLoading,
   showEmpty,
   showError,
   initialLoadDone,
@@ -220,74 +217,78 @@ onMounted(() => {
       </template>
     </AdminListToolbar>
 
-    <AdminPageFeedback
-      :show-skeleton="showPageSkeleton"
-      :show-error="showError"
-      :error-message="error"
-      :show-empty="showEmpty"
-      empty-description="暂无已安装的 DST 实例"
-      empty-action-label="前往实例管理"
-      @retry="loadRows"
-      @empty-action="goToInstanceManagement"
-    >
-      <template v-if="hasFilteredRows">
-        <NDataTable
-          v-if="!isMobileMode"
-          :bordered="false"
-          :single-line="false"
-          :columns="columns"
-          :data="filteredRows"
-          :loading="showTableLoading"
-          :scroll-x="1000"
-        />
-        <div v-else class="space-y-3" :aria-busy="showTableLoading">
-          <article
-            v-for="row in filteredRows"
-            :key="row.instance.id"
-            class="rounded-lg border border-border bg-card p-4 space-y-3"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <h2 class="truncate font-medium">
-                  {{ row.instance.name }}
-                </h2>
-                <p class="mt-1 text-sm text-muted-foreground truncate">
-                  {{ row.room.clusterName || '尚未配置房间名称' }}
-                </p>
-              </div>
-              <NTag size="small" :bordered="false" :type="statusTagType(getInstanceState(row.instance).tone)">
-                {{ getInstanceState(row.instance).label }}
-              </NTag>
+    <div v-if="showError" class="space-y-3" role="alert">
+      <NAlert type="error" title="加载失败">
+        {{ error }}
+      </NAlert>
+      <NButton size="small" @click="loadRows">
+        重试
+      </NButton>
+    </div>
+    <template v-else-if="hasFilteredRows">
+      <NDataTable
+        v-if="!isMobileMode"
+        :bordered="false"
+        :single-line="false"
+        :columns="columns"
+        :data="filteredRows"
+        :loading="loading"
+        :scroll-x="1000"
+      />
+      <div v-else class="space-y-3" :aria-busy="loading">
+        <article
+          v-for="row in filteredRows"
+          :key="row.instance.id"
+          class="rounded-lg border border-border bg-card p-4 space-y-3"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h2 class="truncate font-medium">
+                {{ row.instance.name }}
+              </h2>
+              <p class="mt-1 text-sm text-muted-foreground truncate">
+                {{ row.room.clusterName || '尚未配置房间名称' }}
+              </p>
             </div>
-            <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-              <div>
-                <dt class="text-muted-foreground">联机模式</dt>
-                <dd>{{ row.room.networkMode ? networkModeLabel[row.room.networkMode] : '—' }}</dd>
-              </div>
-              <div>
-                <dt class="text-muted-foreground">在线人数</dt>
-                <dd>{{ formatOnlinePlayers(row) }}</dd>
-              </div>
-              <div>
-                <dt class="text-muted-foreground">洞穴</dt>
-                <dd>{{ buildCavesSummary(row.room.shardEnabled, row.world.caves?.configured).label }}</dd>
-              </div>
-              <div v-if="row.room.error" class="col-span-2 text-amber-600 dark:text-amber-400">
-                {{ row.room.error }}
-              </div>
-            </dl>
-            <NButton block @click="openSettings(row.instance.id)">
-              配置房间
-            </NButton>
-          </article>
-        </div>
-      </template>
-      <div
-        v-else-if="showFilteredEmpty"
-        class="text-muted-foreground py-12 text-center text-sm"
-      >
-        没有匹配「{{ keywordFilter }}」的房间，请调整关键词或重置筛选。
+            <NTag size="small" :bordered="false" :type="statusTagType(getInstanceState(row.instance).tone)">
+              {{ getInstanceState(row.instance).label }}
+            </NTag>
+          </div>
+          <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+            <div>
+              <dt class="text-muted-foreground">联机模式</dt>
+              <dd>{{ row.room.networkMode ? networkModeLabel[row.room.networkMode] : '—' }}</dd>
+            </div>
+            <div>
+              <dt class="text-muted-foreground">在线人数</dt>
+              <dd>{{ formatOnlinePlayers(row) }}</dd>
+            </div>
+            <div>
+              <dt class="text-muted-foreground">洞穴</dt>
+              <dd>{{ buildCavesSummary(row.room.shardEnabled, row.world.caves?.configured).label }}</dd>
+            </div>
+            <div v-if="row.room.error" class="col-span-2 text-amber-600 dark:text-amber-400">
+              {{ row.room.error }}
+            </div>
+          </dl>
+          <NButton block @click="openSettings(row.instance.id)">
+            配置房间
+          </NButton>
+        </article>
       </div>
-    </AdminPageFeedback>
+    </template>
+    <div
+      v-else-if="showFilteredEmpty"
+      class="text-muted-foreground py-12 text-center text-sm"
+    >
+      没有匹配「{{ keywordFilter }}」的房间，请调整关键词或重置筛选。
+    </div>
+    <NEmpty v-else-if="showEmpty" description="暂无已安装的 DST 实例">
+      <template #extra>
+        <NButton type="primary" @click="goToInstanceManagement">
+          前往实例管理
+        </NButton>
+      </template>
+    </NEmpty>
   </FaPageMain>
 </template>

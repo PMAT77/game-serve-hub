@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemInfoData } from './types'
-import { NProgress, NSkeleton } from 'naive-ui'
+import { NProgress } from 'naive-ui'
 
 defineOptions({
   name: 'SystemLoadCard',
@@ -76,8 +76,7 @@ const loadStatusColor = computed(() => {
     </div>
     <div>
       <div class="font-semibold">
-        <NSkeleton v-if="loading" text animated :sharp="false" width="220px" />
-        <template v-else-if="isWindowsSyntheticLoad">
+        <template v-if="isWindowsSyntheticLoad">
           综合压力 {{ loadPercent.toFixed(2) }}% · CPU队列 {{ info?.load?.cpuQueueLength ?? '--' }} · 磁盘队列 {{ info?.load?.diskQueueLength ?? '--' }}
         </template>
         <template v-else>
@@ -85,10 +84,7 @@ const loadStatusColor = computed(() => {
         </template>
       </div>
       <div class="text-xs text-muted-foreground mt-1">
-        <NSkeleton v-if="loading" text animated :repeat="1" :sharp="false" width="120px" />
-        <template v-else>
-          归一化占用率 {{ loadPercent.toFixed(2) }}%
-        </template>
+        归一化占用率 {{ loadPercent.toFixed(2) }}%
       </div>
     </div>
   </div>

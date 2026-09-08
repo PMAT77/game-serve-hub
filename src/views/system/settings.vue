@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PanelSettingsPayload } from '@/api/modules/system'
-import { NAlert, NInputNumber, NSelect, NSkeleton, useDialog } from 'naive-ui'
+import { NAlert, NInputNumber, NSelect, NSpin, useDialog } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
 import apiSystem from '@/api/modules/system'
@@ -302,9 +302,7 @@ onActivated(async () => {
 
 <template>
   <FaPageMain title="系统设置" class="h-full">
-    <div v-if="loading" class="space-y-4" aria-busy="true" aria-label="加载中">
-      <NSkeleton v-for="i in 5" :key="i" text :style="{ width: i === 5 ? '40%' : '100%' }" />
-    </div>
+    <NSpin v-if="loading" size="large" class="block mx-auto my-8" />
     <div v-else-if="settingsLoadError || !settingsLoaded" class="space-y-4" role="alert">
       <NAlert type="error" title="无法加载系统设置">
         {{ settingsLoadError ?? '当前设置不可用，请重新加载后再编辑。' }}

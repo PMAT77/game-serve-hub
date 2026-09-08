@@ -117,9 +117,6 @@ declare global {
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
   // @ts-ignore
-  export type { AdminPageStateOptions, AdminEmptyAction } from '../composables/useAdminPageState'
-  import('../composables/useAdminPageState')
-  // @ts-ignore
   export type { ModInstallHandlers } from '../composables/useInstanceModState'
   import('../composables/useInstanceModState')
   // @ts-ignore

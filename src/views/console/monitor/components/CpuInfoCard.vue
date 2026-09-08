@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemInfoData } from './types'
-import { NProgress, NSkeleton } from 'naive-ui'
+import { NProgress } from 'naive-ui'
 
 defineOptions({
   name: 'CpuInfoCard',
@@ -29,16 +29,10 @@ const cpuPercent = computed(() => clampPercent(props.info?.cpu.usageRate ?? 0))
 
     <div>
       <div class="font-semibold">
-        <NSkeleton v-if="loading" text animated :sharp="false" width="72px" />
-        <template v-else>
-          {{ info?.cpu.cores ?? '--' }} 核
-        </template>
+        {{ info?.cpu.cores ?? '--' }} 核
       </div>
       <div class="text-xs text-muted-foreground mt-1">
-        <NSkeleton v-if="loading" text animated :repeat="1" :sharp="false" width="220px" />
-        <template v-else>
-          {{ info?.cpu.model ?? '--' }}
-        </template>
+        {{ info?.cpu.model ?? '--' }}
       </div>
     </div>
   </div>

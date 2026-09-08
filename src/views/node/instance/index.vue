@@ -30,25 +30,27 @@ function onSteamcmdStateChange(payload: { installed: boolean }) {
 
 <template>
   <div class="space-y-4">
-    <NCollapse v-model:expanded-names="envExpandedNames">
-      <NCollapseItem name="env">
-        <template #header>
-          <span class="font-medium">运行环境与安装镜像</span>
-          <NTag
-            size="small"
-            :bordered="false"
-            :type="steamcmdInstalled ? 'success' : 'warning'"
-            class="ml-2"
-          >
-            {{ steamcmdInstalled ? '就绪' : '需要初始化' }}
-          </NTag>
-        </template>
-        <div class="space-y-4">
-          <NodeResourceOverview @nodes-change="onNodesChange" />
-          <SteamcmdPanel @state-change="onSteamcmdStateChange" />
-        </div>
-      </NCollapseItem>
-    </NCollapse>
+    <FaPageMain>
+      <NCollapse v-model:expanded-names="envExpandedNames">
+        <NCollapseItem name="env">
+          <template #header>
+            <span class="font-medium">运行环境与安装镜像</span>
+            <NTag
+              size="small"
+              :bordered="false"
+              :type="steamcmdInstalled ? 'success' : 'warning'"
+              class="ml-2"
+            >
+              {{ steamcmdInstalled ? '就绪' : '需要初始化' }}
+            </NTag>
+          </template>
+          <div class="space-y-4">
+            <NodeResourceOverview @nodes-change="onNodesChange" />
+            <SteamcmdPanel @state-change="onSteamcmdStateChange" />
+          </div>
+        </NCollapseItem>
+      </NCollapse>
+    </FaPageMain>
     <InstanceManagement
       :nodes="nodes"
       :steamcmd-installed="steamcmdInstalled"

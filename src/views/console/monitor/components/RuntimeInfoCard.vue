@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemInfoData } from './types'
-import { NProgress, NSkeleton, NSpace } from 'naive-ui'
+import { NProgress, NSpace } from 'naive-ui'
 import { computed } from 'vue'
 
 defineOptions({
@@ -34,10 +34,7 @@ const statusClass = computed(() => (isRunning.value ? 'text-emerald-600' : hasDa
       {{ runtimeLabel }} 状态
     </div>
     <div class="font-semibold" :class="statusClass">
-      <NSkeleton v-if="props.loading" text animated :sharp="false" width="72px" />
-      <template v-else>
-        {{ statusText }}
-      </template>
+      {{ statusText }}
     </div>
   </div>
 

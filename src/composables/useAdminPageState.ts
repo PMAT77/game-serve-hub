@@ -1,22 +1,11 @@
 import { computed, ref, type Ref } from 'vue'
 
-export interface AdminPageStateOptions {
-  /** 是否在 loading 时仍展示已有数据（表格刷新场景） */
-  keepContentWhileLoading?: Ref<boolean>
-}
-
-export interface AdminEmptyAction {
-  label: string
-  onClick: () => void
-}
-
 /**
  * 管理后台列表/详情页统一三态：loading、empty、error。
- * 表格区优先用 NDataTable :loading；整页首次加载用 showPageSkeleton。
+ * 表格加载用 NDataTable :loading；空态用 NDataTable #empty 插槽 / NEmpty；错误态用 NAlert + 重试。
  */
 export function useAdminPageState<T>(
   data: Ref<T[] | T | null | undefined>,
-  options: AdminPageStateOptions = {},
 ) {
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -33,25 +22,9 @@ export function useAdminPageState<T>(
     return false
   })
 
-  const showPageSkeleton = computed(() => {
-    if (options.keepContentWhileLoading?.value && initialLoadDone.value) {
-      return false
-    }
-    return loading.value && !initialLoadDone.value
-  })
-
-  const showTableLoading = computed(() => loading.value && initialLoadDone.value)
-
   const showEmpty = computed(() => !loading.value && !error.value && isEmpty.value && initialLoadDone.value)
 
   const showError = computed(() => !loading.value && Boolean(error.value))
-
-  const showContent = computed(() => {
-    if (showPageSkeleton.value || showError.value || showEmpty.value) {
-      return false
-    }
-    return !isEmpty.value || (options.keepContentWhileLoading?.value && initialLoadDone.value)
-  })
 
   async function runLoad<T>(loader: () => Promise<T>): Promise<T | undefined> {
     loading.value = true
@@ -71,21 +44,12 @@ export function useAdminPageState<T>(
     }
   }
 
-  function clearError() {
-    error.value = null
-  }
-
   return {
     loading,
     error,
     initialLoadDone,
-    isEmpty,
-    showPageSkeleton,
-    showTableLoading,
     showEmpty,
     showError,
-    showContent,
     runLoad,
-    clearError,
   }
 }

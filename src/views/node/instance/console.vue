@@ -16,8 +16,8 @@ import {
   NInput,
   NRadioButton,
   NRadioGroup,
-  NSkeleton,
   NSpace,
+  NSpin,
   NSwitch,
   NTabPane,
   NTabs,
@@ -661,9 +661,7 @@ onBeforeUnmount(() => {
       </div>
 
       <NCard title="连接与加入" size="small">
-        <template v-if="connectInfoLoading && !connectInfo">
-          <NSkeleton text :repeat="4" />
-        </template>
+        <NSpin v-if="connectInfoLoading && !connectInfo" class="block mx-auto my-6" />
         <template v-else-if="connectInfo">
           <NDescriptions :column="1" label-placement="left" size="small" class="mb-3">
             <NDescriptionsItem label="房间名">

@@ -179,11 +179,8 @@ pnpm run build          # 输出 dist/
 ### 构建 Docker 镜像
 
 ```bash
-# 面板镜像（含 dist + 后端）
-docker build -t ghcr.io/pmat77/game-server-hub:local .
-
-# DST 运行环境镜像
-docker build -t ghcr.io/pmat77/game-server-hub-dst:local docker/game-dst
+# 统一镜像（面板 + DST 运行库 + SteamCMD）
+docker build -t ghcr.io/pmat77/game-server-hub:local docker/unified
 ```
 
 ### 本地 Compose 启动（非安装脚本路径）
@@ -196,8 +193,7 @@ docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind
 
 官方镜像由 GitHub Actions 在推送 `main` 或 `v*` tag 时发布至 GHCR：
 
-- `ghcr.io/pmat77/game-server-hub:<tag>`
-- `ghcr.io/pmat77/game-server-hub-dst:<tag>`
+- `ghcr.io/pmat77/game-server-hub:<tag>`（统一镜像，v0.2.0 起三合一）
 
 ---
 

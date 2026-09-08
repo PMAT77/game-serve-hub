@@ -222,19 +222,27 @@ jobs:
             docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r '.digest // empty'
           }
 
+          # 幂等：正式 tag 已存在说明本次 run 早前 attempt 已完成提升，直接成功（支持 Re-run）。
+          first_target="${IMAGE_PREFIX}/game-server-hub:${{ github.ref_name }}"
+          if promoted="$(remote_digest "${first_target}" 2>/dev/null)" && [[ -n "${promoted}" ]]; then
+            echo "Release tag already promoted: ${first_target}@${promoted}; nothing to do."
+            exit 0
+          fi
+
           # Finish every read-only check before creating any public tag.
+          # GHCR manifest 传播存在秒级延迟（尤其带 provenance/SBOM 的 index），带重试缓冲。
           for image in "${images[@]}"; do
             source="${IMAGE_PREFIX}/${image}:${candidate_tag}"
-            digest="$(remote_digest "${source}")"
+            digest=""
+            for attempt in 1 2 3 4 5 6; do
+              if digest="$(remote_digest "${source}" 2>/dev/null)" && [[ -n "${digest}" ]]; then
+                break
+              fi
+              echo "Candidate manifest not visible yet (${source}); retry ${attempt}/6..." >&2
+              sleep 10
+            done
             if [[ -z "${digest}" ]]; then
               echo "Missing candidate image: ${source}" >&2
-              exit 1
-            fi
-          done
-          for image in "${images[@]}"; do
-            target="${IMAGE_PREFIX}/${image}:${{ github.ref_name }}"
-            if existing="$(remote_digest "${target}" 2>/dev/null)" && [[ -n "${existing}" ]]; then
-              echo "Refusing to overwrite immutable release tag: ${target}@${existing}" >&2
               exit 1
             fi
           done

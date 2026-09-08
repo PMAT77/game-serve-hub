@@ -62,36 +62,28 @@ const settingsDirty = computed(() =>
   savedSnapshot.value !== '' && JSON.stringify({ ...form }) !== savedSnapshot.value,
 )
 
-const canApplyPanelUpdate = computed(() => {
+const canApplyImageUpdate = computed(() => {
   if (!updateStatus.value) {
     return false
   }
-  return updateStatus.value.panel.updateAvailable && updateStatus.value.panelApplySupported
+  return updateStatus.value.image.updateAvailable && updateStatus.value.imageApplySupported
 })
 
 const isNativeRuntime = computed(() => updateStatus.value?.runtimeMode === 'native')
-const panelVersionLabel = computed(() => isNativeRuntime.value ? '面板 Release' : '面板镜像')
-const dstVersionLabel = computed(() => isNativeRuntime.value ? 'DST 原生运行时' : 'DST 运行镜像')
-
-const canApplyDstUpdate = computed(() => {
-  if (!updateStatus.value) {
-    return false
-  }
-  return updateStatus.value.dst.updateAvailable && updateStatus.value.dstApplySupported
-})
+const imageVersionLabel = computed(() => isNativeRuntime.value ? '面板 Release' : '统一镜像')
 
 const canApplyUpdate = computed(() => {
   if (!updateStatus.value || updateStatus.value.updating) {
     return false
   }
-  return canApplyPanelUpdate.value || canApplyDstUpdate.value
+  return canApplyImageUpdate.value
 })
 
-const showPanelApplyHint = computed(() => {
+const showImageApplyHint = computed(() => {
   if (!updateStatus.value) {
     return false
   }
-  return updateStatus.value.panel.updateAvailable && !updateStatus.value.panelApplySupported
+  return updateStatus.value.image.updateAvailable && !updateStatus.value.imageApplySupported
 })
 
 const formattedLastCheckedAt = computed(() => formatDisplayDateTime(updateStatus.value?.lastCheckedAt ?? null))
@@ -136,14 +128,14 @@ function normalizeApplyHint(value: string | null): string | null {
     return null
   }
   if (/无法在容器内访问 compose|未配置 GSH_STACK_DIR|GSH_STACK_DIR 必须是绝对路径/.test(value)) {
-    return '面板镜像无法一键更新，请使用下方命令手动更新；DST 运行镜像仍可点击「立即更新」。'
+    return '无法一键更新统一镜像，请使用下方命令手动更新。'
   }
   return value
 }
 
 function formatImageLine(
   label: string,
-  info: NonNullable<typeof updateStatus.value>['panel'],
+  info: NonNullable<typeof updateStatus.value>['image'],
 ) {
   const version = info.releaseVersion || info.tag
   const digest = info.localDigestShort ? ` · ${info.localDigestShort}` : ''
@@ -203,8 +195,8 @@ async function checkHubUpdate() {
     if (normalizeCheckError(res.data.checkError)) {
       faToast.warning('无法完成远端版本检查，请查看下方检查提示')
     }
-    else if (res.data.panel.updateAvailable || res.data.dst.updateAvailable) {
-      faToast.info(isNativeRuntime.value ? '检测到面板 Release 有新版本' : '检测到面板镜像有新版本')
+    else if (res.data.image.updateAvailable) {
+      faToast.info(isNativeRuntime.value ? '检测到面板 Release 有新版本' : '检测到统一镜像有新版本')
     }
     else {
       faToast.success(isNativeRuntime.value ? '面板已是最新版本' : '面板镜像已是最新版本')
@@ -220,7 +212,7 @@ function confirmApplyHubUpdate() {
     title: '确认应用更新',
     content: isNativeRuntime.value
       ? '将原地升级面板；升级过程中面板会短暂不可用。是否继续？'
-      : '应用更新会拉取新镜像并短暂重启面板；游戏实例不受影响。是否继续？',
+      : '应用更新会拉取新统一镜像并短暂重启面板；游戏实例不受影响。是否继续？',
     positiveText: '立即更新',
     negativeText: '取消',
     onPositiveClick: () => applyHubUpdate(),
@@ -233,14 +225,7 @@ async function applyHubUpdate() {
   }
   applyLoading.value = true
   try {
-    const targets: Array<'panel' | 'dst'> = []
-    if (canApplyPanelUpdate.value) {
-      targets.push('panel')
-    }
-    if (canApplyDstUpdate.value) {
-      targets.push('dst')
-    }
-    const res = await apiSystem.applyPanelUpdate({ targets })
+    const res = await apiSystem.applyPanelUpdate()
     faToast.success(res.data.message)
     if (res.data.status === 'updating') {
       updateStatus.value = updateStatus.value
@@ -345,11 +330,10 @@ onActivated(async () => {
         title="面板与游戏版本"
         :description="isNativeRuntime
           ? '检查面板 Release；裸机模式通过校验安装包并保留旧版本的脚本原地升级。'
-          : '检查并应用面板与 DST 运行镜像更新。应用面板更新会短暂重启管理端。'"
+          : '检查并应用统一镜像更新（面板 + DST 运行环境 + SteamCMD）。应用更新会短暂重启管理端。'"
       >
         <div v-if="updateStatus" class="space-y-2 text-sm">
-          <p>{{ formatImageLine(panelVersionLabel, updateStatus.panel) }}</p>
-          <p>{{ formatImageLine(dstVersionLabel, updateStatus.dst) }}</p>
+          <p>{{ formatImageLine(imageVersionLabel, updateStatus.image) }}</p>
           <p v-if="updateStatus.release" class="text-muted-foreground">
             最新 Release：{{ updateStatus.release.tagName }}
             <span v-if="formattedLastCheckedAt"> · 上次检查 {{ formattedLastCheckedAt }}</span>
@@ -360,11 +344,11 @@ onActivated(async () => {
           <p v-if="normalizedCheckError" class="text-xs text-amber-600 dark:text-amber-400">
             检查提示：{{ normalizedCheckError }}
           </p>
-          <p v-if="normalizedApplyHint && showPanelApplyHint" class="text-xs text-muted-foreground">
+          <p v-if="normalizedApplyHint && showImageApplyHint" class="text-xs text-muted-foreground">
             {{ normalizedApplyHint }}
           </p>
           <pre
-            v-if="updateStatus.manualUpdateCommand && showPanelApplyHint"
+            v-if="updateStatus.manualUpdateCommand && showImageApplyHint"
             class="text-xs bg-muted overflow-x-auto p-3 rounded-md"
           >{{ updateStatus.manualUpdateCommand }}</pre>
           <div

@@ -1,11 +1,14 @@
 services:
   panel:
-    image: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.1.4}
+    image: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.2.0}
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/unified/Dockerfile
     container_name: game-server-hub-panel
     restart: unless-stopped
+    # 统一镜像保持中性（无 ENTRYPOINT/HEALTHCHECK/USER）：面板入口在此显式指定；
+    # DST/SteamCMD 子容器由面板创建时显式传入 Cmd/User。
+    command: ["node", "dist-server/main.js"]
     ports:
       - "${PANEL_PORT:-8888}:8888"
     # 可选：复制 panel.env.example 为 panel.env；安装脚本亦可通过 --env-file 注入
@@ -20,9 +23,12 @@ services:
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
-      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.1.4}
-      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub-dst:v0.1.4}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/steamcmd-base:v0.1.4}
+      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.2.0}
+      # v0.2.0 起面板/DST/SteamCMD 合并为同一统一镜像；三个变量值一致，保留以便旧配置平滑迁移
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.2.0}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.2.0}
+      # 备选镜像 registry 候选（逗号分隔）：按顺序优先尝试，全部失败后回退主引用
+      GSH_IMAGE_MIRRORS: ${GSH_IMAGE_MIRRORS:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB:-}
       GSH_STEAMCMD_APP_INFO_MEMORY_MB: ${GSH_STEAMCMD_APP_INFO_MEMORY_MB:-}
@@ -53,9 +59,17 @@ services:
       - gsh-instances:/var/lib/game-server-hub/instances
       - gsh-backups:/var/lib/game-server-hub/backups
       - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:'+(process.env.SERVER_PORT||8888)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
 
   steamcmd:
-    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/steamcmd-base:v0.1.4}
+    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.2.0}
     profiles:
       - tools
     entrypoint: ["/bin/true"]

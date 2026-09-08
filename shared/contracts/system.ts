@@ -129,30 +129,26 @@ export type GitHubReleaseSummary = z.infer<typeof gitHubReleaseSummarySchema>
 
 export const panelUpdateStatusSchema = z.object({
   runtimeMode: z.enum(['docker', 'native']),
-  panel: hubImageUpdateInfoSchema,
-  dst: hubImageUpdateInfoSchema,
+  /** v0.2.0 起统一镜像：面板/DST/SteamCMD 共用同一镜像，单一更新目标 */
+  image: hubImageUpdateInfoSchema,
   release: gitHubReleaseSummarySchema.nullable(),
   lastCheckedAt: z.string().nullable(),
   checking: z.boolean(),
   updating: z.boolean(),
   applySupported: z.boolean(),
-  panelApplySupported: z.boolean(),
-  dstApplySupported: z.boolean(),
+  imageApplySupported: z.boolean(),
   applyHint: z.string().nullable(),
   manualUpdateCommand: z.string().nullable(),
   checkError: z.string().nullable(),
 })
 export type PanelUpdateStatus = z.infer<typeof panelUpdateStatusSchema>
 
-export const panelUpdateApplyRequestSchema = z.object({
-  targets: z.array(z.enum(['panel', 'dst'])).max(2).optional(),
-})
+export const panelUpdateApplyRequestSchema = z.object({}).strict()
 export type PanelUpdateApplyRequest = z.infer<typeof panelUpdateApplyRequestSchema>
 
 export const panelUpdateApplyResponseSchema = z.object({
   status: z.enum(['updating', 'completed']),
   message: z.string(),
-  applied: z.array(z.enum(['panel', 'dst'])),
 })
 export type PanelUpdateApplyResponse = z.infer<typeof panelUpdateApplyResponseSchema>
 

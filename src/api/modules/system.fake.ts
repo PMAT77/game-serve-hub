@@ -10,27 +10,15 @@ let panelSettings = {
 
 const panelUpdateStatus = {
   runtimeMode: 'docker' as const,
-  panel: {
-    image: 'ghcr.io/pmat77/game-server-hub:v0.1.3',
+  image: {
+    image: 'ghcr.io/pmat77/game-server-hub:v0.2.0',
     tag: 'latest',
-    releaseVersion: '0.1.0',
+    releaseVersion: '0.2.0',
     localDigest: 'sha256:abc123',
     localDigestShort: 'abc123',
     remoteDigest: 'sha256:def456',
     remoteDigestShort: 'def456',
     updateAvailable: true,
-    localPresent: true,
-    checkError: null,
-  },
-  dst: {
-    image: 'ghcr.io/pmat77/game-server-hub-dst:v0.1.3',
-    tag: 'latest',
-    releaseVersion: '0.1.0',
-    localDigest: 'sha256:abc123',
-    localDigestShort: 'abc123',
-    remoteDigest: 'sha256:abc123',
-    remoteDigestShort: 'abc123',
-    updateAvailable: false,
     localPresent: true,
     checkError: null,
   },
@@ -45,10 +33,9 @@ const panelUpdateStatus = {
   checking: false,
   updating: false,
   applySupported: true,
-  panelApplySupported: false,
-  dstApplySupported: true,
+  imageApplySupported: false,
   applyHint: '开发环境未配置 GSH_STACK_DIR',
-  manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull && docker pull ghcr.io/pmat77/game-server-hub-dst:v0.1.3 && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d',
+  manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d',
   checkError: null,
 }
 
@@ -211,7 +198,7 @@ export default defineFakeRoute([
       data: {
         status: 'completed',
         message: 'DST 运行镜像已更新，下次启动实例时将使用新环境。',
-        applied: ['dst'],
+        applied: [],
       },
     }),
   },

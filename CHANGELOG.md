@@ -4,7 +4,16 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-08
+
 ### Added
+
+- **统一镜像**：面板（Node.js）+ DST 运行库 + SteamCMD 合并为单一 `game-server-hub` 镜像（Debian 12 基础），镜像保持中性（无 ENTRYPOINT/HEALTHCHECK/USER），面板入口由 compose 提供，健康检查移至 compose。镜像更新只需拉取应用代码层。
+- **国内可达分发**：安装器新增 `--registry auto|ghcr|aliyun|dockerhub`（自动探测可用 registry）；CI 支持 GHCR 之外同步推送阿里云 ACR / Docker Hub 并附带离线 `docker save` 压缩包；native 安装与安装资源镜像池更新国内加速节点并支持 `GSH_GITHUB_PROXY` 强制指定。
+- 新增 `gsh` 装后管理命令（`scripts/gsh.sh`）：status/start/stop/restart/logs/update/doctor/setup-swap 与交互菜单，Docker/Native 双模式适配；`doctor` 一键收集脱敏诊断，`setup-swap` 缓解小内存机 OOM。
+- 新增 `GSH_IMAGE_MIRRORS`：面板拉取镜像的备选 registry 候选（泛化自 `GSH_STEAMCMD_IMAGE_MIRRORS`，后者保留兼容）。
+
+### Changed
 
 - 新增「存档导入」：将外部 Klei DST 集群存档目录（支持集群目录、`DoNotStarveTogether/<用户ID>/Cluster_N` 等层级）一键导入为指定实例的世界存档。导入前自动创建「导入前」安全备份；世界数据与房间设置保留源档，端口自动重写为本实例配置并同步数据库，避免多实例端口冲突；源档 Mod 反向写入面板 Mod 列表（`pre_import` 备份类型，工作坊内容缺失时提示）；导入与恢复共用实例级互斥锁。入口在「备份与恢复」页。
 

@@ -36,16 +36,15 @@ export interface GitHubReleaseSummary {
 
 export interface PanelUpdateStatus {
   runtimeMode: 'docker' | 'native'
-  panel: HubImageUpdateInfo
-  dst: HubImageUpdateInfo
+  /** v0.2.0 起统一镜像：面板/DST/SteamCMD 共用同一镜像，单一更新目标 */
+  image: HubImageUpdateInfo
   release: GitHubReleaseSummary | null
   lastCheckedAt: string | null
   checking: boolean
   updating: boolean
-  /** 至少有一种镜像支持一键更新（面板或 DST） */
+  /** 统一镜像是否支持一键更新（docker 模式且 stack 可达时为真） */
   applySupported: boolean
-  panelApplySupported: boolean
-  dstApplySupported: boolean
+  imageApplySupported: boolean
   applyHint: string | null
   manualUpdateCommand: string | null
   checkError: string | null
@@ -61,8 +60,7 @@ export interface StackPaths {
 }
 
 export interface ApplySupport {
-  panelSupported: boolean
-  dstSupported: boolean
+  imageSupported: boolean
   supported: boolean
   hint: string | null
   stackPaths: StackPaths | null
@@ -240,7 +238,7 @@ export function isReleaseNewer(current: string | null, latest: string | null): b
 function buildManualUpdateCommand(stackPaths: StackPaths | null, releaseTag?: string | null): string {
   const config = loadServerConfig()
   if (config.runtimeMode === 'native') {
-    const currentTag = normalizeReleaseTag(config.releaseVersion, 'v0.1.4')
+    const currentTag = normalizeReleaseTag(config.releaseVersion, 'v0.2.0')
     const targetTag = normalizeReleaseTag(releaseTag, currentTag)
     return `curl -fsSL https://raw.githubusercontent.com/${config.githubRepo}/${targetTag}/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=${targetTag} bash -s -- --mode native`
   }
@@ -248,17 +246,14 @@ function buildManualUpdateCommand(stackPaths: StackPaths | null, releaseTag?: st
   const composeArgs = config.composeFiles.map(file => `-f ${file}`).join(' ')
   return [
     `cd ${hostDir}`,
-    `docker compose --env-file panel.env ${composeArgs} pull`,
-    `docker pull ${config.gameDstImage}`,
-    `docker compose --env-file panel.env ${composeArgs} up -d`,
+    `docker compose --env-file panel.env ${composeArgs} pull && docker compose --env-file panel.env ${composeArgs} up -d`,
   ].join(' && ')
 }
 
 export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   if (config.runtimeMode === 'native') {
     return {
-      panelSupported: false,
-      dstSupported: false,
+      imageSupported: false,
       supported: false,
       hint: '裸机模式使用带 SHA256 校验和回滚的安装脚本原地升级；请执行下方命令。',
       stackPaths: null,
@@ -266,8 +261,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   }
   if (!config.stackDir) {
     return {
-      panelSupported: false,
-      dstSupported: true,
+      imageSupported: false,
       supported: true,
       hint: '未配置 GSH_STACK_DIR，无法一键更新面板。请在 panel.env 中设置后重启面板，或使用下方手动命令。',
       stackPaths: null,
@@ -275,8 +269,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   }
   if (!path.isAbsolute(config.stackDir)) {
     return {
-      panelSupported: false,
-      dstSupported: true,
+      imageSupported: false,
       supported: true,
       hint: 'GSH_STACK_DIR 必须是绝对路径。',
       stackPaths: null,
@@ -285,16 +278,14 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   const stackPaths = resolveStackPaths(config.stackDir, config.composeFiles)
   if (!stackPaths) {
     return {
-      panelSupported: false,
-      dstSupported: true,
+      imageSupported: false,
       supported: true,
       hint: '面板无法在容器内访问 compose 目录，无法一键更新面板。请使用下方手动命令。',
       stackPaths: null,
     }
   }
   return {
-    panelSupported: true,
-    dstSupported: true,
+    imageSupported: true,
     supported: true,
     hint: null,
     stackPaths,
@@ -304,8 +295,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
 function buildApplyFields(applySupport: ApplySupport, releaseTag?: string | null) {
   return {
     applySupported: applySupport.supported,
-    panelApplySupported: applySupport.panelSupported,
-    dstApplySupported: applySupport.dstSupported,
+    imageApplySupported: applySupport.imageSupported,
     applyHint: applySupport.hint,
     manualUpdateCommand: buildManualUpdateCommand(applySupport.stackPaths, releaseTag),
   }
@@ -381,8 +371,7 @@ function buildEmptyStatus(): PanelUpdateStatus {
   })
   return {
     runtimeMode: config.runtimeMode,
-    panel: emptyImage(config.panelImage),
-    dst: emptyImage(config.gameDstImage),
+    image: emptyImage(config.panelImage),
     release: null,
     lastCheckedAt: null,
     checking: false,
@@ -409,7 +398,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       const release = await fetchLatestGitHubRelease(config.githubRepo)
       const currentVersion = envReleaseVersion || null
       const latestVersion = release?.tagName ?? null
-      const panel: HubImageUpdateInfo = {
+      const image: HubImageUpdateInfo = {
         image: 'native-release',
         tag: currentVersion || 'unknown',
         releaseVersion: currentVersion,
@@ -421,49 +410,33 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
         localPresent: true,
         checkError: release ? null : '无法读取最新 GitHub Release',
       }
-      const dst: HubImageUpdateInfo = {
-        image: 'native-systemd',
-        tag: 'host',
-        releaseVersion: currentVersion,
-        localDigest: null,
-        localDigestShort: null,
-        remoteDigest: null,
-        remoteDigestShort: null,
-        updateAvailable: false,
-        localPresent: true,
-        checkError: null,
-      }
       const nextStatus: PanelUpdateStatus = {
         runtimeMode: config.runtimeMode,
-        panel,
-        dst,
+        image,
         release,
         lastCheckedAt: new Date().toISOString(),
         checking: false,
         updating,
         ...buildApplyFields(applySupport, latestVersion),
-        checkError: panel.checkError,
+        checkError: image.checkError,
       }
       cachedStatus = nextStatus
       return nextStatus
     }
-    const [panel, dst, release] = await Promise.all([
+    const [image, release] = await Promise.all([
       buildImageUpdateInfo(config.panelImage, envReleaseVersion),
-      buildImageUpdateInfo(config.gameDstImage, envReleaseVersion),
       fetchLatestGitHubRelease(config.githubRepo),
     ])
 
-    const checkErrors = normalizeErrorMessages([panel.checkError, dst.checkError])
     const nextStatus: PanelUpdateStatus = {
       runtimeMode: config.runtimeMode,
-      panel,
-      dst,
+      image,
       release,
       lastCheckedAt: new Date().toISOString(),
       checking: false,
       updating,
       ...buildApplyFields(applySupport, release?.tagName),
-      checkError: checkErrors,
+      checkError: image.checkError,
     }
     cachedStatus = nextStatus
     return nextStatus
@@ -493,7 +466,7 @@ function buildComposeCommand(action: 'pull' | 'up'): string {
 async function startPanelComposeUpdater(): Promise<void> {
   const config = loadServerConfig()
   const applySupport = resolveApplySupport(config)
-  if (!applySupport.panelSupported || !applySupport.stackPaths) {
+  if (!applySupport.imageSupported || !applySupport.stackPaths) {
     throw new Error(applySupport.hint || '当前环境不支持一键更新面板')
   }
 
@@ -526,63 +499,51 @@ async function startPanelComposeUpdater(): Promise<void> {
   }).then(container => container.start())
 }
 
-export async function applyPanelUpdates(
-  targets?: Array<'panel' | 'dst'>,
-): Promise<{ status: 'updating' | 'completed', message: string, applied: Array<'panel' | 'dst'> }> {
+export async function applyPanelUpdate(): Promise<{ status: 'updating' | 'completed', message: string }> {
   if (updating) {
     throw new Error('更新正在进行中，请稍后再试')
   }
 
   const status = cachedStatus ?? await refreshPanelUpdateStatus()
-  const applySupport = resolveApplySupport()
-  const requested = targets?.length
-    ? targets
-    : (['panel', 'dst'] as Array<'panel' | 'dst'>).filter((target) => {
-      if (target === 'panel') {
-        return status.panel.updateAvailable && applySupport.panelSupported
-      }
-      return status.dst.updateAvailable && applySupport.dstSupported
-    })
-
-  if (requested.length === 0) {
+  if (!status.image.updateAvailable) {
     return {
       status: 'completed',
       message: '当前已是最新版本',
-      applied: [],
     }
   }
 
-  const applied: Array<'panel' | 'dst'> = []
-
-  if (requested.includes('dst')) {
-    const pullResult = await pullGameDstImage({ force: true })
-    if (!pullResult.ok) {
-      throw new Error(pullResult.error)
-    }
-    applied.push('dst')
+  const applySupport = resolveApplySupport()
+  updating = true
+  if (cachedStatus) {
+    cachedStatus = { ...cachedStatus, updating: true }
   }
 
-  if (requested.includes('panel')) {
-    updating = true
+  // 统一镜像：预拉取即同时完成 DST/SteamCMD 运行环境更新
+  const pullResult = await pullGameDstImage({ force: true })
+  if (!pullResult.ok) {
+    updating = false
     if (cachedStatus) {
-      cachedStatus = { ...cachedStatus, updating: true }
+      cachedStatus = { ...cachedStatus, updating: false }
     }
-    await startPanelComposeUpdater()
-    applied.push('panel')
+    throw new Error(pullResult.error)
+  }
+
+  if (!applySupport.imageSupported || !applySupport.stackPaths) {
+    updating = false
+    if (cachedStatus) {
+      cachedStatus = { ...cachedStatus, updating: false }
+    }
+    await refreshPanelUpdateStatus()
     return {
-      status: 'updating',
-      message: '面板更新已启动，服务将在约 30 秒内重启。请稍后刷新页面。',
-      applied,
+      status: 'completed',
+      message: '统一镜像已拉取到本地，重启面板容器后生效。请使用下方手动命令或 gsh update。',
     }
   }
 
-  await refreshPanelUpdateStatus()
+  await startPanelComposeUpdater()
   return {
-    status: 'completed',
-    message: applied.includes('dst')
-      ? 'DST 运行镜像已更新，下次启动实例时将使用新环境。'
-      : '更新完成',
-    applied,
+    status: 'updating',
+    message: '面板更新已启动，服务将在约 30 秒内重启。请稍后刷新页面。',
   }
 }
 

@@ -11,8 +11,14 @@ import { loadServerConfig, resolveInstallLogsDir } from '../../shared/config'
 import { loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
 import { appendInstallResourceSnapshot } from './install-resource-monitor'
 import { formatSteamcmdMemoryLimitForLog, resolveSteamcmdContainerMemoryLimits } from './steamcmd-container-resources'
-import { parseImageRef } from './image-ref'
 import { DST_WORKSHOP_APP_ID } from '../game-adapter/dst/constants'
+import {
+  buildImageCandidates,
+  formatPullError,
+  isImagePresentByRef,
+  OFFICIAL_UNIFIED_IMAGE_REPOSITORY,
+  pullImageWithCandidates,
+} from './image-candidates'
 import {
   cancelNativeSteamcmdJob,
   isNativeSteamcmdJobRunning,
@@ -27,8 +33,6 @@ import {
   isSteamcmdJobRunning as isDockerSteamcmdJobRunning,
 } from './steamcmd-job'
 
-/** 未配置 SteamCMD 镜像时使用的官方默认仓库。 */
-export const STEAMCMD_OFFICIAL_REPOSITORY = 'ghcr.io/pmat77/steamcmd-base'
 
 const STEAMCMD_APP_UPDATE_TIMEOUT_MS = 30 * 60 * 1000
 const STEAMCMD_APP_INFO_TIMEOUT_MS = 90_000
@@ -345,114 +349,29 @@ export type SteamcmdImagePullResult = { ok: true } | { ok: false, error: string 
 
 let steamcmdImagePullInFlight: Promise<SteamcmdImagePullResult> | null = null
 
-function normalizeMirrorRegistries(): string[] {
-  const raw = (process.env.GSH_STEAMCMD_IMAGE_MIRRORS || '').trim()
-  if (!raw) {
-    return []
-  }
-  return [...new Set(
-    raw
-      .split(',')
-      .map(item => item.trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''))
-      .filter(Boolean),
-  )]
-}
 
-function buildImageRef(registry: string, repository: string, tag: string): string {
-  if (registry === 'docker.io') {
-    return `${repository}:${tag}`
+function resolveSteamcmdMirrorsRaw(): string {
+  const { imageMirrors } = getServerContainerConfig()
+  if (imageMirrors.length > 0) {
+    return imageMirrors.join(',')
   }
-  return `${registry}/${repository}:${tag}`
-}
-
-function buildTagRepo(ref: string): { repo: string, tag: string } {
-  const parsed = parseImageRef(ref)
-  const repo = parsed.registry === 'docker.io'
-    ? parsed.repository
-    : `${parsed.registry}/${parsed.repository}`
-  return { repo, tag: parsed.tag }
-}
-
-function formatSteamcmdPullError(raw: string, image: string, triedImages?: string[]): string {
-  const text = raw.trim() || `拉取 ${image} 失败`
-  const attempted = triedImages?.length ? `已尝试镜像：${triedImages.join(' -> ')}。` : ''
-  if (/403 Forbidden|denied|unauthorized/i.test(text)) {
-    return `${attempted}镜像仓库拒绝访问（403/unauthorized），请检查镜像可见性或更换可访问镜像。原始错误：${text}`
-  }
-  if (/registry-1\.docker\.io|docker\.io|connectex|ETIMEDOUT|timeout|deadline|ECONNREFUSED|failed to respond/i.test(text)) {
-    return [
-      attempted,
-      `无法从镜像仓库拉取 SteamCMD 镜像 ${image}（网络超时或被阻断）。`,
-      '可尝试：① 在可访问网络下手动 docker pull 后重试；',
-      '② 确认可访问 GHCR（ghcr.io/pmat77/steamcmd-base）；',
-      '③ 检查 panel.env 中 GSH_STEAMCMD_IMAGE 的 tag 是否与 GHCR 一致。',
-      `原始错误：${text}`,
-    ].join('')
-  }
-  if (/manifest unknown|not found|404/i.test(text)) {
-    return `${attempted}镜像 ${image} 不存在或标签错误，请检查 GSH_STEAMCMD_IMAGE。原始错误：${text}`
-  }
-  return `${attempted}${text}`
-}
-
-async function pullSteamcmdImageOnce(steamcmdImage: string): Promise<void> {
-  const docker = resolveDocker()
-  await new Promise<void>((resolve, reject) => {
-    docker.pull(steamcmdImage, (pullError: Error | null, stream: NodeJS.ReadableStream) => {
-      if (pullError) {
-        reject(pullError)
-        return
-      }
-      docker.modem.followProgress(stream, (progressError: Error | null) => {
-        if (progressError) {
-          reject(progressError)
-        }
-        else {
-          resolve()
-        }
-      })
-    })
-  })
-}
-
-async function isImagePresentByRef(imageRef: string): Promise<boolean> {
-  try {
-    const docker = resolveDocker()
-    await docker.getImage(imageRef).inspect()
-    return true
-  }
-  catch {
-    return false
-  }
-}
-
-async function tagImageAlias(sourceRef: string, targetRef: string): Promise<void> {
-  if (sourceRef === targetRef) {
-    return
-  }
-  const docker = resolveDocker()
-  const { repo, tag } = buildTagRepo(targetRef)
-  await docker.getImage(sourceRef).tag({ repo, tag })
+  // 旧变量保留兼容
+  return (process.env.GSH_STEAMCMD_IMAGE_MIRRORS || '').trim()
 }
 
 /** 面板拉取目标（完整保留 panel.env 中的 GSH_STEAMCMD_IMAGE） */
 export function resolvePanelSteamcmdPullRef(configuredImage?: string): string {
   const configured = (configuredImage ?? getServerContainerConfig().steamcmdImage).trim()
-  return configured || `${STEAMCMD_OFFICIAL_REPOSITORY}:latest`
+  return configured || `${OFFICIAL_UNIFIED_IMAGE_REPOSITORY}:latest`
 }
 
 /**
  * SteamCMD 拉取候选：
- * 1) 若配置 GSH_STEAMCMD_IMAGE_MIRRORS，按顺序优先尝试候选 registry；
+ * 1) 若配置 GSH_IMAGE_MIRRORS（旧 GSH_STEAMCMD_IMAGE_MIRRORS 保留兼容），按顺序优先尝试候选 registry；
  * 2) 最后尝试完整的已配置镜像引用。
  */
 export function buildSteamcmdImageCandidates(configuredImage?: string): string[] {
-  const configuredRef = resolvePanelSteamcmdPullRef(configuredImage)
-  const parsed = parseImageRef(configuredRef)
-  const mirrors = normalizeMirrorRegistries().filter(registry => registry !== parsed.registry)
-  const candidates = mirrors.map(registry => buildImageRef(registry, parsed.repository, parsed.tag))
-  candidates.push(configuredRef)
-  return candidates
+  return buildImageCandidates(resolvePanelSteamcmdPullRef(configuredImage), resolveSteamcmdMirrorsRaw())
 }
 
 export async function isSteamcmdImagePresent(): Promise<boolean> {
@@ -468,7 +387,7 @@ export async function isSteamcmdImagePresent(): Promise<boolean> {
   }
   try {
     const { steamcmdImage } = config
-    if (await isImagePresentByRef(steamcmdImage)) {
+    if (await isImagePresentByRef(resolveDocker(), steamcmdImage)) {
       return true
     }
     return false
@@ -498,7 +417,7 @@ export async function pullSteamcmdImage(): Promise<SteamcmdImagePullResult> {
     }
   }
   const { steamcmdImage } = config
-  if (await isImagePresentByRef(steamcmdImage)) {
+  if (await isImagePresentByRef(resolveDocker(), steamcmdImage)) {
     return { ok: true }
   }
   if (steamcmdImagePullInFlight) {
@@ -506,34 +425,17 @@ export async function pullSteamcmdImage(): Promise<SteamcmdImagePullResult> {
   }
   const candidates = buildSteamcmdImageCandidates(steamcmdImage)
   steamcmdImagePullInFlight = (async (): Promise<SteamcmdImagePullResult> => {
-    for (const candidate of candidates) {
-      if (await isImagePresentByRef(candidate)) {
-        await tagImageAlias(candidate, steamcmdImage)
-        return { ok: true }
-      }
-    }
-
-    let lastError = ''
-    const tried: string[] = []
-    for (const candidate of candidates) {
-      tried.push(candidate)
-      for (let attempt = 1; attempt <= STEAMCMD_PULL_MAX_ATTEMPTS; attempt++) {
-        try {
-          await pullSteamcmdImageOnce(candidate)
-          await tagImageAlias(candidate, steamcmdImage)
-          return { ok: true }
-        }
-        catch (error) {
-          lastError = error instanceof Error ? error.message : String(error)
-          if (attempt < STEAMCMD_PULL_MAX_ATTEMPTS) {
-            await sleep(STEAMCMD_PULL_RETRY_BASE_MS * attempt)
-          }
-        }
-      }
+    const result = await pullImageWithCandidates(resolveDocker(), candidates, steamcmdImage, {
+      maxAttempts: STEAMCMD_PULL_MAX_ATTEMPTS,
+      retryBaseMs: STEAMCMD_PULL_RETRY_BASE_MS,
+      sleep,
+    })
+    if (result.ok) {
+      return { ok: true }
     }
     return {
       ok: false,
-      error: formatSteamcmdPullError(lastError, candidates[candidates.length - 1] || steamcmdImage, tried),
+      error: formatPullError(result.error, candidates[candidates.length - 1] || steamcmdImage, result.tried),
     }
   })().finally(() => {
     steamcmdImagePullInFlight = null

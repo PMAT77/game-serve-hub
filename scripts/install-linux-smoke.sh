@@ -9,14 +9,28 @@ if [[ "${SCRIPT_DIR}" == "${BASH_SOURCE[0]}" ]]; then
 fi
 source "${SCRIPT_DIR}/install.linux.sh"
 
-[[ "${GSH_RELEASE_TAG}" == "v0.1.4" ]]
-[[ "${PANEL_IMAGE}" == "ghcr.io/pmat77/game-server-hub:v0.1.4" ]]
-[[ "${GSH_GAME_DST_IMAGE}" == "ghcr.io/pmat77/game-server-hub-dst:v0.1.4" ]]
-[[ "${GSH_STEAMCMD_IMAGE}" == "ghcr.io/pmat77/steamcmd-base:v0.1.4" ]]
-[[ "${INSTALLER_REPO_MIRRORS}" == *"@v0.1.4"* ]]
+# v0.2.0 统一镜像：三键同值（占位 registry 待 resolve_image_registry 替换）
+[[ "${GSH_RELEASE_TAG}" == "v0.2.0" ]]
+[[ "${PANEL_IMAGE}" == "" ]]
+[[ "${GSH_GAME_DST_IMAGE}" == "" ]]
+[[ "${GSH_STEAMCMD_IMAGE}" == "" ]]
+# 默认镜像池为空（由 init_installer_repo_pool 按代理清单生成）
+[[ "${INSTALLER_REPO_MIRRORS}" == "" ]]
+init_installer_repo_pool
+[[ "${INSTALLER_REPO_MIRRORS}" == *"@v0.2.0"* ]]
+[[ "${INSTALLER_REPO_MIRRORS}" == *gh-proxy.com* ]]
 [[ "${PANEL_HEALTHCHECK_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]
 [[ "${PANEL_HEALTHCHECK_INTERVAL_SECONDS}" =~ ^[0-9]+$ ]]
-uses_ghcr_image
+
+# registry 解析（显式 ghcr 不需要网络探测）
+IMAGE_REGISTRY_CHOICE="ghcr"
+RESOLVED_NETWORK_PROFILE="global"
+resolve_image_registry
+[[ "${RESOLVED_IMAGE_REGISTRY}" == "ghcr.io" ]]
+finalize_image_refs
+[[ "${PANEL_IMAGE}" == "ghcr.io/pmat77/game-server-hub:v0.2.0" ]]
+[[ "${GSH_GAME_DST_IMAGE}" == "${PANEL_IMAGE}" ]]
+[[ "${GSH_STEAMCMD_IMAGE}" == "${PANEL_IMAGE}" ]]
 
 # 安装器校验的是镜像源提供的 git blob 原始字节（LF）；Windows 检出经 core.autocrlf
 # 得到的是 CRLF 工作区文件，直接哈希会与 pin 不符。先归一化为 LF 再交给安装器校验。

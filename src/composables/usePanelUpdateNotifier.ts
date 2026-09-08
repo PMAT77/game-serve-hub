@@ -17,15 +17,8 @@ export function usePanelUpdateNotifier() {
   }
 
   function buildUpdateMessage(status: Awaited<ReturnType<typeof apiSystem.getPanelUpdateStatus>>['data']) {
-    const parts: string[] = []
-    if (status.panel.updateAvailable) {
-      parts.push('面板镜像')
-    }
-    if (status.dst.updateAvailable) {
-      parts.push('DST 运行镜像')
-    }
     const releaseHint = status.release?.tagName ? `（${status.release.tagName}）` : ''
-    return `${parts.join('、')}有新版本${releaseHint}。请前往「系统设置 → Hub 版本」查看并更新。`
+    return `统一镜像有新版本${releaseHint}。请前往「系统设置 → Hub 版本」查看并更新。`
   }
 
   async function pollPanelUpdateStatus() {
@@ -38,7 +31,7 @@ export function usePanelUpdateNotifier() {
     try {
       const res = await apiSystem.getPanelUpdateStatus()
       const status = res.data
-      const hasUpdate = status.panel.updateAvailable || status.dst.updateAvailable
+      const hasUpdate = status.image.updateAvailable
       if (!hasUpdate) {
         dismissNotification()
         return

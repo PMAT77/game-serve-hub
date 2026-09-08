@@ -10,6 +10,7 @@ export interface ServerContainerConfig {
   nativeSystemdUnitDir: string
   gameDstImage: string
   steamcmdImage: string
+  imageMirrors: string[]
   edition: string
 }
 
@@ -25,6 +26,7 @@ export function getServerContainerConfig(): ServerContainerConfig {
     nativeSystemdUnitDir: config.nativeSystemdUnitDir,
     gameDstImage: config.gameDstImage,
     steamcmdImage: config.steamcmdImage,
+    imageMirrors: config.imageMirrors,
     edition: config.edition,
   }
 }

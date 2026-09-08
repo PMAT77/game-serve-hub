@@ -33,7 +33,7 @@ describe('system API contracts', () => {
       tls: { provider: 'invalid' },
     }).success, false)
     assert.equal(panelUpdateApplyRequestSchema.safeParse({
-      targets: ['panel', 'unknown'],
+      targets: ['panel'],
     }).success, false)
   })
 })

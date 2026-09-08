@@ -40,8 +40,9 @@ function buildConfig(partial: Partial<ServerConfig>): ServerConfig {
     dockerHost: 'unix:///var/run/docker.sock',
     instancesRoot: '/tmp/instances',
     backupsRoot: '/tmp/backups',
-    gameDstImage: 'ghcr.io/pmat77/game-server-hub-dst:latest',
-    steamcmdImage: 'ghcr.io/pmat77/steamcmd-base:latest',
+    gameDstImage: 'ghcr.io/pmat77/game-server-hub:latest',
+    steamcmdImage: 'ghcr.io/pmat77/game-server-hub:latest',
+    imageMirrors: [],
     edition: 'community',
     runtimeMode: 'docker',
     nativeRuntimeDir: '/tmp/runtime',
@@ -102,27 +103,24 @@ describe('resolveStackPaths', () => {
 })
 
 describe('resolveApplySupport', () => {
-  it('allows dst apply when stack dir is missing', () => {
+  it('still supports image pull when stack dir is missing', () => {
     const support = resolveApplySupport(buildConfig({ stackDir: '' }))
-    assert.equal(support.panelSupported, false)
-    assert.equal(support.dstSupported, true)
+    assert.equal(support.imageSupported, false)
     assert.equal(support.supported, true)
     assert.match(support.hint ?? '', /GSH_STACK_DIR/)
   })
 
   it('uses the verified installer path for Native upgrades', () => {
     const support = resolveApplySupport(buildConfig({ runtimeMode: 'native' }))
-    assert.equal(support.panelSupported, false)
-    assert.equal(support.dstSupported, false)
+    assert.equal(support.imageSupported, false)
     assert.equal(support.supported, false)
     assert.match(support.hint ?? '', /原地升级/)
   })
 
-  it('enables panel apply when stack files are reachable', () => {
+  it('enables image apply when stack files are reachable', () => {
     const hostDir = createTempStackDir(['panel.env', 'docker-compose.yml', 'docker-compose.bind.yml'])
     const support = resolveApplySupport(buildConfig({ stackDir: hostDir }))
-    assert.equal(support.panelSupported, true)
-    assert.equal(support.dstSupported, true)
+    assert.equal(support.imageSupported, true)
     assert.equal(support.hint, null)
     assert.equal(support.stackPaths?.hostDir, hostDir)
     assert.equal(support.stackPaths?.localDir, hostDir)

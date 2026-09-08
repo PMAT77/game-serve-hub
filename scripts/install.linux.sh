@@ -6,12 +6,15 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.1.4}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
+GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.2.0}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
-INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@${GSH_RELEASE_TAG},https://ghproxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${GSH_RELEASE_TAG},https://raw.githubusercontent.com/PMAT77/game-serve-hub/${GSH_RELEASE_TAG}}" # 安装资源镜像池（按顺序回退）。
+# GitHub 资源加速代理（前缀拼接型）：安装资源与 Native 包共用；GSH_GITHUB_PROXY 可强制指定单一节点。
+GITHUB_PROXY_SITES="${GITHUB_PROXY_SITES:-https://gh-proxy.com/,https://ghfast.top/,https://ghproxy.com/}"
+GSH_GITHUB_PROXY="${GSH_GITHUB_PROXY:-}" # 强制指定 GitHub 加速代理（如 https://gh-proxy.com/）；为空则走镜像池自动回退。
+INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-}" # 安装资源镜像池；为空时由 init_installer_repo_pool 按代理清单生成。
 # 校验对象是镜像源提供的 git blob 原始字节（LF）；改动 compose 后必须同步更新此处。
 # 历史 pin eb30aeae... 与 v0.1.4 tag 内 compose blob（a34665e2...）不匹配，导致严格校验必然失败。
-INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-a34665e20997ac9ad86a6f35423399f5c380e7e52ebe4a80684ddd056df19a38}"
+INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-b66d24d6a032343903fca0bea215d991b5f45be52b6f5cae04ebbe7a04af1823}"
 INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML:-525eaf74e17df33887fe47248f414c0de3e6cd94a8d20e072ab5d66284c760ae}"
 INSTALL_MODE="${GSH_INSTALL_MODE:-auto}" # auto | docker | native
 NETWORK_PROFILE="${GSH_NETWORK_PROFILE:-auto}" # auto | cn | global
@@ -48,12 +51,12 @@ PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境�
 PANEL_PORT="${PANEL_PORT:-9527}" # 面板对外暴露端口（默认使用高位端口以降低备案拦截影响）。
 PANEL_PROTOCOL="${PANEL_PROTOCOL:-http}" # 访问协议（用于生成访问 URL）。
 INSTALL_STEAMCMD_IMAGE="${INSTALL_STEAMCMD_IMAGE:-1}" # 安装阶段是否预拉 SteamCMD 镜像（默认拉取，安装完成后可直接创建实例）。
-PANEL_IMAGE_OVERRIDE="${PANEL_IMAGE:-}" # 完整面板镜像引用；设置后不再拼接 tag。
-GSH_GAME_DST_IMAGE_OVERRIDE="${GSH_GAME_DST_IMAGE:-}" # 完整 DST 镜像引用；设置后不再拼接 tag。
-GSH_STEAMCMD_IMAGE_OVERRIDE="${GSH_STEAMCMD_IMAGE:-}" # 完整 SteamCMD 镜像引用；设置后不再拼接 tag。
-PANEL_IMAGE_OFFICIAL_REPOSITORY="${PANEL_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/pmat77/game-server-hub}" # 面板官方镜像仓库。
-GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY="${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/pmat77/game-server-hub-dst}" # DST 官方镜像仓库。
-GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY="${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY:-ghcr.io/pmat77/steamcmd-base}" # SteamCMD 官方镜像仓库（与 CI 同步 GHCR 名一致）。
+# v0.2.0 起三镜像合一：面板/DST/SteamCMD 共用同一统一镜像引用。
+IMAGE_REGISTRY_CHOICE="${GSH_IMAGE_REGISTRY:-${GSH_REGISTRY:-auto}}" # auto | ghcr | aliyun | dockerhub；auto 按网络探测选择。
+RESOLVED_IMAGE_REGISTRY="" # 解析后的 registry 主机名。
+PANEL_IMAGE_OVERRIDE="${PANEL_IMAGE:-}" # 完整面板镜像引用；设置后跳过 registry 解析直接采用。
+PANEL_IMAGE_OFFICIAL_REPOSITORY="game-server-hub" # 统一镜像仓库名（各 registry 同名）。
+ALIYUN_ACR_NAMESPACE="${ALIYUN_ACR_NAMESPACE:-gsh_release}" # 阿里云 ACR 命名空间（可被环境变量覆盖）。
 PANEL_INSTALL_DIR="${PANEL_INSTALL_DIR:-/opt/game-server-hub}" # 安装目录（放置 env/compose）。
 PANEL_DATA_DIR="${PANEL_DATA_DIR:-/var/lib/game-server-hub}" # 面板持久化数据目录。
 PANEL_LOG_DIR="${PANEL_LOG_DIR:-/var/log/game-server-hub}" # 面板日志与安装状态目录。
@@ -61,10 +64,11 @@ PANEL_INSTANCES_DIR="${PANEL_INSTANCES_DIR:-${PANEL_DATA_DIR}/instances}" # 游�
 PANEL_BACKUPS_DIR="${PANEL_BACKUPS_DIR:-${PANEL_DATA_DIR}/backups}" # 备份目录。
 PANEL_BIND_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.bind.yml"
 PANEL_IMAGE_TAG="${PANEL_IMAGE_TAG:-${GSH_RELEASE_TAG}}" # 容器镜像标签；默认与安装资源锁定同一个 Release。
-PANEL_IMAGE="${PANEL_IMAGE_OVERRIDE:-${PANEL_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # 完整镜像引用（可为 tag 或 digest）。
-GSH_GAME_DST_IMAGE="${GSH_GAME_DST_IMAGE_OVERRIDE:-${GSH_GAME_DST_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # DST 镜像引用（可为 tag 或 digest）。
-GSH_STEAMCMD_IMAGE="${GSH_STEAMCMD_IMAGE_OVERRIDE:-${GSH_STEAMCMD_IMAGE_OFFICIAL_REPOSITORY}:${PANEL_IMAGE_TAG}}" # SteamCMD 镜像引用（可为 tag 或 digest）。
-INSTALL_STEAMCMD_PULL_IMAGE="${GSH_STEAMCMD_IMAGE}"
+# v0.2.0 三键同值（统一镜像）；完整引用由 finalize_image_refs 按 registry 生成，panel.env 保留三个变量以兼容面板配置读取与历史脚本。
+PANEL_IMAGE="" # 统一镜像完整引用（由 finalize_image_refs 填充；PANEL_IMAGE_OVERRIDE 设置时直接采用）。
+GSH_GAME_DST_IMAGE=""
+GSH_STEAMCMD_IMAGE=""
+INSTALL_STEAMCMD_PULL_IMAGE=""
 PANEL_ENV_FILE="${PANEL_INSTALL_DIR}/panel.env" # 运行时环境变量文件路径。
 PANEL_COMPOSE_FILE="${PANEL_INSTALL_DIR}/docker-compose.yml" # Docker Compose 文件路径。
 STATUS_FILE="${PANEL_LOG_DIR}/install.status" # 安装状态追踪文件路径。
@@ -78,7 +82,7 @@ NATIVE_RELEASE_ROOT="${GSH_NATIVE_RELEASE_ROOT:-${PANEL_INSTALL_DIR}/releases}"
 NATIVE_CURRENT_LINK="${PANEL_INSTALL_DIR}/current"
 NATIVE_RELEASE_NAME="game-server-hub-native-${GSH_RELEASE_TAG}-linux-x64"
 NATIVE_RELEASE_ARCHIVE="${GSH_NATIVE_RELEASE_ARCHIVE:-}"
-NATIVE_RELEASE_MIRRORS="${GSH_NATIVE_RELEASE_MIRRORS:-https://github.com/PMAT77/game-serve-hub/releases/download/${GSH_RELEASE_TAG},https://ghproxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${GSH_RELEASE_TAG}}"
+NATIVE_RELEASE_MIRRORS="${GSH_NATIVE_RELEASE_MIRRORS:-}" # 为空时由 init_installer_repo_pool 生成（直连 + 加速代理）。https://github.com/PMAT77/game-serve-hub/releases/download/${GSH_RELEASE_TAG},https://ghproxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${GSH_RELEASE_TAG}}"
 NATIVE_STEAMCMD_DIR="${GSH_NATIVE_STEAMCMD_DIR:-${PANEL_INSTALL_DIR}/runtime/steamcmd}"
 NATIVE_STEAMCMD_PATH="${NATIVE_STEAMCMD_DIR}/steamcmd.sh"
 NATIVE_STEAMCMD_URL="${GSH_NATIVE_STEAMCMD_URL:-https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz}"
@@ -416,13 +420,41 @@ append_installer_repo_source() {
   INSTALLER_REPO_POOL+=("${source}")
 }
 
-# 初始化安装资源镜像池（INSTALLER_REPO_RAW 优先，其次 INSTALLER_REPO_MIRRORS）。
+# 生成 GitHub 资源候选列表（逗号分隔）：加速代理前缀 → 直连。GSH_GITHUB_PROXY 设置时仅走该代理 + 直连。
+build_github_url_variants() {
+  local direct_url="$1"
+  local proxy site
+  local -a parts=()
+
+  if [[ -n "${GSH_GITHUB_PROXY}" ]]; then
+    proxy="${GSH_GITHUB_PROXY%/}"
+    parts+=("${proxy}/${direct_url}")
+  else
+    local old_ifs="${IFS}"
+    IFS=","
+    for site in ${GITHUB_PROXY_SITES}; do
+      parts+=("${site%/}/${direct_url}")
+    done
+    IFS="${old_ifs}"
+  fi
+  parts+=("${direct_url}")
+  local old_ifs2="${IFS}"
+  IFS=","
+  echo "${parts[*]}"
+  IFS="${old_ifs2}"
+}
+
+# 初始化安装资源镜像池（INSTALLER_REPO_RAW 优先，其次 INSTALLER_REPO_MIRRORS，为空时按代理清单自动生成）。
 init_installer_repo_pool() {
   local item
   local raw_sources
 
   if [[ "${INSTALLER_REPO_POOL_INITIALIZED}" -eq 1 ]]; then
     return
+  fi
+
+  if [[ -z "${INSTALLER_REPO_MIRRORS}" ]]; then
+    INSTALLER_REPO_MIRRORS="https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@${GSH_RELEASE_TAG},$(build_github_url_variants "https://raw.githubusercontent.com/PMAT77/game-serve-hub/${GSH_RELEASE_TAG}")"
   fi
 
   if [[ -n "${INSTALLER_REPO_RAW}" ]]; then
@@ -599,25 +631,104 @@ EOF"
   return 0
 }
 
-# GHCR 连通性预检：优先探测 registry v2（200/401 视为可达），避免 HEAD / 405 误报。
-check_ghcr_reachability() {
+# registry 连通性预检：探测 registry v2 端点（200/401/403 视为可达），避免 HEAD / 405 误报。
+check_registry_reachability() {
+  local registry="${1:-ghcr.io}"
   local status_code
 
-  status_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" --max-time "${GHCR_CHECK_TIMEOUT_SECONDS}" "https://ghcr.io/v2/")" || return 1
+  status_code="$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" --max-time "${GHCR_CHECK_TIMEOUT_SECONDS}" "https://${registry}/v2/")" || return 1
   case "${status_code}" in
     200|401|403|404|405|30[0-9])
-      log_info "GHCR preflight check passed via https://ghcr.io/v2/ (HTTP ${status_code})."
+      log_info "Registry preflight check passed via https://${registry}/v2/ (HTTP ${status_code})."
       return 0
       ;;
     *)
-      log_warn "GHCR preflight returned HTTP ${status_code} on https://ghcr.io/v2/."
+      log_warn "Registry preflight returned HTTP ${status_code} on https://${registry}/v2/."
       return 1
       ;;
   esac
 }
 
-uses_ghcr_image() {
-  [[ "${PANEL_IMAGE}" == ghcr.io/* || "${GSH_GAME_DST_IMAGE}" == ghcr.io/* || "${GSH_STEAMCMD_IMAGE}" == ghcr.io/* ]]
+# 兼容旧调用点：network profile 打分仍以 GHCR 可达性作为 global 档位信号。
+check_ghcr_reachability() {
+  check_registry_reachability "ghcr.io"
+}
+
+# 解析统一镜像 registry：auto 时按网络档位排序探测，取首个可用端点。
+resolve_image_registry() {
+  local -a order=()
+  case "${IMAGE_REGISTRY_CHOICE}" in
+    ghcr)
+      order=(ghcr.io)
+      ;;
+    aliyun)
+      order=("registry.cn-hangzhou.aliyuncs.com")
+      ;;
+    dockerhub)
+      order=(docker.io)
+      ;;
+    auto)
+      if [[ "${RESOLVED_NETWORK_PROFILE}" == "cn" ]]; then
+        order=("registry.cn-hangzhou.aliyuncs.com" "ghcr.io" "docker.io")
+      else
+        order=("ghcr.io" "docker.io" "registry.cn-hangzhou.aliyuncs.com")
+      fi
+      ;;
+    *)
+      abort "Invalid image registry choice: ${IMAGE_REGISTRY_CHOICE}. Expected auto, ghcr, aliyun or dockerhub."
+      ;;
+  esac
+
+  if [[ "${IMAGE_REGISTRY_CHOICE}" != "auto" ]]; then
+    RESOLVED_IMAGE_REGISTRY="${order[0]}"
+    log_info "Image registry (explicit): ${RESOLVED_IMAGE_REGISTRY}"
+    return
+  fi
+  local registry
+  for registry in "${order[@]}"; do
+    if check_registry_reachability "${registry}"; then
+      RESOLVED_IMAGE_REGISTRY="${registry}"
+      log_info "Image registry (auto): ${RESOLVED_IMAGE_REGISTRY}"
+      return
+    fi
+  done
+  RESOLVED_IMAGE_REGISTRY="${order[0]}"
+  log_warn "No registry endpoint reachable; falling back to ${RESOLVED_IMAGE_REGISTRY}."
+}
+
+# 生成统一镜像完整引用：GHCR/Docker Hub 带 maintainer 命名空间，ACR 带可配置命名空间。
+resolve_unified_image_ref() {
+  local tag="${PANEL_IMAGE_TAG}"
+  case "${RESOLVED_IMAGE_REGISTRY}" in
+    ghcr.io)
+      printf "ghcr.io/pmat77/game-server-hub:%s" "${tag}"
+      ;;
+    docker.io)
+      printf "pmat77/game-server-hub:%s" "${tag}"
+      ;;
+    *)
+      printf "%s/%s/game-server-hub:%s" "${RESOLVED_IMAGE_REGISTRY}" "${ALIYUN_ACR_NAMESPACE}" "${tag}"
+      ;;
+  esac
+}
+
+# 生成三个镜像键（v0.2.0 统一镜像：三键同值；PANEL_IMAGE_OVERRIDE 设置时直接采用）。
+finalize_image_refs() {
+  if [[ -n "${PANEL_IMAGE_OVERRIDE}" ]]; then
+    PANEL_IMAGE="${PANEL_IMAGE_OVERRIDE}"
+    GSH_GAME_DST_IMAGE="${PANEL_IMAGE_OVERRIDE}"
+    GSH_STEAMCMD_IMAGE="${PANEL_IMAGE_OVERRIDE}"
+    INSTALL_STEAMCMD_PULL_IMAGE="${PANEL_IMAGE_OVERRIDE}"
+    log_info "Image override in effect: ${PANEL_IMAGE}"
+    return
+  fi
+  PANEL_IMAGE="$(resolve_unified_image_ref)"
+  GSH_GAME_DST_IMAGE="${PANEL_IMAGE}"
+  GSH_STEAMCMD_IMAGE="${PANEL_IMAGE}"
+  INSTALL_STEAMCMD_PULL_IMAGE="${PANEL_IMAGE}"
+  log_info "Panel image: ${PANEL_IMAGE}"
+  log_info "DST image: ${GSH_GAME_DST_IMAGE}"
+  log_info "SteamCMD image: ${GSH_STEAMCMD_IMAGE}"
 }
 
 probe_https_url() {
@@ -695,6 +806,9 @@ resolve_install_mode() {
 # 校验系统是否提供 apt-get（仅支持 Debian/Ubuntu 体系）。
 ensure_apt() {
   if ! command -v apt-get >/dev/null 2>&1; then
+    if command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+      abort "RHEL/Rocky/Alma hosts are supported in docker mode only (native systemd packaging is Debian/Ubuntu). Rerun with --mode docker."
+    fi
     abort "Only Debian/Ubuntu systems with apt are supported."
   fi
 }
@@ -966,6 +1080,10 @@ download_native_release_archive() {
       return 1
     fi
   else
+    if [[ -z "${NATIVE_RELEASE_MIRRORS}" ]]; then
+      NATIVE_RELEASE_MIRRORS="$(build_github_url_variants "https://github.com/PMAT77/game-serve-hub/releases/download/${GSH_RELEASE_TAG}")"
+      log_info "Native release mirrors: ${NATIVE_RELEASE_MIRRORS}"
+    fi
     local raw_sources=()
     IFS=',' read -r -a raw_sources <<< "${NATIVE_RELEASE_MIRRORS}"
     for source in "${raw_sources[@]}"; do
@@ -1259,6 +1377,7 @@ Usage: ${SCRIPT_NAME} [options]
 Options:
   --mode MODE         Deployment mode: auto, docker or native
   --network PROFILE   Network profile: auto, cn or global
+  --registry REG      Container registry: auto, ghcr, aliyun or dockerhub (default: auto)
   --open-panel-port  Open panel TCP port (${PANEL_PORT}) via ufw/firewalld
   --open-dst-ports   Open default DST UDP ports (${DST_GAME_PORT}, ${DST_AUTH_PORT}, ${DST_MASTER_PORT}) via ufw/firewalld
   -h, --help         Show this help
@@ -1267,15 +1386,18 @@ Environment (optional):
   GSH_INSTALL_MODE=MODE          Same as --mode
   GSH_NETWORK_PROFILE=PROFILE    Same as --network
   INSTALL_STEAMCMD_IMAGE=0      Skip SteamCMD pre-pull (default: pre-pull so the panel is ready to create instances)
-  PANEL_IMAGE=REF               Full panel image reference (tag or digest)
-  GSH_GAME_DST_IMAGE=REF        Full DST image reference (tag or digest)
-  GSH_STEAMCMD_IMAGE=REF        Full SteamCMD image reference (tag or digest)
+  PANEL_IMAGE=REF               Full unified image reference (tag or digest); overrides --registry
+  GSH_GAME_DST_IMAGE=REF        Kept for compatibility; defaults to PANEL_IMAGE (v0.2.0 unified image)
+  GSH_STEAMCMD_IMAGE=REF        Kept for compatibility; defaults to PANEL_IMAGE (v0.2.0 unified image)
+  GSH_IMAGE_REGISTRY=REG        Same as --registry
+  GSH_GITHUB_PROXY=URL          Force one GitHub accelerator (e.g. https://gh-proxy.com/)
+  ALIYUN_ACR_NAMESPACE=NS       Alibaba Cloud ACR namespace (default: gsh_release)
   PANEL_HEALTHCHECK_TIMEOUT_SECONDS=90  Maximum wait for panel /health after startup
   PANEL_HEALTHCHECK_INTERVAL_SECONDS=3  Panel /health polling interval
   USE_CN_DEBIAN_MIRROR=1        Enable CN Debian/Ubuntu mirror
   GSH_NATIVE_RELEASE_ARCHIVE=PATH  Install a local Native Release archive
   STRICT_INSTALLER_ASSET_CHECKSUM=0  Skip embedded checksum verification (not recommended)
-  With INSTALL_STEAMCMD_IMAGE=1, SteamCMD pre-pulls the same image recorded in panel.env.
+  v0.2.0 unified image: one docker pull provides the panel, DST runtime libraries and SteamCMD.
 EOF
 }
 
@@ -1360,10 +1482,10 @@ warn_host_memory_tier() {
 
   if [[ "${total_mb}" -lt "${HOST_MEMORY_WARN_MIN_MB}" ]]; then
     log_warn "Host RAM is below ~4 GiB. Recommended: single surface shard, few mods, avoid caves. See docs/MEMORY.md."
-    log_warn "Single instance + caves + many mods may OOM. Consider upgrading to 6–8 GiB or use preset: config/panel.env.presets/small.env"
-    write_status "preflight" "warn" "Low host RAM ${total_mb} MB; see docs/MEMORY.md"
+    log_warn "Single instance + caves + many mods may OOM. Consider upgrading to 6-8 GiB, use preset: config/panel.env.presets/small.env, and run: gsh setup-swap"
+    write_status "preflight" "warn" "Low host RAM ${total_mb} MB; see docs/MEMORY.md and gsh setup-swap"
   elif [[ "${total_mb}" -lt "${HOST_MEMORY_TIER_SMALL_MAX_MB}" ]]; then
-    log_warn "Host RAM tier is small (<5 GiB). Caves and heavy mod sets increase OOM risk. See docs/MEMORY.md."
+    log_warn "Host RAM tier is small (<5 GiB). Caves and heavy mod sets increase OOM risk. See docs/MEMORY.md; consider: gsh setup-swap"
     write_status "preflight" "warn" "Host RAM tier small (${total_mb} MB)"
   fi
 }
@@ -1439,11 +1561,11 @@ preflight_checks() {
     abort "Insufficient disk space on /. Require >= ${MIN_FREE_DISK_MB} MB."
   fi
 
-  if [[ "${RESOLVED_INSTALL_MODE}" == "docker" ]] && uses_ghcr_image && ! check_ghcr_reachability; then
+  if [[ "${RESOLVED_INSTALL_MODE}" == "docker" && -z "${PANEL_IMAGE_OVERRIDE}" ]] && ! check_registry_reachability "${RESOLVED_IMAGE_REGISTRY}"; then
     if [[ "${STRICT_GHCR_CHECK}" == "1" ]]; then
-      abort "Cannot reach GHCR registry endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Please check outbound network."
+      abort "Cannot reach registry endpoint https://${RESOLVED_IMAGE_REGISTRY}/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s. Please check outbound network or rerun with --registry auto."
     fi
-    log_warn "Cannot reach GHCR registry endpoint https://ghcr.io/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s during preflight. Continue and rely on docker pull retries."
+    log_warn "Cannot reach registry endpoint https://${RESOLVED_IMAGE_REGISTRY}/v2/ within ${GHCR_CHECK_TIMEOUT_SECONDS}s during preflight. Continue and rely on docker pull retries."
   fi
   if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]] && ! command -v systemctl >/dev/null 2>&1; then
     abort "Native mode requires systemd/systemctl."
@@ -1497,6 +1619,15 @@ prepare_panel_files() {
   fi
 
   if [[ "${is_upgrade}" -eq 1 ]]; then
+    local old_dst_image old_steamcmd_image
+    old_dst_image="$(read_env_value "${PANEL_ENV_FILE}" "GSH_GAME_DST_IMAGE")"
+    old_steamcmd_image="$(read_env_value "${PANEL_ENV_FILE}" "GSH_STEAMCMD_IMAGE")"
+    if [[ -n "${old_dst_image}" && "${old_dst_image}" != "${PANEL_IMAGE}" ]]; then
+      log_info "Detected legacy three-image layout (dst: ${old_dst_image}). Migrating to the v0.2.0 unified image (panel + DST + SteamCMD in one)."
+    fi
+    if [[ -n "${old_steamcmd_image}" && "${old_steamcmd_image}" != "${PANEL_IMAGE}" ]]; then
+      log_info "Legacy SteamCMD image ${old_steamcmd_image} will be replaced by the unified image; old tags can be removed later with docker rmi."
+    fi
     run_as_root cp -p "${PANEL_ENV_FILE}" "${PANEL_ENV_FILE}.backup.$(date +%Y%m%d%H%M%S)"
     upsert_env_values "${PANEL_ENV_FILE}" \
       "PANEL_IMAGE=${PANEL_IMAGE}" \
@@ -1596,11 +1727,9 @@ pull_install_steamcmd_image() {
   return 1
 }
 
-# 拉取运行时镜像（面板 + DST；SteamCMD 仅 INSTALL_STEAMCMD_IMAGE=1 时预拉）。
+# 拉取运行时镜像（v0.2.0 起统一镜像：面板/DST/SteamCMD 同一引用，一次拉取全部就绪）。
 pull_runtime_images() {
   run_with_retry "docker pull ${PANEL_IMAGE}" run_as_root docker pull "${PANEL_IMAGE}" || return 1
-  run_with_retry "docker pull ${GSH_GAME_DST_IMAGE}" run_as_root docker pull "${GSH_GAME_DST_IMAGE}" || return 1
-  pull_install_steamcmd_image || return 1
 }
 
 wait_for_panel_health() {
@@ -1660,6 +1789,24 @@ deploy_native_panel() {
   write_status "health" "ok" "Native panel health endpoint is ready"
 }
 
+# 部署 gsh CLI 到 /usr/local/bin（优先本地仓库，其次镜像池下载）。
+install_gsh_cli() {
+  local script_dir src tmp
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  src="${script_dir}/../scripts/gsh.sh"
+  if [[ ! -f "${src}" ]]; then
+    tmp="$(mktemp)"
+    if download_installer_asset "scripts/gsh.sh" "${tmp}"; then
+      src="${tmp}"
+    else
+      log_warn "gsh.sh not available locally or from mirrors; skip CLI install."
+      return 0
+    fi
+  fi
+  run_as_root install -m 0755 "${src}" /usr/local/bin/gsh
+  log_info "Installed panel CLI: /usr/local/bin/gsh (try: gsh doctor)"
+}
+
 # 输出最终访问信息与安全提醒。
 print_summary() {
   write_status "install" "ok" "Installation completed"
@@ -1673,14 +1820,8 @@ print_summary() {
     log_info "Native SteamCMD: ${NATIVE_STEAMCMD_PATH}"
     log_info "Panel service: game-server-hub.service"
   else
-    log_info "Panel image: ${PANEL_IMAGE}"
-    log_info "DST image: ${GSH_GAME_DST_IMAGE}"
-    log_info "SteamCMD image (panel.env): ${GSH_STEAMCMD_IMAGE}"
-    if [[ "${INSTALL_STEAMCMD_IMAGE}" == "1" ]]; then
-      log_info "SteamCMD pre-pull during install: enabled"
-    else
-      log_info "SteamCMD pre-pull during install: disabled (pull from panel UI)"
-    fi
+    log_info "Unified image (panel + DST + SteamCMD): ${PANEL_IMAGE}"
+    log_info "CLI: run gsh (or bash /usr/local/bin/gsh) to manage the panel stack; gsh doctor for diagnostics."
   fi
   log_info "Panel URL: ${PANEL_ACCESS_URL}"
   log_info "Admin username: ${ADMIN_USERNAME}"
@@ -1725,6 +1866,15 @@ main() {
         OPEN_DST_PORTS=1
         shift
         ;;
+      --registry)
+        [[ $# -ge 2 ]] || abort "--registry requires auto, ghcr, aliyun or dockerhub."
+        IMAGE_REGISTRY_CHOICE="$2"
+        shift 2
+        ;;
+      --registry=*)
+        IMAGE_REGISTRY_CHOICE="${1#*=}"
+        shift
+        ;;
       -h|--help)
         print_usage
         exit 0
@@ -1748,6 +1898,10 @@ main() {
   resolve_network_profile
   resolve_install_mode
   validate_install_mode_transition
+  if [[ "${RESOLVED_INSTALL_MODE}" == "docker" ]]; then
+    resolve_image_registry
+    finalize_image_refs
+  fi
 
   begin_stage "dependencies" "Installing base dependencies"
   install_base_packages
@@ -1790,6 +1944,7 @@ main() {
     deploy_native_panel
   fi
 
+  install_gsh_cli
   print_summary
 }
 

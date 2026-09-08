@@ -4,7 +4,6 @@ import type {
   DirectoryItem,
   NetworkConfigRequest,
   PanelSettingsRequest,
-  PanelUpdateApplyRequest,
   SteamcmdConfigRequest,
 } from '../../../../shared/contracts/system'
 import {
@@ -80,7 +79,7 @@ import {
   warmSystemMetricsCaches,
 } from './metrics'
 import {
-  applyPanelUpdates,
+  applyPanelUpdate,
   getCachedPanelUpdateStatus,
   refreshPanelUpdateStatus,
   schedulePanelUpdateChecks,
@@ -413,7 +412,6 @@ export function registerSystemModule(app: FastifyInstance) {
   app.post('/app/system/panel-update/apply', async (request): Promise<ApiSuccessResponse<{
     status: 'updating' | 'completed'
     message: string
-    applied: Array<'panel' | 'dst'>
   }> | ApiErrorResponse> => {
     const authError = await requirePermission(request, SYSTEM_MANAGE_PERMISSION)
     if (authError) {
@@ -429,9 +427,8 @@ export function registerSystemModule(app: FastifyInstance) {
     if (!parsedBody.success) {
       return businessError('请求参数无效', request)
     }
-    const body: PanelUpdateApplyRequest = parsedBody.data
     try {
-      const result = await applyPanelUpdates(body.targets)
+      const result = await applyPanelUpdate()
       return success(result, request)
     }
     catch (error) {

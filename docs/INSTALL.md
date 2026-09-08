@@ -46,7 +46,7 @@ Native 不安装、不调用 Docker，不支持 tmux、screen 或 PM2。两种�
 ### 3.1 Docker
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
@@ -55,13 +55,13 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/script
 1. 检测网络档位并准备 apt；
 2. 尝试 Docker 官方仓库，失败后回退发行版签名软件包；
 3. 获取并校验 Compose 文件；
-4. 生成 `panel.env`，拉取面板、DST 和 SteamCMD 镜像；
+4. 生成 `panel.env`，拉取统一镜像（面板 + DST 运行库 + SteamCMD 三合一）；
 5. 启动 Compose 并等待 `/health`。
 
 ### 3.2 Native systemd
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -70,7 +70,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/script
 1. 安装 SteamCMD 所需的 i386 运行库；
 2. 创建无登录 shell 的 `gsh` 系统用户并启用 linger；
 3. 下载 Native Release 与 `.sha256`，校验摘要及归档路径；
-4. 安装到 `/opt/game-server-hub/releases/v0.1.4` 并原子切换 `current`；
+4. 安装到 `/opt/game-server-hub/releases/v0.2.0` 并原子切换 `current`；
 5. 安装 SteamCMD；
 6. 写入并启动 `game-server-hub.service`；
 7. 等待 `/health`，失败时切回先前 Release。
@@ -80,7 +80,7 @@ Native Release 内置 Node.js Linux x64 运行时，宿主机无需另装 Node.j
 ### 3.3 国内网络档位
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.1.4/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.2.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 
@@ -93,12 +93,12 @@ curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.1.4/scripts/inst
 
 安装资源默认从 jsDelivr、GitHub 资源代理、GitHub Raw 依次回退。Compose 使用安装器内置 SHA256，不会为了校验再次访问 Raw。
 
-当前没有官方国内容器仓库。Docker 镜像仍来自 `ghcr.io/pmat77/*`，第三方容器代理不会自动启用。
+v0.2.0 起官方提供国内容器仓库发布（阿里云 ACR，与 GHCR 同 tag 同构建）。安装器 `--registry auto` 按网络探测自动选择；中国服务器通常命中 `registry.cn-hangzhou.aliyuncs.com`，一次拉取即包含面板、DST 运行库与 SteamCMD。也可显式指定 `--registry ghcr|aliyun|dockerhub`。
 
 ### 3.4 本地安装
 
 ```bash
-git clone --branch v0.1.4 --depth 1 https://github.com/PMAT77/game-serve-hub.git
+git clone --branch v0.2.0 --depth 1 https://github.com/PMAT77/game-serve-hub.git
 cd game-server-hub
 sudo bash ./scripts/install.linux.sh --mode native --network auto
 ```
@@ -107,8 +107,8 @@ sudo bash ./scripts/install.linux.sh --mode native --network auto
 
 ```bash
 sudo \
-  GSH_RELEASE_TAG=v0.1.4 \
-  GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.1.4-linux-x64.tar.gz \
+  GSH_RELEASE_TAG=v0.2.0 \
+  GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.2.0-linux-x64.tar.gz \
   bash ./scripts/install.linux.sh --mode native
 ```
 
@@ -162,7 +162,7 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
 也可以在首次安装时显式设置：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
   | sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='替换为强密码' \
       bash -s -- --mode native
 ```
@@ -231,15 +231,13 @@ Docker 模式若无法访问 GHCR，请优先使用自己控制的仓库：
 
 ```bash
 sudo docker login registry.example.com
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
   | sudo env \
-      PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.1.4 \
-      GSH_GAME_DST_IMAGE=registry.example.com/gsh/game-server-hub-dst:v0.1.4 \
-      GSH_STEAMCMD_IMAGE=registry.example.com/gsh/steamcmd-base:v0.1.4 \
+      PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.2.0 \
       bash -s -- --mode docker --network cn
 ```
 
-三个镜像应来自同一个 Release，并按 Release 的 `release-images.json` 核对 digest。不要使用无法说明来源的公共镜像。
+统一镜像引用应与 Release tag 一致，并按 Release 的 `release-images.json` 核对 digest。不要使用无法说明来源的公共镜像。
 
 SteamCMD 支持在 `panel.env` 中设置：
 
@@ -273,12 +271,12 @@ Native 手动回滚：
 
 ```bash
 sudo systemctl stop game-server-hub.service
-sudo ln -sfn /opt/game-server-hub/releases/v0.1.4 /opt/game-server-hub/current.rollback
+sudo ln -sfn /opt/game-server-hub/releases/v0.2.0 /opt/game-server-hub/current.rollback
 sudo mv -Tf /opt/game-server-hub/current.rollback /opt/game-server-hub/current
 sudo systemctl start game-server-hub.service
 ```
 
-Docker 回滚时，把 `/opt/game-server-hub/panel.env` 中三个镜像 tag 改回同一旧版本，再执行 `docker compose pull && docker compose up -d`。不要执行带 `-v` 的 `docker compose down`。
+Docker 回滚时，把 `/opt/game-server-hub/panel.env` 中镜像键（PANEL_IMAGE 与两个 GSH_*_IMAGE）改回同一旧版本 tag，再执行 `docker compose pull && docker compose up -d`。不要执行带 `-v` 的 `docker compose down`。
 
 ### 面板内备份与恢复（v0.2.0 起）
 

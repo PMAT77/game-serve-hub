@@ -6,7 +6,7 @@
 
 面向 Steam 专用服务器的开源运维面板。当前以《饥荒联机版》（DST）为首个完整适配游戏，提供安装、更新、启停、监控、日志、控制台、世界和 Mod 管理。
 
-项目采用 **Open-Core**：单机服主需要的 Community 核心永久开源；多节点等高级能力以独立 Pro 插件提供。当前仓库版本为 `v0.1.4` 公测线，裸机模式属于首期预览能力，建议先在非关键服务器验证。
+项目采用 **Open-Core**：单机服主需要的 Community 核心永久开源；多节点等高级能力以独立 Pro 插件提供。当前仓库版本为 `v0.2.0` 公测线（面板 + DST 运行环境 + SteamCMD 已合并为单一统一镜像，支持国内容器仓库分发），裸机模式属于首期预览能力，建议先在非关键服务器验证。
 
 ![Game Server Hub 首页](https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/game-server-hub/home.png)
 
@@ -28,14 +28,14 @@ Native 模式完全不依赖 Docker，也不使用 tmux、screen 或 PM2。面�
 ### Docker 模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 ### Native systemd 模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.4/script
 若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.1.4/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.2.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 

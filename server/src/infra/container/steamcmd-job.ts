@@ -332,6 +332,8 @@ export async function runSteamcmdJob(spec: SteamcmdJobSpec): Promise<SteamcmdJob
     Image: spec.image,
     Cmd: spec.cmd,
     User: spec.user,
+    // v0.2.0 统一镜像 WORKDIR=/app；显式固定 steamcmd 工作目录以兼容 uid 1000 写入需求（与旧 steamcmd-base 镜像一致）。
+    WorkingDir: '/home/steam/steamcmd',
     Env: containerEnv.length > 0 ? containerEnv : undefined,
     Labels: labels,
     HostConfig: hostConfig,

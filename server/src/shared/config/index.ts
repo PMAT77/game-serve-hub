@@ -7,6 +7,9 @@ import { z } from 'zod'
 import { loadModeEnv } from './env-file'
 import { resolveRepoRoot } from '../repo-root'
 
+/** v0.2.0 起面板/DST/SteamCMD 共用的统一镜像引用。 */
+export const UNIFIED_IMAGE_REF = 'ghcr.io/pmat77/game-server-hub:v0.2.0'
+
 const envSchema = z.object({
   SERVER_HOST: z.string().trim().min(1).default('0.0.0.0'),
   SERVER_PORT: z.coerce.number().int().min(1).max(65535).default(8888),
@@ -21,6 +24,8 @@ const envSchema = z.object({
   GSH_BACKUPS_ROOT: z.string().trim().optional(),
   GSH_GAME_DST_IMAGE: z.string().trim().optional(),
   GSH_STEAMCMD_IMAGE: z.string().trim().optional(),
+  /** 备选镜像 registry 候选（逗号分隔）；v0.2.0 起泛化自 GSH_STEAMCMD_IMAGE_MIRRORS */
+  GSH_IMAGE_MIRRORS: z.string().trim().optional(),
   GSH_EDITION: z.string().trim().optional(),
   GSH_RUNTIME_MODE: z.enum(['docker', 'native']).default('docker'),
   GSH_NATIVE_RUNTIME_DIR: z.string().trim().optional(),
@@ -73,6 +78,8 @@ export interface ServerConfig {
   backupsRoot: string
   gameDstImage: string
   steamcmdImage: string
+  /** 备选镜像 registry 候选（逗号分隔） */
+  imageMirrors: string[]
   edition: string
   runtimeMode: 'docker' | 'native'
   nativeRuntimeDir: string
@@ -113,6 +120,9 @@ export function loadServerConfig(): ServerConfig {
     GSH_BACKUPS_ROOT: process.env.GSH_BACKUPS_ROOT ?? env.GSH_BACKUPS_ROOT,
     GSH_GAME_DST_IMAGE: process.env.GSH_GAME_DST_IMAGE ?? env.GSH_GAME_DST_IMAGE,
     GSH_STEAMCMD_IMAGE: process.env.GSH_STEAMCMD_IMAGE ?? env.GSH_STEAMCMD_IMAGE,
+    // 备选镜像 registry 候选；旧变量 GSH_STEAMCMD_IMAGE_MIRRORS 保留兼容回退
+    GSH_IMAGE_MIRRORS: process.env.GSH_IMAGE_MIRRORS ?? env.GSH_IMAGE_MIRRORS
+      ?? process.env.GSH_STEAMCMD_IMAGE_MIRRORS ?? env.GSH_STEAMCMD_IMAGE_MIRRORS,
     GSH_EDITION: process.env.GSH_EDITION ?? env.GSH_EDITION,
     GSH_RUNTIME_MODE: process.env.GSH_RUNTIME_MODE ?? env.GSH_RUNTIME_MODE,
     GSH_NATIVE_RUNTIME_DIR: process.env.GSH_NATIVE_RUNTIME_DIR ?? env.GSH_NATIVE_RUNTIME_DIR,
@@ -156,14 +166,19 @@ export function loadServerConfig(): ServerConfig {
       : 'unix:///var/run/docker.sock'),
     instancesRoot: path.resolve(parsed.GSH_INSTANCES_ROOT || defaultInstancesRoot),
     backupsRoot: path.resolve(parsed.GSH_BACKUPS_ROOT || defaultBackupsRoot),
-    gameDstImage: parsed.GSH_GAME_DST_IMAGE || 'ghcr.io/pmat77/game-server-hub-dst:v0.1.4',
-    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || 'ghcr.io/pmat77/steamcmd-base:v0.1.4',
+    // v0.2.0 起面板/DST/SteamCMD 合并为同一统一镜像；三个引用默认一致，旧 env 显式设置时仍优先采用
+    gameDstImage: parsed.GSH_GAME_DST_IMAGE || UNIFIED_IMAGE_REF,
+    steamcmdImage: parsed.GSH_STEAMCMD_IMAGE || UNIFIED_IMAGE_REF,
+    imageMirrors: (parsed.GSH_IMAGE_MIRRORS?.trim() || '')
+      .split(',')
+      .map(item => item.trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''))
+      .filter(Boolean),
     edition: parsed.GSH_EDITION || 'community',
     runtimeMode: parsed.GSH_RUNTIME_MODE,
     nativeRuntimeDir: path.resolve(parsed.GSH_NATIVE_RUNTIME_DIR || path.join(defaultInstancesRoot, '..', 'runtime')),
     nativeSteamcmdPath: path.resolve(parsed.GSH_NATIVE_STEAMCMD_PATH || '/opt/game-server-hub/runtime/steamcmd/steamcmd.sh'),
     nativeSystemdUnitDir: path.resolve(parsed.GSH_NATIVE_SYSTEMD_UNIT_DIR || path.join(os.homedir(), '.config/systemd/user')),
-    panelImage: parsed.PANEL_IMAGE || 'ghcr.io/pmat77/game-server-hub:v0.1.4',
+    panelImage: parsed.PANEL_IMAGE || UNIFIED_IMAGE_REF,
     stackDir: parsed.GSH_STACK_DIR?.trim() || '',
     composeFiles: (parsed.GSH_COMPOSE_FILES?.trim() || 'docker-compose.yml:docker-compose.bind.yml')
       .split(':')

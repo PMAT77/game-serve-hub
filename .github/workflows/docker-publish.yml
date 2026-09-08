@@ -361,6 +361,9 @@ jobs:
       - name: Delete candidate package versions
         env:
           GH_TOKEN: ${{ github.token }}
+        # GHCR 首次发布后需在 Package settings 授予 Actions 访问权限，否则 DELETE 403；
+        # 清理仅用于控制存储，失败不阻塞发布结果。
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail

@@ -32,6 +32,7 @@
 [ ] pnpm run release:check 本地通过（lint + test:unit + build）
 [ ] PR 合并后 CI 绿色
 [ ] git tag v0.x.y && git push origin v0.x.y
+[ ] 首次发布后：在 GHCR Package settings 的 Manage Actions access 授予本仓库写权限（否则 candidate 清理会 403）
 [ ] （可选）发布后在 Release 页确认离线镜像包 `game-server-hub-<tag>-docker-image.tar.gz` 已上传
 [ ] 等待 Container Pipeline 完成（统一镜像验证 → candidate → 正式 tag）
 [ ] 核对 GHCR 统一镜像 tag、`release-images.json` 与 GitHub Release（含离线镜像包）

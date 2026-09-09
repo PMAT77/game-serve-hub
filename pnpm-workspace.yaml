@@ -88,6 +88,8 @@ catalog:
 catalogs:
   naive-ui:
     naive-ui: ^2.44.1
+patchedDependencies:
+  '@vitejs/plugin-vue@6.0.7': patches/@vitejs__plugin-vue@6.0.7.patch
 engineStrict: true
 shamefullyHoist: true
 shellEmulator: true

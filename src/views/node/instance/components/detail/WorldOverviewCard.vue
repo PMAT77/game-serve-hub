@@ -1,0 +1,172 @@
+<script setup lang="ts">
+import type { InstanceItem } from '@/api/modules/instance'
+import type { ShardId, ShardListDto } from '@/api/modules/shard'
+import apiShard from '@/api/modules/shard'
+import { NButton, NCard, NEmpty, NSpin, NTag } from 'naive-ui'
+import { computed, ref } from 'vue'
+import { routeToDstWorldSettings } from '@/navigation/game-routes'
+import { SHARD_CONTAINER_STATUS, statusTagType } from '@/constants/statusDictionary'
+import { dstSeasonLabel } from '../../instanceCommandShortcuts'
+
+/** 世界运行时状态（P1：指令注入查询，实例未运行时 available=false） */
+export interface InstanceWorldState {
+  available: boolean
+  cycles: number | null
+  season: string | null
+  daysInSeason: number | null
+  message?: string
+}
+
+defineOptions({
+  name: 'InstanceDetailWorldOverviewCard',
+})
+
+const props = defineProps<{
+  instance: InstanceItem | null
+  shardList: ShardListDto | null
+  worldState?: InstanceWorldState | null
+  loading?: boolean
+}>()
+
+const emit = defineEmits<{
+  refreshed: []
+}>()
+
+const router = useRouter()
+const initCavesLoading = ref(false)
+
+const cavesShard = computed(() => props.shardList?.shards.find(shard => shard.id === 'caves') ?? null)
+
+const cavesEnabled = computed(() => props.shardList?.clusterShardEnabled === true)
+
+const worldStateText = computed(() => {
+  const ws = props.worldState
+  if (!ws || !ws.available || ws.cycles === null) {
+    return null
+  }
+  const dayText = `第 ${ws.cycles + 1} 天`
+  const seasonText = ws.season
+    ? `${dstSeasonLabel(ws.season)}${ws.daysInSeason !== null ? `（第 ${ws.daysInSeason + 1} 天）` : ''}`
+    : ''
+  return seasonText ? `${dayText} · ${seasonText}` : dayText
+})
+
+function shardStatus(shardId: ShardId) {
+  const shard = props.shardList?.shards.find(item => item.id === shardId)
+  if (!shard) {
+    return null
+  }
+  return {
+    shard,
+    descriptor: SHARD_CONTAINER_STATUS[shard.containerStatus],
+    tagType: statusTagType(SHARD_CONTAINER_STATUS[shard.containerStatus].tone),
+  }
+}
+
+const masterView = computed(() => shardStatus('master'))
+const cavesView = computed(() => shardStatus('caves'))
+
+function presetLabel(preset: string | null | undefined) {
+  if (!preset) {
+    return '—'
+  }
+  const map: Record<string, string> = {
+    SURVIVAL_TOGETHER: '标准生存',
+    DST_CAVE: '洞穴',
+    DST_CAVE_PLUS: '加强洞穴',
+    COMPLETE_DARKNESS: '永久黑暗',
+  }
+  return map[preset] ?? preset
+}
+
+async function initCaves() {
+  if (!props.instance || initCavesLoading.value) {
+    return
+  }
+  initCavesLoading.value = true
+  try {
+    await apiShard.initCaves(props.instance.id)
+    faToast.success('洞穴已初始化，可在世界设置中调整参数')
+    emit('refreshed')
+  }
+  catch (error) {
+    faToast.error(error instanceof Error ? error.message : '洞穴初始化失败，请稍后重试')
+  }
+  finally {
+    initCavesLoading.value = false
+  }
+}
+
+function goWorldSettings() {
+  if (props.instance) {
+    router.push(routeToDstWorldSettings(props.instance.id))
+  }
+}
+</script>
+
+<template>
+  <NCard title="世界概览" size="small">
+    <NSpin v-if="loading && !shardList" class="block mx-auto my-6" />
+    <template v-else-if="instance && shardList">
+      <p
+        v-if="worldStateText"
+        class="mb-3 text-xs text-muted-foreground"
+      >
+        世界进程：<span class="text-foreground">{{ worldStateText }}</span>
+        <span v-if="worldState && !worldState.available && worldState.message" class="ml-1">{{ worldState.message }}</span>
+      </p>
+
+      <div class="grid gap-3 md:grid-cols-2">
+        <div
+          v-for="view in [masterView, cavesView]"
+          :key="view?.shard.id ?? Math.random()"
+          v-show="view"
+          class="rounded-lg border border-border p-3 space-y-2"
+        >
+          <template v-if="view">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-sm font-medium">{{ view.shard.isMaster ? '主世界（地上）' : '洞穴' }}</span>
+              <NTag size="small" :bordered="false" :type="view.tagType">
+                {{ view.descriptor.label }}
+              </NTag>
+            </div>
+            <dl class="text-xs text-muted-foreground space-y-1">
+              <div class="flex justify-between gap-2">
+                <dt>世界生成</dt>
+                <dd>{{ view.shard.worldGenerated ? '已生成' : '未生成' }}</dd>
+              </div>
+              <div class="flex justify-between gap-2">
+                <dt>地图预设</dt>
+                <dd>{{ presetLabel(view.shard.worldgenPreset) }}</dd>
+              </div>
+              <div class="flex justify-between gap-2">
+                <dt>游戏端口</dt>
+                <dd>{{ view.shard.serverPort ?? '—' }}</dd>
+              </div>
+            </dl>
+          </template>
+        </div>
+      </div>
+
+      <div v-if="!cavesEnabled" class="mt-3 rounded-md bg-muted/50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+        <span class="text-xs text-muted-foreground">未开启洞穴：如需地下世界，请先在世界设置中开启。</span>
+        <NButton size="tiny" secondary @click="goWorldSettings">
+          去世界设置
+        </NButton>
+      </div>
+      <div
+        v-else-if="cavesEnabled && cavesShard && !cavesShard.configured"
+        class="mt-3 rounded-md bg-muted/50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2"
+      >
+        <span class="text-xs text-muted-foreground">洞穴尚未初始化，初始化后会自动分配端口并生成默认配置。</span>
+        <NButton size="tiny" type="primary" secondary :loading="initCavesLoading" @click="initCaves">
+          初始化洞穴
+        </NButton>
+      </div>
+    </template>
+    <template v-else-if="instance">
+      <NEmpty description="世界配置读取失败或实例暂不支持世界概览" size="small" class="py-6" />
+    </template>
+    <NEmpty v-else description="未找到实例" size="small" class="py-6" />
+  </NCard>
+</template>

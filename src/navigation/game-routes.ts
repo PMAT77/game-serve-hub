@@ -4,6 +4,7 @@ import { FRONTEND_ROUTE_PATHS } from '../../shared/constants/frontend-routes'
 /** 与后端 menu-routes、auth 动态路由 name 保持一致 */
 export const ROUTE_NAMES = {
   nodeInstance: 'nodeInstance',
+  nodeInstanceDetail: 'nodeInstanceDetail',
   nodeInstanceConsole: 'nodeInstanceConsole',
   dstRoomList: 'dstRoomList',
   dstRoomSettings: 'dstRoomSettings',
@@ -18,6 +19,10 @@ export { FRONTEND_ROUTE_PATHS }
 
 export function routeToNodeInstance(): RouteLocationRaw {
   return { name: ROUTE_NAMES.nodeInstance }
+}
+
+export function routeToInstanceDetail(instanceId: string): RouteLocationRaw {
+  return { name: ROUTE_NAMES.nodeInstanceDetail, params: { instanceId } }
 }
 
 export function routeToInstanceConsole(instanceId: string): RouteLocationRaw {

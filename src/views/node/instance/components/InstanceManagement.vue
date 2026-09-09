@@ -4,39 +4,21 @@ import type { CreateInstancePayload, InstallableGameItem, InstanceItem, Instance
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
-import { NButton, NCheckbox, NDropdown, NProgress, NStatistic, NTag, NTooltip, useDialog, useNotification } from 'naive-ui'
+import { NButton, NDropdown, NProgress, NStatistic, NTag, NTooltip, useNotification } from 'naive-ui'
 import AdminListToolbar from '@/components/AdminListToolbar.vue'
 import { statusBadgeClass } from '@/constants/statusDictionary'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
-import apiCluster from '@/api/modules/cluster'
 import apiInstance from '@/api/modules/instance'
-import apiShard from '@/api/modules/shard'
-import { instanceSupportsDstRoom } from '@/composables/useGameInstance'
 import {
   routeToDstRoomSettings,
   routeToDstWorldSettings,
   routeToInstanceConsole,
+  routeToInstanceDetail,
 } from '@/navigation/game-routes'
 import { blurFocusedElement } from '@/utils'
 import {
-  formatPortConflictDetail,
-  getPortConflictDialogLabels,
-  isInstancePortConflictError,
-  type InstancePortConflictAction,
-} from '@/utils/instancePortConflict'
-import {
   tryNotifyHostMemoryPressure,
 } from '@/utils/hostMemoryPressure'
-import {
-  blocksDefaultStart,
-  buildInstanceStartGuideContext,
-  buildStartGuideParagraphs,
-  buildStartGuidePositiveText,
-  buildStartGuideTitle,
-  setStartGuideSkipped,
-  shouldOfferStartGuide,
-  type InstanceStartGuideContext,
-} from '../instanceStartGuide'
 import {
   canOpenInstallLog,
   computeUptimeSecondsFromStartedAt,
@@ -52,6 +34,11 @@ import {
   buildInstallResultNotification,
   shouldShowPostCreateInstallGuide,
 } from '../instanceInstallGuide'
+import {
+  canUpdateInstance,
+  getUpdateInstanceButtonTitle,
+  useInstanceLifecycleActions,
+} from '../composables/useInstanceLifecycleActions'
 import { useInstanceRuntimeObservability } from '../composables/useInstanceRuntimeObservability'
 import { formatDateTime } from '../utils'
 import InstanceInstallLogModal from './InstanceInstallLogModal.vue'
@@ -69,7 +56,6 @@ interface Props {
 
 const { nodes, steamcmdInstalled } = toRefs(props)
 
-const dialog = useDialog()
 const notification = useNotification()
 const router = useRouter()
 
@@ -81,8 +67,21 @@ const updateCheckLoading = ref(false)
 const UPDATE_CHECK_POLL_MS = 2000
 const UPDATE_CHECK_POLL_MAX_ATTEMPTS = 45
 const createLoading = ref(false)
-const actionLoadingIds = ref<Set<string>>(new Set())
 const instances = ref<InstanceItem[]>([])
+
+/** 实例生命周期操作：列表页与详情页共用同一套确认/引导/端口冲突处理逻辑 */
+const {
+  isActionLoading,
+  isInstanceActionRunning,
+  confirmStartInstance,
+  confirmUpdateInstance,
+  confirmDangerousInstanceAction,
+} = useInstanceLifecycleActions({
+  refresh: fetchInstances,
+  onBeforeUpdate: suppressInstanceUpdateNotificationForCurrentBatch,
+  onUpdateAccepted: openInstallLogModal,
+})
+
 const {
   uptimeNowMs,
   syncRuntimeObservabilityPolling,
@@ -108,7 +107,7 @@ const installNotifyPendingIds = new Set<string>()
 
 // --- 常量 ---
 /** 列宽总和，启用横向滚动，避免中间列被挤压为 0（操作列移动端收拢为「更多」） */
-const INSTANCE_TABLE_SCROLL_X = computed(() => (isMobileMode.value ? 1210 : 1330))
+const INSTANCE_TABLE_SCROLL_X = computed(() => (isMobileMode.value ? 1170 : 1240))
 const INSTANCE_INSTALL_POLL_MS = 2000
 /** 用户手动关闭通知后记录签名，避免同一批更新反复弹出 */
 const UPDATE_NOTIFY_DISMISSED_KEY = 'gsh-instance-update-dismissed'
@@ -242,7 +241,11 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
       key: 'name',
       width: 200,
       render: (row) => {
-        const children = [h('span', row.name)]
+        const children = [h('span', {
+          class: 'cursor-pointer hover:text-primary transition-colors',
+          title: '查看实例详情',
+          onClick: () => router.push(routeToInstanceDetail(row.id)),
+        }, row.name)]
         if (row.updateAvailable) {
           children.push(
             h(NTag, { type: 'warning', size: 'small', round: true }, { default: () => '有新版本' }),
@@ -322,7 +325,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '操作',
       key: 'actions',
-      width: isMobileMode.value ? 88 : 210,
+      width: isMobileMode.value ? 88 : 120,
       fixed: 'right',
       render: row => renderInstanceRowActions(row),
     },
@@ -347,9 +350,17 @@ interface InstanceRowAction {
   loading?: boolean
   title?: string
   type?: 'default' | 'error'
+  /** 仅桌面端操作列内联展示（不进入「更多」下拉） */
+  inlineOnly?: boolean
+  /** 仅收进下拉（桌面端操作列不内联展示） */
+  menuOnly?: boolean
   onClick: () => void
 }
 
+/**
+ * 行操作全集：详情/控制台/启停在操作列内联展示，
+ * 更新/重启/删除收进「更多」下拉；房间设置入口已移入实例详情页。
+ */
 function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
   const stopAction = row.status === 'installing' || row.status === 'pending_install' ? 'cancel_install' : 'stop'
   const stopLabel = stopAction === 'cancel_install' ? '取消安装' : '停止'
@@ -357,29 +368,22 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
   const installFailed = getInstanceState(row).key === 'install_failed'
   return [
     {
-      key: 'room',
-      label: '房间设置',
-      disabled: instanceActionRunning || !instanceSupportsDstRoom(row),
-      title: !instanceSupportsDstRoom(row) ? '当前仅 DST 实例支持房间配置' : undefined,
-      onClick: () => router.push(routeToDstRoomSettings(row.id)),
+      key: 'detail',
+      label: '详情',
+      inlineOnly: true,
+      onClick: () => router.push(routeToInstanceDetail(row.id)),
     },
     {
       key: 'console',
       label: '控制台',
+      inlineOnly: true,
       disabled: instanceActionRunning || row.status === 'pending_install' || row.status === 'installing',
       onClick: () => router.push(routeToInstanceConsole(row.id)),
     },
     {
-      key: 'update',
-      label: installFailed ? '修复安装' : '更新服务端',
-      loading: isActionLoading(row.id, 'update'),
-      disabled: instanceActionRunning || !canUpdateInstance(row),
-      title: getUpdateInstanceButtonTitle(row),
-      onClick: () => confirmUpdateInstance(row),
-    },
-    {
       key: 'start',
       label: '启动',
+      menuOnly: true,
       loading: isActionLoading(row.id, 'start'),
       disabled: instanceActionRunning || row.status === 'running' || row.status === 'pending_install' || row.status === 'installing',
       onClick: () => confirmStartInstance(row),
@@ -387,13 +391,24 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
     {
       key: 'stop',
       label: stopLabel,
+      menuOnly: true,
       loading: isActionLoading(row.id, 'stop'),
       disabled: instanceActionRunning || row.status === 'stopped' || row.status === 'error',
       onClick: () => confirmDangerousInstanceAction(row, stopAction),
     },
     {
+      key: 'update',
+      label: installFailed ? '修复安装' : '更新服务端',
+      menuOnly: true,
+      loading: isActionLoading(row.id, 'update'),
+      disabled: instanceActionRunning || !canUpdateInstance(row),
+      title: getUpdateInstanceButtonTitle(row),
+      onClick: () => confirmUpdateInstance(row),
+    },
+    {
       key: 'restart',
       label: '重启',
+      menuOnly: true,
       loading: isActionLoading(row.id, 'restart'),
       disabled: instanceActionRunning || row.status === 'pending_install' || row.status === 'installing',
       onClick: () => confirmDangerousInstanceAction(row, 'restart'),
@@ -401,6 +416,7 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
     {
       key: 'delete',
       label: '删除',
+      menuOnly: true,
       type: 'error',
       disabled: instanceActionRunning || row.status === 'pending_install' || row.status === 'installing',
       onClick: () => confirmDangerousInstanceAction(row, 'delete'),
@@ -408,30 +424,22 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
   ]
 }
 
-function renderInstanceRowActions(row: InstanceItem) {
-  const actions = buildInstanceRowActions(row)
-  if (!isMobileMode.value) {
-    return h(
-      'div',
-      { class: 'flex flex-wrap gap-4' },
-      actions.map(action => createTextActionButton(action)),
-    )
+function actionToDropdownOption(action: InstanceRowAction): DropdownOption {
+  const option: DropdownOption = {
+    label: action.loading ? `${action.label}…` : action.label,
+    key: action.key,
+    disabled: Boolean(action.disabled || action.loading),
   }
+  if (action.type === 'error') {
+    option.props = { class: 'text-red-600 dark:text-red-400' }
+  }
+  return option
+}
 
-  const options: DropdownOption[] = actions.map((action) => {
-    const option: DropdownOption = {
-      label: action.loading ? `${action.label}…` : action.label,
-      key: action.key,
-      disabled: Boolean(action.disabled || action.loading),
-    }
-    if (action.type === 'error') {
-      option.props = { class: 'text-red-600 dark:text-red-400' }
-    }
-    return option
-  })
-
-  const hasLoading = actions.some(action => action.loading)
-
+/** 「更多」下拉按钮（含 loading 汇总与动作分发） */
+function renderActionDropdown(actions: InstanceRowAction[], loadingActions: InstanceRowAction[]) {
+  const options = actions.map(actionToDropdownOption)
+  const hasLoading = loadingActions.some(action => action.loading)
   return h(
     NDropdown,
     {
@@ -459,18 +467,29 @@ function renderInstanceRowActions(row: InstanceItem) {
   )
 }
 
+function renderInstanceRowActions(row: InstanceItem) {
+  const actions = buildInstanceRowActions(row)
+  if (!isMobileMode.value) {
+    const inlineActions = actions.filter(action => !action.menuOnly)
+    const menuActions = actions.filter(action => action.menuOnly)
+    const children = inlineActions.map(action => createTextActionButton(action))
+    if (menuActions.length > 0) {
+      children.push(renderActionDropdown(menuActions, actions))
+    }
+    return h(
+      'div',
+      { class: 'flex flex-wrap gap-4' },
+      children,
+    )
+  }
+
+  // 移动端：卡片上已有「详情」「控制台」按钮，下拉提供其余生命周期动作
+  const mobileActions = actions.filter(action => !action.inlineOnly)
+  return renderActionDropdown(mobileActions, actions)
+}
+
 function mobileActionOptions(row: InstanceItem): DropdownOption[] {
-  return buildInstanceRowActions(row).map((action) => {
-    const option: DropdownOption = {
-      label: action.loading ? `${action.label}…` : action.label,
-      key: action.key,
-      disabled: Boolean(action.disabled || action.loading),
-    }
-    if (action.type === 'error') {
-      option.props = { class: 'text-red-600 dark:text-red-400' }
-    }
-    return option
-  })
+  return buildInstanceRowActions(row).filter(action => !action.inlineOnly).map(actionToDropdownOption)
 }
 
 function selectMobileAction(row: InstanceItem, key: string) {
@@ -640,149 +659,12 @@ function renderInstanceUptimeColumn(row: InstanceItem) {
   )
 }
 
-/** 是否已检查且为最新版本 */
-function isInstanceUpToDate(instance: InstanceItem) {
-  return Boolean(
-    instance.updateCheckedAt
-    && instance.localBuildId
-    && instance.remoteBuildId
-    && !instance.updateAvailable,
-  )
-}
-
-/** 是否允许点击「更新服务端」 */
-function canUpdateInstance(instance: InstanceItem) {
-  if (instance.status === 'running') {
-    return false
-  }
-  if (instance.status === 'pending_install' || instance.status === 'installing') {
-    return false
-  }
-  if (instance.status === 'error') {
-    return true
-  }
-  if (!instance.localBuildId) {
-    return true
-  }
-  if (instance.updateAvailable) {
-    return true
-  }
-  return instance.status === 'stopped' && !isInstanceUpToDate(instance)
-}
-
-/** 「更新服务端」按钮禁用时的 tooltip */
-function getUpdateInstanceButtonTitle(instance: InstanceItem) {
-  if (instance.status === 'running') {
-    return '请先停止实例'
-  }
-  if (instance.status === 'pending_install' || instance.status === 'installing') {
-    return '安装进行中'
-  }
-  if (instance.status === 'error') {
-    return '实例异常，点击重新拉取服务端文件'
-  }
-  if (!instance.localBuildId) {
-    return '尚未检测到本地服务端文件，点击拉取安装'
-  }
-  if (isInstanceUpToDate(instance)) {
-    return `已是最新版本（Build ${instance.localBuildId}）`
-  }
-  return '拉取最新游戏服务端'
-}
-
-function confirmUpdateInstance(row: InstanceItem) {
-  blurFocusedElement()
-  const isRepair = getInstanceState(row).key === 'install_failed'
-  dialog.warning({
-    title: isRepair ? '确认修复安装' : '确认更新服务端',
-    content: isRepair
-      ? `上次安装未完成。将重新拉取「${row.name}」的游戏服务端文件，已有配置会保留，过程可在「查看日志」中查看进度。`
-      : `将拉取「${row.name}」的最新游戏服务端文件。更新前请确保实例已停止，过程可在「查看日志」中查看进度。`,
-    positiveText: '开始更新',
-    negativeText: '取消',
-    positiveButtonProps: {
-      type: 'warning',
-    },
-    onPositiveClick: () => runUpdateInstance(row),
-  })
-}
-
 function suppressInstanceUpdateNotificationForCurrentBatch() {
   const signature = buildUpdateNotifySignature(instances.value)
   if (signature) {
     localStorage.setItem(UPDATE_NOTIFY_DISMISSED_KEY, signature)
   }
   dismissInstanceUpdateNotification()
-}
-
-async function runUpdateInstance(row: InstanceItem) {
-  if (isInstanceActionRunning(row.id)) {
-    return
-  }
-  suppressInstanceUpdateNotificationForCurrentBatch()
-  const operationKey = `update:${row.id}`
-  actionLoadingIds.value = new Set([...actionLoadingIds.value, operationKey])
-  try {
-    await apiInstance.updateInstance(row.id, { force: row.status === 'error' || !row.localBuildId })
-    faToast.success('已开始更新服务端，请查看安装日志了解进度')
-    await fetchInstances()
-    await openInstallLogModal(row)
-  }
-  catch (error) {
-    if (tryNotifyHostMemoryPressure(notification, error)) {
-      await fetchInstances()
-      return
-    }
-    await fetchInstances()
-  }
-  finally {
-    const next = new Set(actionLoadingIds.value)
-    next.delete(operationKey)
-    actionLoadingIds.value = next
-  }
-}
-
-function confirmDangerousInstanceAction(row: InstanceItem, action: 'stop' | 'cancel_install' | 'restart' | 'delete') {
-  blurFocusedElement()
-  const actionConfig = {
-    stop: {
-      title: '确认停止',
-      content: `确认停止实例「${row.name}」吗？`,
-      positiveText: '停止',
-      type: 'warning' as const,
-    },
-    cancel_install: {
-      title: '确认取消安装',
-      content: `将中断「${row.name}」的安装，实例将标记为异常。可查看安装日志后删除并重新创建。`,
-      positiveText: '取消安装',
-      type: 'warning' as const,
-    },
-    restart: {
-      title: '确认重启',
-      content: `确认重启实例「${row.name}」吗？`,
-      positiveText: '重启',
-      type: 'warning' as const,
-    },
-    delete: {
-      title: '确认删除',
-      content: `确认删除实例「${row.name}」吗？若正在运行将先自动停止，并清理该实例安装目录。`,
-      positiveText: '删除',
-      type: 'error' as const,
-    },
-  }[action]
-
-  dialog.warning({
-    title: actionConfig.title,
-    content: actionConfig.content,
-    positiveText: actionConfig.positiveText,
-    negativeText: '取消',
-    positiveButtonProps: {
-      type: actionConfig.type,
-    },
-    onPositiveClick: () => {
-      return runInstanceAction(row.id, action === 'cancel_install' ? 'stop' : action)
-    },
-  })
 }
 
 function resetCreateForm() {
@@ -1126,222 +1008,6 @@ async function createInstance() {
   }
 }
 
-function renderStartGuideContent(
-  ctx: InstanceStartGuideContext,
-  instanceId: string,
-  dontShowAgainRef: { value: boolean },
-) {
-  const paragraphs = buildStartGuideParagraphs(ctx)
-  const children: ReturnType<typeof h>[] = paragraphs.map(text =>
-    h('p', { class: 'text-sm leading-relaxed text-foreground' }, text),
-  )
-
-  if (!blocksDefaultStart(ctx)) {
-    children.push(
-      h('div', { class: 'flex flex-wrap gap-2 pt-1' }, [
-        h(
-          NButton,
-          {
-            size: 'small',
-            tertiary: true,
-            onClick: () => {
-              dialog.destroyAll()
-              router.push(routeToDstRoomSettings(instanceId))
-            },
-          },
-          { default: () => '先去配置房间' },
-        ),
-        h(
-          NButton,
-          {
-            size: 'small',
-            tertiary: true,
-            onClick: () => {
-              dialog.destroyAll()
-              router.push(routeToDstWorldSettings(instanceId))
-            },
-          },
-          { default: () => '先去配置世界' },
-        ),
-      ]),
-      h(NCheckbox, {
-        checked: dontShowAgainRef.value,
-        'onUpdate:checked': (v: boolean) => {
-          dontShowAgainRef.value = v
-        },
-      }, { default: () => '下次启动不再提示' }),
-    )
-  }
-
-  return h('div', { class: 'space-y-3 max-w-prose' }, children)
-}
-
-async function confirmStartInstance(row: InstanceItem) {
-  blurFocusedElement()
-
-  const quickStart = () => runInstanceAction(row.id, 'start')
-
-  if (!shouldOfferStartGuide(row, undefined)) {
-    await quickStart()
-    return
-  }
-
-  let guideContext: InstanceStartGuideContext
-  try {
-    const [clusterRes, shardRes] = await Promise.all([
-      apiCluster.getClusterConfig(row.id),
-      apiShard.getShardList(row.id),
-    ])
-    const master = shardRes.data.shards.find(s => s.id === 'master')
-    if (!shouldOfferStartGuide(row, master?.worldGenerated)) {
-      await quickStart()
-      return
-    }
-    guideContext = buildInstanceStartGuideContext(row, clusterRes.data, shardRes.data)
-  }
-  catch {
-    // 引导信息读取失败不阻塞启动：直接启动并提示用户稍后可配置
-    faToast.warning('房间配置读取失败，已直接启动；可稍后在「房间设置」中检查配置')
-    await quickStart()
-    return
-  }
-
-  const dontShowAgain = { value: false }
-  const publicBlocked = blocksDefaultStart(guideContext)
-
-  dialog.warning({
-    title: buildStartGuideTitle(),
-    content: () => renderStartGuideContent(guideContext, row.id, dontShowAgain),
-    positiveText: buildStartGuidePositiveText(guideContext),
-    negativeText: '取消',
-    onPositiveClick: () => {
-      if (dontShowAgain.value) {
-        setStartGuideSkipped(row.id)
-      }
-      if (publicBlocked) {
-        router.push(routeToDstRoomSettings(row.id))
-        return
-      }
-      return quickStart()
-    },
-  })
-}
-
-function showInstancePortConflictDialog(
-  instanceId: string,
-  action: InstancePortConflictAction,
-  payload: { error: string, data?: { conflictingPorts?: number[], suggestedGamePort?: number | null } },
-  onAutoResolve?: () => void | Promise<void>,
-) {
-  const labels = getPortConflictDialogLabels(action)
-  const detail = formatPortConflictDetail(payload.data ?? {})
-  dialog.warning({
-    title: labels.title,
-    content: () => h('div', { class: 'space-y-2 max-w-prose text-sm' }, [
-      h('p', payload.error),
-      h('p', { class: 'text-muted-foreground' }, detail),
-    ]),
-    positiveText: labels.positiveText,
-    negativeText: '自行配置',
-    onPositiveClick: () => onAutoResolve?.(),
-    onNegativeClick: () => {
-      router.push(routeToDstWorldSettings(instanceId, { tab: 'network' }))
-    },
-  })
-}
-
-function describeInstanceActionError(error: unknown, fallback: string): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  if (typeof error === 'object' && error && 'error' in error) {
-    return String((error as { error?: string }).error)
-  }
-  return fallback
-}
-
-async function runInstanceLifecycleWithPortHandling(
-  instanceId: string,
-  action: InstancePortConflictAction,
-  options?: { autoAllocatePorts?: boolean },
-) {
-  const labels = getPortConflictDialogLabels(action)
-  const apiCall = action === 'restart'
-    ? () => apiInstance.restartInstance(instanceId, { autoAllocatePorts: options?.autoAllocatePorts })
-    : () => apiInstance.startInstance(instanceId, { autoAllocatePorts: options?.autoAllocatePorts })
-
-  try {
-    await apiCall()
-    faToast.success(labels.successToast)
-    await fetchInstances()
-  }
-  catch (error) {
-    if (isInstancePortConflictError(error)) {
-      showInstancePortConflictDialog(instanceId, action, error, () => runInstanceLifecycleWithPortHandling(instanceId, action, {
-        autoAllocatePorts: true,
-      }))
-      return
-    }
-    if (tryNotifyHostMemoryPressure(notification, error)) {
-      return
-    }
-    faToast.error(action === 'restart' ? '重启失败' : '启动失败', {
-      description: describeInstanceActionError(error, '请稍后重试'),
-    })
-  }
-}
-
-async function runInstanceAction(
-  instanceId: string,
-  action: 'start' | 'stop' | 'restart' | 'delete',
-) {
-  if (isInstanceActionRunning(instanceId)) {
-    return
-  }
-  const operationKey = `${action}:${instanceId}`
-  actionLoadingIds.value = new Set([...actionLoadingIds.value, operationKey])
-  try {
-    if (action === 'start') {
-      await runInstanceLifecycleWithPortHandling(instanceId, 'start')
-      return
-    }
-    if (action === 'restart') {
-      await runInstanceLifecycleWithPortHandling(instanceId, 'restart')
-      return
-    }
-    if (action === 'stop') {
-      await apiInstance.stopInstance(instanceId)
-      faToast.success('实例已停止')
-    }
-    else {
-      await apiInstance.deleteInstance(instanceId)
-      faToast.success('实例已删除')
-    }
-    await fetchInstances()
-  }
-  catch (error) {
-    if (action !== 'start' && action !== 'restart') {
-      faToast.error('操作失败', {
-        description: describeInstanceActionError(error, '请稍后重试'),
-      })
-    }
-  }
-  finally {
-    const next = new Set(actionLoadingIds.value)
-    next.delete(operationKey)
-    actionLoadingIds.value = next
-  }
-}
-
-/** 操作按钮是否处于 loading（格式 action:instanceId） */
-function isActionLoading(instanceId: string, action: 'start' | 'stop' | 'restart' | 'delete' | 'update') {
-  return actionLoadingIds.value.has(`${action}:${instanceId}`)
-}
-
-function isInstanceActionRunning(instanceId: string) {
-  return [...actionLoadingIds.value].some(key => key.endsWith(`:${instanceId}`))
-}
-
 onMounted(async () => {
   sessionStorage.removeItem(UPDATE_NOTIFY_STORAGE_KEY_LEGACY)
   localStorage.removeItem(UPDATE_NOTIFY_STORAGE_KEY_LEGACY)
@@ -1518,6 +1184,9 @@ onBeforeUnmount(() => {
             </div>
           </dl>
           <div class="flex gap-2">
+            <NButton class="flex-1" type="primary" secondary @click="router.push(routeToInstanceDetail(instance.id))">
+              详情
+            </NButton>
             <NButton class="flex-1" :disabled="instance.status === 'pending_install' || instance.status === 'installing'" @click="router.push(routeToInstanceConsole(instance.id))">
               控制台
             </NButton>

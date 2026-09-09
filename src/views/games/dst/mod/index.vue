@@ -448,7 +448,7 @@ function showSubscribeSuccessGuide() {
   subscribeGuideNotificationRef.value?.destroy()
   subscribeGuideNotificationRef.value = notification.success({
     title: '订阅成功',
-    content: 'Mod 已下载完成。请到「世界与洞穴」开启该 Mod，重启实例后生效。',
+    content: 'Mod 已下载完成。请到「世界管理」开启该 Mod，重启实例后生效。',
     duration: 0,
     closable: true,
     onClose: () => {

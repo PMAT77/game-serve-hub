@@ -71,6 +71,7 @@ function filterConsoleLines(lines: ConsoleLogLine[], filter: InstanceConsoleLogF
 }
 
 import { registerMaintenanceAnnounceRoutes } from './maintenance-routes'
+import { registerWorldStateRoutes } from './world-state-routes'
 
 /**
  * console 模块：游戏实例运行时控制台（日志流 + 命令下发）。
@@ -260,4 +261,5 @@ export function registerConsoleModule(app: FastifyInstance) {
   })
 
   registerMaintenanceAnnounceRoutes(app)
+  registerWorldStateRoutes(app)
 }

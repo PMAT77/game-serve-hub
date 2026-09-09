@@ -104,6 +104,11 @@ export interface RouteMetaRaw {
 }
 
 export interface RouteRecordMainRaw {
+  /**
+   * 模块容器路径（如 /node）
+   * @description 转换导航菜单数据时作为子项相对 path 的基准，缺省时子项 path 保持相对值
+   */
+  path?: string
   meta?: Pick<RouteMetaRaw, 'auth' | 'title' | 'icon' | 'sort'>
   children: RouteRecordRaw[]
 }

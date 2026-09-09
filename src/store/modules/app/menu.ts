@@ -19,7 +19,10 @@ export const useAppMenuStore = defineStore(
               meta: {},
               children: [],
             })
-            returnMenus[0].children.push(...convertRouteToMenuRecursive(item.children))
+            // 必须以模块容器 path 作为 basePath：否则子菜单项 path 是相对值
+            // （如 'instance'、''），router.push 时会相对当前页面解析，
+            // 从深层页面（实例详情等）点击菜单会解析出错误 URL
+            returnMenus[0].children.push(...convertRouteToMenuRecursive(item.children, item.path))
           }
           else {
             const menuItem: MenuRecordMainRaw = {
@@ -30,7 +33,7 @@ export const useAppMenuStore = defineStore(
               },
               children: [],
             }
-            menuItem.children = convertRouteToMenuRecursive(item.children)
+            menuItem.children = convertRouteToMenuRecursive(item.children, item.path)
             returnMenus.push(menuItem)
           }
         }

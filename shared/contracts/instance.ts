@@ -167,3 +167,25 @@ export const instanceItemSchema = z.object({
   updatedAt: z.string(),
 })
 export type InstanceItem = z.infer<typeof instanceItemSchema>
+
+/** 世界运行时状态查询（通过游戏内指令回读，仅运行中实例可用） */
+export const instanceWorldStateQuerySchema = z.object({
+  instanceId: instanceIdSchema,
+  shard: z.enum(['master', 'caves']).default('master'),
+})
+export type InstanceWorldStateQuery = z.infer<typeof instanceWorldStateQuerySchema>
+
+export const instanceWorldStateSchema = z.object({
+  instanceId: instanceIdSchema,
+  /** 查询是否成功（指令已送达且日志回读到结果） */
+  available: z.boolean(),
+  /** 世界天数（0 起，展示层 +1） */
+  cycles: z.number().int().nonnegative().nullable(),
+  /** 季节（autumn/winter/spring/summer 或 Mod 自定义） */
+  season: z.string().nullable(),
+  /** 当前季节内的天数（0 起，展示层 +1） */
+  daysInSeason: z.number().int().nonnegative().nullable(),
+  /** 不可用原因说明（available=false 时给用户看的文案） */
+  message: z.string().optional(),
+})
+export type InstanceWorldStateDto = z.infer<typeof instanceWorldStateSchema>

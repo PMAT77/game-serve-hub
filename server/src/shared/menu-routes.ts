@@ -26,7 +26,7 @@ export const OPS_MANAGE_PERMISSION = 'ops:manage'
  * 后端驱动的动态菜单与路由（component 为 views/ 下相对路径）。
  *
  * 菜单组织约定（扁平化，杜绝「控制台>控制台>监控台」式同名嵌套）：
- * - 主导航（图标栏）每一项对应一个页面任务：监控台 / 实例管理 / 房间与联机 / 世界与洞穴 / 模组管理 / 系统设置；
+ * - 主导航（图标栏）每一项对应一个页面任务：监控台 / 实例管理 / 房间管理 / 世界管理 / 模组管理 / 系统设置；
  * - 页面路由挂在 Layout 容器下（component: 'Layout'），真实页面 `meta.menu: false` 使容器在菜单中呈现为可点击的单项；
  * - 容器用 redirect 指向真实页面；列表页 `meta.breadcrumb: false` 避免与容器标题重复；
  * - 房间/世界/Mod 的设置页保持隐藏路由（menu: false），面包屑正常展示，activeMenu 归属列表项。
@@ -96,6 +96,19 @@ export const menuRouteList: MenuRouteItem[] = [
             },
           },
           {
+            path: 'instance/detail/:instanceId',
+            name: 'nodeInstanceDetail',
+            component: 'node/instance/detail.vue',
+            meta: {
+              title: '实例详情',
+              icon: 'ri:stack-line',
+              auth: NODE_INSTANCE_MANAGE_PERMISSION,
+              activeMenu: FRONTEND_ROUTE_PATHS.nodeInstance,
+              menu: false,
+              keepAlive: true,
+            },
+          },
+          {
             path: 'instance/console/:instanceId',
             name: 'nodeInstanceConsole',
             component: 'node/instance/console.vue',
@@ -114,7 +127,7 @@ export const menuRouteList: MenuRouteItem[] = [
   },
   {
     meta: {
-      title: '房间与联机',
+      title: '房间管理',
       icon: 'ri:home-wifi-line',
     },
     children: [
@@ -123,7 +136,7 @@ export const menuRouteList: MenuRouteItem[] = [
         component: 'Layout',
         name: 'dstRooms',
         meta: {
-          title: '房间与联机',
+          title: '房间管理',
           icon: 'ri:home-wifi-line',
           auth: NODE_INSTANCE_MANAGE_PERMISSION,
         },
@@ -133,7 +146,7 @@ export const menuRouteList: MenuRouteItem[] = [
             name: 'dstRoomList',
             component: 'games/dst/cluster/index.vue',
             meta: {
-              title: '房间与联机',
+              title: '房间管理',
               icon: 'ri:home-wifi-line',
               auth: NODE_INSTANCE_MANAGE_PERMISSION,
               menu: false,
@@ -159,7 +172,7 @@ export const menuRouteList: MenuRouteItem[] = [
   },
   {
     meta: {
-      title: '世界与洞穴',
+      title: '世界管理',
       icon: 'ri:earth-line',
     },
     children: [
@@ -168,7 +181,7 @@ export const menuRouteList: MenuRouteItem[] = [
         component: 'Layout',
         name: 'dstWorlds',
         meta: {
-          title: '世界与洞穴',
+          title: '世界管理',
           icon: 'ri:earth-line',
           auth: NODE_INSTANCE_MANAGE_PERMISSION,
         },
@@ -178,7 +191,7 @@ export const menuRouteList: MenuRouteItem[] = [
             name: 'dstWorldList',
             component: 'games/dst/shard/index.vue',
             meta: {
-              title: '世界与洞穴',
+              title: '世界管理',
               icon: 'ri:earth-line',
               auth: NODE_INSTANCE_MANAGE_PERMISSION,
               menu: false,

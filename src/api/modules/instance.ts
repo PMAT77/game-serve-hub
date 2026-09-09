@@ -25,6 +25,7 @@ import type {
   InstanceStatusCounts,
   InstanceStatusCountsQuery,
   InstanceUpdateCheckJobPayload,
+  InstanceWorldStateDto,
   InstallableGameItem,
 } from '../../../shared/contracts/instance'
 import type {
@@ -92,6 +93,9 @@ export default {
   getInstanceConnectInfo: (instanceId: string) => api.get('app/instance/connect-info', {
     params: { instanceId },
   }) as Promise<{ data: InstanceConnectInfo }>,
+  getInstanceWorldState: (instanceId: string, shard: 'master' | 'caves' = 'master') => api.get('app/instance/world-state', {
+    params: { instanceId, shard },
+  }) as Promise<{ data: InstanceWorldStateDto }>,
   getInstanceConsoleLogs: (instanceId: string, afterId = 0, stream: InstanceConsoleLogFilter = 'all') => api.get('app/instance/console/logs', {
     params: { instanceId, afterId, stream: stream === 'all' ? undefined : stream },
   }) as Promise<{ data: InstanceConsoleLogsPayload }>,

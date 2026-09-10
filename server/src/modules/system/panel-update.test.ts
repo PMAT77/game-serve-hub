@@ -6,9 +6,10 @@ import { afterEach, describe, it } from 'node:test'
 import type { ServerConfig } from '../../shared/config'
 import {
   hasStackRequiredFiles,
+  isReleaseNewer,
   resolveApplySupport,
   resolveStackPaths,
-  isReleaseNewer,
+  resolveUpdateKind,
 } from './panel-update'
 
 const tempDirs: string[] = []
@@ -124,6 +125,68 @@ describe('resolveApplySupport', () => {
     assert.equal(support.hint, null)
     assert.equal(support.stackPaths?.hostDir, hostDir)
     assert.equal(support.stackPaths?.localDir, hostDir)
+  })
+})
+
+describe('resolveUpdateKind', () => {
+  it('separates a newer release from the same version with different image content', () => {
+    assert.equal(resolveUpdateKind({
+      runtimeMode: 'docker',
+      updateAvailable: true,
+      currentVersion: 'v0.2.1',
+      latestVersion: 'v0.2.2',
+    }), 'newer')
+    assert.equal(resolveUpdateKind({
+      runtimeMode: 'docker',
+      updateAvailable: true,
+      currentVersion: 'v0.2.2',
+      latestVersion: 'v0.2.2',
+    }), 'same-version-changed')
+    assert.equal(resolveUpdateKind({
+      runtimeMode: 'docker',
+      updateAvailable: true,
+      currentVersion: '0.2.2',
+      latestVersion: 'v0.2.2',
+    }), 'same-version-changed')
+  })
+
+  it('never claims an update when the digests match', () => {
+    assert.equal(resolveUpdateKind({
+      runtimeMode: 'docker',
+      updateAvailable: false,
+      currentVersion: 'v0.2.2',
+      latestVersion: 'v0.2.2',
+    }), 'none')
+  })
+
+  it('stays unknown when the release tag cannot be read', () => {
+    assert.equal(resolveUpdateKind({
+      runtimeMode: 'docker',
+      updateAvailable: true,
+      currentVersion: 'v0.2.2',
+      latestVersion: null,
+    }), 'unknown')
+    assert.equal(resolveUpdateKind({
+      runtimeMode: 'docker',
+      updateAvailable: true,
+      currentVersion: null,
+      latestVersion: 'v0.2.2',
+    }), 'unknown')
+  })
+
+  it('treats a native upgrade as a plain newer version', () => {
+    assert.equal(resolveUpdateKind({
+      runtimeMode: 'native',
+      updateAvailable: true,
+      currentVersion: 'v0.2.1',
+      latestVersion: 'v0.2.2',
+    }), 'newer')
+    assert.equal(resolveUpdateKind({
+      runtimeMode: 'native',
+      updateAvailable: false,
+      currentVersion: 'v0.2.2',
+      latestVersion: 'v0.2.2',
+    }), 'none')
   })
 })
 

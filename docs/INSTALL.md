@@ -256,6 +256,28 @@ GSH_STEAMCMD_HTTPS_PROXY=http://proxy.example.com:7890
 
 ## 9. 原地升级与回滚
 
+### 面板内一键更新
+
+面板「系统设置 → 面板与游戏版本」里的「应用更新」需要同时满足三个条件：
+
+- 使用 Docker 部署。Native（systemd）安装没有容器镜像可换，需在服务器终端重跑安装脚本；
+- `panel.env` 中的 `GSH_STACK_DIR` 是安装目录的**绝对路径**（安装脚本默认写为 `/opt/game-server-hub`）；
+- compose 叠加了 `docker-compose.bind.yml`，使面板容器能通过 `/stack` 读到 `panel.env` 与 compose 文件。
+
+任一条件不满足时按钮置灰，面板只说明「当前部署方式不支持面板内自动更新」并给出一条可复制的手动更新命令：
+
+```bash
+sudo gsh update
+```
+
+注意：**只按面板给出（或历史文档里）那条 `docker compose pull && up -d` 升级，不会更新宿主机上的 compose 文件**。如果一键更新一直不可用，说明 compose 文件或 `/stack` 挂载停留在旧版本，在服务器终端重跑一次安装脚本即可补齐并恢复（脚本默认 `auto`，有 Docker 的机器会自动判定为 Docker 模式）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/<版本 tag>/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=<版本 tag> bash -s
+```
+
+### 安装脚本原地升级
+
 同模式重跑新版安装脚本即原地升级：
 
 ```bash

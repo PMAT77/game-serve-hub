@@ -18,7 +18,7 @@ export function usePanelUpdateNotifier() {
 
   function buildUpdateMessage(status: Awaited<ReturnType<typeof apiSystem.getPanelUpdateStatus>>['data']) {
     const releaseHint = status.release?.tagName ? `（${status.release.tagName}）` : ''
-    return `统一镜像有新版本${releaseHint}。请前往「系统设置 → Hub 版本」查看并更新。`
+    return `统一镜像有新版本${releaseHint}。请前往「系统设置 → 面板与游戏版本」查看并更新。`
   }
 
   async function pollPanelUpdateStatus() {

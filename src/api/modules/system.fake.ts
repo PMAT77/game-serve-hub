@@ -25,7 +25,8 @@ const panelUpdateStatus = {
   release: {
     tagName: 'v0.2.0',
     name: 'v0.2.0',
-    body: '- 面板更新检测\n- DST 运行镜像优化',
+    // 与线上一致的长文本，用于验证面板不再原样展示发布方术语。
+    body: '本 Release 的统一镜像（面板 + DST 运行环境 + SteamCMD）与 Native systemd 部署包、离线 Docker 镜像包一同发布。\n\n统一镜像的不可变 digest 见附件 `release-images.json`；Native 包与离线镜像包使用同名 `.sha256` 校验。安装与升级请使用版本 tag 或附件中的 digest，不要依赖 `latest`。\n\n**Full Changelog**: https://github.com/PMAT77/game-serve-hub/compare/v0.2.1...v0.2.2',
     publishedAt: new Date().toISOString(),
     htmlUrl: 'https://github.com/PMAT77/game-serve-hub/releases/tag/v0.2.0',
   },
@@ -35,6 +36,7 @@ const panelUpdateStatus = {
   applySupported: true,
   imageApplySupported: false,
   applyHint: '开发环境未配置 GSH_STACK_DIR',
+  updateKind: 'same-version-changed' as const,
   manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d',
   checkError: null,
 }

@@ -13,6 +13,9 @@ import { loadServerConfig } from '../../shared/config'
 import { getSystemPanelSettings } from '../../shared/db/index'
 import { getDefaultPanelSettings } from './defaults'
 
+/** 更新语义分类，用于把"同版本号但镜像变了"与"版本更高"区分展示 */
+export type UpdateKind = 'none' | 'newer' | 'same-version-changed' | 'unknown'
+
 export interface HubImageUpdateInfo {
   image: string
   tag: string
@@ -46,6 +49,8 @@ export interface PanelUpdateStatus {
   applySupported: boolean
   imageApplySupported: boolean
   applyHint: string | null
+  /** 更新语义分类：区分"版本更高"与"同版本号但镜像内容变了" */
+  updateKind: UpdateKind
   manualUpdateCommand: string | null
   checkError: string | null
 }
@@ -235,6 +240,45 @@ export function isReleaseNewer(current: string | null, latest: string | null): b
   return right.prerelease.localeCompare(left.prerelease, 'en', { numeric: true }) > 0
 }
 
+function parseVersionTriple(value: string | null | undefined): string | null {
+  const match = value?.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/)
+  if (!match) {
+    return null
+  }
+  return `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}`
+}
+
+/**
+ * 把"有新版本"细分为用户能理解的几种情形。
+ * Docker 模式的 updateAvailable 只由镜像摘要决定，与版本号无关，
+ * 因此必须把"版本号相同但镜像变了"单独区分，否则界面自相矛盾。
+ */
+export function resolveUpdateKind(input: {
+  runtimeMode: 'docker' | 'native'
+  updateAvailable: boolean
+  currentVersion: string | null
+  latestVersion: string | null
+}): UpdateKind {
+  if (!input.updateAvailable) {
+    return 'none'
+  }
+  if (input.runtimeMode === 'native') {
+    return 'newer'
+  }
+  if (!input.latestVersion) {
+    return 'unknown'
+  }
+  const current = parseVersionTriple(input.currentVersion)
+  const latest = parseVersionTriple(input.latestVersion)
+  if (current && latest && current === latest) {
+    return 'same-version-changed'
+  }
+  if (isReleaseNewer(input.currentVersion, input.latestVersion)) {
+    return 'newer'
+  }
+  return 'unknown'
+}
+
 function buildManualUpdateCommand(stackPaths: StackPaths | null, releaseTag?: string | null): string {
   const config = loadServerConfig()
   if (config.runtimeMode === 'native') {
@@ -377,6 +421,7 @@ function buildEmptyStatus(): PanelUpdateStatus {
     checking: false,
     updating,
     ...buildApplyFields(applySupport),
+    updateKind: 'none',
     checkError: null,
   }
 }
@@ -398,6 +443,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       const release = await fetchLatestGitHubRelease(config.githubRepo)
       const currentVersion = envReleaseVersion || null
       const latestVersion = release?.tagName ?? null
+      const nativeUpdateAvailable = isReleaseNewer(currentVersion, latestVersion)
       const image: HubImageUpdateInfo = {
         image: 'native-release',
         tag: currentVersion || 'unknown',
@@ -406,7 +452,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
         localDigestShort: config.buildSha ? config.buildSha.slice(0, 12) : null,
         remoteDigest: null,
         remoteDigestShort: null,
-        updateAvailable: isReleaseNewer(currentVersion, latestVersion),
+        updateAvailable: nativeUpdateAvailable,
         localPresent: true,
         checkError: release ? null : '无法读取最新 GitHub Release',
       }
@@ -418,6 +464,12 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
         checking: false,
         updating,
         ...buildApplyFields(applySupport, latestVersion),
+        updateKind: resolveUpdateKind({
+          runtimeMode: 'native',
+          updateAvailable: nativeUpdateAvailable,
+          currentVersion,
+          latestVersion,
+        }),
         checkError: image.checkError,
       }
       cachedStatus = nextStatus
@@ -436,6 +488,12 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       checking: false,
       updating,
       ...buildApplyFields(applySupport, release?.tagName),
+      updateKind: resolveUpdateKind({
+        runtimeMode: 'docker',
+        updateAvailable: image.updateAvailable,
+        currentVersion: image.releaseVersion,
+        latestVersion: release?.tagName ?? null,
+      }),
       checkError: image.checkError,
     }
     cachedStatus = nextStatus

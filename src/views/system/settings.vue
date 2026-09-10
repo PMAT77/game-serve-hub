@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { PanelSettingsPayload } from '@/api/modules/system'
-import { NAlert, NInputNumber, NSelect, NSpin, useDialog } from 'naive-ui'
+import { NAlert, NCollapse, NCollapseItem, NInputNumber, NSelect, NSpin, useDialog } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
 import apiSystem from '@/api/modules/system'
+import { copyTextToClipboard } from '@/utils/copyToClipboard'
+import { buildPanelUpdatePresentation, MANUAL_UPDATE_COMMAND, MANUAL_UPDATE_HINT, MANUAL_UPDATE_NOTE } from './panelUpdatePresentation'
 
 defineOptions({
   name: 'SystemSettings',
@@ -68,16 +70,18 @@ const canApplyUpdate = computed(() => {
   return canApplyImageUpdate.value
 })
 
-const showImageApplyHint = computed(() => {
-  if (!updateStatus.value) {
-    return false
-  }
-  return updateStatus.value.image.updateAvailable && !updateStatus.value.imageApplySupported
-})
-
 const formattedLastCheckedAt = computed(() => formatDisplayDateTime(updateStatus.value?.lastCheckedAt ?? null))
 const normalizedCheckError = computed(() => normalizeCheckError(updateStatus.value?.checkError ?? null))
-const normalizedApplyHint = computed(() => normalizeApplyHint(updateStatus.value?.applyHint ?? null))
+
+const updateView = computed(() => buildPanelUpdatePresentation(updateStatus.value))
+const releaseUrl = computed(() => updateStatus.value?.release?.htmlUrl?.trim() || null)
+const manualUpdateCommand = computed(() => updateStatus.value?.manualUpdateCommand?.trim() || null)
+const applyButtonLabel = computed(() => updateStatus.value?.updating ? '更新中…' : '应用更新')
+const needsManualUpdate = computed(() => updateView.value.needsManualCommand)
+const releaseMetaLine = computed(() => {
+  const checkedAt = formattedLastCheckedAt.value
+  return checkedAt ? `上次检查：${checkedAt}` : null
+})
 
 function formatDisplayDateTime(value: string | null): string | null {
   if (!value) {
@@ -112,22 +116,18 @@ function normalizeCheckError(value: string | null): string | null {
   return [...new Set(parts)].join('；')
 }
 
-function normalizeApplyHint(value: string | null): string | null {
+async function copyUpdateCommand(command: string, label: string) {
+  const value = command.trim()
   if (!value) {
-    return null
+    faToast.warning('暂无可复制的命令')
+    return
   }
-  if (/无法在容器内访问 compose|未配置 GSH_STACK_DIR|GSH_STACK_DIR 必须是绝对路径/.test(value)) {
-    return '当前环境暂不支持自动更新，请使用下方命令手动更新。'
+  const ok = await copyTextToClipboard(value)
+  if (!ok) {
+    faToast.error('复制失败，请手动选中命令文本复制')
+    return
   }
-  return value
-}
-
-function formatImageLine(
-  info: NonNullable<typeof updateStatus.value>['image'],
-) {
-  const version = info.releaseVersion || info.tag
-  const status = info.updateAvailable ? '（有新版本）' : '（已是最新）'
-  return `面板版本：${version}${status}`
+  faToast.success(`${label}已复制`)
 }
 
 async function loadSettings(options?: { silent?: boolean }) {
@@ -302,49 +302,75 @@ onActivated(async () => {
 
       <AdminSettingsSection
         title="面板与游戏版本"
-        description="检查面板与游戏服务端是否有新版本；应用更新后面板会短暂重启。"
+        description="检查面板与游戏服务端是否有新版本。"
       >
         <div v-if="updateStatus" class="space-y-2 text-sm">
-          <p>{{ formatImageLine(updateStatus.image) }}</p>
-          <p v-if="updateStatus.release" class="text-muted-foreground">
-            最新版本：{{ updateStatus.release.tagName }}
-            <span v-if="formattedLastCheckedAt"> · 上次检查 {{ formattedLastCheckedAt }}</span>
+          <p class="font-medium">
+            {{ updateView.versionLine }}
           </p>
-          <p v-else-if="formattedLastCheckedAt" class="text-xs text-muted-foreground">
-            上次检查：{{ formattedLastCheckedAt }}
+          <p v-if="releaseMetaLine" class="text-xs text-muted-foreground">
+            {{ releaseMetaLine }}
+            <a
+              v-if="releaseUrl"
+              :href="releaseUrl"
+              target="_blank"
+              rel="noopener"
+              class="ml-1 text-primary hover:underline"
+            >
+              更新说明
+            </a>
           </p>
           <p v-if="normalizedCheckError" class="text-xs text-amber-600 dark:text-amber-400">
             检查提示：{{ normalizedCheckError }}
           </p>
-          <p v-if="normalizedApplyHint && showImageApplyHint" class="text-xs text-muted-foreground">
-            {{ normalizedApplyHint }}
-          </p>
-          <pre
-            v-if="updateStatus.manualUpdateCommand && showImageApplyHint"
-            class="text-xs bg-muted overflow-x-auto p-3 rounded-md"
-          >{{ updateStatus.manualUpdateCommand }}</pre>
-          <div
-            v-if="updateStatus.release?.body"
-            class="text-xs text-muted-foreground whitespace-pre-wrap border rounded-md p-3 max-h-40 overflow-y-auto"
-          >
-            {{ updateStatus.release.body }}
-          </div>
         </div>
         <div v-else class="text-sm text-muted-foreground">
           暂时无法获取版本信息
         </div>
-        <div class="flex flex-wrap gap-2 pt-1">
-          <FaButton
-            :loading="applyLoading"
-            :disabled="!canApplyUpdate"
-            @click="confirmApplyHubUpdate"
-          >
-            应用更新
-          </FaButton>
-          <FaButton variant="outline" :loading="updateStatusLoading" @click="checkHubUpdate">
-            检查更新
-          </FaButton>
+
+        <div class="space-y-2 pt-1">
+          <div class="flex flex-wrap gap-2">
+            <FaButton
+              :loading="applyLoading"
+              :disabled="!canApplyUpdate"
+              @click="confirmApplyHubUpdate"
+            >
+              {{ applyButtonLabel }}
+            </FaButton>
+            <FaButton variant="outline" :loading="updateStatusLoading" @click="checkHubUpdate">
+              检查更新
+            </FaButton>
+          </div>
+          <div v-if="needsManualUpdate" class="flex flex-wrap gap-2 items-center text-xs">
+            <span class="text-amber-600 dark:text-amber-400">{{ MANUAL_UPDATE_NOTE }}</span>
+            <code class="bg-muted px-2 py-1 rounded-md">{{ MANUAL_UPDATE_COMMAND }}</code>
+            <FaButton
+              variant="outline"
+              size="sm"
+              @click="copyUpdateCommand(MANUAL_UPDATE_COMMAND, '更新命令')"
+            >
+              复制
+            </FaButton>
+          </div>
         </div>
+
+        <NCollapse v-if="needsManualUpdate && manualUpdateCommand" class="pt-1">
+          <NCollapseItem title="其他更新方式" name="manual-update">
+            <div class="space-y-2 text-sm">
+              <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ manualUpdateCommand }}</pre>
+              <div class="flex flex-wrap gap-2 items-center">
+                <FaButton
+                  variant="outline"
+                  size="sm"
+                  @click="copyUpdateCommand(manualUpdateCommand ?? '', '备用命令')"
+                >
+                  复制
+                </FaButton>
+                <span class="text-xs text-muted-foreground">{{ MANUAL_UPDATE_HINT }}</span>
+              </div>
+            </div>
+          </NCollapseItem>
+        </NCollapse>
       </AdminSettingsSection>
 
       <AdminSettingsSection

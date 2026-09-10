@@ -15,12 +15,16 @@
 
 **单一事实来源：**
 
-1. Git tag：`v0.1.4`
-2. `package.json` → `"version": "0.1.4"`
+1. Git tag：`v0.2.2`
+2. `package.json` → `"version": "0.2.2"`
 3. `CHANGELOG.md` → 对应章节
 4. GitHub Release 说明（镜像 tag 与升级指引）
 
-四者在发布前必须一致。
+四者必须一致。**开发期间 `package.json` 的 version 应与最新已发布 tag 保持一致**——不要在功能提交里顺手 bump 版本号，也不要预写带日期的 CHANGELOG 发布章节。
+
+原因：镜像引用（`docker-compose.yml`、`panel.env.example`、`install.linux.sh` 等 6 处）指向的是**已发布**版本，一旦 `package.json` 提前 bump，`pnpm run release:verify` 就会失败，而它在每次推送到 `main` 时都会执行 —— CI 会从那一刻起持续变红，掩盖这期间真正的回归。
+
+版本号、CHANGELOG 发布章节与全部镜像引用应在**发布日一次性更新**，见下方检查清单。
 
 ---
 

@@ -262,6 +262,76 @@ export const menuRouteList: MenuRouteItem[] = [
   },
   {
     meta: {
+      title: '备份与恢复',
+      icon: 'ri:archive-line',
+    },
+    children: [
+      {
+        path: '/ops',
+        component: 'Layout',
+        name: 'ops',
+        redirect: FRONTEND_ROUTE_PATHS.opsBackups,
+        meta: {
+          title: '备份与恢复',
+          icon: 'ri:archive-line',
+          auth: OPS_READ_PERMISSION,
+        },
+        children: [
+          {
+            path: 'backups',
+            name: 'opsBackups',
+            component: 'ops/backups/index.vue',
+            meta: {
+              title: '备份与恢复',
+              icon: 'ri:archive-line',
+              auth: OPS_READ_PERMISSION,
+              menu: false,
+              breadcrumb: false,
+              activeMenu: FRONTEND_ROUTE_PATHS.opsBackups,
+              keepAlive: true,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    meta: {
+      title: '计划任务',
+      icon: 'ri:timer-line',
+    },
+    children: [
+      {
+        path: '/ops-schedule',
+        component: 'Layout',
+        name: 'opsSchedule',
+        redirect: FRONTEND_ROUTE_PATHS.opsSchedules,
+        meta: {
+          title: '计划任务',
+          icon: 'ri:timer-line',
+          auth: OPS_READ_PERMISSION,
+        },
+        children: [
+          {
+            path: 'schedules',
+            name: 'opsSchedules',
+            component: 'ops/schedules/index.vue',
+            meta: {
+              title: '计划任务',
+              icon: 'ri:timer-line',
+              auth: OPS_READ_PERMISSION,
+              menu: false,
+              breadcrumb: false,
+              activeMenu: FRONTEND_ROUTE_PATHS.opsSchedules,
+              keepAlive: true,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    meta: {
       title: '系统设置',
       icon: 'ri:settings-3-line',
     },
@@ -290,39 +360,17 @@ export const menuRouteList: MenuRouteItem[] = [
               activeMenu: '/system',
             },
           },
-        ],
-      },
-    ],
-  },
-  {
-    meta: {
-      title: '备份与恢复',
-      icon: 'ri:archive-line',
-    },
-    children: [
-      {
-        path: '/ops',
-        component: 'Layout',
-        name: 'ops',
-        redirect: FRONTEND_ROUTE_PATHS.opsBackups,
-        meta: {
-          title: '备份与恢复',
-          icon: 'ri:archive-line',
-          auth: OPS_READ_PERMISSION,
-        },
-        children: [
           {
-            path: 'backups',
-            name: 'opsBackups',
-            component: 'ops/backups/index.vue',
+            path: 'notify',
+            name: 'systemNotify',
+            component: 'system/notify.vue',
             meta: {
-              title: '备份与恢复',
-              icon: 'ri:archive-line',
-              auth: OPS_READ_PERMISSION,
+              title: '通知渠道',
+              icon: 'ri:notification-3-line',
+              auth: SYSTEM_MANAGE_PERMISSION,
               menu: false,
               breadcrumb: false,
-              activeMenu: FRONTEND_ROUTE_PATHS.opsBackups,
-              keepAlive: true,
+              activeMenu: '/system',
             },
           },
         ],

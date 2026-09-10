@@ -7,6 +7,7 @@ import type {
 import fs from 'node:fs'
 import process from 'node:process'
 import type { InstallSeedDonor } from './install-seed'
+import { maybeEmitUpdateAvailableEvent } from './update-notify'
 import type { DbGameInstance } from '../../shared/db/index'
 import {
   getGameInstanceById,
@@ -156,6 +157,7 @@ export async function refreshInstanceUpdateStatus(
   if (input.forceRemote) {
     clearRemoteBuildCache(instance.gameCode)
   }
+  const previousAvailable = instance.updateAvailable === true
   const result = await checkGameUpdateAvailable({
     installPath,
     appId: instance.gameCode,
@@ -169,6 +171,12 @@ export async function refreshInstanceUpdateStatus(
     updateCheckedAt: result.checkedAt,
   })
   const updated = await getGameInstanceById(instance.id)
+  // 仅在「无更新 → 有更新」跃迁时发布事件，重复检查不会反复推送（通知侧冷却窗口兜底）
+  maybeEmitUpdateAvailableEvent(
+    { ...instance, updateAvailable: previousAvailable },
+    result,
+    updated,
+  )
   return updated ?? instance
 }
 
@@ -245,6 +253,12 @@ export async function checkInstancesForUpdates(input: {
       updateCheckedAt: checkedAt,
     })
     const updated = await getGameInstanceById(instance.id)
+    // 批量检查（定时任务/6 小时周期）同样走「无更新 → 有更新」跃迁推送
+    maybeEmitUpdateAvailableEvent(
+      instance,
+      { updateAvailable, localBuildId, remoteBuildId, checkedAt },
+      updated,
+    )
     items.push(toStatusItem(updated ?? instance))
   }
   return {

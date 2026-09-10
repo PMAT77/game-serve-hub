@@ -1,0 +1,414 @@
+<script setup lang="ts">
+import type { DataTableColumns, FormRules, SelectOption } from 'naive-ui'
+import type { ScheduleTaskItem } from '@/api/modules/schedule'
+import type { InstanceItem } from '@/api/modules/instance'
+import { NButton, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch, NTag, NTime, NTimePicker, NTooltip, useDialog } from 'naive-ui'
+import { computed, h, onActivated, onMounted, ref } from 'vue'
+import apiSchedule from '@/api/modules/schedule'
+import apiInstance from '@/api/modules/instance'
+import { useAdminPageState } from '@/composables/useAdminPageState'
+
+defineOptions({
+  name: 'OpsSchedules',
+})
+
+const dialog = useDialog()
+const appSettingsStore = useAppSettingsStore()
+
+const rows = ref<ScheduleTaskItem[]>([])
+const instances = ref<InstanceItem[]>([])
+const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
+
+const {
+  loading,
+  runLoad,
+} = useAdminPageState(rows)
+
+const kindMeta: Record<ScheduleTaskItem['kind'], { label: string, type: 'default' | 'info' | 'warning' | 'error' | 'success' }> = {
+  restart: { label: '定时重启', type: 'warning' },
+  backup: { label: '定时备份', type: 'info' },
+  update_check: { label: '更新检查', type: 'default' },
+  db_snapshot: { label: '数据库快照', type: 'success' },
+}
+
+const runStatusMeta: Record<NonNullable<ScheduleTaskItem['lastRunStatus']>, { label: string, type: 'default' | 'info' | 'warning' | 'error' | 'success' }> = {
+  ok: { label: '成功', type: 'success' },
+  failed: { label: '失败', type: 'error' },
+  skipped: { label: '跳过', type: 'warning' },
+}
+
+function describeSchedule(task: ScheduleTaskItem): string {
+  if (task.scheduleType === 'interval') {
+    return `每 ${task.scheduleValue} 小时`
+  }
+  return `每日 ${task.scheduleValue}`
+}
+
+function instanceName(instanceId: string): string {
+  if (instanceId === 'panel-db') {
+    return '面板数据库'
+  }
+  return instances.value.find(item => item.id === instanceId)?.name ?? instanceId
+}
+
+const instanceOptions = computed<SelectOption[]>(() => {
+  return instances.value.map(item => ({
+    label: item.name,
+    value: item.id,
+  }))
+})
+
+function triggerLoad() {
+  runLoad(async () => {
+    const [scheduleResponse, instanceResponse] = await Promise.all([
+      apiSchedule.getScheduleList(),
+      apiInstance.getInstanceList().catch(() => ({ data: [] as InstanceItem[] })),
+    ])
+    rows.value = scheduleResponse.data ?? []
+    instances.value = instanceResponse.data ?? []
+  })
+}
+
+onMounted(() => {
+  triggerLoad()
+})
+
+onActivated(() => {
+  triggerLoad()
+})
+
+// ---------------------------------------------------------------------------
+// 创建 / 编辑
+// ---------------------------------------------------------------------------
+
+const editorVisible = ref(false)
+const editorIsEdit = ref(false)
+const editorTaskId = ref('')
+const editorInstanceId = ref<string | null>(null)
+const editorKind = ref<ScheduleTaskItem['kind']>('backup')
+const editorScheduleType = ref<ScheduleTaskItem['scheduleType']>('daily')
+const editorIntervalHours = ref<number | null>(24)
+const editorDailyTimeTs = ref<number | null>(null)
+
+/** HH:mm 字符串 → 当天该时刻的时间戳（供时间选择器回显） */
+function parseHHmmToTs(value: string): number {
+  const [hourPart, minutePart] = value.split(':')
+  const date = new Date()
+  date.setHours(Number.parseInt(hourPart ?? '0', 10) || 0, Number.parseInt(minutePart ?? '0', 10) || 0, 0, 0)
+  return date.getTime()
+}
+
+/** 时间戳 → HH:mm 字符串（提交给后端的格式） */
+function formatTsToHHmm(ts: number): string {
+  const date = new Date(ts)
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return hour + ':' + minute
+}
+
+const kindOptions: SelectOption[] = [
+  { label: '定时备份（实例存档）', value: 'backup' },
+  { label: '定时重启', value: 'restart' },
+  { label: '更新检查（SteamCMD）', value: 'update_check' },
+  { label: '数据库快照（面板全局）', value: 'db_snapshot' },
+]
+
+const scheduleTypeOptions: SelectOption[] = [
+  { label: '每日固定时刻（服务器本地时区）', value: 'daily' },
+  { label: '每 N 小时', value: 'interval' },
+]
+
+const editorRules: FormRules = {
+  instanceId: [{ required: true, message: '请选择目标实例', trigger: ['blur', 'change'], type: 'string' }],
+}
+
+const editorServerTimezone = computed(() => Intl.DateTimeFormat().resolvedOptions().timeZone || '本地时区')
+
+function openCreateDialog() {
+  editorIsEdit.value = false
+  editorTaskId.value = ''
+  editorInstanceId.value = instances.value[0]?.id ?? null
+  editorKind.value = 'backup'
+  editorScheduleType.value = 'daily'
+  editorIntervalHours.value = 24
+  editorDailyTimeTs.value = parseHHmmToTs('04:30')
+  editorVisible.value = true
+}
+
+function openEditDialog(task: ScheduleTaskItem) {
+  editorIsEdit.value = true
+  editorTaskId.value = task.id
+  editorInstanceId.value = task.instanceId
+  editorKind.value = task.kind
+  editorScheduleType.value = task.scheduleType
+  editorIntervalHours.value = Number.parseInt(task.scheduleValue, 10) || 24
+  editorDailyTimeTs.value = parseHHmmToTs(task.scheduleValue)
+  editorVisible.value = true
+}
+
+function resolveScheduleValue(): string | null {
+  if (editorScheduleType.value === 'interval') {
+    const hours = editorIntervalHours.value
+    if (!Number.isInteger(hours) || (hours ?? 0) < 1 || (hours ?? 0) > 168) {
+      return null
+    }
+    return String(hours)
+  }
+  if (editorDailyTimeTs.value === null) {
+    return null
+  }
+  return formatTsToHHmm(editorDailyTimeTs.value)
+}
+
+async function submitEditor() {
+  const scheduleValue = resolveScheduleValue()
+  if (!scheduleValue) {
+    faToast.error(editorScheduleType.value === 'interval' ? '间隔需为 1-168 的整数小时' : '请选择每日执行时刻')
+    return
+  }
+  if (editorIsEdit.value) {
+    const response = await apiSchedule.updateScheduleTask({
+      taskId: editorTaskId.value,
+      scheduleType: editorScheduleType.value,
+      scheduleValue,
+    })
+    if (response.data.isSuccess) {
+      faToast.success('计划任务已更新')
+      editorVisible.value = false
+      triggerLoad()
+    }
+    return
+  }
+  if (!editorInstanceId.value) {
+    faToast.error('请选择目标实例')
+    return
+  }
+  const response = await apiSchedule.createScheduleTask({
+    instanceId: editorInstanceId.value,
+    kind: editorKind.value,
+    scheduleType: editorScheduleType.value,
+    scheduleValue,
+  })
+  if (response.data.isSuccess) {
+    faToast.success('计划任务已创建')
+    editorVisible.value = false
+    triggerLoad()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 行操作
+// ---------------------------------------------------------------------------
+
+async function toggleEnabled(task: ScheduleTaskItem, enabled: boolean) {
+  try {
+    const response = await apiSchedule.updateScheduleTask({ taskId: task.id, enabled })
+    if (response.data.isSuccess) {
+      task.enabled = enabled
+      faToast.success(enabled ? '任务已启用' : '任务已停用')
+      triggerLoad()
+    }
+  }
+  catch {
+    faToast.error('操作失败，请稍后重试')
+  }
+}
+
+function runNow(task: ScheduleTaskItem) {
+  dialog.warning({
+    title: '立即执行',
+    content: `确定立即执行「${kindMeta[task.kind].label}」？执行结果与周期顺延将记录到最近执行。`,
+    positiveText: '执行',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const response = await apiSchedule.runScheduleTaskNow({ taskId: task.id })
+        faToast[response.data.message?.startsWith('skipped') ? 'warning' : 'success'](response.data.message ?? '已触发执行')
+        triggerLoad()
+      }
+      catch {
+        faToast.error('执行失败，请稍后重试')
+      }
+    },
+  })
+}
+
+function removeTask(task: ScheduleTaskItem) {
+  dialog.error({
+    title: '删除计划任务',
+    content: `确定删除「${kindMeta[task.kind].label}（${describeSchedule(task)}）」？删除后不再执行。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const response = await apiSchedule.deleteScheduleTask({ taskId: task.id })
+        if (response.data.isSuccess) {
+          faToast.success('已删除')
+          triggerLoad()
+        }
+      }
+      catch {
+        faToast.error('删除失败，请稍后重试')
+      }
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 表格
+// ---------------------------------------------------------------------------
+
+const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
+  const base: DataTableColumns<ScheduleTaskItem> = [
+    {
+      title: '任务',
+      key: 'kind',
+      width: 110,
+      render: row => h(NTag, { type: kindMeta[row.kind].type, size: 'small', bordered: false }, { default: () => kindMeta[row.kind].label }),
+    },
+    {
+      title: '目标',
+      key: 'instanceId',
+      minWidth: 140,
+      render: row => instanceName(row.instanceId),
+    },
+    {
+      title: '调度',
+      key: 'schedule',
+      width: 140,
+      render: row => describeSchedule(row),
+    },
+    {
+      title: '状态',
+      key: 'enabled',
+      width: 90,
+      render: (row) => {
+        return h(NSwitch, {
+          value: row.enabled,
+          size: 'small',
+          onUpdateValue: (value: boolean) => toggleEnabled(row, value),
+        })
+      },
+    },
+    {
+      title: '最近执行',
+      key: 'lastRun',
+      minWidth: 200,
+      render: (row) => {
+        if (!row.lastRunStatus) {
+          return '尚未执行'
+        }
+        const meta = runStatusMeta[row.lastRunStatus]
+        return h(NSpace, { align: 'center', size: 6, wrap: false }, {
+          default: () => [
+            h(NTooltip, null, {
+              trigger: () => h(NTag, { type: meta.type, size: 'small', bordered: false }, { default: () => meta.label }),
+              default: () => row.lastRunMessage ?? '',
+            }),
+            h('span', { class: 'text-xs opacity-60' }, row.lastRunAt?.replace('T', ' ').slice(0, 19) ?? ''),
+          ],
+        })
+      },
+    },
+    {
+      title: '下次执行',
+      key: 'nextRunAt',
+      width: 170,
+      render: row => (row.enabled && row.nextRunAt
+        ? h(NTime, { time: new Date(row.nextRunAt), type: 'datetime' })
+        : '—'),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 200,
+      render: row => h(NSpace, { size: 8, wrap: false }, {
+        default: () => [
+          h(NButton, { size: 'small', secondary: true, disabled: !row.enabled, onClick: () => runNow(row) }, { default: () => '立即执行' }),
+          h(NButton, { size: 'small', secondary: true, onClick: () => openEditDialog(row) }, { default: () => '编辑' }),
+          h(NButton, { size: 'small', secondary: true, type: 'error', onClick: () => removeTask(row) }, { default: () => '删除' }),
+        ],
+      }),
+    },
+  ]
+  return base
+})
+</script>
+
+<template>
+  <div class="flex flex-col gap-4 p-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="text-sm opacity-70">
+        单机计划任务：定时重启 / 备份 / 更新检查 / 数据库快照。面板离线期间错过的执行不补跑，恢复后自动顺延到下一周期。
+      </div>
+      <NButton type="primary" @click="openCreateDialog">
+        新建任务
+      </NButton>
+    </div>
+
+    <NDataTable
+      :columns="columns"
+      :data="rows"
+      :loading="loading"
+      :scroll-x="isMobileMode ? 900 : undefined"
+      :pagination="false"
+      size="small"
+    />
+
+    <NModal
+      v-model:show="editorVisible"
+      preset="card"
+      :title="editorIsEdit ? '编辑计划任务' : '新建计划任务'"
+      class="w-[480px] max-w-[92vw]"
+      :mask-closable="false"
+    >
+      <NForm
+        :model="{}"
+        :rules="editorRules"
+        label-placement="top"
+        @submit.prevent="submitEditor"
+      >
+        <NFormItem label="任务类型">
+          <NSelect v-model:value="editorKind" :options="kindOptions" :disabled="editorIsEdit" />
+        </NFormItem>
+        <NFormItem v-if="editorKind !== 'db_snapshot'" label="目标实例" path="instanceId">
+          <NSelect
+            v-model:value="editorInstanceId"
+            :options="instanceOptions"
+            :disabled="editorIsEdit"
+            filterable
+            placeholder="选择实例"
+          />
+        </NFormItem>
+        <NFormItem v-else label="目标">
+          <NInput value="面板数据库（全局，仅允许一个启用任务）" disabled />
+        </NFormItem>
+        <NFormItem label="调度方式">
+          <NSelect v-model:value="editorScheduleType" :options="scheduleTypeOptions" />
+        </NFormItem>
+        <NFormItem v-if="editorScheduleType === 'interval'" label="间隔（小时，1-168）">
+          <NInputNumber v-model:value="editorIntervalHours" :min="1" :max="168" :step="1" class="w-full" />
+        </NFormItem>
+        <NFormItem v-else label="每日时刻（服务器时区）">
+          <NTimePicker
+            v-model:value="editorDailyTimeTs"
+            format="HH:mm"
+            :minute-step="5"
+            class="w-full"
+          />
+        </NFormItem>
+        <div class="mb-3 text-xs opacity-50">
+          服务器时区：{{ editorServerTimezone }}；运行中实例的定时备份会先发送 c_save() 热保存。
+        </div>
+        <NSpace justify="end">
+          <NButton @click="editorVisible = false">
+            取消
+          </NButton>
+          <NButton type="primary" @click="submitEditor">
+            {{ editorIsEdit ? '保存' : '创建' }}
+          </NButton>
+        </NSpace>
+      </NForm>
+    </NModal>
+  </div>
+</template>

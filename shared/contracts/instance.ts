@@ -155,6 +155,8 @@ export const instanceItemSchema = z.object({
   rconPort: portSchema.nullable(),
   lastCommand: z.string().nullable(),
   lastError: z.string().nullable(),
+  /** 最近一次异常退出检测时间（ISO）；成功启动后清除 */
+  unexpectedExitAt: z.string().nullable(),
   installLogStatus: z.enum(['running', 'success', 'failed']).nullable(),
   installPercent: z.number().nullable(),
   installLogUpdatedAt: z.string().nullable(),

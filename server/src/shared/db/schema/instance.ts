@@ -17,6 +17,8 @@ export const gameInstances = sqliteTable('game_instances', {
   lastCommand: text('last_command'),
   lastExitCode: integer('last_exit_code'),
   lastError: text('last_error'),
+  /** 最近一次异常退出检测时间（ISO）；成功启动后清除 */
+  unexpectedExitAt: text('unexpected_exit_at'),
   installLogStatus: text('install_log_status'),
   installPercent: integer('install_percent'),
   installLogUpdatedAt: text('install_log_updated_at'),

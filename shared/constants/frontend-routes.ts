@@ -7,4 +7,6 @@ export const FRONTEND_ROUTE_PATHS = {
   dstMods: '/games/dst/mods',
   dstModDetail: '/games/dst/mods/:workshopId/detail',
   opsBackups: '/ops/backups',
+  opsSchedules: '/ops-schedule/schedules',
+  systemNotify: '/system/notify',
 } as const

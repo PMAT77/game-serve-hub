@@ -325,7 +325,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '操作',
       key: 'actions',
-      width: isMobileMode.value ? 88 : 120,
+      width: isMobileMode.value ? 88 : 150,
       fixed: 'right',
       render: row => renderInstanceRowActions(row),
     },
@@ -381,6 +381,15 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
       onClick: () => router.push(routeToInstanceConsole(row.id)),
     },
     {
+      key: 'update',
+      label: installFailed ? '修复安装' : '更新服务端',
+      menuOnly: true,
+      loading: isActionLoading(row.id, 'update'),
+      disabled: instanceActionRunning || !canUpdateInstance(row),
+      title: getUpdateInstanceButtonTitle(row),
+      onClick: () => confirmUpdateInstance(row),
+    },
+    {
       key: 'start',
       label: '启动',
       menuOnly: true,
@@ -395,15 +404,6 @@ function buildInstanceRowActions(row: InstanceItem): InstanceRowAction[] {
       loading: isActionLoading(row.id, 'stop'),
       disabled: instanceActionRunning || row.status === 'stopped' || row.status === 'error',
       onClick: () => confirmDangerousInstanceAction(row, stopAction),
-    },
-    {
-      key: 'update',
-      label: installFailed ? '修复安装' : '更新服务端',
-      menuOnly: true,
-      loading: isActionLoading(row.id, 'update'),
-      disabled: instanceActionRunning || !canUpdateInstance(row),
-      title: getUpdateInstanceButtonTitle(row),
-      onClick: () => confirmUpdateInstance(row),
     },
     {
       key: 'restart',
@@ -528,7 +528,7 @@ function createTextActionButton(options: {
   )
 }
 
-/** 状态列：词典化标签 + 失败原因摘要（tooltip） */
+/** 状态列：词典化标签 + 异常退出徽标 + 失败原因摘要（tooltip） */
 function renderInstanceStateColumn(row: InstanceItem) {
   const state = getInstanceState(row)
   const tag = h(
@@ -538,15 +538,30 @@ function renderInstanceStateColumn(row: InstanceItem) {
     },
     state.label,
   )
+  const badges: ReturnType<typeof h>[] = [tag]
+  const unexpectedExitAt = row.unexpectedExitAt?.trim()
+  if (unexpectedExitAt) {
+    badges.push(
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () => h('span', { class: 'text-xs px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-500' }, '异常退出'),
+          default: () => `检测到进程异常退出（${unexpectedExitAt.replace('T', ' ').slice(0, 19)}）`,
+        },
+      ),
+    )
+  }
+  const badgeGroup = h('span', { class: 'inline-flex items-center gap-1' }, badges)
   const errorText = row.lastError?.trim()
   if (!errorText || isInstanceInstallingStatus(row.status)) {
-    return tag
+    return badgeGroup
   }
   return h(
     NTooltip,
     { trigger: 'hover' },
     {
-      trigger: () => tag,
+      trigger: () => badgeGroup,
       default: () => errorText.length > 160 ? `${errorText.slice(0, 160)}…` : errorText,
     },
   )

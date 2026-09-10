@@ -48,6 +48,57 @@ async function enforceDbSnapshotRetention(app: FastifyInstance, retention: numbe
   }
 }
 
+export interface DatabaseSnapshotResult {
+  ok: boolean
+  backupId?: string
+  message?: string
+}
+
+/**
+ * 创建面板数据库一致性快照（VACUUM INTO）。
+ * 手动路由与计划任务 db_snapshot 共用；retention 沿用备份设置。
+ */
+export async function createDatabaseSnapshot(app: FastifyInstance, createdBy: string): Promise<DatabaseSnapshotResult> {
+  const { sqliteDb } = ensureDb()
+  const settings = await getSystemBackupSettings()
+  const dbDir = path.join(loadServerConfig().backupsRoot, 'db')
+  fs.mkdirSync(dbDir, { recursive: true })
+  // 同秒重复创建时加随机后缀防撞名；VACUUM INTO 要求目标文件不存在
+  const fileName = `db-${formatTimestampForFile(new Date())}-${Math.random().toString(36).slice(2, 8)}.sqlite`
+  const targetPath = path.join(dbDir, fileName)
+
+  try {
+    sqliteDb.exec(`VACUUM INTO '${targetPath.replace(/'/g, "''")}'`)
+  }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'VACUUM INTO 失败'
+    app.log.error({ error: message }, '数据库快照创建失败')
+    return { ok: false, message: `数据库快照创建失败: ${message}` }
+  }
+
+  let sizeBytes = 0
+  try {
+    sizeBytes = fs.statSync(targetPath).size
+  }
+  catch {
+    sizeBytes = 0
+  }
+
+  const record = await createBackupRecord({
+    id: newBackupId(),
+    instanceId: DB_BACKUP_INSTANCE_ID,
+    filePath: targetPath,
+    sizeBytes,
+    note: '面板数据库一致性快照',
+    kind: 'database',
+    status: 'completed',
+    createdBy,
+  })
+
+  await enforceDbSnapshotRetention(app, settings.dbSnapshotRetention)
+  return { ok: true, backupId: record.id }
+}
+
 /**
  * 数据库备份路由：SQLite 一致性快照（VACUUM INTO）。
  * 快照记录 kind=database，由 backup 模块的 list/download/delete 统一管理。
@@ -59,44 +110,11 @@ export function registerDatabaseBackupRoutes(app: FastifyInstance) {
       return auth.error ?? businessError('登录状态失效，请重新登录', request)
     }
 
-    const { sqliteDb } = ensureDb()
-    const settings = await getSystemBackupSettings()
-    const dbDir = path.join(loadServerConfig().backupsRoot, 'db')
-    fs.mkdirSync(dbDir, { recursive: true })
-    // 同秒重复创建时加随机后缀防撞名；VACUUM INTO 要求目标文件不存在
-    const fileName = `db-${formatTimestampForFile(new Date())}-${Math.random().toString(36).slice(2, 8)}.sqlite`
-    const targetPath = path.join(dbDir, fileName)
-
-    try {
-      sqliteDb.exec(`VACUUM INTO '${targetPath.replace(/'/g, "''")}'`)
+    const result = await createDatabaseSnapshot(app, auth.context.user.account)
+    if (!result.ok || !result.backupId) {
+      return businessError(result.message ?? '数据库快照创建失败', request, ErrorCode.BACKUP_CREATE_FAILED)
     }
-    catch (error) {
-      const message = error instanceof Error ? error.message : 'VACUUM INTO 失败'
-      app.log.error({ error: message }, '数据库快照创建失败')
-      return businessError(`数据库快照创建失败: ${message}`, request, ErrorCode.BACKUP_CREATE_FAILED)
-    }
-
-    let sizeBytes = 0
-    try {
-      sizeBytes = fs.statSync(targetPath).size
-    }
-    catch {
-      sizeBytes = 0
-    }
-
-    const record = await createBackupRecord({
-      id: newBackupId(),
-      instanceId: DB_BACKUP_INSTANCE_ID,
-      filePath: targetPath,
-      sizeBytes,
-      note: '面板数据库一致性快照',
-      kind: 'database',
-      status: 'completed',
-      createdBy: auth.context.user.account,
-    })
-
-    await enforceDbSnapshotRetention(app, settings.dbSnapshotRetention)
-    return success({ isSuccess: true, backupId: record.id }, request)
+    return success({ isSuccess: true, backupId: result.backupId }, request)
   })
 
   app.get('/app/system/db/backup', async (request): Promise<ApiSuccessResponse<BackupItem[]> | ApiErrorResponse> => {

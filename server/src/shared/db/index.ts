@@ -33,6 +33,8 @@ export * from './types'
 export { closeDatabase, initDatabase, verifyPassword } from './connection'
 export * from './instance-repository'
 export * from './backup-repository'
+export * from './schedule-repository'
+export * from './notify-repository'
 
 interface DbUserRow {
   id: string

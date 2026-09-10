@@ -1,0 +1,1 @@
+ALTER TABLE `game_instances` ADD `unexpected_exit_at` text;

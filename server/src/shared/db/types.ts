@@ -89,6 +89,8 @@ export interface DbGameInstance {
   lastCommand: string | null
   lastExitCode: number | null
   lastError: string | null
+  /** 最近一次异常退出检测时间（ISO）；成功启动后清除 */
+  unexpectedExitAt: string | null
   installLogStatus: DbInstallLogStatus | null
   installPercent: number | null
   installLogUpdatedAt: string | null
@@ -132,6 +134,7 @@ export interface UpdateGameInstanceRuntimeInput {
   lastCommand?: string | null
   lastExitCode?: number | null
   lastError?: string | null
+  unexpectedExitAt?: string | null
   installLogStatus?: DbInstallLogStatus | null
   installPercent?: number | null
   installLogUpdatedAt?: string | null
@@ -211,4 +214,92 @@ export interface CreateBackupInput {
   status?: DbBackupStatus
   shards?: string | null
   createdBy?: string
+}
+
+export type DbNotifyChannelType = 'dingtalk' | 'wecom' | 'feishu' | 'serverchan' | 'pushplus'
+export type DbNotifyHealthStatus = 'healthy' | 'failing'
+
+export interface DbNotifyChannel {
+  id: string
+  type: DbNotifyChannelType
+  name: string
+  /** JSON 序列化配置（webhookUrl/secret/sendKey） */
+  config: string
+  enabled: boolean
+  healthStatus: DbNotifyHealthStatus
+  lastErrorAt: string | null
+  lastErrorMessage: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateNotifyChannelInput {
+  id: string
+  type: DbNotifyChannelType
+  name: string
+  config: string
+  enabled?: boolean
+}
+
+export interface UpdateNotifyChannelInput {
+  name?: string
+  config?: string
+  enabled?: boolean
+  healthStatus?: DbNotifyHealthStatus
+  lastErrorAt?: string | null
+  lastErrorMessage?: string | null
+}
+
+export interface DbNotifySettings {
+  /** 通知总开关（渠道级 enabled 之外） */
+  enabled: boolean
+  /** 同实例同事件类型的冷却窗口（分钟） */
+  cooldownMinutes: number
+  thresholds: {
+    cpuPercent: number
+    memPercent: number
+    diskPercent: number
+  }
+}
+
+export type DbScheduleTaskKind = 'restart' | 'backup' | 'update_check' | 'db_snapshot'
+export type DbScheduleType = 'interval' | 'daily'
+export type DbScheduleRunStatus = 'ok' | 'failed' | 'skipped'
+
+export interface DbScheduledTask {
+  id: string
+  instanceId: string
+  kind: DbScheduleTaskKind
+  scheduleType: DbScheduleType
+  /** interval 存小时数字符串（1-168）；daily 存 HH:MM */
+  scheduleValue: string
+  enabled: boolean
+  lastRunAt: string | null
+  lastRunStatus: DbScheduleRunStatus | null
+  lastRunMessage: string | null
+  nextRunAt: string | null
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateScheduleTaskInput {
+  id: string
+  instanceId: string
+  kind: DbScheduleTaskKind
+  scheduleType: DbScheduleType
+  scheduleValue: string
+  enabled?: boolean
+  nextRunAt?: string | null
+  createdBy?: string
+}
+
+export interface UpdateScheduleTaskInput {
+  scheduleType?: DbScheduleType
+  scheduleValue?: string
+  enabled?: boolean
+  lastRunAt?: string | null
+  lastRunStatus?: DbScheduleRunStatus | null
+  lastRunMessage?: string | null
+  nextRunAt?: string | null
 }

@@ -79,10 +79,10 @@ function triggerLoad() {
   runLoad(async () => {
     const [backupResponse, instanceResponse] = await Promise.all([
       apiBackup.getBackupList(selectedInstanceId.value ?? undefined),
-      apiInstance.getInstanceList().catch(() => ({ data: { data: [] as InstanceItem[] } })),
+      apiInstance.getInstanceList().catch(() => ({ data: [] as InstanceItem[] })),
     ])
     rows.value = backupResponse.data ?? []
-    instances.value = instanceResponse.data.data ?? []
+    instances.value = instanceResponse.data ?? []
   })
 }
 

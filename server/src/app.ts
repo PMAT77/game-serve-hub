@@ -13,6 +13,8 @@ import { registerInstanceModule } from './modules/instance'
 import { registerNodeModule } from './modules/node'
 import { registerSystemModule } from './modules/system'
 import { registerBackupModule } from './modules/backup'
+import { registerScheduleModule } from './modules/schedule'
+import { registerNotifyModule } from './modules/notify'
 import { getCachedDockerStatus } from './infra/docker'
 import { getCachedRuntimeStatus, isSteamcmdRuntimeReady } from './infra/runtime'
 import { success } from './shared/http/response'
@@ -123,6 +125,8 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
   registerModModule(app)
   registerConsoleModule(app)
   registerBackupModule(app)
+  registerScheduleModule(app)
+  registerNotifyModule(app)
 
   if (config.mode === 'production') {
     // 打包后 bundle 位于 dist-server/，改从仓库根定位前端产物

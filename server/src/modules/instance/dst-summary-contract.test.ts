@@ -16,6 +16,7 @@ const instance = {
   rconPort: null,
   lastCommand: null,
   lastError: null,
+  unexpectedExitAt: null,
   installLogStatus: null,
   installPercent: null,
   installLogUpdatedAt: null,

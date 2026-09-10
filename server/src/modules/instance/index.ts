@@ -76,6 +76,8 @@ import {
   startInstallJob,
 } from './install-service'
 import { prepareInstallPathForRuntime, prepareInstallPathForSteamcmd } from './install-path'
+import { registerInstanceScheduledOps } from './scheduled-entry'
+import { startInstanceExitWatch } from './exit-watch'
 import { businessError, success } from '../../shared/http/response'
 import { hostMemoryPressureError } from '../../shared/http/host-memory-pressure-error'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
@@ -813,10 +815,12 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
     }
   })
 
-  async function handleInstanceStart(request: FastifyRequest): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> {
-    const authError = await verifyAuthorized(request)
-    if (authError) {
-      return authError
+  async function handleInstanceStart(request: FastifyRequest, options?: { skipAuth?: boolean }): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> {
+    if (!options?.skipAuth) {
+      const authError = await verifyAuthorized(request)
+      if (authError) {
+        return authError
+      }
     }
     const body = instanceActionBodySchema.safeParse(request.body ?? {})
     if (!body.success) {
@@ -1029,6 +1033,7 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       lastCommand: started.displayCommand,
       lastExitCode: null,
       lastError: null,
+      unexpectedExitAt: null,
     })
     return success({ isSuccess: true }, request)
   }
@@ -1098,6 +1103,50 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
     return restartInstanceCore(app, request, id, {
       autoAllocatePorts: body.data.autoAllocatePorts === true,
     })
+  })
+
+  // 崩溃感知轮询：DB=running 但运行时无进程时标记异常退出并发布事件（单元测试环境不启动）
+  startInstanceExitWatch(app)
+
+  // 计划任务内部通道：schedule 模块经注册表调用重启，无需构造带用户 token 的 HTTP 请求
+  registerInstanceScheduledOps({
+    restart: async (_app, instanceId) => {
+      const current = await getGameInstanceById(instanceId)
+      if (!current) {
+        return { ok: false, message: '实例不存在' }
+      }
+      if (current.nodeId !== LOCAL_NODE_ID) {
+        return { ok: false, message: '当前仅支持本地节点执行实例命令' }
+      }
+      if (current.status === 'pending_install' || current.status === 'installing' || isInstallJobActive(instanceId)) {
+        return { ok: false, message: '实例正在安装中，无法按计划重启' }
+      }
+      const runtimeReady = await ensureContainerRuntimeReady()
+      if (!runtimeReady.ok) {
+        return { ok: false, message: runtimeReady.message ?? '游戏运行时未就绪' }
+      }
+      if (current.status === 'running' || current.containerId) {
+        try {
+          await stopInstanceContainer(instanceId)
+        }
+        catch (error) {
+          const message = error instanceof Error ? error.message : '计划重启时停止实例失败'
+          await updateGameInstanceRuntime(instanceId, { status: 'error', lastError: message })
+          return { ok: false, message }
+        }
+      }
+      const syntheticRequest = {
+        id: 'schedule-internal',
+        url: '/internal/schedule/restart',
+        headers: {},
+        body: { id: instanceId },
+      } as unknown as FastifyRequest
+      const result = await handleInstanceStart(syntheticRequest, { skipAuth: true })
+      if ('error' in result && result.error) {
+        return { ok: false, message: result.error }
+      }
+      return { ok: true }
+    },
   })
 
   app.post('/app/instance/delete', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {

@@ -112,22 +112,6 @@ pino 输出是 UTF-8，PowerShell 默认按系统区域（GBK）解码显示。�
 - **所有新终端**：把上面两行写进 PowerShell 配置文件（`notepad $PROFILE`；文件不存在先 `New-Item -Force $PROFILE`）。
 - **系统级一劳永逸**：设置 → 时间和语言 → 语言和区域 → 管理语言设置 → 更改系统区域设置 → 勾选 **“Beta: 使用 Unicode UTF-8 提供全球语言支持”** 后重启。副作用：极少数依赖 GBK 的旧程序可能反向乱码。
 
-### 端口被本机软件"精确环回绑定"静默劫持（案例：127.0.0.1:3000）
-
-症状：后端日志正常显示 `Server listening at http://0.0.0.0:3000`，但 `curl http://127.0.0.1:3000/health` 返回**别人的**纯文本 `Not Found`（404）——Fastify 的 404 是 JSON，纯文本说明应答的不是后端；前端经 vite 代理的登录请求同样 404。
-
-原理：Windows 允许 `0.0.0.0:PORT` 与 `127.0.0.1:PORT` 被不同进程同时绑定，且**环回流量优先交给绑定精确地址的进程**。本机常驻软件（案例：Mineradio.exe 绑定 `127.0.0.1:3000`）会静默截走后端（绑定 `0.0.0.0`）的全部环回流量，后端日志却毫无异常。
-
-诊断（注意：普通权限的 `netstat -ano` 可能漏报，**必须用管理员**）：
-
-```powershell
-# 管理员 PowerShell
-netstat -abno | findstr :3000     # LISTENING 行的 PID 即真凶
-Get-Process -Id <PID>             # 看进程名与路径
-```
-
-修复：结束/卸载占用软件，或后端换端口（`server.env.development` 设 `SERVER_PORT`，并同步 `.env.development` 的 `VITE_APP_API_BASEURL`）。排查时不要被表象带偏：重启 Docker/WSL/Rancher Desktop 均无效，因为劫持者只是个普通用户态进程。若占用者本身是开发环境依赖的组件（如 DSH 前端）不能结束，换端口是正确做法——**本仓库后端默认端口即因此从 3000 迁至 8888**。
-
 ### `dev:compose` 下前端容器冷启动慢
 
 Rancher Desktop（WSL2 后端）把 Windows 源码目录 bind mount 进容器，文件 IO 走跨 VM 通道（实测同目录遍历慢约 35 倍）。vite 冷启动 ready 需要 70~80 秒，期间浏览器打开 `localhost:9527` 无响应**属正常现象**，等日志出现 `VITE ready in ...` 再访问。日常改前端代码建议直接用 `pnpm run dev`（原生 NTFS，约 13 秒 ready，HMR 也更可靠）。

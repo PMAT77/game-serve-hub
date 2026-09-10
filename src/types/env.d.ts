@@ -3,7 +3,6 @@ interface ImportMetaEnv {
   // Auto generate by env-parse
   /**
    * 网络请求地址，应用于 axios 的 baseURL（与后端 SERVER_PORT 一致，默认 8888）
-   * 注：本机 127.0.0.1:3000 被 DSH 开发环境前端（Mineradio.exe）占用，后端默认端口已迁至 8888
    */
   readonly VITE_APP_API_BASEURL: string
   /**

@@ -14,6 +14,7 @@ import SubSidebar from './components/SubSidebar/index.vue'
 import Topbar from './components/Topbar/index.vue'
 import LinkView from './components/views/link.vue'
 import { usePanelUpdateNotifier } from '@/composables/usePanelUpdateNotifier'
+import { useScheduleRunNotifier } from '@/composables/useScheduleRunNotifier'
 
 defineOptions({
   name: 'Layout',
@@ -22,6 +23,7 @@ defineOptions({
 const routeInfo = useRoute()
 
 usePanelUpdateNotifier()
+useScheduleRunNotifier()
 
 const appSettingsStore = useAppSettingsStore()
 const appKeepAliveStore = useAppKeepAliveStore()

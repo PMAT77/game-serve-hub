@@ -198,10 +198,17 @@ export function registerScheduleModule(app: FastifyInstance) {
       return businessError('任务已停用，请先启用再执行', request)
     }
 
-    // 与调度器一致：执行后写回 last_run_* 并顺延 next_run_at
+    // 与调度器一致：先置执行中，执行后写回 last_run_* 并顺延 next_run_at
+    // （终态复用同一个触发时刻，便于前端把「一次触发」识别为一条通知）
+    const startedAt = new Date()
+    await updateScheduleTask(task.id, {
+      lastRunAt: startedAt.toISOString(),
+      lastRunStatus: 'running',
+      lastRunMessage: '执行中…（手动触发）',
+    })
     const result = await executeScheduleAction(app, task)
     await updateScheduleTask(task.id, {
-      lastRunAt: new Date().toISOString(),
+      lastRunAt: startedAt.toISOString(),
       lastRunStatus: result.status,
       lastRunMessage: result.message,
       nextRunAt: computeNextRunAtIso(task.scheduleType, task.scheduleValue, new Date(), task.scheduleTz),

@@ -66,6 +66,7 @@ declare global {
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
   const storeToRefs: typeof import('pinia').storeToRefs
+  const suppressScheduleRunNotificationOnce: typeof import('../composables/useScheduleRunNotifier').suppressScheduleRunNotificationOnce
   const toRaw: typeof import('vue').toRaw
   const toRef: typeof import('vue').toRef
   const toRefs: typeof import('vue').toRefs
@@ -103,6 +104,7 @@ declare global {
   const usePollingTask: typeof import('../composables/usePollingTask').usePollingTask
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
+  const useScheduleRunNotifier: typeof import('../composables/useScheduleRunNotifier').useScheduleRunNotifier
   const useSlots: typeof import('vue').useSlots
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useUnsavedChangesGuard: typeof import('../composables/useUnsavedChangesGuard').useUnsavedChangesGuard

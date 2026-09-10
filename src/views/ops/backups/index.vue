@@ -61,6 +61,17 @@ function formatTime(iso: string): string {
   return iso ? iso.replace('T', ' ').slice(0, 19) : '—'
 }
 
+/**
+ * 创建者展示：正常为登录账号；计划任务由调度器自动执行、没有账号，
+ * 因此后端写入固定标识 'scheduler'（server 端 SCHEDULED_OPERATOR），此处显示为中文。
+ */
+function formatCreator(createdBy: string): string {
+  if (!createdBy) {
+    return '—'
+  }
+  return createdBy === 'scheduler' ? '计划任务' : createdBy
+}
+
 function instanceName(instanceId: string): string {
   if (instanceId === 'panel-db') {
     return '面板'
@@ -246,7 +257,7 @@ const columns = computed<DataTableColumns<BackupItem>>(() => [
     title: '创建者',
     key: 'createdBy',
     width: 120,
-    render: row => row.createdBy || '—',
+    render: row => formatCreator(row.createdBy),
   },
   {
     title: '创建时间',

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import {
   listDueScheduleTasks,
-  listEnabledScheduleTasks,
+  listScheduleTasks,
   updateScheduleTask,
 } from '../../shared/db/index'
 import type { DbScheduledTask } from '../../shared/db/index'
@@ -21,20 +21,36 @@ function isUnitTest(): boolean {
 }
 
 /**
- * 面板启动时的错过恢复：enabled 且 next_run_at 已过期的任务不补跑，
- * 顺延到下一周期并记录 skipped（凌晨定时重启在面板离线后补跑反而危险）。
+ * 面板启动时的恢复，覆盖全部任务（含已停用，避免残留的「执行中」卡死）：
+ * - 上次进程中断留下的 last_run_status='running' 标记为 failed（执行中崩溃不会永久停在执行中）；
+ * - enabled 且 next_run_at 已过期的任务不补跑，顺延到下一周期并记录 skipped
+ *   （凌晨定时重启在面板离线后补跑反而危险）。
  */
 export async function recoverMissedTasksOnBoot(app: FastifyInstance): Promise<void> {
-  const tasks = await listEnabledScheduleTasks()
+  const tasks = await listScheduleTasks()
   const now = new Date()
   for (const task of tasks) {
+    const wasRunning = task.lastRunStatus === 'running'
     const dueAt = task.nextRunAt ? Date.parse(task.nextRunAt) : Number.NaN
-    if (Number.isFinite(dueAt) && dueAt > now.getTime()) {
+    const missed = !(Number.isFinite(dueAt) && dueAt > now.getTime())
+    if (!wasRunning && !missed) {
       continue
     }
-    const nextRunAt = computeNextRunAtIso(task.scheduleType, task.scheduleValue, now, task.scheduleTz)
-    if (nextRunAt === null) {
+    const nextRunAt = missed
+      ? computeNextRunAtIso(task.scheduleType, task.scheduleValue, now, task.scheduleTz)
+      : null
+    if (missed && nextRunAt === null && !wasRunning) {
       app.log.warn({ taskId: task.id, scheduleValue: task.scheduleValue }, '计划任务 scheduleValue 非法，无法恢复调度；请修正或删除该任务')
+      continue
+    }
+    if (wasRunning) {
+      // 保留真实的触发时刻（lastRunAt），只覆盖中断的状态
+      await updateScheduleTask(task.id, {
+        lastRunStatus: 'failed',
+        lastRunMessage: '面板重启导致上次执行中断',
+        ...(nextRunAt === null ? {} : { nextRunAt }),
+      })
+      app.log.warn({ taskId: task.id, kind: task.kind }, '计划任务上次执行被面板重启中断，已标记失败')
       continue
     }
     await updateScheduleTask(task.id, {
@@ -49,11 +65,15 @@ export async function recoverMissedTasksOnBoot(app: FastifyInstance): Promise<vo
 
 async function runDueTask(app: FastifyInstance, task: DbScheduledTask): Promise<void> {
   const now = new Date()
-  // 先推进 next_run_at 再执行：执行中崩溃也不会在重启后立即重复执行同一到期任务
+  // 先推进 next_run_at 再执行：执行中崩溃也不会在重启后立即重复执行同一到期任务。
+  // 同时把最近执行置为执行中，供面板列表展示（终态写回时复用同一个 lastRunAt 触发时刻）。
   const nextRunAt = computeNextRunAtIso(task.scheduleType, task.scheduleValue, now, task.scheduleTz)
-  if (nextRunAt !== null) {
-    await updateScheduleTask(task.id, { nextRunAt })
-  }
+  await updateScheduleTask(task.id, {
+    ...(nextRunAt === null ? {} : { nextRunAt }),
+    lastRunAt: now.toISOString(),
+    lastRunStatus: 'running',
+    lastRunMessage: '执行中…',
+  })
 
   let result
   try {

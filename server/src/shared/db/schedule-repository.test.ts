@@ -188,4 +188,68 @@ describe('schedule repository & boot recovery', () => {
     const futureAfter = await getScheduleTaskById(futureTask.id)
     assert.equal(futureAfter?.lastRunStatus, null, 'future tasks must not be touched by recovery')
   })
+
+  it('persists the running status while an action is executing', async () => {
+    const instanceId = await seedInstance()
+    const task = await createScheduleTask({
+      id: newScheduleTaskId(),
+      instanceId,
+      kind: 'backup',
+      scheduleType: 'interval',
+      scheduleValue: '6',
+      nextRunAt: new Date(Date.now() + 6 * 60 * 60_000).toISOString(),
+    })
+    const startedAt = new Date().toISOString()
+    const running = await updateScheduleTask(task.id, {
+      lastRunAt: startedAt,
+      lastRunStatus: 'running',
+      lastRunMessage: '执行中…',
+    })
+    assert.equal(running?.lastRunStatus, 'running', 'running must survive status normalization')
+    assert.equal(running?.lastRunAt, startedAt)
+    const read = await getScheduleTaskById(task.id)
+    assert.equal(read?.lastRunStatus, 'running')
+  })
+
+  it('boot recovery clears the running flag left by an interrupted execution', async () => {
+    const instanceId = await seedInstance()
+    const startedAt = new Date(Date.now() - 5 * 60_000).toISOString()
+    const interrupted = await createScheduleTask({
+      id: newScheduleTaskId(),
+      instanceId,
+      kind: 'backup',
+      scheduleType: 'interval',
+      scheduleValue: '6',
+      nextRunAt: new Date(Date.now() - 60_000).toISOString(),
+    })
+    await updateScheduleTask(interrupted.id, {
+      lastRunAt: startedAt,
+      lastRunStatus: 'running',
+      lastRunMessage: '执行中…',
+    })
+    // 已停用任务的残留「执行中」同样需要清理（否则列表永久停在执行中）
+    const disabledInterrupted = await createScheduleTask({
+      id: newScheduleTaskId(),
+      instanceId,
+      kind: 'restart',
+      scheduleType: 'interval',
+      scheduleValue: '12',
+      enabled: false,
+      nextRunAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+    })
+    await updateScheduleTask(disabledInterrupted.id, { lastRunStatus: 'running', lastRunMessage: '执行中…' })
+
+    await recoverMissedTasksOnBoot(stubApp)
+
+    const interruptedAfter = await getScheduleTaskById(interrupted.id)
+    assert.equal(interruptedAfter?.lastRunStatus, 'failed')
+    assert.equal(interruptedAfter?.lastRunAt, startedAt, 'interrupted run keeps its trigger time')
+    assert.match(interruptedAfter?.lastRunMessage ?? '', /中断/)
+    const nextAt = Date.parse(interruptedAfter?.nextRunAt ?? '')
+    assert.ok(Number.isFinite(nextAt) && nextAt > Date.now(), 'interrupted task should be rescheduled into the future')
+
+    const disabledAfter = await getScheduleTaskById(disabledInterrupted.id)
+    assert.equal(disabledAfter?.lastRunStatus, 'failed', 'disabled tasks must not keep a stale running flag')
+    assert.equal(disabledAfter?.enabled, false)
+  })
 })

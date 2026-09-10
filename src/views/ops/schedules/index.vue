@@ -6,6 +6,7 @@ import { NButton, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NS
 import { computed, h, onActivated, onMounted, ref } from 'vue'
 import apiSchedule from '@/api/modules/schedule'
 import apiInstance from '@/api/modules/instance'
+import { suppressScheduleRunNotificationOnce } from '@/composables/useScheduleRunNotifier'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 
 defineOptions({
@@ -14,6 +15,8 @@ defineOptions({
 
 const dialog = useDialog()
 const appSettingsStore = useAppSettingsStore()
+const route = useRoute()
+const router = useRouter()
 
 const rows = ref<ScheduleTaskItem[]>([])
 const instances = ref<InstanceItem[]>([])
@@ -32,6 +35,7 @@ const kindMeta: Record<ScheduleTaskItem['kind'], { label: string, type: 'default
 }
 
 const runStatusMeta: Record<NonNullable<ScheduleTaskItem['lastRunStatus']>, { label: string, type: 'default' | 'info' | 'warning' | 'error' | 'success' }> = {
+  running: { label: '执行中', type: 'info' },
   ok: { label: '成功', type: 'success' },
   failed: { label: '失败', type: 'error' },
   skipped: { label: '跳过', type: 'warning' },
@@ -59,16 +63,67 @@ const instanceOptions = computed<SelectOption[]>(() => {
   }))
 })
 
+/** 从通知「查看任务」跳转过来时要定位的任务：短暂高亮并滚动到可视区 */
+const highlightedTaskId = ref<string | null>(null)
+let highlightTimer: number | undefined
+
+function highlightTaskRow(taskId: string) {
+  highlightedTaskId.value = taskId
+  if (highlightTimer !== undefined) {
+    window.clearTimeout(highlightTimer)
+  }
+  // 等表格应用高亮 class 后再滚动到该行
+  nextTick(() => {
+    document.querySelector('.schedule-row-highlight')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+  highlightTimer = window.setTimeout(() => {
+    highlightedTaskId.value = null
+  }, 4000)
+}
+
+/** 消费 ?taskId= 定位参数；消费后从地址栏移除，避免刷新时重复高亮 */
+function focusTaskFromQuery() {
+  const taskId = typeof route.query.taskId === 'string' ? route.query.taskId : ''
+  if (!taskId) {
+    return
+  }
+  highlightTaskRow(taskId)
+  void router.replace({ path: route.path, query: {} })
+}
+
+function scheduleRowClassName(row: ScheduleTaskItem): string {
+  return row.id === highlightedTaskId.value ? 'schedule-row-highlight' : ''
+}
+
 function triggerLoad() {
-  runLoad(async () => {
+  // 列表就绪后再定位（行必须已经渲染才能滚动）
+  void runLoad(async () => {
     const [scheduleResponse, instanceResponse] = await Promise.all([
       apiSchedule.getScheduleList(),
       apiInstance.getInstanceList().catch(() => ({ data: [] as InstanceItem[] })),
     ])
     rows.value = scheduleResponse.data ?? []
     instances.value = instanceResponse.data ?? []
-  })
+  }).then(focusTaskFromQuery)
 }
+
+/** 存在执行中的任务时按 5s 刷新列表，让「执行中」自动滚动到终态 */
+const hasRunningTask = computed(() => rows.value.some(row => row.lastRunStatus === 'running'))
+const runPoller = usePollingTask(async () => {
+  const response = await apiSchedule.getScheduleList()
+  rows.value = response.data ?? []
+}, { intervalMs: 5000, immediate: false })
+
+function syncRunPoller() {
+  if (hasRunningTask.value) {
+    runPoller.start()
+  }
+  else {
+    runPoller.stop()
+  }
+}
+
+watch(hasRunningTask, syncRunPoller)
 
 onMounted(() => {
   triggerLoad()
@@ -76,6 +131,24 @@ onMounted(() => {
 
 onActivated(() => {
   triggerLoad()
+  syncRunPoller()
+})
+
+onDeactivated(() => {
+  runPoller.stop()
+})
+
+// 已在计划任务页时再次点击通知（路由不变化）也要重新定位
+watch(() => route.query.taskId, (taskId) => {
+  if (typeof taskId === 'string' && taskId) {
+    triggerLoad()
+  }
+})
+
+onBeforeUnmount(() => {
+  if (highlightTimer !== undefined) {
+    window.clearTimeout(highlightTimer)
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -128,8 +201,6 @@ const scheduleTimezoneOptions: SelectOption[] = [
 const editorRules: FormRules = {
   instanceId: [{ required: true, message: '请选择目标实例', trigger: ['blur', 'change'], type: 'string' }],
 }
-
-const editorServerTimezone = computed(() => Intl.DateTimeFormat().resolvedOptions().timeZone || '本地时区')
 
 function openCreateDialog() {
   editorIsEdit.value = false
@@ -232,14 +303,18 @@ function runNow(task: ScheduleTaskItem) {
     positiveText: '执行',
     negativeText: '取消',
     onPositiveClick: async () => {
+      // 乐观反馈：接口同步等待执行完成，先把该行置为执行中并抑制重复的右上角通知
+      task.lastRunStatus = 'running'
+      task.lastRunMessage = '执行中…'
+      suppressScheduleRunNotificationOnce(task.id)
       try {
         const response = await apiSchedule.runScheduleTaskNow({ taskId: task.id })
         faToast[response.data.message?.startsWith('skipped') ? 'warning' : 'success'](response.data.message ?? '已触发执行')
-        triggerLoad()
       }
       catch {
         faToast.error('执行失败，请稍后重试')
       }
+      triggerLoad()
     },
   })
 }
@@ -302,24 +377,25 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
       },
     },
     {
-      title: '最近执行',
-      key: 'lastRun',
-      minWidth: 200,
+      title: '执行状态',
+      key: 'lastRunStatus',
+      width: 110,
       render: (row) => {
         if (!row.lastRunStatus) {
-          return '尚未执行'
+          return h('span', { class: 'text-xs opacity-60' }, '尚未执行')
         }
         const meta = runStatusMeta[row.lastRunStatus]
-        return h(NSpace, { align: 'center', size: 6, wrap: false }, {
-          default: () => [
-            h(NTooltip, null, {
-              trigger: () => h(NTag, { type: meta.type, size: 'small', bordered: false }, { default: () => meta.label }),
-              default: () => row.lastRunMessage ?? '',
-            }),
-            h('span', { class: 'text-xs opacity-60' }, row.lastRunAt?.replace('T', ' ').slice(0, 19) ?? ''),
-          ],
+        return h(NTooltip, null, {
+          trigger: () => h(NTag, { type: meta.type, size: 'small', bordered: false }, { default: () => meta.label }),
+          default: () => row.lastRunMessage ?? '',
         })
       },
+    },
+    {
+      title: '最近执行时间',
+      key: 'lastRunAt',
+      width: 170,
+      render: row => (row.lastRunAt ? h(NTime, { time: new Date(row.lastRunAt), type: 'datetime' }) : '—'),
     },
     {
       title: '下次执行',
@@ -361,8 +437,9 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
       :columns="columns"
       :data="rows"
       :loading="loading"
-      :scroll-x="isMobileMode ? 900 : undefined"
+      :scroll-x="isMobileMode ? 1100 : undefined"
       :pagination="false"
+      :row-class-name="scheduleRowClassName"
       size="small"
     />
 
@@ -412,7 +489,7 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
           />
         </NFormItem>
         <div class="mb-3 text-xs opacity-50">
-          「北京时间」固定 UTC+8，与部署环境时区无关；「服务器所在时区」按面板运行环境的时区执行（当前：{{ editorServerTimezone }}）。运行中实例的定时备份会先发送 c_save() 热保存。
+          运行中实例的定时备份会先发送 c_save() 热保存。
         </div>
         <NSpace justify="end">
           <NButton @click="editorVisible = false">
@@ -426,3 +503,20 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
     </NModal>
   </div>
 </template>
+
+<style scoped>
+:deep(.schedule-row-highlight td) {
+  animation: schedule-row-flash 1s ease-in-out 4;
+}
+
+@keyframes schedule-row-flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: rgb(32 128 240 / 18%);
+  }
+}
+</style>

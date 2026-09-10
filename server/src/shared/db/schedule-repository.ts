@@ -15,7 +15,7 @@ import type {
 const TASK_KINDS: DbScheduleTaskKind[] = ['restart', 'backup', 'update_check', 'db_snapshot']
 const SCHEDULE_TYPES: DbScheduleType[] = ['interval', 'daily']
 const SCHEDULE_TIMEZONES: DbScheduleTimezone[] = ['beijing', 'server']
-const RUN_STATUSES: DbScheduleRunStatus[] = ['ok', 'failed', 'skipped']
+const RUN_STATUSES: DbScheduleRunStatus[] = ['running', 'ok', 'failed', 'skipped']
 
 function normalizeKind(kind: string | null | undefined): DbScheduleTaskKind {
   return TASK_KINDS.includes(kind as DbScheduleTaskKind) ? kind as DbScheduleTaskKind : 'backup'

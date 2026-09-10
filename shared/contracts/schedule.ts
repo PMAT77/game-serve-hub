@@ -12,8 +12,8 @@ export type ScheduleType = z.infer<typeof scheduleTypeSchema>
 export const scheduleTimezoneSchema = z.enum(['beijing', 'server'])
 export type ScheduleTimezone = z.infer<typeof scheduleTimezoneSchema>
 
-/** 最近一次执行状态：成功 / 失败 / 跳过（互斥守卫或错过补跑策略） */
-export const scheduleRunStatusSchema = z.enum(['ok', 'failed', 'skipped'])
+/** 最近一次执行状态：执行中 / 成功 / 失败 / 跳过（互斥守卫或错过补跑策略） */
+export const scheduleRunStatusSchema = z.enum(['running', 'ok', 'failed', 'skipped'])
 export type ScheduleRunStatus = z.infer<typeof scheduleRunStatusSchema>
 
 const intervalValueSchema = z.string().trim().regex(/^(?:[1-9]|1[0-6][0-8])$/, 'interval 必须为 1-168 的整数小时')

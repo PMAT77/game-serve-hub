@@ -33,6 +33,8 @@
 ```text
 [ ] CHANGELOG.md：将 [Unreleased] 内容移至新版本标题下
 [ ] package.json version 与 tag 一致（不含 v 前缀）
+[ ] 同步 install.linux.sh 内置的 compose 校验和（INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML / _BIND_YML）
+[ ] 同步 7 处版本引用（两份 compose、panel.env.example、server/src/shared/config/index.ts、README、docs/INSTALL.md）
 [ ] pnpm run release:check 本地通过（lint + test:unit + build）
 [ ] PR 合并后 CI 绿色
 [ ] git tag v0.x.y && git push origin v0.x.y

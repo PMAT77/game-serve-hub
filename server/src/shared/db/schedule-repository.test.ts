@@ -64,6 +64,23 @@ describe('schedule repository & boot recovery', () => {
     const read = await getScheduleTaskById(task.id)
     assert.equal(read?.instanceId, instanceId)
     assert.equal(read?.scheduleValue, '04:30')
+    assert.equal(read?.scheduleTz, 'beijing', 'daily task defaults to beijing timezone')
+  })
+
+  it('persists explicit schedule timezone and normalizes unknown values to beijing', async () => {
+    const instanceId = await seedInstance()
+    const serverTz = await createScheduleTask({
+      id: newScheduleTaskId(),
+      instanceId,
+      kind: 'restart',
+      scheduleType: 'daily',
+      scheduleValue: '03:00',
+      scheduleTz: 'server',
+      nextRunAt: '2026-09-16T19:00:00.000Z',
+    })
+    assert.equal(serverTz.scheduleTz, 'server')
+    const updated = await updateScheduleTask(serverTz.id, { scheduleTz: 'beijing' })
+    assert.equal(updated?.scheduleTz, 'beijing')
   })
 
   it('filters due tasks by enabled + next_run_at <= now', async () => {

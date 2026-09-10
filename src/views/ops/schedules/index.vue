@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DataTableColumns, FormRules, SelectOption } from 'naive-ui'
-import type { ScheduleTaskItem } from '@/api/modules/schedule'
+import type { ScheduleCreateRequest, ScheduleTaskItem } from '@/api/modules/schedule'
 import type { InstanceItem } from '@/api/modules/instance'
 import { NButton, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch, NTag, NTime, NTimePicker, NTooltip, useDialog } from 'naive-ui'
 import { computed, h, onActivated, onMounted, ref } from 'vue'
@@ -41,7 +41,8 @@ function describeSchedule(task: ScheduleTaskItem): string {
   if (task.scheduleType === 'interval') {
     return `每 ${task.scheduleValue} 小时`
   }
-  return `每日 ${task.scheduleValue}`
+  const tzLabel = task.scheduleTimezone === 'server' ? '服务器时区' : '北京时间'
+  return `每日 ${task.scheduleValue}（${tzLabel}）`
 }
 
 function instanceName(instanceId: string): string {
@@ -87,6 +88,7 @@ const editorTaskId = ref('')
 const editorInstanceId = ref<string | null>(null)
 const editorKind = ref<ScheduleTaskItem['kind']>('backup')
 const editorScheduleType = ref<ScheduleTaskItem['scheduleType']>('daily')
+const editorScheduleTimezone = ref<NonNullable<ScheduleCreateRequest['scheduleTimezone']>>('beijing')
 const editorIntervalHours = ref<number | null>(24)
 const editorDailyTimeTs = ref<number | null>(null)
 
@@ -114,8 +116,13 @@ const kindOptions: SelectOption[] = [
 ]
 
 const scheduleTypeOptions: SelectOption[] = [
-  { label: '每日固定时刻（服务器本地时区）', value: 'daily' },
+  { label: '每日固定时刻', value: 'daily' },
   { label: '每 N 小时', value: 'interval' },
+]
+
+const scheduleTimezoneOptions: SelectOption[] = [
+  { label: '北京时间（默认）', value: 'beijing' },
+  { label: '服务器所在时区', value: 'server' },
 ]
 
 const editorRules: FormRules = {
@@ -130,6 +137,7 @@ function openCreateDialog() {
   editorInstanceId.value = instances.value[0]?.id ?? null
   editorKind.value = 'backup'
   editorScheduleType.value = 'daily'
+  editorScheduleTimezone.value = 'beijing'
   editorIntervalHours.value = 24
   editorDailyTimeTs.value = parseHHmmToTs('04:30')
   editorVisible.value = true
@@ -141,6 +149,7 @@ function openEditDialog(task: ScheduleTaskItem) {
   editorInstanceId.value = task.instanceId
   editorKind.value = task.kind
   editorScheduleType.value = task.scheduleType
+  editorScheduleTimezone.value = task.scheduleTimezone ?? 'beijing'
   editorIntervalHours.value = Number.parseInt(task.scheduleValue, 10) || 24
   editorDailyTimeTs.value = parseHHmmToTs(task.scheduleValue)
   editorVisible.value = true
@@ -171,6 +180,7 @@ async function submitEditor() {
       taskId: editorTaskId.value,
       scheduleType: editorScheduleType.value,
       scheduleValue,
+      scheduleTimezone: editorScheduleTimezone.value,
     })
     if (response.data.isSuccess) {
       faToast.success('计划任务已更新')
@@ -188,6 +198,7 @@ async function submitEditor() {
     kind: editorKind.value,
     scheduleType: editorScheduleType.value,
     scheduleValue,
+    scheduleTimezone: editorScheduleTimezone.value,
   })
   if (response.data.isSuccess) {
     faToast.success('计划任务已创建')
@@ -386,10 +397,13 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
         <NFormItem label="调度方式">
           <NSelect v-model:value="editorScheduleType" :options="scheduleTypeOptions" />
         </NFormItem>
+        <NFormItem v-if="editorScheduleType === 'daily'" label="时区">
+          <NSelect v-model:value="editorScheduleTimezone" :options="scheduleTimezoneOptions" />
+        </NFormItem>
         <NFormItem v-if="editorScheduleType === 'interval'" label="间隔（小时，1-168）">
           <NInputNumber v-model:value="editorIntervalHours" :min="1" :max="168" :step="1" class="w-full" />
         </NFormItem>
-        <NFormItem v-else label="每日时刻（服务器时区）">
+        <NFormItem v-else :label="editorScheduleTimezone === 'beijing' ? '每日时刻（北京时间）' : '每日时刻（服务器时区）'">
           <NTimePicker
             v-model:value="editorDailyTimeTs"
             format="HH:mm"
@@ -398,7 +412,7 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
           />
         </NFormItem>
         <div class="mb-3 text-xs opacity-50">
-          服务器时区：{{ editorServerTimezone }}；运行中实例的定时备份会先发送 c_save() 热保存。
+          「北京时间」固定 UTC+8，与部署环境时区无关；「服务器所在时区」按面板运行环境的时区执行（当前：{{ editorServerTimezone }}）。运行中实例的定时备份会先发送 c_save() 热保存。
         </div>
         <NSpace justify="end">
           <NButton @click="editorVisible = false">

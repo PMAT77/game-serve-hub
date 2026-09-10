@@ -37,6 +37,7 @@ function toTaskItem(task: DbScheduledTask): ScheduleTaskItem {
     kind: task.kind,
     scheduleType: task.scheduleType,
     scheduleValue: task.scheduleValue,
+    scheduleTimezone: task.scheduleTz,
     enabled: task.enabled,
     lastRunAt: task.lastRunAt,
     lastRunStatus: task.lastRunStatus,
@@ -87,7 +88,7 @@ export function registerScheduleModule(app: FastifyInstance) {
     if (!body.success) {
       return businessError('请求参数无效：调度类型或值不合法', request)
     }
-    const { kind, scheduleType, scheduleValue } = body.data
+    const { kind, scheduleType, scheduleValue, scheduleTimezone } = body.data
 
     let instanceId = body.data.instanceId
     if (kind === 'db_snapshot') {
@@ -107,7 +108,7 @@ export function registerScheduleModule(app: FastifyInstance) {
       }
     }
 
-    const nextRunAt = computeNextRunAtIso(scheduleType, scheduleValue, new Date())
+    const nextRunAt = computeNextRunAtIso(scheduleType, scheduleValue, new Date(), scheduleTimezone)
     if (nextRunAt === null) {
       return businessError('调度配置无效：interval 需为 1-168 整数小时，daily 需为 HH:MM', request)
     }
@@ -118,11 +119,12 @@ export function registerScheduleModule(app: FastifyInstance) {
       kind,
       scheduleType,
       scheduleValue,
+      scheduleTz: scheduleTimezone,
       enabled: true,
       nextRunAt,
       createdBy: auth.operatorAccount,
     })
-    app.log.info({ taskId: task.id, kind, instanceId, schedule: describeSchedule(scheduleType, scheduleValue) }, '计划任务已创建')
+    app.log.info({ taskId: task.id, kind, instanceId, schedule: describeSchedule(scheduleType, scheduleValue, scheduleTimezone) }, '计划任务已创建')
     return success({ isSuccess: true, taskId: task.id }, request)
   })
 
@@ -142,20 +144,22 @@ export function registerScheduleModule(app: FastifyInstance) {
 
     const finalType = body.data.scheduleType ?? task.scheduleType
     const finalValue = body.data.scheduleValue ?? task.scheduleValue
-    if (computeNextRunAtIso(finalType, finalValue, new Date()) === null) {
+    const finalTz = body.data.scheduleTimezone ?? task.scheduleTz
+    if (computeNextRunAtIso(finalType, finalValue, new Date(), finalTz) === null) {
       return businessError('调度配置无效：interval 需为 1-168 整数小时，daily 需为 HH:MM', request)
     }
 
-    // 调度配置变化或重新启用时重算 next_run_at，避免沿用过去的相位立即触发
-    const scheduleChanged = finalType !== task.scheduleType || finalValue !== task.scheduleValue
+    // 调度配置（含时区）变化或重新启用时重算 next_run_at，避免沿用过去的相位立即触发
+    const scheduleChanged = finalType !== task.scheduleType || finalValue !== task.scheduleValue || finalTz !== task.scheduleTz
     const reenabled = body.data.enabled === true && !task.enabled
     const nextRunAt = scheduleChanged || reenabled || (body.data.enabled === false)
-      ? computeNextRunAtIso(finalType, finalValue, new Date())
+      ? computeNextRunAtIso(finalType, finalValue, new Date(), finalTz)
       : undefined
 
     const updated = await updateScheduleTask(task.id, {
       scheduleType: body.data.scheduleType,
       scheduleValue: body.data.scheduleValue,
+      scheduleTz: body.data.scheduleTimezone,
       enabled: body.data.enabled,
       ...(nextRunAt === undefined ? {} : { nextRunAt }),
     })
@@ -201,7 +205,7 @@ export function registerScheduleModule(app: FastifyInstance) {
       lastRunAt: new Date().toISOString(),
       lastRunStatus: result.status,
       lastRunMessage: result.message,
-      nextRunAt: computeNextRunAtIso(task.scheduleType, task.scheduleValue, new Date()),
+      nextRunAt: computeNextRunAtIso(task.scheduleType, task.scheduleValue, new Date(), task.scheduleTz),
     })
     return success({ triggered: true, message: result.message }, request)
   })

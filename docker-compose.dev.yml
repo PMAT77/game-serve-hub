@@ -11,6 +11,8 @@ services:
     command: ["sh", "-c", "corepack enable && if [ ! -f node_modules/.modules.yaml ]; then pnpm install; fi && pnpm run dev:server:watch"]
     environment:
       NODE_ENV: development
+      # 与生产一致：容器默认 UTC 会让 daily 计划任务偏移 8 小时
+      TZ: ${TZ:-Asia/Shanghai}
       GSH_PANEL_CONTAINER_NAME: game-server-hub-panel
       GSH_DEV_COMPOSE_QUIET: "1"
       NODE_NO_WARNINGS: "1"

@@ -264,6 +264,7 @@ export interface DbNotifySettings {
 
 export type DbScheduleTaskKind = 'restart' | 'backup' | 'update_check' | 'db_snapshot'
 export type DbScheduleType = 'interval' | 'daily'
+export type DbScheduleTimezone = 'beijing' | 'server'
 export type DbScheduleRunStatus = 'ok' | 'failed' | 'skipped'
 
 export interface DbScheduledTask {
@@ -273,6 +274,8 @@ export interface DbScheduledTask {
   scheduleType: DbScheduleType
   /** interval 存小时数字符串（1-168）；daily 存 HH:MM */
   scheduleValue: string
+  /** daily 任务时区；interval 忽略 */
+  scheduleTz: DbScheduleTimezone
   enabled: boolean
   lastRunAt: string | null
   lastRunStatus: DbScheduleRunStatus | null
@@ -289,6 +292,7 @@ export interface CreateScheduleTaskInput {
   kind: DbScheduleTaskKind
   scheduleType: DbScheduleType
   scheduleValue: string
+  scheduleTz?: DbScheduleTimezone
   enabled?: boolean
   nextRunAt?: string | null
   createdBy?: string
@@ -297,6 +301,7 @@ export interface CreateScheduleTaskInput {
 export interface UpdateScheduleTaskInput {
   scheduleType?: DbScheduleType
   scheduleValue?: string
+  scheduleTz?: DbScheduleTimezone
   enabled?: boolean
   lastRunAt?: string | null
   lastRunStatus?: DbScheduleRunStatus | null

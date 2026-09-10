@@ -1,4 +1,9 @@
 FROM node:22-bookworm-slim AS base
+# 容器无 TZ 默认 UTC；计划任务 daily「每日 HH:MM」按服务器本地时区计算，不设时区会被
+# 换算成 UTC 相位（北京时间用户创建 08:40 实际执行/显示为 16:40）。
+# 运行时可用 environment TZ 覆盖；Node 用内置 ICU 解析时区名，无需安装 tzdata。
+ARG TZ=Asia/Shanghai
+ENV TZ=${TZ}
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable

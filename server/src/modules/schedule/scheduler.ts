@@ -32,7 +32,7 @@ export async function recoverMissedTasksOnBoot(app: FastifyInstance): Promise<vo
     if (Number.isFinite(dueAt) && dueAt > now.getTime()) {
       continue
     }
-    const nextRunAt = computeNextRunAtIso(task.scheduleType, task.scheduleValue, now)
+    const nextRunAt = computeNextRunAtIso(task.scheduleType, task.scheduleValue, now, task.scheduleTz)
     if (nextRunAt === null) {
       app.log.warn({ taskId: task.id, scheduleValue: task.scheduleValue }, '计划任务 scheduleValue 非法，无法恢复调度；请修正或删除该任务')
       continue
@@ -50,7 +50,7 @@ export async function recoverMissedTasksOnBoot(app: FastifyInstance): Promise<vo
 async function runDueTask(app: FastifyInstance, task: DbScheduledTask): Promise<void> {
   const now = new Date()
   // 先推进 next_run_at 再执行：执行中崩溃也不会在重启后立即重复执行同一到期任务
-  const nextRunAt = computeNextRunAtIso(task.scheduleType, task.scheduleValue, now)
+  const nextRunAt = computeNextRunAtIso(task.scheduleType, task.scheduleValue, now, task.scheduleTz)
   if (nextRunAt !== null) {
     await updateScheduleTask(task.id, { nextRunAt })
   }

@@ -7,12 +7,14 @@ import type {
   DbScheduleRunStatus,
   DbScheduledTask,
   DbScheduleTaskKind,
+  DbScheduleTimezone,
   DbScheduleType,
   UpdateScheduleTaskInput,
 } from './types'
 
 const TASK_KINDS: DbScheduleTaskKind[] = ['restart', 'backup', 'update_check', 'db_snapshot']
 const SCHEDULE_TYPES: DbScheduleType[] = ['interval', 'daily']
+const SCHEDULE_TIMEZONES: DbScheduleTimezone[] = ['beijing', 'server']
 const RUN_STATUSES: DbScheduleRunStatus[] = ['ok', 'failed', 'skipped']
 
 function normalizeKind(kind: string | null | undefined): DbScheduleTaskKind {
@@ -21,6 +23,10 @@ function normalizeKind(kind: string | null | undefined): DbScheduleTaskKind {
 
 function normalizeType(type: string | null | undefined): DbScheduleType {
   return SCHEDULE_TYPES.includes(type as DbScheduleType) ? type as DbScheduleType : 'daily'
+}
+
+function normalizeScheduleTz(tz: string | null | undefined): DbScheduleTimezone {
+  return SCHEDULE_TIMEZONES.includes(tz as DbScheduleTimezone) ? tz as DbScheduleTimezone : 'beijing'
 }
 
 function normalizeRunStatus(status: string | null | undefined): DbScheduleRunStatus | null {
@@ -33,6 +39,7 @@ function mapDbScheduledTask(row: {
   kind: string | null
   scheduleType: string | null
   scheduleValue: string
+  scheduleTz: string | null
   enabled: number | null
   lastRunAt: string | null
   lastRunStatus: string | null
@@ -48,6 +55,7 @@ function mapDbScheduledTask(row: {
     kind: normalizeKind(row.kind),
     scheduleType: normalizeType(row.scheduleType),
     scheduleValue: row.scheduleValue,
+    scheduleTz: normalizeScheduleTz(row.scheduleTz),
     enabled: row.enabled === 1,
     lastRunAt: row.lastRunAt,
     lastRunStatus: normalizeRunStatus(row.lastRunStatus),
@@ -65,6 +73,7 @@ const TASK_COLUMNS = {
   kind: scheduledTasks.kind,
   scheduleType: scheduledTasks.scheduleType,
   scheduleValue: scheduledTasks.scheduleValue,
+  scheduleTz: scheduledTasks.scheduleTz,
   enabled: scheduledTasks.enabled,
   lastRunAt: scheduledTasks.lastRunAt,
   lastRunStatus: scheduledTasks.lastRunStatus,
@@ -88,6 +97,7 @@ export async function createScheduleTask(input: CreateScheduleTaskInput): Promis
     kind: input.kind,
     scheduleType: input.scheduleType,
     scheduleValue: input.scheduleValue,
+    scheduleTz: input.scheduleTz ?? 'beijing',
     enabled: input.enabled === false ? 0 : 1,
     lastRunAt: null,
     lastRunStatus: null,
@@ -145,6 +155,7 @@ export async function updateScheduleTask(id: string, input: UpdateScheduleTaskIn
     .set({
       ...(input.scheduleType === undefined ? {} : { scheduleType: input.scheduleType }),
       ...(input.scheduleValue === undefined ? {} : { scheduleValue: input.scheduleValue }),
+      ...(input.scheduleTz === undefined ? {} : { scheduleTz: input.scheduleTz }),
       ...(input.enabled === undefined ? {} : { enabled: input.enabled ? 1 : 0 }),
       ...(input.lastRunAt === undefined ? {} : { lastRunAt: input.lastRunAt }),
       ...(input.lastRunStatus === undefined ? {} : { lastRunStatus: input.lastRunStatus }),

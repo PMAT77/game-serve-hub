@@ -4,9 +4,13 @@ import { z } from 'zod'
 export const scheduleTaskKindSchema = z.enum(['restart', 'backup', 'update_check', 'db_snapshot'])
 export type ScheduleTaskKind = z.infer<typeof scheduleTaskKindSchema>
 
-/** 调度类型：interval=每 N 小时；daily=每日固定时刻（服务器本地时区） */
+/** 调度类型：interval=每 N 小时；daily=每日固定时刻 */
 export const scheduleTypeSchema = z.enum(['interval', 'daily'])
 export type ScheduleType = z.infer<typeof scheduleTypeSchema>
+
+/** daily 任务时区：beijing=北京时间（固定 UTC+8）；server=面板进程本地时区 */
+export const scheduleTimezoneSchema = z.enum(['beijing', 'server'])
+export type ScheduleTimezone = z.infer<typeof scheduleTimezoneSchema>
 
 /** 最近一次执行状态：成功 / 失败 / 跳过（互斥守卫或错过补跑策略） */
 export const scheduleRunStatusSchema = z.enum(['ok', 'failed', 'skipped'])
@@ -22,6 +26,8 @@ export const scheduleCreateRequestSchema = z
     kind: scheduleTaskKindSchema,
     scheduleType: scheduleTypeSchema,
     scheduleValue: z.string().trim().min(1).max(5),
+    /** daily 任务执行时区；interval 忽略。默认北京时间 */
+    scheduleTimezone: scheduleTimezoneSchema.default('beijing'),
   })
   .superRefine((value, ctx) => {
     if (value.scheduleType === 'interval') {
@@ -43,6 +49,7 @@ export const scheduleUpdateRequestSchema = z
     taskId: z.string().trim().min(1).max(128),
     scheduleType: scheduleTypeSchema.optional(),
     scheduleValue: z.string().trim().min(1).max(5).optional(),
+    scheduleTimezone: scheduleTimezoneSchema.optional(),
     enabled: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
@@ -74,6 +81,7 @@ export const scheduleTaskItemSchema = z.object({
   kind: scheduleTaskKindSchema,
   scheduleType: scheduleTypeSchema,
   scheduleValue: z.string(),
+  scheduleTimezone: scheduleTimezoneSchema,
   enabled: z.boolean(),
   lastRunAt: z.string().nullable(),
   lastRunStatus: scheduleRunStatusSchema.nullable(),

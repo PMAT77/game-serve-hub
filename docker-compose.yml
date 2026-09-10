@@ -14,6 +14,8 @@ services:
     # 可选：复制 panel.env.example 为 panel.env；安装脚本亦可通过 --env-file 注入
     environment:
       NODE_ENV: production
+      # 计划任务 daily 按「服务器本地时区」计算；容器默认 UTC 会导致每日任务整体偏移
+      TZ: ${TZ:-Asia/Shanghai}
       GSH_PANEL_CONTAINER_NAME: game-server-hub-panel
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "8888"

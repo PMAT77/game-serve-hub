@@ -12,6 +12,11 @@
 # 层顺序：node 基础 → 系统库+SteamCMD（极少变化）→ node_modules（依赖变化才变）
 # → 应用代码（每次发版）。面板小更新只需拉取最后一层。
 FROM node:22-bookworm-slim AS base
+# 容器无 TZ 默认 UTC；计划任务 daily「每日 HH:MM」按服务器本地时区计算，不设时区会被
+# 换算成 UTC 相位。DST/SteamCMD 子容器继承镜像 ENV，此处一并修正。
+# 运行时可用 environment TZ 覆盖；Node 用内置 ICU 解析时区名，无需安装 tzdata。
+ARG TZ=Asia/Shanghai
+ENV TZ=${TZ}
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable

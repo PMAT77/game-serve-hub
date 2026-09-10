@@ -4,6 +4,10 @@ services:
     build:
       context: .
       dockerfile: docker/unified/Dockerfile
+      # SteamCMD 下载源可覆盖：国内直连 steamcdn-a.akamaihd.net 常被中断，
+      # 可改用 Steam 的另一条官方 CDN（见 docs/INSTALL.md）。默认值不变。
+      args:
+        STEAMCMD_ARCHIVE_URL: ${STEAMCMD_ARCHIVE_URL:-https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz}
     container_name: game-server-hub-panel
     restart: unless-stopped
     # 统一镜像保持中性（无 ENTRYPOINT/HEALTHCHECK/USER）：面板入口在此显式指定；

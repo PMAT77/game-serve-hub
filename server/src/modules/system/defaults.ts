@@ -21,7 +21,7 @@ export function getDefaultNetworkConfig(): DbSystemNetworkConfig {
 
 export function getDefaultPanelSettings(): DbSystemPanelSettings {
   return {
-    panelPort: 80,
+    panelPort: 9527,
     theme: 'system',
     autoUpdate: true,
     checkUpdateBeforeStart: false,

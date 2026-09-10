@@ -58,7 +58,7 @@ export async function bootstrap() {
       `生产环境未配置 ADMIN_PASSWORD，已为管理员「${config.adminUsername}」自动生成初始密码，已写入 0600 权限凭据文件（请立即读取保存，首次登录改密后可删除）: ${credentialsFile}`,
     )
   }
-  await syncPanelPortSettingIfStale(config.port)
+  await syncPanelPortSettingIfStale({ mode: config.mode })
 
   try {
     await app.listen({ port: config.port, host: config.host })

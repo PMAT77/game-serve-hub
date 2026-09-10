@@ -92,26 +92,57 @@ export function resolveActualPanelPortFromRequest(
   })
 }
 
-export async function syncPanelPortSettingIfStale(serverPort: number) {
-  const actualPanelPort = resolveActualPanelPort({
-    serverPort,
-    publishedPortEnv: process.env.GSH_PANEL_PUBLISHED_PORT,
-  })
+export interface PanelPortBootstrapSyncInput {
+  mode: 'development' | 'test' | 'production'
+  publishedPortEnv?: string
+  existingPanelPort?: number
+  defaultPanelPort: number
+}
+
+/**
+ * 计算「面板端口」启动引导值，返回应写入的端口，null 表示不写。
+ *
+ * 仅生产部署且通过 GSH_PANEL_PUBLISHED_PORT 显式声明对外发布端口（compose 栈）时，
+ * 才允许把发布端口初始化/校正进「面板端口」设置：
+ * - 开发/测试环境没有"对外发布端口"语义，禁止把后端监听端口固化成面板端口（避免
+ *   dev 后端 8888 / dev:compose 发布端口被误同步进设置与 panel.env 的 VITE_DEV_WEB_PORT）；
+ * - 用户已显式设置过的面板端口（不等于出厂默认）永不覆盖。
+ */
+export function resolvePanelPortBootstrapSync(input: PanelPortBootstrapSyncInput): number | null {
+  if (input.mode !== 'production') {
+    return null
+  }
+  const publishedPort = parsePort(input.publishedPortEnv)
+  if (!publishedPort) {
+    return null
+  }
+  // 全新数据库：以实际发布端口初始化
+  if (input.existingPanelPort === undefined) {
+    return publishedPort
+  }
+  // 仍为出厂默认值：校正为实际发布端口
+  if (input.existingPanelPort === input.defaultPanelPort && publishedPort !== input.defaultPanelPort) {
+    return publishedPort
+  }
+  return null
+}
+
+export async function syncPanelPortSettingIfStale(input: {
+  mode: 'development' | 'test' | 'production'
+}): Promise<void> {
   const settings = await getSystemPanelSettings()
   const defaults = getDefaultPanelSettings()
-
-  if (!settings) {
-    await saveSystemPanelSettings({
-      ...defaults,
-      panelPort: actualPanelPort,
-    })
+  const nextPort = resolvePanelPortBootstrapSync({
+    mode: input.mode,
+    publishedPortEnv: process.env.GSH_PANEL_PUBLISHED_PORT,
+    existingPanelPort: settings?.panelPort,
+    defaultPanelPort: defaults.panelPort,
+  })
+  if (nextPort === null) {
     return
   }
-
-  if (settings.panelPort === defaults.panelPort && actualPanelPort !== defaults.panelPort) {
-    await saveSystemPanelSettings({
-      ...settings,
-      panelPort: actualPanelPort,
-    })
-  }
+  await saveSystemPanelSettings({
+    ...(settings ?? defaults),
+    panelPort: nextPort,
+  })
 }

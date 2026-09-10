@@ -410,10 +410,13 @@ export async function saveSystemNetworkConfig(config: DbSystemNetworkConfig) {
     })
 }
 
+/** 面板端口出厂默认；与 server/src/modules/system/defaults.ts 保持一致（生产 compose 发布端口默认 9527） */
+const DEFAULT_PANEL_PORT = 9527
+
 function normalizePanelSettings(raw: unknown): DbSystemPanelSettings {
   if (!raw || typeof raw !== 'object') {
     return {
-      panelPort: 80,
+      panelPort: DEFAULT_PANEL_PORT,
       theme: 'system',
       autoUpdate: true,
       checkUpdateBeforeStart: false,
@@ -421,12 +424,12 @@ function normalizePanelSettings(raw: unknown): DbSystemPanelSettings {
     }
   }
   const value = raw as Partial<DbSystemPanelSettings>
-  const panelPort = Number.isInteger(value.panelPort) ? value.panelPort as number : 80
+  const panelPort = Number.isInteger(value.panelPort) ? value.panelPort as number : DEFAULT_PANEL_PORT
   const theme = value.theme === 'light' || value.theme === 'dark' || value.theme === 'system'
     ? value.theme
     : 'system'
   return {
-    panelPort: panelPort > 0 && panelPort <= 65535 ? panelPort : 80,
+    panelPort: panelPort > 0 && panelPort <= 65535 ? panelPort : DEFAULT_PANEL_PORT,
     theme,
     autoUpdate: typeof value.autoUpdate === 'boolean' ? value.autoUpdate : true,
     checkUpdateBeforeStart: typeof value.checkUpdateBeforeStart === 'boolean'

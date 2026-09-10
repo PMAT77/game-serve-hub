@@ -126,7 +126,7 @@ export function registerSystemModule(app: FastifyInstance) {
       return businessError('请求参数无效', request)
     }
     const body: PanelSettingsRequest = parsedBody.data
-    const panelPort = body.panelPort ?? 80
+    const panelPort = body.panelPort ?? getDefaultPanelSettings().panelPort
     const theme = body.theme ?? 'system'
     const autoUpdate = body.autoUpdate ?? true
     const checkUpdateBeforeStart = body.checkUpdateBeforeStart ?? false

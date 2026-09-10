@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-10
+
 ### Fixed
 
 - **安装器内存预设未写入**：`write_builtin_panel_env_preset_asset` 把 heredoc 包在 `bash -c "..."` 内部，内层 shell 拿不到后续行，于是预设内容被当作命令执行（安装日志里出现 `small.env: command not found`），`panel.env` 实际没有写入内存上限参数 —— 小内存机器因此缺少运行时内存守卫。已改为命令替换内的 heredoc + `tee` 落盘，并修正内置 `small.env` 的 `GSH_DST_CONTAINER_MEMORY_MB`（768 → 1536，与 `config/panel.env.presets/small.env` 对齐）。
@@ -199,7 +201,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PMAT77/game-serve-hub/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/PMAT77/game-serve-hub/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/PMAT77/game-serve-hub/compare/v0.2.0...v0.2.1

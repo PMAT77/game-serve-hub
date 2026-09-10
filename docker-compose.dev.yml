@@ -26,8 +26,8 @@ services:
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
       # v0.2.2 起面板/DST/SteamCMD 合并为同一统一镜像
-      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.0}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.0}
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.1}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.1}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB:-}
       GSH_STEAMCMD_APP_INFO_MEMORY_MB: ${GSH_STEAMCMD_APP_INFO_MEMORY_MB:-}

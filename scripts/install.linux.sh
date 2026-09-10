@@ -174,6 +174,22 @@ read_env_value() {
   fi
 }
 
+# 仅当键不存在时追加，不覆盖已有值。
+# 用于升级路径补齐必需键：老 panel.env 可能缺 PANEL_DATA_DIR / PANEL_LOG_DIR / PANEL_PORT 等，
+# 而 docker-compose.bind.yml 依赖它们；upsert 会覆盖用户自定义值，故单列一个"仅缺失才补"的函数。
+ensure_env_values() {
+  local env_file="$1"
+  shift
+  local pair key
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    if [[ -z "$(read_env_value "${env_file}" "${key}")" ]]; then
+      printf '%s\n' "${pair}" | run_as_root tee -a "${env_file}" >/dev/null
+      log_info "Added missing key to panel.env: ${key}"
+    fi
+  done
+}
+
 # 原子更新指定环境变量，保留未涉及的用户配置、权限和文件 inode。
 upsert_env_values() {
   local file="$1"
@@ -552,22 +568,27 @@ verify_installer_asset_checksum() {
 write_builtin_panel_env_preset_asset() {
   local item="$1"
   local dest_path="$2"
+  local content
 
+  # 用命令替换内的 heredoc 承载内容，再由 tee 落盘。
+  # 不要写成 run_as_root bash -c "... <<EOF"：heredoc 必须由同一个 shell 解析后续行，
+  # 包在 bash -c 的双引号里会让内层 shell 把内容当命令执行。
   case "${item}" in
     small.env)
-      run_as_root bash -c "cat > \"${dest_path}\" <<'EOF'
+      content="$(cat <<'EOF'
 # GSH 内存预设：small（总内存约 4 GiB，< 5 GiB）
 # 合并到 panel.env 后重启 panel。勿与 dev 压力测试用的大上限（如 5120）混用。
 GSH_STEAMCMD_CONTAINER_MEMORY_MB=1536
 GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB=1536
-GSH_DST_CONTAINER_MEMORY_MB=768
+GSH_DST_CONTAINER_MEMORY_MB=1536
 GSH_HOST_STEAMCMD_PLANNING_MB=1280
 GSH_HOST_MEMORY_HEADROOM_MB=384
 GSH_HOST_DST_PLANNING_MB=512
-EOF"
+EOF
+)"
       ;;
     medium.env)
-      run_as_root bash -c "cat > \"${dest_path}\" <<'EOF'
+      content="$(cat <<'EOF'
 # GSH 内存预设：medium（总内存约 6 GiB，5 GiB–8 GiB）
 GSH_STEAMCMD_CONTAINER_MEMORY_MB=2048
 GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB=2048
@@ -575,19 +596,21 @@ GSH_DST_CONTAINER_MEMORY_MB=1536
 GSH_HOST_STEAMCMD_PLANNING_MB=1280
 GSH_HOST_MEMORY_HEADROOM_MB=512
 GSH_HOST_DST_PLANNING_MB=768
-EOF"
+EOF
+)"
       ;;
     large.env)
-      run_as_root bash -c "cat > \"${dest_path}\" <<'EOF'
+      content="$(cat <<'EOF'
 # GSH 内存预设：large（总内存 ≥ 8 GiB）
 # 高配默认不设子容器硬上限，由 DST/SteamCMD 按需使用；若需防止单容器失控可取消注释：
 # GSH_STEAMCMD_CONTAINER_MEMORY_MB=4096
 # GSH_DST_CONTAINER_MEMORY_MB=8192
 GSH_HOST_MEMORY_HEADROOM_MB=512
-EOF"
+EOF
+)"
       ;;
     README.md)
-      run_as_root bash -c "cat > \"${dest_path}\" <<'EOF'
+      content="$(cat <<'EOF'
 # panel.env 内存预设
 
 按宿主机 **总内存（MemTotal）** 选用预设，写入 `panel.env` 中的 **可选** 子容器内存上限与安装守卫参数。  
@@ -595,7 +618,7 @@ EOF"
 
 | 预设文件 | 适用总内存 | 说明 |
 |----------|------------|------|
-| `small.env` | 约 4 GiB（< 5 GiB） | 单实例地上、少 Mod；不建议洞穴 |
+| `small.env` | 约 4 GiB（&lt; 5 GiB） | 单实例地上、少 Mod；不建议洞穴 |
 | `medium.env` | 约 6 GiB（5–8 GiB） | 单实例 + 洞穴 + 中等 Mod |
 | `large.env` | ≥ 8 GiB | 默认不设硬上限；可按需取消注释 |
 
@@ -618,12 +641,15 @@ sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose
 ```
 
 完整说明见 [docs/MEMORY.md](../../docs/MEMORY.md)。
-EOF"
+EOF
+)"
       ;;
     *)
       return 1
       ;;
   esac
+
+  printf '%s\n' "${content}" | run_as_root tee "${dest_path}" >/dev/null
 
   return 0
 }
@@ -1565,6 +1591,15 @@ prepare_panel_files() {
       log_info "Legacy SteamCMD image ${old_steamcmd_image} will be replaced by the unified image; old tags can be removed later with docker rmi."
     fi
     run_as_root cp -p "${PANEL_ENV_FILE}" "${PANEL_ENV_FILE}.backup.$(date +%Y%m%d%H%M%S)"
+    # 老版本写的 panel.env 可能没有这些键，而 docker-compose.bind.yml 依赖它们：
+    # 缺 PANEL_DATA_DIR / PANEL_LOG_DIR 会让 compose 报 "invalid spec: :/app/data: empty section"；
+    # 缺 PANEL_PORT 会回退到默认端口，可能撞上宿主机已有服务。仅补缺失项，不覆盖用户设置。
+    ensure_env_values "${PANEL_ENV_FILE}" \
+      "PANEL_PORT=${PANEL_PORT}" \
+      "PANEL_DATA_DIR=${PANEL_DATA_DIR}" \
+      "PANEL_LOG_DIR=${PANEL_LOG_DIR}" \
+      "PANEL_INSTANCES_DIR=${PANEL_INSTANCES_DIR}" \
+      "PANEL_BACKUPS_DIR=${PANEL_BACKUPS_DIR}"
     upsert_env_values "${PANEL_ENV_FILE}" \
       "PANEL_IMAGE=${PANEL_IMAGE}" \
       "GSH_EDITION=community" \
@@ -1665,7 +1700,21 @@ pull_install_steamcmd_image() {
 
 # 拉取运行时镜像（v0.2.0 起统一镜像：面板/DST/SteamCMD 同一引用，一次拉取全部就绪）。
 pull_runtime_images() {
-  run_with_retry "docker pull ${PANEL_IMAGE}" run_as_root docker pull "${PANEL_IMAGE}" || return 1
+  # 离线镜像包导入后本地已有该 tag；v* tag 不可变，无需重复拉取。
+  # 否则弱网环境（GHCR 的镜像层域名常不可达）会在这一步中止整个安装。
+  if [[ "${GSH_FORCE_IMAGE_PULL:-0}" != "1" ]] \
+    && run_as_root docker image inspect "${PANEL_IMAGE}" >/dev/null 2>&1; then
+    log_info "Runtime image already present locally, skipping pull: ${PANEL_IMAGE}"
+    return 0
+  fi
+
+  if ! run_with_retry "docker pull ${PANEL_IMAGE}" run_as_root docker pull "${PANEL_IMAGE}"; then
+    log_error "Failed to pull runtime image: ${PANEL_IMAGE}"
+    log_error "GHCR 的镜像层域名（pkg-containers.githubusercontent.com）在国内常不可达，表现为 TLS handshake timeout。"
+    log_error "请改用 Release 离线镜像包，见 docs/INSTALL.md「网络受限时的安装方式」。"
+    log_error "如需强制重新拉取，可设置 GSH_FORCE_IMAGE_PULL=1。"
+    return 1
+  fi
 }
 
 wait_for_panel_health() {

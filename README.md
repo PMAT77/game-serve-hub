@@ -68,7 +68,11 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
   /opt/game-server-hub/panel.env
 ```
 
-首次登录必须修改密码。镜像分发与代理、端口、升级、回滚和完整排错说明见 [安装与运维指南](docs/INSTALL.md)。
+首次登录必须修改密码。
+
+> **国内网络**：若卡在镜像下载（`TLS handshake timeout`，GHCR 的镜像层域名常不可达），请改用 Release 离线镜像包，步骤见[安装与运维指南 · 离线镜像包完整步骤](docs/INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
+
+镜像分发与代理、端口、升级、回滚和完整排错说明见 [安装与运维指南](docs/INSTALL.md)。
 
 ## 开源与规划
 

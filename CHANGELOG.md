@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **安装器内存预设未写入**：`write_builtin_panel_env_preset_asset` 把 heredoc 包在 `bash -c "..."` 内部，内层 shell 拿不到后续行，于是预设内容被当作命令执行（安装日志里出现 `small.env: command not found`），`panel.env` 实际没有写入内存上限参数 —— 小内存机器因此缺少运行时内存守卫。已改为命令替换内的 heredoc + `tee` 落盘，并修正内置 `small.env` 的 `GSH_DST_CONTAINER_MEMORY_MB`（768 → 1536，与 `config/panel.env.presets/small.env` 对齐）。
+- **原地升级缺失必需键**：升级路径只更新镜像相关键，不会补 `PANEL_DATA_DIR` / `PANEL_LOG_DIR` / `PANEL_PORT` 等。老 `panel.env` 里若没有这些键，会先后导致 `docker-compose.bind.yml` 报 `invalid spec: :/app/data: empty section between colons`，以及端口回退到默认值后与宿主机已有服务冲突（`address already in use`），而报错信息完全指不出原因。现在升级时会**仅补齐缺失键，不覆盖用户显式设置过的值**。
+- **离线镜像包导入后安装器仍尝试拉取**：`docker pull` 失败会中止整个安装，使「下载 Release 离线包 → `docker load` → 跑安装器」这条国内推荐路径失效（与 `INSTALL.md` 的描述不符）。现在安装器会先检查本地是否已有该镜像（`v*` tag 不可变，无需重复拉取），有则跳过；确需强制拉取可设 `GSH_FORCE_IMAGE_PULL=1`。拉取失败时的报错也会明确指向离线镜像包方案。
+
 ## [0.3.0] - 2026-09-10
 
 ### Added

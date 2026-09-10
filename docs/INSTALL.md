@@ -101,6 +101,55 @@ v0.2.0 起官方容器镜像仅发布 GHCR（`ghcr.io/pmat77/game-server-hub`）
 2. **自选镜像代理**：在 `panel.env` 配置 `GSH_IMAGE_MIRRORS`（逗号分隔的 registry 主机名，面板按序回退拉取）；
 3. **PANEL_IMAGE 覆盖**：安装时设置 `PANEL_IMAGE=<你控制的镜像仓库引用>`。
 
+#### 离线镜像包完整步骤（国内推荐先读这一节）
+
+安装器需要从 GHCR 拉取统一镜像，而 GHCR 的**镜像层域名** `pkg-containers.githubusercontent.com` 在国内经常不可达。典型症状是「能看见镜像列表、但下载层时超时」，重试多少次都一样：
+
+```text
+failed to copy: ... Get "https://pkg-containers.githubusercontent.com/ghcrblobs/...":
+net/http: TLS handshake timeout
+```
+
+此时用每个 Release 附带的**离线镜像包**绕过 GHCR：
+
+**1. 下载镜像包与校验文件**（用安装器同款的 GitHub 加速代理）
+
+```bash
+tag=v0.3.0
+base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
+curl -fL --retry 3 -o gsh-image.tar.gz          "${base}/game-server-hub-${tag}-docker-image.tar.gz"
+curl -fL --retry 3 -o gsh-image.tar.gz.sha256   "${base}/game-server-hub-${tag}-docker-image.tar.gz.sha256"
+```
+
+> `gh-proxy.com` 不可用时换成 `https://ghfast.top/` 前缀（两者都在安装器的代理清单里）。
+
+**2. 校验**
+
+`.sha256` 内记录的是**原始文件名**。本地另存成别的名字会报 `No such file or directory`，改名或手工比对即可：
+
+```bash
+mv gsh-image.tar.gz "game-server-hub-${tag}-docker-image.tar.gz"
+sha256sum -c gsh-image.tar.gz.sha256      # 期望输出：...: OK
+```
+
+**3. 导入镜像**
+
+```bash
+docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
+docker images | grep game-server-hub
+```
+
+> 用 `docker load -i` 而不要用 `gunzip -c ... | docker load`：管道方式没有进度输出，大文件会看起来像卡住（实际在解压）。离线包约 420 MB，导入后镜像约 3.2 GB，请预留 4 GB 以上磁盘。
+
+**4. 运行安装器**
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh" \
+  | sudo bash -s -- --mode docker
+```
+
+镜像已在本地，安装器会**跳过拉取**（日志打印 `Runtime image already present locally, skipping pull`）。确实需要强制重新拉取时，加 `GSH_FORCE_IMAGE_PULL=1`。
+
 ### 3.4 本地安装
 
 ```bash

@@ -286,7 +286,7 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
     {
       title: '调度',
       key: 'schedule',
-      width: 140,
+      width: 180,
       render: row => describeSchedule(row),
     },
     {

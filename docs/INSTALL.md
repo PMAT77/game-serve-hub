@@ -2,6 +2,8 @@
 
 本文面向 Linux 生产部署。Docker 模式适合小型社区和托管商，Native systemd 模式适合个人服主。本地开发见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
+> **Windows 不受支持，也不是部署目标。** 它只用于本机开发调试，不提供安装脚本，也不为"让他人联机"做兼容。开发时的进服方式见 [DEVELOPMENT.md 平台定位](DEVELOPMENT.md#平台定位)；容器网络边界的说明见 [DST 开服教程 5.2](DST_TUTORIAL.md#52-windows-开发环境只保证本机进服)。
+
 ## 1. 选择部署模式
 
 | 对比项 | Docker | Native systemd |

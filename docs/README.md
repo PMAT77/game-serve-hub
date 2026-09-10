@@ -4,7 +4,8 @@
 
 | 文档 | 说明 |
 |------|------|
-| [INSTALL.md](INSTALL.md) | Linux 生产安装、升级、DST 使用、运维与故障排查 |
+| [INSTALL.md](INSTALL.md) | Linux 生产安装、升级、运维与故障排查 |
+| [DST_TUTORIAL.md](DST_TUTORIAL.md) | 服主视角从零开服：端口放行、面板操作、房间世界、控制台、备份与计划任务 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Docker/Native 双运行时、Open-Core 与插件边界 |
 | [MEMORY.md](MEMORY.md) | 宿主机内存档位（4G/6G/8G）、洞穴/Mod 建议与 `panel.env` 预设 |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 本地开发环境、测试、构建镜像 |

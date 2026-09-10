@@ -134,6 +134,29 @@ Rancher Desktop（WSL2 后端）把 Windows 源码目录 bind mount 进容器，
 
 ---
 
+## 本地构建统一镜像
+
+```bash
+docker compose build
+```
+
+构建是多阶段的，会依次访问 Docker Hub（基础镜像）、Debian apt 源、npm registry 与 Steam CDN。国内网络下最后一项常常失败：
+
+```text
+curl: (35) OpenSSL SSL_connect: SSL_ERROR_SYSCALL in connection to steamcdn-a.akamaihd.net:443
+```
+
+换用 Steam 的另一条官方 CDN 即可绕过（`docker-compose.yml` 已透传该参数，默认值不变）：
+
+```bash
+STEAMCMD_ARCHIVE_URL=https://media.steampowered.com/client/installer/steamcmd_linux.tar.gz \
+  docker compose build
+```
+
+> 仅仅开发功能并不需要构建镜像：`pnpm run dev`（宿主机 Node）与 `pnpm run dev:compose`（容器开发栈）都跳过了这一步。发布用的镜像由 CI 构建，见 [RELEASE.md](RELEASE.md)。
+
+---
+
 ## 测试与代码检查
 
 ```bash

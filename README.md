@@ -6,24 +6,35 @@
 
 面向 Steam 专用服务器的开源运维面板。当前以《饥荒联机版》（DST）为首个完整适配游戏，提供安装、更新、启停、监控、日志、控制台、世界和 Mod 管理。
 
-项目采用 **Open-Core**：单机服主需要的 Community 核心永久开源；多节点等高级能力以独立 Pro 插件提供。当前仓库版本为 `v0.2.2` 公测线（面板 + DST 运行环境 + SteamCMD 已合并为单一统一镜像，国内支持离线镜像包与自选镜像代理分发），裸机模式属于首期预览能力，建议先在非关键服务器验证。
-
 ![Game Server Hub 首页](https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/game-server-hub/home.png)
 
-## 两种部署模式
+## 适合谁
+
+- **个人服主** —— 不想再开一堆 SSH 窗口改 ini、手动重启世界；想在浏览器里管世界、Mod、存档和定时备份。
+- **小团队 / 游戏社区** —— 需要成员账号与权限、多实例并存、操作可追溯。
+- **托管商 / 集成方** —— 多节点统一管理属于规划中的 Pro 插件；也可直接联系做定制集成（见文末）。
+
+## 它能做什么
+
+- **一键开服与更新** —— 图形化创建实例，SteamCMD 自动安装与更新，地上 / 洞穴双分片一键拉起。
+- **世界与 Mod 管理** —— 房间参数、世界生成配置、创意工坊 Mod 在线订阅与开关。
+- **实时掌控** —— CPU / 内存 / 磁盘 / 网络监控，SSE 实时日志，游戏控制台直接下发命令。
+- **存档与备份** —— 定时备份、面板数据库快照、导入既有存档。
+- **两种部署方式** —— Docker Compose 或裸机 systemd，按你的隔离预期选。
+- **升级不出事** —— 同模式原地升级，升级前自动备份数据库，保留实例、存档和自定义配置。
+
+## 快速开始
+
+当前为 `v0.2.2` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
 
 | 模式 | 适合谁 | 面板 | SteamCMD / 游戏进程 | 进程管理 |
 | --- | --- | --- | --- | --- |
 | Docker | 小型游戏社区、托管商 | Docker Compose | Docker | Docker Engine |
 | Native | 个人服主 | 裸机 | 裸机 | 仅 systemd |
 
-Native 模式完全不依赖 Docker，也不使用 tmux、screen 或 PM2。面板由系统级 `game-server-hub.service` 管理，游戏分片由 `gsh` 用户的 systemd 服务管理；重启、自恢复、journald 日志和资源限制均由 systemd 接管。
+建议明确指定模式，避免自动判断与你的隔离预期不一致。Native 模式完全不依赖 Docker，也不使用 tmux、screen 或 PM2：面板由系统级 `game-server-hub.service` 管理，游戏分片由 `gsh` 用户的 systemd 服务管理，重启、自恢复、journald 日志和资源限制均由 systemd 接管。**裸机模式属于首期预览能力，建议先在非关键服务器验证。**
 
-## 立即安装
-
-要求：Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘。Native 正式支持 x86_64；Docker 的 ARM64 支持仍为实验性。
-
-建议明确指定模式，避免自动判断与你的隔离预期不一致。
+> **平台支持**：两种模式都以 Linux 为目标平台。**Windows 不是部署目标，也不提供安装脚本**——它只用于本机开发调试，见[开发指南 · 平台定位](docs/DEVELOPMENT.md#平台定位)。
 
 ### Docker 模式
 
@@ -48,36 +59,22 @@ curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.2.2/scripts/inst
   | sudo bash -s -- --mode native --network cn
 ```
 
-`--network auto` 根据 GitHub、Docker 仓库和国内软件源的实际连通性选择档位，不使用 IP 归属接口。`cn` 会临时切换 Ubuntu/Debian 软件源、增加 SteamCMD 重试；失败时恢复原软件源。
+`--network auto` 根据 GitHub、Docker 仓库和国内软件源的实际连通性选择档位，不使用 IP 归属接口；`cn` 会临时切换 Ubuntu/Debian 软件源、增加 SteamCMD 重试，失败时恢复原软件源。
 
-> 官方镜像仅发布 GHCR（统一镜像一次拉取即包含面板、DST 运行库与 SteamCMD）。GHCR 不可达时优先使用 Release 离线镜像包（配合 GitHub 加速代理），或在 `panel.env` 配置 `GSH_IMAGE_MIRRORS` 指向你信任的镜像代理；安装器不会把来源不明的容器代理写入默认配置。
-
-安装完成后打开脚本输出的地址。安装器会生成随机初始密码，默认不在摘要中明文展示；可在服务器上读取：
+安装完成后打开脚本输出的地址。安装器会生成随机初始密码，默认不在摘要中明文展示，可在服务器上读取：
 
 ```bash
 sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
   /opt/game-server-hub/panel.env
 ```
 
-首次登录必须修改密码。完整的代理、端口、升级、回滚和排错说明见 [安装与运维指南](docs/INSTALL.md)。
+首次登录必须修改密码。镜像分发与代理、端口、升级、回滚和完整排错说明见 [安装与运维指南](docs/INSTALL.md)。
 
-## 核心能力
+## 开源与规划
 
-- 实例创建、SteamCMD 安装/更新、启动、停止和重启
-- DST 地上/洞穴分片、房间、世界生成和 Mod 管理
-- 主机与实例 CPU、内存、磁盘和网络监控
-- SSE 实时日志、游戏控制台命令
-- Docker Compose 与 Native systemd 双运行时
-- 安装资源多源回退、SHA256 校验、阶段状态和脱敏诊断
-- 同模式原地升级；升级前一致性备份 SQLite，并保留实例、存档、备份和自定义 `panel.env`
+本项目采用 [MIT License](LICENSE)，**当前所有功能开源、免费，没有付费项，也没有付费入口**。
 
-## Open-Core 边界
-
-Community 核心永久包含单节点完整生命周期、双部署模式、基础监控、DST 管理和本地数据能力，采用 [MIT License](LICENSE)。
-
-首个 Pro 插件规划为**多节点管理**，后续候选包括计划任务、异地备份、告警、审计、高级 RBAC、SSO 与托管商能力。商业插件将采用签名包和可离线使用的设备授权文件；授权服务不可达时不会停止已运行的游戏实例。
-
-目前 Pro 插件与授权服务尚未发布，Community 不包含占位付费按钮。技术边界见 [架构与产品边界](docs/ARCHITECTURE.md)。
+后续可能以独立插件的形式推出 Pro 版本（例如多节点管理），目前**仅在规划中、尚未开发**，也没有时间表。如果你需要官方路线图之外的能力，见文末的[定制开发](#定制开发与商业合作)。
 
 ## 常见问题
 
@@ -109,37 +106,71 @@ sudo loginctl show-user gsh -p Linger
 
 同时检查本机防火墙和云厂商安全组。默认需放行面板 `9527/tcp`，以及 DST 的 `10999/udp`、`8766/udp`、`12346/udp`（开启洞穴还需 `11000`、`8768`、`12348`）。安装器只有在传入 `--open-panel-port` / `--open-dst-ports` 时才修改本机防火墙。完整端口清单见 [DST 开服教程](docs/DST_TUTORIAL.md#4-开放端口安全组与防火墙)。
 
+先确认控制台显示的直连地址是否可用：地址来源见命令下方提示，来自"出站 IP 探测"的地址在本机 / 家用 NAT / 容器环境下往往不可直连（开着系统代理时还可能返回代理出口地址）；本机游玩请用「本机」档。Windows 环境的注意事项见 [DST 开服教程第 5 章](docs/DST_TUTORIAL.md#5-需要配置-ip-转发吗)。
+
 ### 重跑安装脚本会清空数据吗
 
 不会。同模式重跑被视为原地升级：保留数据库、实例、备份、账号和自定义配置，备份 `panel.env` 后只更新版本相关键。Docker 与 Native 之间不自动迁移。
 
-更多按错误关键词整理的处理方法见 [INSTALL.md 的 FAQ](docs/INSTALL.md#faq-按错误关键词排查)。
+更多按错误关键词整理的处理方法见 [INSTALL.md 的 FAQ](docs/INSTALL.md#faq按错误关键词排查)。
+
+## 交流与反馈
+
+![QQ 群：1055694763](https://img.shields.io/badge/QQ%E7%BE%A4-1055694763-12B7F5?logo=tencentqq&logoColor=white)
+
+公测版本发布、部署安装问题、使用心得与建议都欢迎在群里讨论。
+
+- **部署 / 配置 / 使用问题** → 群里问最快，也方便互相参考
+- **可复现的 Bug、明确的功能请求** → 提 [Issue](https://github.com/PMAT77/game-serve-hub/issues)，不会被聊天记录冲掉，后续也好跟进
 
 ## 文档
 
+**给服主**
+
 | 文档 | 内容 |
 | --- | --- |
-| [DST 开服教程](docs/DST_TUTORIAL.md) | 服主视角从零开服：端口放行、面板操作、房间世界、控制台、备份与计划任务 |
 | [安装与运维](docs/INSTALL.md) | 两种模式从零安装、升级、回滚、日志与 FAQ |
-| [架构与产品边界](docs/ARCHITECTURE.md) | 运行时分层、Open-Core 边界、Native 服务模型 |
+| [DST 开服教程](docs/DST_TUTORIAL.md) | 端口放行、面板操作、房间世界、控制台、备份与计划任务 |
 | [内存建议](docs/MEMORY.md) | 4/6/8 GiB 档位、洞穴与 Mod 建议 |
-| [开发指南](docs/DEVELOPMENT.md) | 本地开发、测试和构建 |
-| [发布流程](docs/RELEASE.md) | Release 与镜像发布 |
-| [变更记录](CHANGELOG.md) | 版本变更 |
+
+**给开发者**
+
+本地环境搭建、测试与构建见 [开发指南](docs/DEVELOPMENT.md)；版本策略与发布检查清单见 [发布流程](docs/RELEASE.md)；运行时分层与 Open-Core 边界见 [架构与产品边界](docs/ARCHITECTURE.md)。
+
+版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 赞助与商业合作
+
+项目主要利用业余时间维护。如果它帮你省下了时间，可以请我喝杯咖啡——赞助用于持续开发、测试机器与文档维护。
+
+<img src="https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/common/collection_wechat.jpg" alt="微信赞助" width="200" />
+
+> 赞助是心意，不等同于购买 Pro、故障处理时限或一对一支持。
+
+### 定制开发与商业合作
+
+除官方路线图外，可以提供以下付费服务：
+
+| 服务 | 说明 |
+| --- | --- |
+| **适配你的游戏** | 项目以 DST 为首个适配游戏，可对接其他 Steam 专用服务器，复用安装、分片、Mod 与控制台链路 |
+| **私有化部署与迁移** | 内网 / 代理受限 / 无公网环境的部署；从裸机或既有面板迁移存档与实例 |
+| **功能定制开发** | 按你的玩法或运营需求实现专属功能，交付形式按需求商定 |
+
+**联系方式**
+
+- 微信：`PMAT77`（下方二维码）
+  - 添加时请**备注来意**，建议格式 `身份 / 需求 / 规模`，例如 `个人服主 / DST 开服 / 20 人`、`托管商 / 定制插件 / 多节点`
+- 电话与合同细节在微信沟通后按需提供
+- 功能问题与 Bug 见[交流与反馈](#交流与反馈)。项目由我利用业余时间维护、平日有主业在身，回复可能不够及时，但看到都会回
+
+<img src="https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/common/WeChat.jpg" alt="微信联系：PMAT77" width="200" />
 
 ## 参与贡献
 
-欢迎提交 [Issue](https://github.com/PMAT77/game-serve-hub/issues) 与 [Pull Request](https://github.com/PMAT77/game-serve-hub/pulls)。开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)。
+欢迎提交 [Issue](https://github.com/PMAT77/game-serve-hub/issues) 与 [Pull Request](https://github.com/PMAT77/game-serve-hub/pulls)；流程与规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，本地开发见 [开发指南](docs/DEVELOPMENT.md)，安全问题见 [SECURITY.md](SECURITY.md)。
 
-前端基于 Fantastic-admin、Vue 3 和 Vite；后端采用 Fastify、Drizzle ORM。感谢这些项目及所有贡献者。
-
-## 赞助
-
-项目主要利用业余时间维护。赞助用于持续开发、测试机器和文档维护，不等同于购买 Pro、故障处理时限或一对一支持。
-
-<img src="https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/common/collection_wechat.jpg" alt="微信赞助码" width="200" />
-
-商业合作或托管商集成可通过[商业合作 Issue](https://github.com/PMAT77/game-serve-hub/issues/new?title=%5B%E5%95%86%E4%B8%9A%E5%90%88%E4%BD%9C%5D)联系。付费调试服务说明与 GIF 演示按当前计划暂缓发布。
+后端基于 Fastify 与 Drizzle ORM，前端基于 Vue 3、Vite 与 Fantastic-admin。感谢这些项目及所有贡献者。
 
 ## 许可证
 

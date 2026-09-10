@@ -1,4 +1,9 @@
-# syntax=docker/dockerfile:1
+# 刻意不使用 `# syntax=docker/dockerfile:1`：该指令会强制 BuildKit 从 Docker Hub 拉取
+# docker/dockerfile 前端镜像，国内网络下会让 `docker compose build` 直接失败
+# （failed to resolve source metadata ... authorization failed）。
+# 本文件只用标准 Dockerfile 语法，内置 frontend 即可解析。
+# 若将来引入 `RUN --mount=` / heredoc 等特性，再按需加回并解决镜像源。
+#
 # Game Server Hub 统一镜像：面板（Node.js）+ DST 运行库 + SteamCMD。
 #
 # 镜像保持「中性」：不设 ENTRYPOINT / HEALTHCHECK / USER ——

@@ -101,6 +101,37 @@ export const SHARD_CONTAINER_STATUS: Record<ShardContainerStatus, StatusDescript
 
 export const SHARD_UNCONFIGURED: StatusDescriptor = SHARD_CONTAINER_STATUS.not_created
 
+/** 分片展示状态的判定输入（世界列表 / 实例详情 / 世界设置复用的最小字段集） */
+export interface ShardDisplayFacts {
+  /** 分片配置是否就绪（磁盘上存在 server.ini） */
+  configured: boolean
+  /** 运行容器状态（服务端 resolveShardContainerStatus） */
+  containerStatus: ShardContainerStatus
+  /** 世界存档是否已生成（save 目录非空）；世界列表摘要接口暂不提供，缺省视为未生成 */
+  worldGenerated?: boolean
+}
+
+/**
+ * 分片展示状态。
+ *
+ * 容器状态只表示「运行容器是否存在」——面板停止实例时会连同容器一起删除以释放内存，
+ * 因此容器不存在并不代表没有配置或没有存档；仅当两者皆无时才显示「未配置」。
+ */
+export function resolveShardDisplayStatus(shard: ShardDisplayFacts | null | undefined): StatusDescriptor {
+  if (!shard || shard.containerStatus === 'unknown') {
+    return SHARD_CONTAINER_STATUS.unknown
+  }
+  if (shard.containerStatus === 'running') {
+    return SHARD_CONTAINER_STATUS.running
+  }
+  if (shard.containerStatus === 'stopped') {
+    return SHARD_CONTAINER_STATUS.stopped
+  }
+  return shard.configured || shard.worldGenerated === true
+    ? SHARD_CONTAINER_STATUS.stopped
+    : SHARD_CONTAINER_STATUS.not_created
+}
+
 /* ---------------------------------- 模组 ---------------------------------- */
 
 export const MOD_INSTALL_STATUS: Record<'pending' | 'ready' | 'failed', StatusDescriptor> = {

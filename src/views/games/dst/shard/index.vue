@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { DataTableColumns } from 'naive-ui'
-import type { ShardContainerStatus } from '@/api/modules/shard'
 import type { DstInstanceSummaryDto } from '@/api/modules/dst-summary'
 import { NAlert, NButton, NDataTable, NEmpty, NTag, NTooltip } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
@@ -8,7 +7,7 @@ import AdminListToolbar from '@/components/AdminListToolbar.vue'
 import apiDstSummary from '@/api/modules/dst-summary'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 import { routeToDstWorldSettings, routeToNodeInstance } from '@/navigation/game-routes'
-import { CONFIG_ERROR_STATUS, SHARD_CONTAINER_STATUS, SHARD_UNCONFIGURED, statusTagType } from '@/constants/statusDictionary'
+import { CONFIG_ERROR_STATUS, resolveShardDisplayStatus, statusTagType, type ShardDisplayFacts } from '@/constants/statusDictionary'
 import { getInstanceState } from '@/views/node/instance/instanceDisplay'
 
 defineOptions({
@@ -30,8 +29,8 @@ const {
   runLoad,
 } = useAdminPageState(rows)
 
-function renderShardStatusTag(status: ShardContainerStatus) {
-  const descriptor = SHARD_CONTAINER_STATUS[status]
+function renderShardStatusTag(shard: ShardDisplayFacts) {
+  const descriptor = resolveShardDisplayStatus(shard)
   return h(
     NTag,
     { size: 'small', bordered: false, type: statusTagType(descriptor.tone) },
@@ -41,13 +40,7 @@ function renderShardStatusTag(status: ShardContainerStatus) {
 
 function shardStatusText(row: DstInstanceSummaryDto, shardId: 'master' | 'caves'): string {
   const shard = row.world[shardId]
-  if (!shard) {
-    return '—'
-  }
-  if (!shard.configured) {
-    return SHARD_UNCONFIGURED.label
-  }
-  return SHARD_CONTAINER_STATUS[shard.containerStatus].label
+  return shard ? resolveShardDisplayStatus(shard).label : '—'
 }
 
 const filteredRows = computed(() => {
@@ -115,17 +108,7 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
     key: 'master',
     render: (row) => {
       const master = row.world.master
-      if (!master) {
-        return '—'
-      }
-      if (!master.configured) {
-        return h(
-          NTag,
-          { size: 'small', bordered: false, type: statusTagType(SHARD_UNCONFIGURED.tone) },
-          { default: () => SHARD_UNCONFIGURED.label },
-        )
-      }
-      return renderShardStatusTag(master.containerStatus)
+      return master ? renderShardStatusTag(master) : '—'
     },
   },
   {
@@ -133,17 +116,7 @@ const columns: DataTableColumns<DstInstanceSummaryDto> = [
     key: 'caves',
     render: (row) => {
       const caves = row.world.caves
-      if (!caves) {
-        return '—'
-      }
-      if (!caves.configured) {
-        return h(
-          NTag,
-          { size: 'small', bordered: false, type: statusTagType(SHARD_UNCONFIGURED.tone) },
-          { default: () => SHARD_UNCONFIGURED.label },
-        )
-      }
-      return renderShardStatusTag(caves.containerStatus)
+      return caves ? renderShardStatusTag(caves) : '—'
     },
   },
   {

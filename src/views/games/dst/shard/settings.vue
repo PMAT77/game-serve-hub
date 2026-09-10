@@ -33,6 +33,7 @@ import {
   routeToDstWorldList,
 } from '@/navigation/game-routes'
 import { isInstanceInstallingStatus } from '@/views/node/instance/instanceDisplay'
+import { resolveShardDisplayStatus, statusTagType } from '@/constants/statusDictionary'
 import { tryNotifyHostMemoryPressure } from '@/utils/hostMemoryPressure'
 import { shardSavePayloadSchema } from '@/api/modules/shard'
 import {
@@ -168,18 +169,9 @@ const portRules: FormRules = {
   ],
 }
 
-function containerStatusTag(shard: ShardSummaryDto | undefined) {
-  if (!shard) {
-    return '未知'
-  }
-  const map = {
-    running: '运行中',
-    stopped: '已停止',
-    not_created: '未创建',
-    unknown: '未知',
-  } as const
-  return map[shard.containerStatus]
-}
+/** 分片状态标签：容器不存在不等于「没配置/没存档」，一律走全站状态词典 */
+const masterShardStatus = computed(() => resolveShardDisplayStatus(masterShard.value))
+const cavesShardStatus = computed(() => resolveShardDisplayStatus(cavesShard.value))
 
 function resetLocalWorldRules() {
   masterWorldRules.value = {}
@@ -532,8 +524,8 @@ onActivated(() => {
             <template #tab>
               <span class="inline-flex items-center gap-2">
                 地上
-                <NTag size="tiny" :bordered="false">
-                  {{ containerStatusTag(masterShard) }}
+                <NTag size="tiny" :bordered="false" :type="statusTagType(masterShardStatus.tone)">
+                  {{ masterShardStatus.label }}
                 </NTag>
               </span>
             </template>
@@ -598,8 +590,9 @@ onActivated(() => {
                   v-if="clusterShardEnabled"
                   size="tiny"
                   :bordered="false"
+                  :type="statusTagType(cavesShardStatus.tone)"
                 >
-                  {{ containerStatusTag(cavesShard) }}
+                  {{ cavesShardStatus.label }}
                 </NTag>
                 <NTag v-else size="tiny" :bordered="false" type="default">
                   未开启

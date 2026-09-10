@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { getInstanceState, looksLikeRuntimeCommand } from './instanceDisplay.ts'
-import { INSTANCE_STATE, INSTANCE_STATUS, MOD_ENABLED_STATUS, MOD_INSTALL_STATUS, SHARD_CONTAINER_STATUS, statusTagType } from '@/constants/statusDictionary'
+import { INSTANCE_STATE, INSTANCE_STATUS, MOD_ENABLED_STATUS, MOD_INSTALL_STATUS, resolveShardDisplayStatus, SHARD_CONTAINER_STATUS, statusTagType } from '@/constants/statusDictionary'
 
 describe('statusDictionary', () => {
   it('every descriptor has a non-empty label and a valid tone', () => {
@@ -26,6 +26,52 @@ describe('statusDictionary', () => {
     assert.equal(statusTagType('warning'), 'warning')
     assert.equal(statusTagType('error'), 'error')
     assert.equal(statusTagType('neutral'), 'default')
+  })
+})
+
+describe('resolveShardDisplayStatus', () => {
+  it('reports a running container as 运行中', () => {
+    const descriptor = resolveShardDisplayStatus({ configured: true, containerStatus: 'running' })
+    assert.equal(descriptor.label, '运行中')
+    assert.equal(descriptor.tone, 'success')
+  })
+
+  it('reports an existing but stopped container as 未运行', () => {
+    const descriptor = resolveShardDisplayStatus({ configured: true, containerStatus: 'stopped' })
+    assert.equal(descriptor.label, '未运行')
+    assert.equal(descriptor.tone, 'neutral')
+  })
+
+  it('reports an unknown container state as 未知', () => {
+    assert.equal(resolveShardDisplayStatus({ configured: true, containerStatus: 'unknown' }).label, '未知')
+  })
+
+  it('reports a missing container as 未运行 when the shard is configured', () => {
+    // 导入存档后实例必然是停止状态，此时面板已删除运行容器
+    const descriptor = resolveShardDisplayStatus({ configured: true, containerStatus: 'not_created' })
+    assert.equal(descriptor.label, '未运行')
+    assert.equal(descriptor.tone, 'neutral')
+  })
+
+  it('reports a missing container as 未运行 when the world save already exists', () => {
+    const descriptor = resolveShardDisplayStatus({
+      configured: false,
+      containerStatus: 'not_created',
+      worldGenerated: true,
+    })
+    assert.equal(descriptor.label, '未运行')
+    assert.equal(descriptor.tone, 'neutral')
+  })
+
+  it('keeps 未配置 only for a shard without config and without a world save', () => {
+    const descriptor = resolveShardDisplayStatus({ configured: false, containerStatus: 'not_created' })
+    assert.equal(descriptor.label, '未配置')
+    assert.equal(descriptor.tone, 'warning')
+  })
+
+  it('falls back to 未知 when the shard summary is missing', () => {
+    assert.equal(resolveShardDisplayStatus(null).label, '未知')
+    assert.equal(resolveShardDisplayStatus(undefined).label, '未知')
   })
 })
 

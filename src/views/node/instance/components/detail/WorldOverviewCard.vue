@@ -5,7 +5,7 @@ import apiShard from '@/api/modules/shard'
 import { NButton, NCard, NEmpty, NSpin, NTag } from 'naive-ui'
 import { computed, ref } from 'vue'
 import { routeToDstWorldSettings } from '@/navigation/game-routes'
-import { SHARD_CONTAINER_STATUS, statusTagType } from '@/constants/statusDictionary'
+import { resolveShardDisplayStatus, statusTagType } from '@/constants/statusDictionary'
 import { dstSeasonLabel } from '../../instanceCommandShortcuts'
 
 /** 世界运行时状态（P1：指令注入查询，实例未运行时 available=false） */
@@ -56,10 +56,11 @@ function shardStatus(shardId: ShardId) {
   if (!shard) {
     return null
   }
+  const descriptor = resolveShardDisplayStatus(shard)
   return {
     shard,
-    descriptor: SHARD_CONTAINER_STATUS[shard.containerStatus],
-    tagType: statusTagType(SHARD_CONTAINER_STATUS[shard.containerStatus].tone),
+    descriptor,
+    tagType: statusTagType(descriptor.tone),
   }
 }
 

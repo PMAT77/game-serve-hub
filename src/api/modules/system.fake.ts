@@ -1,7 +1,7 @@
 import { defineFakeRoute } from 'vite-plugin-fake-server/client'
 
 let panelSettings = {
-  panelPort: 80,
+  panelPort: 9527,
   theme: 'system' as const,
   autoUpdate: true,
   checkUpdateBeforeStart: false,
@@ -59,7 +59,7 @@ export default defineFakeRoute([
     method: 'post',
     response: ({ body }) => {
       panelSettings = {
-        panelPort: Number(body.panelPort) || 80,
+        panelPort: Number(body.panelPort) || 9527,
         theme: body.theme ?? 'system',
         autoUpdate: Boolean(body.autoUpdate),
         checkUpdateBeforeStart: Boolean(body.checkUpdateBeforeStart),

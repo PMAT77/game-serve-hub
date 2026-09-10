@@ -18,7 +18,6 @@ const saveLoading = ref(false)
 const updateStatusLoading = ref(false)
 const applyLoading = ref(false)
 const updateStatus = ref<Awaited<ReturnType<typeof apiSystem.getPanelUpdateStatus>>['data'] | null>(null)
-const apiPort = ref<number | null>(null)
 
 function resolveBrowserAccessPort(): number {
   if (typeof window === 'undefined') {
@@ -35,15 +34,8 @@ function resolveBrowserAccessPort(): number {
 
 const browserAccessPort = computed(() => resolveBrowserAccessPort())
 
-const isSplitDevMode = computed(() => {
-  if (apiPort.value === null) {
-    return false
-  }
-  return browserAccessPort.value !== apiPort.value
-})
-
 const form = reactive<PanelSettingsPayload>({
-  panelPort: 80,
+  panelPort: 9527,
   theme: 'system',
   autoUpdate: true,
   checkUpdateBeforeStart: false,
@@ -68,9 +60,6 @@ const canApplyImageUpdate = computed(() => {
   }
   return updateStatus.value.image.updateAvailable && updateStatus.value.imageApplySupported
 })
-
-const isNativeRuntime = computed(() => updateStatus.value?.runtimeMode === 'native')
-const imageVersionLabel = computed(() => isNativeRuntime.value ? '面板 Release' : '统一镜像')
 
 const canApplyUpdate = computed(() => {
   if (!updateStatus.value || updateStatus.value.updating) {
@@ -128,19 +117,17 @@ function normalizeApplyHint(value: string | null): string | null {
     return null
   }
   if (/无法在容器内访问 compose|未配置 GSH_STACK_DIR|GSH_STACK_DIR 必须是绝对路径/.test(value)) {
-    return '无法一键更新统一镜像，请使用下方命令手动更新。'
+    return '当前环境暂不支持自动更新，请使用下方命令手动更新。'
   }
   return value
 }
 
 function formatImageLine(
-  label: string,
   info: NonNullable<typeof updateStatus.value>['image'],
 ) {
   const version = info.releaseVersion || info.tag
-  const digest = info.localDigestShort ? ` · ${info.localDigestShort}` : ''
   const status = info.updateAvailable ? '（有新版本）' : '（已是最新）'
-  return `${label}：${version}${digest}${status}`
+  return `面板版本：${version}${status}`
 }
 
 async function loadSettings(options?: { silent?: boolean }) {
@@ -150,7 +137,6 @@ async function loadSettings(options?: { silent?: boolean }) {
   try {
     const res = await apiSystem.getSettings()
     const data = res.data
-    apiPort.value = data.apiPort
     form.panelPort = data.panelPort
     form.theme = data.theme
     form.autoUpdate = data.autoUpdate
@@ -164,10 +150,9 @@ async function loadSettings(options?: { silent?: boolean }) {
     if (!settingsLoaded.value) {
       const detail = error instanceof Error && error.message ? `：${error.message}` : ''
       settingsLoadError.value = `加载系统设置失败${detail}`
-      apiPort.value = null
     }
     else if (!options?.silent) {
-      faToast.error('刷新系统设置失败，当前页面保留上次成功加载的数据。')
+      faToast.error('刷新失败，页面保留当前设置。')
     }
   }
   finally {
@@ -193,13 +178,13 @@ async function checkHubUpdate() {
     const res = await apiSystem.checkPanelUpdate()
     updateStatus.value = res.data
     if (normalizeCheckError(res.data.checkError)) {
-      faToast.warning('无法完成远端版本检查，请查看下方检查提示')
+      faToast.warning('暂时无法完成版本检查，请查看下方提示')
     }
     else if (res.data.image.updateAvailable) {
-      faToast.info(isNativeRuntime.value ? '检测到面板 Release 有新版本' : '检测到统一镜像有新版本')
+      faToast.info('检测到新版本')
     }
     else {
-      faToast.success(isNativeRuntime.value ? '面板已是最新版本' : '面板镜像已是最新版本')
+      faToast.success('已是最新版本')
     }
   }
   finally {
@@ -210,9 +195,7 @@ async function checkHubUpdate() {
 function confirmApplyHubUpdate() {
   dialog.warning({
     title: '确认应用更新',
-    content: isNativeRuntime.value
-      ? '将原地升级面板；升级过程中面板会短暂不可用。是否继续？'
-      : '应用更新会拉取新统一镜像并短暂重启面板；游戏实例不受影响。是否继续？',
+    content: '更新过程中面板会短暂无法访问，游戏服务器不受影响。是否继续？',
     positiveText: '立即更新',
     negativeText: '取消',
     onPositiveClick: () => applyHubUpdate(),
@@ -237,7 +220,7 @@ async function applyHubUpdate() {
     }
   }
   catch (error) {
-    const message = error instanceof Error ? error.message : 'Hub 镜像更新失败'
+    const message = error instanceof Error ? error.message : '更新失败'
     faToast.error(message)
   }
   finally {
@@ -247,11 +230,11 @@ async function applyHubUpdate() {
 
 async function saveSettings() {
   if (!settingsLoaded.value || loading.value) {
-    faToast.warning('请先成功加载系统设置后再保存。')
+    faToast.warning('设置尚未加载完成，请稍后重试。')
     return
   }
   if (!Number.isInteger(form.panelPort) || form.panelPort <= 0 || form.panelPort > 65535) {
-    faToast.warning('端口范围应为 1-65535')
+    faToast.warning('端口号无效，请输入 1-65535 之间的数字')
     return
   }
   if (!Number.isInteger(form.updateCheckIntervalHours) || form.updateCheckIntervalHours < 1 || form.updateCheckIntervalHours > 168) {
@@ -299,43 +282,32 @@ onActivated(async () => {
     <div v-else class="space-y-6">
       <AdminSettingsSection
         title="面板端口"
-        description="设置浏览器访问面板的对外端口。开发双容器环境下请区分浏览器端口与 API 端口。"
+        description="浏览器打开本面板所使用的端口。"
       >
-        <div v-if="isSplitDevMode" class="text-sm text-muted-foreground space-y-1">
-          <p>当前访问端口：{{ browserAccessPort }}（浏览器地址栏）</p>
-          <p>后端 API 端口：{{ apiPort }}（开发双容器，仅内部/直连 API 使用）</p>
-        </div>
-        <p v-else class="text-sm text-muted-foreground">
+        <p class="text-sm text-muted-foreground">
           当前访问端口：{{ browserAccessPort }}
         </p>
-        <NInputNumber v-model:value="form.panelPort" :min="1" :max="65535" class="max-w-80 mt-3" placeholder="请输入对外发布端口" />
+        <NInputNumber v-model:value="form.panelPort" :min="1" :max="65535" class="max-w-80 mt-3" placeholder="请输入端口号" />
         <p class="text-xs text-muted-foreground mt-2">
-          <template v-if="isSplitDevMode">
-            开发环境请用 {{ browserAccessPort }} 打开面板；修改端口保存后需重启面板服务生效。
-          </template>
-          <template v-else>
-            端口范围 1-65535，保存后需重启面板服务生效。
-          </template>
+          修改端口保存后，需重启面板才能生效。
         </p>
       </AdminSettingsSection>
 
       <AdminSettingsSection
         title="界面主题"
-        description="选择管理面板的显示主题；保存后立即应用到当前浏览器。"
+        description="选择面板的显示主题，保存后立即生效。"
       >
         <NSelect v-model:value="form.theme" :options="themeOptions" class="max-w-80" />
       </AdminSettingsSection>
 
       <AdminSettingsSection
         title="面板与游戏版本"
-        :description="isNativeRuntime
-          ? '检查面板 Release；裸机模式通过校验安装包并保留旧版本的脚本原地升级。'
-          : '检查并应用统一镜像更新（面板 + DST 运行环境 + SteamCMD）。应用更新会短暂重启管理端。'"
+        description="检查面板与游戏服务端是否有新版本；应用更新后面板会短暂重启。"
       >
         <div v-if="updateStatus" class="space-y-2 text-sm">
-          <p>{{ formatImageLine(imageVersionLabel, updateStatus.image) }}</p>
+          <p>{{ formatImageLine(updateStatus.image) }}</p>
           <p v-if="updateStatus.release" class="text-muted-foreground">
-            最新 Release：{{ updateStatus.release.tagName }}
+            最新版本：{{ updateStatus.release.tagName }}
             <span v-if="formattedLastCheckedAt"> · 上次检查 {{ formattedLastCheckedAt }}</span>
           </p>
           <p v-else-if="formattedLastCheckedAt" class="text-xs text-muted-foreground">
@@ -359,7 +331,7 @@ onActivated(async () => {
           </div>
         </div>
         <div v-else class="text-sm text-muted-foreground">
-          暂无法读取 Hub 版本信息
+          暂时无法获取版本信息
         </div>
         <div class="flex flex-wrap gap-2 pt-1">
           <FaButton
@@ -376,15 +348,13 @@ onActivated(async () => {
       </AdminSettingsSection>
 
       <AdminSettingsSection
-        :title="isNativeRuntime ? '面板自动检查更新' : '面板镜像自动检查更新'"
-        :description="isNativeRuntime ? '按间隔自动检查 GitHub Release 是否有新版本。' : '按间隔自动检查面板镜像是否有新版本。'"
+        title="自动检查更新"
+        description="按设定间隔自动检查面板是否有新版本。"
       >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.autoUpdate" />
           <span class="text-sm text-muted-foreground">
-            {{ form.autoUpdate
-              ? `已启用面板${isNativeRuntime ? ' Release' : '镜像'}自动检查`
-              : `已关闭面板${isNativeRuntime ? ' Release' : '镜像'}自动检查` }}
+            {{ form.autoUpdate ? '已开启自动检查' : '已关闭自动检查' }}
           </span>
         </div>
         <div class="space-y-2 max-w-80">
@@ -395,12 +365,12 @@ onActivated(async () => {
 
       <AdminSettingsSection
         title="启动前检查游戏更新"
-        description="启动或重启实例前，向 Steam 核对服务端 Build ID 是否与本地一致。"
+        description="启动或重启游戏服务器前，先向 Steam 检查是否有新版本。"
       >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.checkUpdateBeforeStart" />
           <span class="text-sm text-muted-foreground">
-            {{ form.checkUpdateBeforeStart ? '启动前将向 Steam 检查 Build ID，有新版时将阻止启动' : '启动时不额外检查 Steam 远端版本' }}
+            {{ form.checkUpdateBeforeStart ? '启动前自动检查游戏更新，避免版本过旧' : '启动前不检查游戏更新' }}
           </span>
         </div>
       </AdminSettingsSection>

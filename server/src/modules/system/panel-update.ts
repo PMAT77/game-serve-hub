@@ -255,7 +255,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
     return {
       imageSupported: false,
       supported: false,
-      hint: '裸机模式使用带 SHA256 校验和回滚的安装脚本原地升级；请执行下方命令。',
+      hint: '当前部署方式需通过安装脚本更新面板，请执行下方命令。',
       stackPaths: null,
     }
   }

@@ -114,7 +114,7 @@ describe('resolveApplySupport', () => {
     const support = resolveApplySupport(buildConfig({ runtimeMode: 'native' }))
     assert.equal(support.imageSupported, false)
     assert.equal(support.supported, false)
-    assert.match(support.hint ?? '', /原地升级/)
+    assert.match(support.hint ?? '', /安装脚本/)
   })
 
   it('enables image apply when stack files are reachable', () => {

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
 import process from 'node:process'
 import { createServerApp } from './app'
+import { startScheduleScheduler } from './modules/schedule/scheduler'
 import { syncPanelPortSettingIfStale } from './modules/system/panel-port'
 import { writeAdminCredentialsFile } from './shared/config/credentials-file'
 import { ensureServerRuntimeDirs, loadServerConfig } from './shared/config'
@@ -59,6 +60,11 @@ export async function bootstrap() {
     )
   }
   await syncPanelPortSettingIfStale({ mode: config.mode })
+
+  // 计划任务调度器必须在数据库初始化之后启动：
+  // 启动恢复要读 scheduled_tasks 并把面板离线期间错过的任务标记为 skipped 顺延（绝不补跑）。
+  // 放在 createServerApp（模块注册）里启动会因为 SQLite 尚未就绪而必然失败。
+  startScheduleScheduler(app)
 
   try {
     await app.listen({ port: config.port, host: config.host })

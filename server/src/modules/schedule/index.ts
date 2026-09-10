@@ -28,7 +28,6 @@ import { resolveAuthorizedContext } from '../system/auth'
 import { DB_BACKUP_INSTANCE_ID } from '../system/db-backup-routes'
 import { computeNextRunAtIso, describeSchedule } from './next-run'
 import { executeScheduleAction } from './schedule-actions'
-import { recoverMissedTasksOnBoot, startScheduleScheduler } from './scheduler'
 
 function toTaskItem(task: DbScheduledTask): ScheduleTaskItem {
   return {
@@ -210,7 +209,7 @@ export function registerScheduleModule(app: FastifyInstance) {
     return success({ triggered: true, message: result.message }, request)
   })
 
-  // 启动调度循环（单元测试环境由 startScheduleScheduler 内部跳过）
-  void recoverMissedTasksOnBoot(app).catch(error => app.log.error({ err: error }, '计划任务启动恢复失败'))
-  startScheduleScheduler(app)
+  // 调度器不在此启动：本模块注册发生在 bootstrap 的数据库初始化之前，
+  // 此刻执行启动恢复会因 SQLite 未就绪而失败（并导致错过的任务被 tick 补跑）。
+  // 统一由 bootstrap 在 initDatabase 之后调用 startScheduleScheduler(app)。
 }

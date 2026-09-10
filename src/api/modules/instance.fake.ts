@@ -471,6 +471,7 @@ export default defineFakeRoute([
           hasPassword: false,
           hostSourceLabel: '未探测到',
           isPlaceholder: !running,
+          preferredMode: running ? 'lan' : 'local',
           hints: [],
           consoleShards: {
             masterRunning: running,

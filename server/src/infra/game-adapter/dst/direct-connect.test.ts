@@ -8,6 +8,8 @@ import { ensureDstClusterConfig } from './cluster-config'
 import {
   buildDstConnectInfo,
   buildDstDirectConnectCommand,
+  isProxyEnvConfigured,
+  resolvePreferredConnectMode,
 } from './direct-connect'
 
 describe('direct-connect', () => {
@@ -20,6 +22,36 @@ describe('direct-connect', () => {
       buildDstDirectConnectCommand('10.0.0.1', 10999, 'say "hi"'),
       'c_connect("10.0.0.1", 10999, "say \\"hi\\"")',
     )
+  })
+
+  it('resolvePreferredConnectMode falls back to local for outbound-probe addresses', () => {
+    assert.equal(
+      resolvePreferredConnectMode({ source: 'ip_echo', isPlaceholder: false, hasLanCommand: false }),
+      'local',
+    )
+    assert.equal(
+      resolvePreferredConnectMode({ source: 'cloud_metadata', isPlaceholder: false, hasLanCommand: false }),
+      'public',
+    )
+    assert.equal(
+      resolvePreferredConnectMode({ source: 'env', isPlaceholder: false, hasLanCommand: false }),
+      'public',
+    )
+    assert.equal(
+      resolvePreferredConnectMode({ source: 'placeholder', isPlaceholder: true, hasLanCommand: true }),
+      'lan',
+    )
+    assert.equal(
+      resolvePreferredConnectMode({ source: 'placeholder', isPlaceholder: true, hasLanCommand: false }),
+      'local',
+    )
+  })
+
+  it('isProxyEnvConfigured detects proxy variables in either case', () => {
+    assert.equal(isProxyEnvConfigured({}), false)
+    assert.equal(isProxyEnvConfigured({ HTTP_PROXY: 'http://127.0.0.1:7892' }), true)
+    assert.equal(isProxyEnvConfigured({ https_proxy: 'http://127.0.0.1:7892' }), true)
+    assert.equal(isProxyEnvConfigured({ ALL_PROXY: '   ' }), false)
   })
 
   it('buildDstConnectInfo returns structured connect payload', async () => {
@@ -37,6 +69,8 @@ describe('direct-connect', () => {
       assert.match(info.localCommand, /127\.0\.0\.1/)
       assert.ok(info.udpPorts.includes(11001))
       assert.equal(info.running, true)
+      // 手动配置的地址视为可信，默认仍展示公网档
+      assert.equal(info.preferredMode, 'public')
     }
     finally {
       clearDstConnectHostCache()

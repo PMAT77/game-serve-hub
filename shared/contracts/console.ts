@@ -31,6 +31,10 @@ export const instanceConsoleShardStatusSchema = z.object({
 })
 export type InstanceConsoleShardStatus = z.infer<typeof instanceConsoleShardStatusSchema>
 
+/** 直连命令展示档位：公网 / 本机 / 局域网 */
+export const instanceConnectModeSchema = z.enum(['public', 'local', 'lan'])
+export type InstanceConnectMode = z.infer<typeof instanceConnectModeSchema>
+
 export const instanceConnectInfoSchema = z.object({
   running: z.boolean(),
   command: z.string(),
@@ -45,6 +49,8 @@ export const instanceConnectInfoSchema = z.object({
   hasPassword: z.boolean(),
   hostSourceLabel: z.string(),
   isPlaceholder: z.boolean(),
+  /** 面板推荐的默认展示档位：出站 IP 探测结果在本机/容器环境下往往不可直连 */
+  preferredMode: instanceConnectModeSchema,
   hints: z.array(z.string()),
   consoleShards: instanceConsoleShardStatusSchema,
 })

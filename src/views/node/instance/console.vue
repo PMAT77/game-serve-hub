@@ -178,6 +178,10 @@ async function loadConnectInfo(options?: { silent?: boolean }) {
       }
       connectInfo.value = res.data
       running.value = res.data.running
+      if (!connectModeApplied) {
+        connectModeApplied = true
+        connectDisplayMode.value = res.data.preferredMode
+      }
     }
     catch {
       if (targetInstanceId === instanceId.value) {
@@ -417,6 +421,7 @@ function resetInstanceRuntimeState() {
   instanceStatus.value = null
   logs.value = []
   connectInfo.value = null
+  connectModeApplied = false
   running.value = false
   maintenanceMessage.value = ''
   maintenanceDraftUpdatedAt.value = null
@@ -509,6 +514,8 @@ async function copyLogs() {
 type ConnectCopyMode = 'public' | 'local' | 'lan'
 
 const connectDisplayMode = ref<ConnectCopyMode>('public')
+// 只在首次拿到 connectInfo 时套用面板推荐档位，避免轮询覆盖用户的手动切换
+let connectModeApplied = false
 
 const availableConnectModes: ConnectCopyMode[] = ['public', 'local', 'lan']
 
@@ -521,7 +528,7 @@ const connectDisplayBlock = computed(() => {
     return {
       title: '本机进服',
       command: info.localCommand,
-      hint: '仅当游戏客户端装在与面板同一台电脑上时使用。',
+      hint: '游戏客户端与面板跑在同一台电脑时使用；面板运行在容器 / WSL2 里时，通常这一档最可靠。',
     }
   }
   if (connectDisplayMode.value === 'lan') {
@@ -530,13 +537,13 @@ const connectDisplayBlock = computed(() => {
       command: info.lanCommand ?? '',
       hint: info.lanCommand
         ? '同一 WiFi / 内网的其他电脑；地址为当前探测结果，连不上请在服务器主机 ipconfig 核对 IPv4。'
-        : '面板未能自动探测局域网 IP。请在游戏服主机执行 ipconfig 查看 IPv4，或于环境配置中指定进服地址。',
+        : '面板容器内看不到宿主机局域网网卡，未能自动探测局域网 IP。请在游戏服主机执行 ipconfig 查看 IPv4，或于环境配置中指定进服地址。',
     }
   }
   return {
     title: '公网 / 对外',
     command: info.command,
-    hint: '适合外网或云服务器；本机 WSL2 / Docker 开发时此地址往往无法直连。',
+    hint: '适合云服务器，或已把 UDP 端口映射到本机的独立主机；地址来源见下方提示。',
   }
 })
 

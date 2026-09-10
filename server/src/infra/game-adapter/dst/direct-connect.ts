@@ -6,6 +6,7 @@ import {
   connectHostSourceLabel,
   resolveDstConnectHost,
   resolveLanConnectHost,
+  type ConnectHostSource,
   type ResolvedConnectHost,
 } from './connect-host'
 import { parseClusterIni } from './cluster-ini'
@@ -16,6 +17,34 @@ const NETWORK_MODE_LABEL: Record<ClusterNetworkMode, string> = {
   offline: '离线',
   lan_only: '仅局域网',
   public: '公网（Klei 列表）',
+}
+
+export const CONNECT_MODES = ['public', 'local', 'lan'] as const
+export type ConnectMode = (typeof CONNECT_MODES)[number]
+
+const PROXY_ENV_KEYS = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']
+
+/** 出站 IP 探测可能被代理接管：此时探测结果是代理出口地址，而不是本机对外地址 */
+export function isProxyEnvConfigured(env: Record<string, string | undefined> = process.env): boolean {
+  return PROXY_ENV_KEYS.some(key => Boolean(env[key]?.trim()))
+}
+
+/**
+ * 面板默认展示哪一档直连命令。
+ *
+ * 出站 IP 探测（`ip_echo`）只回答"谁的出口"，不回答"哪台机器在监听"：在家用 NAT / 容器 /
+ * 开着代理的环境里，探测结果往往无法直连（面板容器里还需要宿主侧的端口转发），
+ * 此时「本机」档才是可直接用的。云元数据与手动配置仍以「公网」档为默认。
+ */
+export function resolvePreferredConnectMode(input: {
+  source: ConnectHostSource
+  isPlaceholder: boolean
+  hasLanCommand: boolean
+}): ConnectMode {
+  if (input.isPlaceholder) {
+    return input.hasLanCommand ? 'lan' : 'local'
+  }
+  return input.source === 'ip_echo' ? 'local' : 'public'
 }
 
 function escapeLuaString(value: string): string {
@@ -51,6 +80,12 @@ function collectConnectHints(
   }
   else if (resolved.source === 'env') {
     hints.push('进服地址来自手动配置')
+  }
+  else if (resolved.source === 'ip_echo') {
+    hints.push('进服地址来自出站 IP 探测，仅在公网 IP 已映射到本机游戏端口时可用；本机游玩请切换「本机」档')
+    if (isProxyEnvConfigured()) {
+      hints.push('检测到代理环境变量（HTTP_PROXY/HTTPS_PROXY），该探测结果可能指向代理出口而非本机，分享给玩家前请核对')
+    }
   }
   if (networkMode === 'public' && !resolved.isPlaceholder) {
     hints.push('从游戏浏览列表进服走 Klei 中继；使用下方直连命令需在防火墙放行游戏 UDP 端口')
@@ -103,6 +138,11 @@ export async function buildDstConnectInfo(
     hasPassword: Boolean(password),
     hostSourceLabel: connectHostSourceLabel(resolved.source),
     isPlaceholder: resolved.isPlaceholder,
+    preferredMode: resolvePreferredConnectMode({
+      source: resolved.source,
+      isPlaceholder: resolved.isPlaceholder,
+      hasLanCommand: lanCommand !== null,
+    }),
     hints,
   }
 }

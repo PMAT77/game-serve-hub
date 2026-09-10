@@ -107,7 +107,7 @@ sudo loginctl show-user gsh -p Linger
 
 ### 玩家无法连接
 
-同时检查本机防火墙和云厂商安全组。默认需放行面板 `9527/tcp`，以及 DST 的 `10999/udp`、`8766/udp`、`12346/udp`。安装器只有在传入 `--open-panel-port` / `--open-dst-ports` 时才修改本机防火墙。
+同时检查本机防火墙和云厂商安全组。默认需放行面板 `9527/tcp`，以及 DST 的 `10999/udp`、`8766/udp`、`12346/udp`（开启洞穴还需 `11000`、`8768`、`12348`）。安装器只有在传入 `--open-panel-port` / `--open-dst-ports` 时才修改本机防火墙。完整端口清单见 [DST 开服教程](docs/DST_TUTORIAL.md#4-开放端口安全组与防火墙)。
 
 ### 重跑安装脚本会清空数据吗
 
@@ -119,6 +119,7 @@ sudo loginctl show-user gsh -p Linger
 
 | 文档 | 内容 |
 | --- | --- |
+| [DST 开服教程](docs/DST_TUTORIAL.md) | 服主视角从零开服：端口放行、面板操作、房间世界、控制台、备份与计划任务 |
 | [安装与运维](docs/INSTALL.md) | 两种模式从零安装、升级、回滚、日志与 FAQ |
 | [架构与产品边界](docs/ARCHITECTURE.md) | 运行时分层、Open-Core 边界、Native 服务模型 |
 | [内存建议](docs/MEMORY.md) | 4/6/8 GiB 档位、洞穴与 Mod 建议 |

@@ -30,6 +30,9 @@ WORKDIR /app
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages ./packages
+# pnpm-workspace.yaml 的 patchedDependencies 指向 patches/；缺这个目录会让
+# `pnpm install --frozen-lockfile` 以 ENOENT 失败（exit 254）。
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS build

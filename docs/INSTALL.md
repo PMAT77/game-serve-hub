@@ -48,7 +48,7 @@ Native 不安装、不调用 Docker，不支持 tmux、screen 或 PM2。两种�
 ### 3.1 Docker
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.2/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.2/script
 ### 3.2 Native systemd
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.2/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -82,7 +82,7 @@ Native Release 内置 Node.js Linux x64 运行时，宿主机无需另装 Node.j
 ### 3.3 国内网络档位
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.2.2/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 
@@ -104,7 +104,7 @@ v0.2.0 起官方容器镜像仅发布 GHCR（`ghcr.io/pmat77/game-server-hub`）
 ### 3.4 本地安装
 
 ```bash
-git clone --branch v0.2.2 --depth 1 https://github.com/PMAT77/game-serve-hub.git
+git clone --branch v0.3.0 --depth 1 https://github.com/PMAT77/game-serve-hub.git
 cd game-server-hub
 sudo bash ./scripts/install.linux.sh --mode native --network auto
 ```
@@ -168,7 +168,7 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
 也可以在首次安装时显式设置：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.2/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.0/scripts/install.linux.sh \
   | sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='替换为强密码' \
       bash -s -- --mode native
 ```
@@ -237,9 +237,9 @@ Docker 模式若无法访问 GHCR，请优先使用自己控制的仓库：
 
 ```bash
 sudo docker login registry.example.com
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.2.2/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.0/scripts/install.linux.sh \
   | sudo env \
-      PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.2.2 \
+      PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.0 \
       bash -s -- --mode docker --network cn
 ```
 

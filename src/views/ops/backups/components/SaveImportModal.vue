@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import type { SaveImportCandidate, SaveImportProbeResult, SaveImportResult, SaveImportTokenSource } from '@/api/modules/backup'
-import { NAlert, NButton, NInput, NModal, NSelect, NSpin, NTag, useDialog } from 'naive-ui'
+import { NAlert, NButton, NInput, NModal, NProgress, NSelect, NSpin, NTag, useDialog } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import apiBackup from '@/api/modules/backup'
-import DirectoryPathPicker from './DirectoryPathPicker.vue'
 
 defineOptions({
   name: 'SaveImportModal',
@@ -23,9 +22,15 @@ const emit = defineEmits<{
 
 const dialog = useDialog()
 
-const sourcePath = ref('')
-const pickerVisible = ref(false)
-const probing = ref(false)
+/** 与服务端上传上限默认值对齐的前置校验：超限直接本地拦截，不发起上传 */
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+const ACCEPT_EXTENSIONS = ['.zip', '.tar.gz', '.tgz']
+
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const selectedFile = ref<File | null>(null)
+const uploading = ref(false)
+const uploadPercent = ref(0)
+const uploadError = ref<string | null>(null)
 const submitting = ref(false)
 const probeResult = ref<SaveImportProbeResult | null>(null)
 const selectedPath = ref<string | null>(null)
@@ -53,12 +58,13 @@ const tokenSourceLabels: Record<SaveImportTokenSource, string> = {
   none: '未配置令牌（公网模式需到房间设置补填）',
 }
 
-const canProbe = computed(() => sourcePath.value.trim().length > 0)
 const canSubmit = computed(() => Boolean(props.instanceId) && Boolean(selectedCandidate.value) && !submitting.value)
 
 function resetForm() {
-  sourcePath.value = ''
-  probing.value = false
+  selectedFile.value = null
+  uploading.value = false
+  uploadPercent.value = 0
+  uploadError.value = null
   submitting.value = false
   probeResult.value = null
   selectedPath.value = null
@@ -80,12 +86,43 @@ function shardLabel(shard: 'master' | 'caves'): string {
   return shard === 'master' ? '主世界' : '洞穴'
 }
 
-async function doProbe() {
-  probing.value = true
+function pickFile() {
+  fileInputRef.value?.click()
+}
+
+function onFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  // 重置 input 以便连续两次选择同一文件也能触发 change
+  input.value = ''
+  if (!file) {
+    return
+  }
+  const lowerName = file.name.toLowerCase()
+  if (!ACCEPT_EXTENSIONS.some(ext => lowerName.endsWith(ext))) {
+    selectedFile.value = null
+    uploadError.value = '仅支持 zip 或 tar.gz 压缩包'
+    return
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    selectedFile.value = null
+    uploadError.value = '存档包超过 2GB 上限，请清理无关文件后重新压缩'
+    return
+  }
+  selectedFile.value = file
+  void uploadArchive(file)
+}
+
+async function uploadArchive(file: File) {
+  uploading.value = true
+  uploadPercent.value = 0
+  uploadError.value = null
   probeResult.value = null
   selectedPath.value = null
   try {
-    const response = await apiBackup.probeSaveImport(sourcePath.value.trim())
+    const response = await apiBackup.uploadSaveImportArchive(file, (percent) => {
+      uploadPercent.value = percent
+    })
     probeResult.value = response.data
     const candidates = response.data.candidates ?? []
     if (candidates.length === 1) {
@@ -93,17 +130,19 @@ async function doProbe() {
     }
   }
   catch (err) {
-    const message = err instanceof Error ? err.message : '源目录探测失败'
-    probeResult.value = { sourcePath: sourcePath.value.trim(), candidates: [], warnings: [message] }
+    const message = err instanceof Error
+      ? err.message
+      : (err as { error?: string } | null)?.error || '存档包上传或识别失败'
+    uploadError.value = message
   }
   finally {
-    probing.value = false
+    uploading.value = false
   }
 }
 
 function confirmImport() {
   const candidate = selectedCandidate.value
-  if (!candidate || !props.instanceId) {
+  if (!candidate || !props.instanceId || !probeResult.value) {
     return
   }
   const content = '将把实例「' + props.instanceName + '」的世界存档整体替换为所选集群存档（'
@@ -119,6 +158,7 @@ function confirmImport() {
       try {
         const response = await apiBackup.importSave({
           instanceId: props.instanceId!,
+          uploadId: probeResult.value!.uploadId,
           sourceClusterPath: candidate.clusterPath,
           ...(clusterToken.value.trim() ? { clusterToken: clusterToken.value.trim() } : {}),
         })
@@ -126,7 +166,7 @@ function confirmImport() {
         emit('imported')
       }
       catch (err) {
-        const message = err instanceof Error ? err.message : '存档导入失败'
+        const message = err instanceof Error ? err.message : (err as { error?: string } | null)?.error || '存档导入失败'
         faToast.error(message)
       }
       finally {
@@ -154,34 +194,41 @@ watch(() => props.show, (visible) => {
     <div class="importer">
       <template v-if="!importResult">
         <NAlert type="info" :show-icon="false">
-          将外部 Klei 存档目录（如 Documents/Klei/DoNotStarveTogether/Cluster_2）导入为所选实例的世界存档。
+          将你电脑上的 Klei 存档压缩包（如压缩后的 Cluster_2 目录）上传并导入为所选实例的世界存档。
           世界进度与房间设置来自源档；端口会自动改写为本实例配置，避免与其它实例冲突。
         </NAlert>
 
         <div class="importer-field">
           <div class="importer-label">
-            源存档目录
+            存档压缩包（你电脑上的文件）
           </div>
           <div class="importer-path-row">
-            <NInput
-              v-model:value="sourcePath"
-              size="small"
-              placeholder="粘贴集群目录或其上级目录的绝对路径"
-              @keyup.enter="doProbe"
-            />
-            <NButton size="small" @click="pickerVisible = true">
-              浏览
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept=".zip,.tar.gz,.tgz"
+              class="importer-file-input"
+              @change="onFileChange"
+            >
+            <NButton size="small" :disabled="uploading" @click="pickFile">
+              {{ selectedFile ? '重新选择文件' : '选择文件…' }}
             </NButton>
-            <NButton size="small" type="primary" :loading="probing" :disabled="!canProbe" @click="doProbe">
-              识别
-            </NButton>
+            <span v-if="selectedFile" class="importer-file-name">
+              {{ selectedFile.name }}（{{ formatSize(selectedFile.size) }}）
+            </span>
+            <NSpin v-if="uploading" :size="14" />
           </div>
+          <NProgress v-if="uploading" type="line" :percentage="uploadPercent" :height="6" />
           <div class="importer-hint">
-            Linux 部署时目录浏览可能受限，可直接粘贴存档在面板宿主机上的绝对路径。
+            支持 zip 与 tar.gz：可直接压缩整个 Cluster_x 目录，也可压缩 DoNotStarveTogether 目录；面板下载的 tar.gz 备份包也可直接导入。
           </div>
         </div>
 
-        <NSpin :show="probing">
+        <NAlert v-if="uploadError" type="error" :show-icon="false">
+          {{ uploadError }}
+        </NAlert>
+
+        <NSpin :show="uploading">
           <div v-if="probeResult" class="importer-probe">
             <NAlert
               v-if="!probeResult.candidates || probeResult.candidates.length === 0"
@@ -309,12 +356,6 @@ watch(() => props.show, (visible) => {
         </NButton>
       </div>
     </template>
-
-    <DirectoryPathPicker
-      v-model:show="pickerVisible"
-      title="选择源存档目录"
-      @select="(path: string) => { sourcePath = path; doProbe() }"
-    />
   </NModal>
 </template>
 
@@ -339,7 +380,18 @@ watch(() => props.show, (visible) => {
 
 .importer-path-row {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.importer-file-input {
+  display: none;
+}
+
+.importer-file-name {
+  font-size: 12px;
+  color: #606070;
+  word-break: break-all;
 }
 
 .importer-hint {

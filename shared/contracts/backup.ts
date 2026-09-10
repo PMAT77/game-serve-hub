@@ -73,21 +73,14 @@ export type BackupRestoreResult = z.infer<typeof backupRestoreResultSchema>
 
 const importPathSchema = z.string().trim().min(1).max(1024)
 
-/** probe 请求：探测一个本地目录可识别出的 DST 集群存档候选 */
-export const saveImportProbeRequestSchema = z.object({
-  /** 面板所在机器上的绝对路径：集群目录本身，或其上级（Klei 根 / DoNotStarveTogether） */
-  sourcePath: importPathSchema,
-})
-export type SaveImportProbeRequest = z.infer<typeof saveImportProbeRequestSchema>
-
 export const importShardIdSchema = z.enum(['master', 'caves'])
 export type ImportShardId = z.infer<typeof importShardIdSchema>
 
-/** 一个可导入的集群存档候选（probe 结果项） */
+/** 一个可导入的集群存档候选（上传识别结果项） */
 export const saveImportCandidateSchema = z.object({
   /** 集群目录名（如 Cluster_2） */
   dirName: z.string().min(1).max(256),
-  /** 集群目录绝对路径（导入请求回传该值） */
+  /** 集群目录绝对路径（位于服务端上传解压临时目录内，导入请求回传该值） */
   clusterPath: importPathSchema,
   /** cluster.ini 中的房间名（解析失败为 null） */
   clusterName: z.string().nullable(),
@@ -107,16 +100,23 @@ export const saveImportCandidateSchema = z.object({
 export type SaveImportCandidate = z.infer<typeof saveImportCandidateSchema>
 
 export const saveImportProbeResultSchema = z.object({
+  /** 本次上传的记录 id（导入请求需回传；上传记录过期后需重新上传） */
+  uploadId: z.string().trim().min(1).max(64),
+  /** 上传的存档包原始文件名（仅展示与安全备份备注） */
+  sourceName: z.string().trim().min(1).max(256),
+  /** 服务端解压根目录（仅供展示） */
   sourcePath: importPathSchema,
   candidates: z.array(saveImportCandidateSchema).max(10),
   warnings: z.array(z.string()),
 })
 export type SaveImportProbeResult = z.infer<typeof saveImportProbeResultSchema>
 
-/** 执行导入请求：将源集群存档替换挂载到目标实例 */
+/** 执行导入请求：将上传解压后的源集群存档替换挂载到目标实例 */
 export const saveImportRequestSchema = z.object({
   instanceId: z.string().trim().min(1).max(128),
-  /** probe 返回的集群目录绝对路径 */
+  /** 上传存档包时返回的记录 id */
+  uploadId: z.string().trim().min(1).max(64),
+  /** 上传解压后识别出的集群目录绝对路径（必须位于该 uploadId 的解压根内） */
   sourceClusterPath: importPathSchema,
   /** 可选：导入时写入的 Klei 集群令牌（优先级高于实例已有令牌与源档令牌文件） */
   clusterToken: z.string().trim().max(512).optional(),

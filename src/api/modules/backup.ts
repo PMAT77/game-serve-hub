@@ -38,11 +38,17 @@ export default {
   deleteBackup: (backupId: string) => api.post('app/instance/backup/delete', { backupId }) as Promise<{ data: BackupMutationResult }>,
   /** 恢复实例存档（要求实例已停止；自动生成恢复前安全备份） */
   restoreBackup: (backupId: string) => api.post('app/instance/backup/restore', { backupId }) as Promise<{ data: BackupRestoreResult }>,
-  /** 探测本地目录可识别出的 DST 集群存档候选（只读） */
-  probeSaveImport: (sourcePath: string) => api.post('app/instance/backup/import/probe', {
-    sourcePath,
+  /** 上传本地存档压缩包（zip/tar.gz）到服务端解压并识别集群候选；onProgress 回传 0-100 上传百分比 */
+  uploadSaveImportArchive: (file: File, onProgress?: (percent: number) => void) => api.post(`app/instance/backup/import/upload?fileName=${encodeURIComponent(file.name)}`, file, {
+    headers: { 'Content-Type': 'application/octet-stream' },
+    timeout: 0,
+    onUploadProgress: (event: { loaded: number, total?: number }) => {
+      if (onProgress && event.total) {
+        onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)))
+      }
+    },
   }) as Promise<{ data: SaveImportProbeResult }>,
-  /** 导入外部 Klei 集群存档到指定实例（要求实例已停止且已完成游戏安装） */
+  /** 导入上传的外部 Klei 集群存档到指定实例（要求实例已停止且已完成游戏安装） */
   importSave: (data: SaveImportRequest) => api.post('app/instance/backup/import', data) as Promise<{ data: SaveImportResult }>,
   /** 创建面板数据库一致性快照（VACUUM INTO） */
   createDbBackup: () => api.post('app/system/db/backup', {}) as Promise<{ data: BackupMutationResult }>,

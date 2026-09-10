@@ -4,7 +4,6 @@ import type {
   BackupItem,
   BackupMutationResult,
   BackupRestoreResult,
-  SaveImportProbeResult,
   SaveImportResult,
 } from '../../../../shared/contracts/backup'
 import {
@@ -12,9 +11,9 @@ import {
   backupIdRequestSchema,
   backupListRequestSchema,
   backupRestoreRequestSchema,
-  saveImportProbeRequestSchema,
   saveImportRequestSchema,
 } from '../../../../shared/contracts/backup'
+import type { Readable } from 'node:stream'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ErrorCode } from '../../../../shared/constants/error-code'
@@ -32,6 +31,19 @@ import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from '../system/auth'
 import { createInstanceBackup, restoreInstanceBackup } from './backup-service'
 import { importSaveToInstance, probeSaveImportSource } from './import-service'
+import {
+  cleanStaleSaveImportUploads,
+  readUploadSourceName,
+  receiveUploadToTempFile,
+  removeUploadDirectory,
+  resolveMaxUploadBytes,
+  resolveUploadDirectory,
+  sanitizeUploadFileName,
+  unpackSaveImportArchive,
+  validateUploadClusterPath,
+  writeUploadMeta,
+} from './upload-service'
+import type { ReceiveUploadResult } from './upload-service'
 
 function toBackupItem(record: DbBackup): BackupItem {
   return {
@@ -72,6 +84,14 @@ async function authorize(request: FastifyRequest): Promise<BackupAuth> {
  * 数据库快照（kind=database）由 system 模块创建、此处统一管理。
  */
 export function registerBackupModule(app: FastifyInstance) {
+  const maxUploadBytes = resolveMaxUploadBytes()
+  // 存档导入上传：以原始二进制体接收（前端固定 application/octet-stream），流式落盘控制内存占用
+  app.addContentTypeParser('application/octet-stream', (_request, payload, done) => {
+    void receiveUploadToTempFile(payload as Readable, maxUploadBytes).then((received) => {
+      done(null, received)
+    })
+  })
+
   app.post('/app/instance/backup/create', async (request): Promise<ApiSuccessResponse<BackupMutationResult> | ApiErrorResponse> => {
     const auth = await authorize(request)
     if (auth.error) {
@@ -204,23 +224,49 @@ export function registerBackupModule(app: FastifyInstance) {
       safetyBackupId: result.safetyBackup?.id,
     }, request)
   })
-  /** 探测本地目录可识别出的 DST 集群存档候选（只读，不落盘） */
-  app.post('/app/instance/backup/import/probe', async (request): Promise<ApiSuccessResponse<SaveImportProbeResult> | ApiErrorResponse> => {
+  /** 接收本地上传的存档压缩包（zip / tar.gz），解压后识别集群候选（只读识别，不导入） */
+  app.post('/app/instance/backup/import/upload', { bodyLimit: maxUploadBytes }, async (request, reply): Promise<void> => {
     const auth = await authorize(request)
     if (auth.error) {
-      return auth.error
+      reply.status(401).send(auth.error)
+      return
     }
-    const body = saveImportProbeRequestSchema.safeParse(request.body)
-    if (!body.success) {
-      return businessError('请求参数无效', request)
+    const received = request.body as ReceiveUploadResult | undefined
+    if (!received?.ok || !received.uploadId || !received.filePath) {
+      reply.status(received?.tooLarge === true ? 413 : 400).send(businessError(received?.error ?? '存档包上传失败', request, ErrorCode.BACKUP_IMPORT_UPLOAD_INVALID))
+      return
     }
-    const probed = probeSaveImportSource(body.data.sourcePath)
+    // 上传时顺手清理过期记录（进程长期运行、上传后放弃导入的兜底）
+    cleanStaleSaveImportUploads()
+    const query = request.query as { fileName?: string }
+    const sourceName = sanitizeUploadFileName(query.fileName)
+    const uploadDir = resolveUploadDirectory(received.uploadId)
+    writeUploadMeta(uploadDir, sourceName)
+    const extractDir = path.join(uploadDir, 'extract')
+    try {
+      await unpackSaveImportArchive(received.filePath, extractDir)
+    }
+    catch (error) {
+      removeUploadDirectory(received.uploadId)
+      const message = error instanceof Error ? error.message : '存档包解压失败'
+      reply.status(400).send(businessError(`存档包解压失败：${message}`, request, ErrorCode.BACKUP_IMPORT_UPLOAD_INVALID))
+      return
+    }
+    const probed = probeSaveImportSource(extractDir)
     if (!probed.ok || !probed.result) {
-      return businessError(probed.message ?? '源目录探测失败', request, ErrorCode.BACKUP_IMPORT_SOURCE_INVALID)
+      removeUploadDirectory(received.uploadId)
+      reply.status(400).send(businessError(probed.message ?? '未在压缩包中识别到 DST 集群存档', request, ErrorCode.BACKUP_IMPORT_SOURCE_INVALID))
+      return
     }
-    return success(probed.result, request)
+    return reply.send(success({
+      uploadId: received.uploadId,
+      sourceName,
+      sourcePath: probed.result.sourcePath,
+      candidates: probed.result.candidates,
+      warnings: probed.result.warnings,
+    }, request))
   })
-  /** 导入外部 Klei 集群存档到指定实例（要求实例已停止且已完成游戏安装） */
+  /** 导入上传的外部 Klei 集群存档到指定实例（要求实例已停止且已完成游戏安装） */
   app.post('/app/instance/backup/import', async (request): Promise<ApiSuccessResponse<SaveImportResult> | ApiErrorResponse> => {
     const auth = await authorize(request)
     if (auth.error) {
@@ -230,16 +276,25 @@ export function registerBackupModule(app: FastifyInstance) {
     if (!body.success) {
       return businessError('请求参数无效', request)
     }
+    // 源目录必须来自本会话上传的解压产物（防路径穿越与伪造源路径）
+    const validated = validateUploadClusterPath(body.data.uploadId, body.data.sourceClusterPath)
+    if (!validated.ok) {
+      return businessError(validated.message, request, ErrorCode.BACKUP_IMPORT_UPLOAD_INVALID)
+    }
     const result = await importSaveToInstance({
       app,
       instanceId: body.data.instanceId,
-      sourceClusterPath: body.data.sourceClusterPath,
+      sourceClusterPath: validated.clusterPath,
+      sourceLabel: readUploadSourceName(resolveUploadDirectory(body.data.uploadId)),
       clusterToken: body.data.clusterToken,
       createdBy: auth.operatorAccount,
     })
     if (!result.ok || !result.result) {
+      // 导入失败保留上传记录供重试，由过期清理兜底
       return businessError(result.message ?? '存档导入失败', request, ErrorCode.BACKUP_IMPORT_FAILED)
     }
+    // 导入成功后清理上传记录（压缩包本体 + 解压目录）
+    removeUploadDirectory(body.data.uploadId)
     return success(result.result, request)
   })
 }

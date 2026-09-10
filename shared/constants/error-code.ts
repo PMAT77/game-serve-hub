@@ -25,6 +25,8 @@ export const ErrorCode = {
   BACKUP_RESTORE_FAILED: 'BACKUP_RESTORE_FAILED',
   /** 存档导入源目录无效（缺失 cluster.ini 等） */
   BACKUP_IMPORT_SOURCE_INVALID: 'BACKUP_IMPORT_SOURCE_INVALID',
+  /** 存档导入上传包无效（超限/格式不符/上传记录过期或路径越界） */
+  BACKUP_IMPORT_UPLOAD_INVALID: 'BACKUP_IMPORT_UPLOAD_INVALID',
   /** 存档导入执行失败 */
   BACKUP_IMPORT_FAILED: 'BACKUP_IMPORT_FAILED',
 } as const

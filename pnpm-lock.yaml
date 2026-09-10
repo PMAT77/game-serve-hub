@@ -36,6 +36,9 @@ catalogs:
     '@types/path-browserify':
       specifier: ^1.0.3
       version: 1.0.3
+    '@types/yauzl':
+      specifier: ^3.4.0
+      version: 3.4.0
     '@unocss/core':
       specifier: ^66.6.8
       version: 66.6.8
@@ -102,6 +105,9 @@ catalogs:
     fastify:
       specifier: ^5.8.5
       version: 5.8.5
+    fflate:
+      specifier: ^0.8.2
+      version: 0.8.3
     filesize:
       specifier: ^11.0.15
       version: 11.0.17
@@ -234,6 +240,9 @@ catalogs:
     vue-tsc:
       specifier: ^3.2.6
       version: 3.2.9
+    yauzl:
+      specifier: ^3.2.0
+      version: 3.4.0
     zod:
       specifier: ^4.3.6
       version: 4.4.3
@@ -362,6 +371,9 @@ importers:
       vue-router:
         specifier: 'catalog:'
         version: 5.0.7(@vue/compiler-sfc@3.5.34)(pinia@3.0.4(typescript@5.9.3)(vue@3.5.34(typescript@5.9.3)))(vue@3.5.34(typescript@5.9.3))
+      yauzl:
+        specifier: 'catalog:'
+        version: 3.4.0
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -396,6 +408,9 @@ importers:
       '@types/path-browserify':
         specifier: 'catalog:'
         version: 1.0.3
+      '@types/yauzl':
+        specifier: 'catalog:'
+        version: 3.4.0
       '@unocss/core':
         specifier: 'catalog:'
         version: 66.6.8
@@ -417,6 +432,9 @@ importers:
       esbuild:
         specifier: ^0.28.0
         version: 0.28.0
+      fflate:
+        specifier: 'catalog:'
+        version: 0.8.3
       http-server:
         specifier: 'catalog:'
         version: 14.1.1
@@ -3170,6 +3188,9 @@ packages:
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
+  '@types/yauzl@3.4.0':
+    resolution: {integrity: sha512-NRPn5w6h8dhcnmx3YIRQcqMywY/+nND/uOkJessedcrowO3C0AssHp3tMJpxKAwOhFOo0OV1y9VtsC5hbKKBAw==}
+
   '@unocss/cli@66.6.8':
     resolution: {integrity: sha512-dJ4AmrhCtQwEDJtpFG7AgJ4Qi4GWnNgWWlLWq4DhKBOCcvldr9k98mscdhs3MOwph25DIxU5MdLRAg/OS1JryQ==}
     engines: {node: '>=14'}
@@ -4264,6 +4285,9 @@ packages:
       picomatch:
         optional: true
 
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
   filesize@11.0.17:
     resolution: {integrity: sha512-oHLTvMLw6imZUl1se/RBQrFlyy50nXce4sU7yGR6Qc0JgCwqnfiFsAnEwotdGmfKLD7SArGUk2/5STU0k8LOBQ==}
     engines: {node: '>= 10.8.0'}
@@ -4932,6 +4956,9 @@ packages:
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
+
+  pend@1.2.0:
+    resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
 
   perfect-debounce@1.0.0:
     resolution: {integrity: sha512-xCy9V055GLEqoFaHoC1SoLIaLmWctgCUaBaWxDZ7/Zx4CTyX7cJQLJOok/orfjZAh9kEYpjJa4d0KcJmCbctZA==}
@@ -6183,6 +6210,10 @@ packages:
 
   yargs@17.7.2:
     resolution: {integrity: sha512-7dSzzRQ++CKnNI/krKnYRV7JKKPUXMEh61soaHKg9mrWEhzFWhFnxPxGl+69cD1Ou63C13NUPCnmIcrvqCuM6w==}
+    engines: {node: '>=12'}
+
+  yauzl@3.4.0:
+    resolution: {integrity: sha512-jIH9yLR9wqr0wOS0TpBvo/g/2UgZH5qePVbjgRliiF0BYvOZyaBknKsF+x9Iht0O6sqgnB93rCICdOZFecJuDw==}
     engines: {node: '>=12'}
 
   zip-stream@6.0.1:
@@ -8216,6 +8247,10 @@ snapshots:
       '@types/node': 25.8.0
     optional: true
 
+  '@types/yauzl@3.4.0':
+    dependencies:
+      '@types/node': 25.8.0
+
   '@unocss/cli@66.6.8':
     dependencies:
       '@jridgewell/remapping': 2.3.5
@@ -9482,6 +9517,8 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.4
 
+  fflate@0.8.3: {}
+
   filesize@11.0.17: {}
 
   find-my-way@9.6.0:
@@ -10170,6 +10207,8 @@ snapshots:
   path-to-regexp@8.4.2: {}
 
   pathe@2.0.3: {}
+
+  pend@1.2.0: {}
 
   perfect-debounce@1.0.0: {}
 
@@ -11515,6 +11554,10 @@ snapshots:
       string-width: 4.2.3
       y18n: 5.0.8
       yargs-parser: 21.1.1
+
+  yauzl@3.4.0:
+    dependencies:
+      pend: 1.2.0
 
   zip-stream@6.0.1:
     dependencies:

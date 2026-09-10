@@ -53,6 +53,8 @@ import { InstanceArchiveBusyError, withInstanceArchiveOperationLock } from './ar
 const SIZE_SCAN_MAX_FILES = 50_000
 /** probe 最多返回的集群候选数 */
 const PROBE_MAX_CANDIDATES = 10
+/** 集群候选向下递归搜索的层数（覆盖用户 zip 包装目录与备份包 klei-storage 布局） */
+const PROBE_MAX_SEARCH_DEPTH = 3
 
 // ---------------------------------------------------------------------------
 // 源目录探测（probe）
@@ -63,7 +65,8 @@ interface ClusterCandidate {
   clusterPath: string
 }
 
-function isClusterDirectory(dirPath: string): boolean {
+/** 目录含 cluster.ini 即视为 DST 集群存档（导入与上传识别共用） */
+export function isClusterDirectory(dirPath: string): boolean {
   return fs.existsSync(path.join(dirPath, 'cluster.ini'))
 }
 
@@ -85,35 +88,54 @@ function findClusterSubdirectories(parentDir: string): ClusterCandidate[] {
     .filter(candidate => isClusterDirectory(candidate.clusterPath))
 }
 
-/** 识别源目录形态：集群目录本身 / Klei 根 / DoNotStarveTogether 目录 */
+/**
+ * 识别源目录形态：集群目录本身 / Klei 根 / DoNotStarveTogether 目录 /
+ * 客户端 DoNotStarveTogether/<userid>/Cluster_N / 面板备份包 klei-storage 布局。
+ * 向下有界递归搜索，兼容用户本地压缩包的任意包装层级。
+ */
 function findClusterCandidates(sourcePath: string): ClusterCandidate[] {
   if (isClusterDirectory(sourcePath)) {
     return [{ dirName: path.basename(sourcePath), clusterPath: sourcePath }]
   }
-  // 搜索起点：选中 DoNotStarveTogether 时在其下找，否则从选中目录本身开始
+  // 选中 DoNotStarveTogether 时优先在其下找
   const confDir = path.join(sourcePath, DST_CONF_DIR)
-  const searchRoot = fs.existsSync(confDir) && fs.statSync(confDir).isDirectory() ? confDir : sourcePath
-  const direct = findClusterSubdirectories(searchRoot)
-  if (direct.length > 0) {
-    return direct
+  if (fs.existsSync(confDir) && fs.statSync(confDir).isDirectory()) {
+    const inConfDir = findClusterSubdirectories(confDir)
+    if (inConfDir.length > 0) {
+      return inConfDir
+    }
   }
-  // 客户端存档多一层 Klei 用户 ID 目录：DoNotStarveTogether/<userid>/Cluster_N，向下再探一层
-  let nested: ClusterCandidate[] = []
-  try {
-    for (const entry of fs.readdirSync(searchRoot, { withFileTypes: true })) {
-      if (nested.length >= PROBE_MAX_CANDIDATES) {
-        break
+  const found: ClusterCandidate[] = []
+  const visit = (dir: string, depth: number): boolean => {
+    let entries: fs.Dirent[] = []
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    }
+    catch {
+      return false
+    }
+    for (const entry of entries) {
+      if (found.length >= PROBE_MAX_CANDIDATES) {
+        return true
       }
       if (!entry.isDirectory()) {
         continue
       }
-      nested = nested.concat(findClusterSubdirectories(path.join(searchRoot, entry.name)))
+      const childDir = path.join(dir, entry.name)
+      if (/^cluster_\d+$/i.test(entry.name)) {
+        if (isClusterDirectory(childDir)) {
+          found.push({ dirName: entry.name, clusterPath: childDir })
+        }
+        continue
+      }
+      if (depth < PROBE_MAX_SEARCH_DEPTH && visit(childDir, depth + 1)) {
+        return true
+      }
     }
+    return false
   }
-  catch {
-    return []
-  }
-  return nested.slice(0, PROBE_MAX_CANDIDATES)
+  visit(sourcePath, 1)
+  return found.slice(0, PROBE_MAX_CANDIDATES)
 }
 
 /** shard 的 save 目录非空即视为世界已生成 */
@@ -302,8 +324,10 @@ export function probeSaveImportSource(rawSourcePath: string): ProbeSaveImportRes
 export interface ImportSaveToInstanceOptions {
   app?: FastifyInstance
   instanceId: string
-  /** probe 返回的集群目录绝对路径 */
+  /** 上传解压后识别出的集群目录绝对路径 */
   sourceClusterPath: string
+  /** 可选：源档展示名（如上传的压缩包文件名），用于安全备份备注；缺省用目录名 */
+  sourceLabel?: string
   /** 可选：导入时写入的 Klei 集群令牌 */
   clusterToken?: string
   createdBy?: string
@@ -323,14 +347,18 @@ export interface ImportSaveToInstanceResult {
   }
 }
 
+/** child 是否位于 dir 内部（跨盘符/不同根时必然为否，兼容上传源在系统临时目录的场景） */
+function isInsideDir(childPath: string, dirPath: string): boolean {
+  const rel = path.relative(path.resolve(dirPath), path.resolve(childPath))
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+}
+
 /** 源路径不得与目标实例目录互相包含（防自我复制嵌套爆炸） */
-function validateSourceTargetDisjoint(sourcePath: string, installPath: string, clusterRoot: string): string | undefined {
-  const relSourceToInstall = path.relative(sourcePath, installPath)
-  if (relSourceToInstall === '' || !relSourceToInstall.startsWith('..')) {
+export function validateSourceTargetDisjoint(sourcePath: string, installPath: string, clusterRoot: string): string | undefined {
+  if (isInsideDir(installPath, sourcePath)) {
     return '源目录不能包含实例安装目录'
   }
-  const relClusterToSource = path.relative(clusterRoot, sourcePath)
-  if (relClusterToSource === '' || !relClusterToSource.startsWith('..')) {
+  if (isInsideDir(sourcePath, clusterRoot)) {
     return '源目录不能位于实例存档目录内部'
   }
   return undefined
@@ -553,7 +581,7 @@ async function importSaveToInstanceLocked(options: ImportSaveToInstanceOptions):
       app,
       instanceId,
       kind: 'pre_import',
-      note: `导入 ${path.basename(sourcePath)} 前的自动安全备份`,
+      note: `导入 ${options.sourceLabel?.trim() || path.basename(sourcePath)} 前的自动安全备份`,
       createdBy: createdBy ?? '',
       saveBeforeArchive: false,
     })

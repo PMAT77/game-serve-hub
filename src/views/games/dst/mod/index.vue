@@ -1443,7 +1443,7 @@ onMounted(async () => {
             >
               <template #empty>
                 <div class="dst-mod-table-empty">
-                  <NEmpty size="small" :description="marketEmptyDescription">
+                  <NEmpty size="large" :description="marketEmptyDescription">
                     <template v-if="steamLoadError" #extra>
                       <NButton size="small" @click="loadSteamMods(true)">
                         重试
@@ -1553,7 +1553,7 @@ onMounted(async () => {
               >
                 <template #empty>
                   <div class="dst-mod-table-empty">
-                    <NEmpty size="small" :description="subscribedEmptyDescription" />
+                    <NEmpty size="large" :description="subscribedEmptyDescription" />
                   </div>
                 </template>
               </NDataTable>
@@ -1668,9 +1668,15 @@ onMounted(async () => {
   min-height: 0;
 }
 
+/*
+ * 表格设置了 scroll-x 时，naive-ui 会给空态节点加内联样式 position: sticky，
+ * 内联优先级高于选择器，会让这里的 absolute 失效、空态贴在表格顶部。
+ * 因此必须用 !important 覆盖，空态才能铺满表格区域并垂直居中。
+ */
 .dst-mod-table :deep(.n-data-table-empty) {
-  position: absolute;
-  inset: 0;
+  position: absolute !important;
+  inset: 0 !important;
+  width: auto !important;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import type { NotifyChannelItem, NotifyChannelType, NotifySettings } from '@/api/modules/notify'
-import { NButton, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch, NTag, NTooltip, useDialog } from 'naive-ui'
+import { NButton, NDataTable, NEmpty, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch, NTag, NTooltip, useDialog } from 'naive-ui'
 import { computed, h, onMounted, ref } from 'vue'
 import apiNotify from '@/api/modules/notify'
 
@@ -296,7 +296,11 @@ const columns = computed<DataTableColumns<NotifyChannelItem>>(() => [
       :loading="tableLoading"
       :pagination="false"
       size="small"
-    />
+    >
+      <template #empty>
+        <NEmpty size="large" />
+      </template>
+    </NDataTable>
 
     <NModal
       v-model:show="editorVisible"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DataTableColumns } from 'naive-ui'
 import type { ModItemDto } from '@/api/modules/mod'
-import { NAlert, NButton, NDataTable, NSelect, NTag, NTooltip, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDataTable, NEmpty, NSelect, NTag, NTooltip, useMessage } from 'naive-ui'
 import { computed, h, ref, watch } from 'vue'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import apiMod from '@/api/modules/mod'
@@ -230,6 +230,10 @@ watch(() => props.instanceId, (value) => {
       :data="filteredInstalledMods"
       :loading="loadingInstalled"
       :pagination="false"
-    />
+    >
+      <template #empty>
+        <NEmpty size="large" />
+      </template>
+    </NDataTable>
   </div>
 </template>

@@ -2,7 +2,7 @@
 import type { DataTableColumns, FormRules, SelectOption } from 'naive-ui'
 import type { ScheduleCreateRequest, ScheduleTaskItem } from '@/api/modules/schedule'
 import type { InstanceItem } from '@/api/modules/instance'
-import { NButton, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch, NTag, NTime, NTimePicker, NTooltip, useDialog } from 'naive-ui'
+import { NButton, NDataTable, NEmpty, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch, NTag, NTime, NTimePicker, NTooltip, useDialog } from 'naive-ui'
 import { computed, h, onActivated, onMounted, ref } from 'vue'
 import apiSchedule from '@/api/modules/schedule'
 import apiInstance from '@/api/modules/instance'
@@ -441,7 +441,11 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
       :pagination="false"
       :row-class-name="scheduleRowClassName"
       size="small"
-    />
+    >
+      <template #empty>
+        <NEmpty size="large" />
+      </template>
+    </NDataTable>
 
     <NModal
       v-model:show="editorVisible"

@@ -369,7 +369,7 @@ onMounted(() => {
       :row-key="(row: BackupItem) => row.id"
     >
       <template #empty>
-        <NEmpty description="暂无备份，选择实例后点击「创建存档备份」" />
+        <NEmpty size="large" description="暂无备份，选择实例后点击「创建存档备份」" />
       </template>
     </NDataTable>
 

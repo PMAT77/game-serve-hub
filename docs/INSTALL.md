@@ -407,6 +407,21 @@ sudo cat /var/log/game-server-hub/install.diagnostics.log
 
 安装器会尝试发行版自带的 Docker/Compose 包。若仍失败，使用 `--network cn`，检查 apt 源签名、系统时间和 HTTPS 出站。安装器不会悄悄切换运行模式。
 
+### `Docker Compose v2 plugin is required but unavailable`
+
+Debian 12 官方源的 `docker.io` **不包含** Compose v2 插件（`docker-compose-v2` 与 `docker-compose-plugin` 包都不存在），Docker 官方 apt 源不可达时安装器会在 dependencies 阶段报此错。手动安装插件后重跑安装器：
+
+```bash
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -fL --retry 3 \
+  "https://gh-proxy.com/https://github.com/docker/compose/releases/download/v2.39.2/docker-compose-linux-x86_64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+docker compose version   # 期望输出：Docker Compose version v2.39.2
+```
+
+> gh-proxy.com 不可用时换 `https://ghfast.top/` 前缀。不要 `apt install docker-compose` —— 那是 v1 独立命令，安装器全程使用 v2 的 `docker compose` 子命令，二者不通用。
+
 ### `checksum mismatch`
 
 下载内容与指定 Release 不一致。不要关闭校验；清理代理/CDN 缓存，确认脚本的 `GSH_RELEASE_TAG` 与资源 URL 是同一版本，或改用本地 Release 包和官方 `.sha256`。

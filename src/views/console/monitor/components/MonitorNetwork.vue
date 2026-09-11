@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import type { EChartsOption } from 'echarts'
 import type { MonitorNetworkOption, NetworkChartPoint } from './types'
-import * as echarts from 'echarts'
+import { LineChart } from 'echarts/charts'
+import { DataZoomComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import * as echarts from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
 import { NSelect } from 'naive-ui'
+
+// 按需注册：echarts/core 替代全量 'echarts'，chunk 体积 1.09MB 降至约 0.3MB。
+// 本组件使用折线图 + 图例/提示/网格/缩放；新增图表能力时需在此追加注册。
+echarts.use([LineChart, LegendComponent, TooltipComponent, GridComponent, DataZoomComponent, CanvasRenderer])
 
 defineOptions({
   name: 'MonitorNetwork',
@@ -20,7 +27,8 @@ const emit = defineEmits<{
 }>()
 
 const chartRef = ref<HTMLDivElement | null>(null)
-let chartInstance: echarts.ECharts | null = null
+type ChartInstance = ReturnType<typeof echarts.init>
+let chartInstance: ChartInstance | null = null
 
 const selectedInterfaceModel = computed<string | null>({
   get() {

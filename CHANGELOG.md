@@ -2,7 +2,23 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.3.8] - 2026-09-12
+
+### Added
+
+- **Release 附带安装脚本与校验和**：发布流程新增 `install-<tag>.sh` 与 `install-<tag>.sh.sha256` 资产，文档可据此改为「下载 → `sha256sum -c` → 执行」，让安装脚本自身也可被校验。
+
+### Changed
+
+- **安装器自证版本**：安装启动时打印实际执行的文件名、目标 Release 与目标镜像；当目标镜像缺失但本地存在同仓库其他 tag 时，先列出本地已有 tag 并提示可用 `GSH_RELEASE_TAG=<tag>` 复用，避免整份重拉。
+- **`gsh doctor` 的 Native 升级命令改为固定版本**：不再指向 `main` 分支脚本（main 的默认 tag 可能与已安装版本不一致），改用 `panel.env` 中记录的实际版本。
+- **安装器结尾摘要改为醒目的边框区块**：面板地址、管理员账号、初始密码读取命令、常用命令与后续步骤集中展示，不再混在 `[INFO]` 日志流里；`compose ps`、面板日志等长排障命令保留在区块之后。
+
+### Fixed
+
+- **Docker 部署的管理员凭证与首登策略未进容器**：`docker compose --env-file panel.env` 只做 compose 文件插值，而 `docker-compose.yml` 的 panel 服务没有映射 `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `FORCE_PASSWORD_CHANGE` / `GSH_SYNC_ADMIN_PASSWORD_FROM_ENV` / `GSH_PASSWORD_RECOVERY_TOKEN`，导致容器按"未配置密码"自行生成随机密码、且首次登录不触发强制改密 —— 用户照着安装摘要从 `panel.env` 读到的密码必然登录失败。现已补齐透传，并新增 compose 透传防回归测试；存量部署需把新版 `docker-compose.yml` 覆盖到 stack 目录后重建面板容器。
+- **初始凭据文件不再落盘未生效的随机密码**：`admin-credentials.txt` 原先只要判定"密码是自动生成的"就写入，而管理员已存在且未开启 `GSH_SYNC_ADMIN_PASSWORD_FROM_ENV` 时该密码根本没写库，且每次启动都会被新的随机值覆盖 —— 用户照它登录同样失败。现在仅在密码确实创建/更新了数据库记录时才写文件，其余情况保持文件原样（它记录的仍是首次创建管理员时的初始密码）并给出明确日志。
+- **安装文档不再静默使用旧脚本**：路线 B 的 `wget` 改为 `curl -fL -o "install-${tag}.sh"`，并新增 `sed -n '9p'` 版本自证、离线包内镜像 tag 核对与 `docker load` 后的 tag 断言。此前 `wget` 遇到同名文件不会覆盖而是另存为 `.1`，继续执行旧脚本会得到「脚本 v0.3.5 + 离线包 v0.3.7」的错配；安装器只按完整引用判断镜像，于是重新拉取一个并不需要的版本。同步修正附录 A 的 `cd` 目录名（clone 出来的是 `game-serve-hub`）。
 
 ## [0.3.7] - 2026-09-11
 

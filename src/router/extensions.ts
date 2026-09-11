@@ -1,4 +1,4 @@
-import type { NavigationFailure, RouteLocationRaw, Router } from 'vue-router'
+import type { RouteLocationRaw, Router } from 'vue-router'
 import pinia from '@/store'
 
 function getId(router: Router) {
@@ -96,41 +96,15 @@ function extendBack(router: Router) {
   }
 }
 
-function extendClose(router: Router) {
-  router.close = function (to: RouteLocationRaw) {
-    const tabId = getId(router)
-    return router.push(to).then(() => {
-      const appSettingsStore = useAppSettingsStore(pinia)
-      if (appSettingsStore.settings.topbar.tabbar) {
-        const appTabbarStore = useAppTabbarStore(pinia)
-        appTabbarStore.remove(tabId)
-      }
-    })
-  }
-}
-
-declare module 'vue-router' {
-  interface Router {
-    /**
-     * 本方法为框架扩展语法，会同时关闭当前标签页
-     *
-     * 如果上一条历史记录与传入目标页一致，则调用原生 `back` 方法
-     * 如果没有历史记录，或者上一条历史记录不是目标页，则使用 `replace` 方法跳转到指定路径或首页
-     *
-     * @param to 可选的目标路由，当无法安全回退时使用此参数作为跳转目标
-     */
-    back: (to?: RouteLocationRaw) => Promise<NavigationFailure | void | undefined>
-    /**
-     * 本方法为框架扩展语法，等同于 `push` 方法，并且同时会关闭当前标签页
-     */
-    close: (to: RouteLocationRaw) => Promise<NavigationFailure | void | undefined>
-  }
-}
+// 注：原框架扩展 router.close/close（关闭标签页并跳转）已迁移为
+// composables/app/tabbar.ts 内的 closeCurrentTo()。vue-router 5.3 的公开
+// Router 类型改为条件类型且其实现接口被混淆导出，实例扩展（monkey-patch
+// 新增方法）已无法通过模块扩充获得类型支持，故不再提供 router.close。
+// extendBack 保留：其仅覆写既有方法签名，类型兼容。
 
 export default function setupExtensions(router: Router) {
   extendPush(router)
   extendReplace(router)
   extendGo(router)
   extendBack(router)
-  extendClose(router)
 }

@@ -1,3 +1,5 @@
+import type { RouteLocationRaw } from 'vue-router'
+
 export function useAppTabbar() {
   const route = useRoute()
   const router = useRouter()
@@ -8,6 +10,16 @@ export function useAppTabbar() {
     return route.fullPath
   }
 
+  /**
+   * 跳转到目标路由并关闭当前标签页（原 router.close 扩展，vue-router 5.3 类型不再支持实例扩展）
+   */
+  function closeCurrentTo(to: RouteLocationRaw) {
+    const tabId = getId()
+    return router.push(to).then(() => {
+      appTabbarStore.remove(tabId)
+    })
+  }
+
   function closeById(tabId = getId()) {
     if (checkClose(tabId, false)) {
       const activedTabId = getId()
@@ -15,10 +27,10 @@ export function useAppTabbar() {
       if (tabId === activedTabId) {
         const index = appTabbarStore.list.findIndex(item => item.tabId === tabId)
         if (index > 0) {
-          router.close(appTabbarStore.list[index - 1].fullPath)
+          closeCurrentTo(appTabbarStore.list[index - 1].fullPath)
         }
         else {
-          router.close(appTabbarStore.list[index + 1].fullPath)
+          closeCurrentTo(appTabbarStore.list[index + 1].fullPath)
         }
       }
       else {

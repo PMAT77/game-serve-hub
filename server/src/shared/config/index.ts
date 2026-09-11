@@ -36,6 +36,8 @@ const envSchema = z.object({
   GSH_COMPOSE_FILES: z.string().trim().optional(),
   GSH_PANEL_CONTAINER_NAME: z.string().trim().optional(),
   GSH_GITHUB_REPO: z.string().trim().optional(),
+  /** 面板更新检查用的 GitHub API 基址；国内可指向兼容反代 */
+  GSH_GITHUB_API_BASE: z.string().trim().optional(),
   GSH_RELEASE_VERSION: z.string().trim().optional(),
   GSH_BUILD_SHA: z.string().trim().optional(),
   CORS_ORIGIN: z.string().trim().optional(),
@@ -90,6 +92,8 @@ export interface ServerConfig {
   composeFiles: string[]
   panelContainerName: string
   githubRepo: string
+  /** GitHub API 基址（检查面板更新）；默认 https://api.github.com */
+  githubApiBase: string
   releaseVersion: string
   buildSha: string
   syncAdminPasswordFromEnv: boolean
@@ -133,6 +137,7 @@ export function loadServerConfig(): ServerConfig {
     GSH_COMPOSE_FILES: process.env.GSH_COMPOSE_FILES ?? env.GSH_COMPOSE_FILES,
     GSH_PANEL_CONTAINER_NAME: process.env.GSH_PANEL_CONTAINER_NAME ?? env.GSH_PANEL_CONTAINER_NAME,
     GSH_GITHUB_REPO: process.env.GSH_GITHUB_REPO ?? env.GSH_GITHUB_REPO,
+    GSH_GITHUB_API_BASE: process.env.GSH_GITHUB_API_BASE ?? env.GSH_GITHUB_API_BASE,
     GSH_RELEASE_VERSION: process.env.GSH_RELEASE_VERSION ?? env.GSH_RELEASE_VERSION,
     GSH_BUILD_SHA: process.env.GSH_BUILD_SHA ?? env.GSH_BUILD_SHA,
     CORS_ORIGIN: process.env.CORS_ORIGIN ?? env.CORS_ORIGIN,
@@ -186,6 +191,7 @@ export function loadServerConfig(): ServerConfig {
       .filter(Boolean),
     panelContainerName: parsed.GSH_PANEL_CONTAINER_NAME?.trim() || 'game-server-hub-panel',
     githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'PMAT77/game-serve-hub',
+    githubApiBase: parsed.GSH_GITHUB_API_BASE?.trim() || 'https://api.github.com',
     releaseVersion: parsed.GSH_RELEASE_VERSION?.trim() || '',
     buildSha: parsed.GSH_BUILD_SHA?.trim() || '',
     syncAdminPasswordFromEnv: isTruthyEnv(parsed.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV),

@@ -60,6 +60,7 @@ function buildConfig(partial: Partial<ServerConfig>): ServerConfig {
     trustedProxies: [],
     installPathPolicy: 'instances-root',
     githubRepo: 'PMAT77/game-serve-hub',
+    githubApiBase: 'https://api.github.com',
     releaseVersion: '',
     buildSha: '',
     syncAdminPasswordFromEnv: false,

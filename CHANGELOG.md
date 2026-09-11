@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **面板检查不到跨版本更新（Docker 模式）**：检查更新只比对 `PANEL_IMAGE` 固定 tag 的本地与远端镜像摘要 —— 面板跑 v0.3.3 时永远拿 v0.3.3 与 v0.3.3 比，结论恒为「无更新」，GitHub Release 上的新版本号被短路、不参与判断。现在只要读取到更新的 Release 版本，就改以该版本的目标镜像作为远端基准重新比对，跨版本提示恢复生效。
+- **GitHub Release 查询可走反代**：更新检查直连 `api.github.com`，失败时静默返回，国内服务器表现为「检查不到新版本」。新增 `GSH_GITHUB_API_BASE` 配置（默认 `https://api.github.com`），可指向任意兼容 GitHub API 的反代地址。
+
 ## [0.3.4] - 2026-09-11
 
 ### Added

@@ -266,7 +266,9 @@ async function inspectLocalImageDigest(image: string): Promise<{
 
 async function fetchLatestGitHubRelease(repo: string): Promise<GitHubReleaseSummary | null> {
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+    // 默认直连 api.github.com；国内服务器可配 GSH_GITHUB_API_BASE 指向兼容 GitHub API 的反代
+    const apiBase = (loadServerConfig().githubApiBase || 'https://api.github.com').replace(/\/+$/, '')
+    const response = await fetch(`${apiBase}/repos/${repo}/releases/latest`, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': 'game-server-hub-panel-update',
@@ -509,6 +511,7 @@ export function isImageOutdated(input: {
 async function buildImageUpdateInfo(
   image: string,
   fallbackReleaseVersion: string | null,
+  remoteImageOverride?: string,
 ): Promise<HubImageUpdateInfo> {
   const parsed = parseImageRef(image)
   let localDigests: string[] = []
@@ -535,7 +538,8 @@ async function buildImageUpdateInfo(
   }
 
   try {
-    const remote = await fetchRemoteImageIdentity(image)
+    // 远端基准默认与本地同为 panelImage；跨版本检查时传入目标版本镜像 ref
+    const remote = await fetchRemoteImageIdentity(remoteImageOverride || image)
     remotePrimary = remote.primary
     remoteLayers = remote.layers
     remoteDigests = [...new Set(
@@ -646,10 +650,14 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       cachedStatus = nextStatus
       return nextStatus
     }
-    const [image, release] = await Promise.all([
-      buildImageUpdateInfo(config.panelImage, envReleaseVersion),
-      fetchLatestGitHubRelease(config.githubRepo),
-    ])
+    const release = await fetchLatestGitHubRelease(config.githubRepo)
+    // 固定 tag 自比自恒为“无更新”，新版本发布后面板不会提示跨版本升级。
+    // 只要读取到 Release 版本，就以该版本解析出的目标镜像作为远端基准重新比对；
+    // Release 拉取失败时退回 panelImage 固定 tag，维持原行为。
+    const targetImage = release?.tagName
+      ? resolveTargetImageRef(release.tagName, config.panelImage)
+      : config.panelImage
+    const image = await buildImageUpdateInfo(config.panelImage, envReleaseVersion, targetImage)
 
     const nextStatus: PanelUpdateStatus = {
       runtimeMode: config.runtimeMode,

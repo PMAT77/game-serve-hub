@@ -7,22 +7,6 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
-    # 大版本升级涉及 breaking changes，须逐个验证后手工分批升级
-    # （Dependabot 生成的 lockfile 对 pnpm catalog 兼容性差，会反复开出过不了
-    # frozen-lockfile 门禁的 PR）；手工升级完成后移除对应条目。
-    ignore:
-      - dependency-name: pinia
-        update-types: ["version-update:semver-major"]
-      - dependency-name: dockerode
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@fastify/cors"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@fastify/static"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: postcss-nested
-        update-types: ["version-update:semver-major"]
-      - dependency-name: npm-run-all2
-        update-types: ["version-update:semver-major"]
     groups:
       production-dependencies:
         patterns:

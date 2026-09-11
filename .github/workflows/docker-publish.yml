@@ -342,6 +342,13 @@ jobs:
           docker pull "${IMAGE_PREFIX}/game-server-hub:${GITHUB_REF_NAME}"
           docker save "${IMAGE_PREFIX}/game-server-hub:${GITHUB_REF_NAME}" | gzip > "game-server-hub-${GITHUB_REF_NAME}-docker-image.tar.gz"
           sha256sum "game-server-hub-${GITHUB_REF_NAME}-docker-image.tar.gz" > "game-server-hub-${GITHUB_REF_NAME}-docker-image.tar.gz.sha256"
+
+      - name: Package installer script
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/install.linux.sh "install-${GITHUB_REF_NAME}.sh"
+          sha256sum "install-${GITHUB_REF_NAME}.sh" > "install-${GITHUB_REF_NAME}.sh.sha256"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
@@ -352,6 +359,8 @@ jobs:
             .artifacts/native/*.tar.gz.sha256
             game-server-hub-*-docker-image.tar.gz
             game-server-hub-*-docker-image.tar.gz.sha256
+            install-*.sh
+            install-*.sh.sha256
           body: |
             本 Release 的统一镜像（面板 + DST 运行环境 + SteamCMD）与 Native systemd 部署包、离线 Docker 镜像包一同发布。
 

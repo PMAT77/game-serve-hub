@@ -86,11 +86,13 @@ ENV NODE_ENV=production
 ENV GSH_RELEASE_VERSION=${GSH_RELEASE_VERSION}
 ENV GSH_BUILD_SHA=${GSH_BUILD_SHA}
 WORKDIR /app
-# node_modules 单独成层：依赖不变时面板发版只重建下方应用代码层。
-# 服务端已 esbuild 打包（node_modules 全 external，运行时复用依赖层），node 直跑不再经 tsx。
-COPY --from=deps /app/node_modules ./node_modules
+# 服务端已 esbuild 全量自包含打包（scripts/build-server.mjs：packages='bundle'，与
+# build-native-release.mjs 的 native release 同款配置，已在生产验证），运行时零
+# node_modules 依赖——不再从 deps 层拷贝 node_modules，镜像体积减少约 900MB。
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
+# resolveRepoRoot() 需向上探测 package.json；同时保留版本信息
+COPY package.json ./package.json
 COPY server/drizzle ./server/drizzle
 EXPOSE 8888
 ENV SERVER_HOST=0.0.0.0

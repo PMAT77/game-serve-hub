@@ -21,3 +21,10 @@ panel.env
 docs
 .agent
 .agents
+# 内置 Node 发行版（210MB / 5 万+文件），仅本地开发/CI 使用，不进 build context
+.ci-node22
+# CI 工作流、native release 构建产物、编辑器目录
+.github
+.artifacts
+.vscode
+.idea

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM node:22-bookworm-slim AS base
 # 容器无 TZ 默认 UTC；计划任务 daily「每日 HH:MM」按服务器本地时区计算，不设时区会被
 # 换算成 UTC 相位（北京时间用户创建 08:40 实际执行/显示为 16:40）。
@@ -10,15 +11,35 @@ RUN corepack enable
 WORKDIR /app
 
 FROM base AS deps
+# patches 必须先于 install 就位（pnpm-workspace.yaml patchedDependencies 指向此目录）
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile
+# pnpm store 走 BuildKit cache mount：重复构建免重新下载，且不进入任何镜像层
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm install --frozen-lockfile
 
 FROM deps AS build
-COPY . .
+# 显式 COPY 构建所需源码与配置（不随 .dockerignore 演进而意外带入无关文件）；
+# package.json/pnpm 元数据/packages/patches 已由 deps 层提供
+COPY src ./src
+COPY server ./server
+COPY shared ./shared
+COPY scripts ./scripts
+COPY vite ./vite
+COPY public ./public
+COPY index.html loading.html ./
+COPY tsconfig.json tsconfig.app.json tsconfig.node.json ./
+COPY vite.config.ts uno.config.ts postcss.config.js components.json ./
 RUN pnpm run build && pnpm run build:server
 
-FROM deps AS production
+# 运行层不再复用 deps：服务端由 esbuild 全量自包含打包（与 build-native-release.mjs
+# 的 native release 同款配置，已在生产验证），零 node_modules 依赖，
+# 最终镜像 = 基础镜像 + dist + dist-server + 迁移文件（~1.15GB → ~280MB）。
+FROM node:22-bookworm-slim AS production
+ARG TZ=Asia/Shanghai
+ENV TZ=${TZ}
 ARG GSH_RELEASE_VERSION=dev
 ARG GSH_BUILD_SHA=unknown
 ENV NODE_ENV=production
@@ -28,8 +49,9 @@ LABEL org.opencontainers.image.version="${GSH_RELEASE_VERSION}"
 LABEL org.opencontainers.image.revision="${GSH_BUILD_SHA}"
 WORKDIR /app
 COPY --from=build /app/dist ./dist
-# 服务端已 esbuild 打包（node_modules 全 external，运行时复用 deps 层依赖），node 直跑不再经 tsx
 COPY --from=build /app/dist-server ./dist-server
+# resolveRepoRoot() 需向上探测 package.json；同时保留版本信息
+COPY --from=build /app/package.json ./package.json
 COPY server/drizzle ./server/drizzle
 EXPOSE 8888
 ENV SERVER_HOST=0.0.0.0

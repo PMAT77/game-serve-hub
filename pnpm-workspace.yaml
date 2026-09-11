@@ -30,7 +30,7 @@ catalog:
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
   '@fastify/cors': ^11.3.0
-  '@fastify/static': ^8.2.0
+  '@fastify/static': ^10.1.3
   '@types/dockerode': ^3.3.47
   dayjs: ^1.11.23
   defu: ^6.1.7

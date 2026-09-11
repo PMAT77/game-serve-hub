@@ -409,7 +409,7 @@ export function resolveUpdateKind(input: {
 function buildManualUpdateCommand(stackPaths: StackPaths | null, releaseTag?: string | null): string {
   const config = loadServerConfig()
   if (config.runtimeMode === 'native') {
-    const currentTag = normalizeReleaseTag(config.releaseVersion, 'v0.3.8')
+    const currentTag = normalizeReleaseTag(config.releaseVersion, 'v0.3.9')
     const targetTag = normalizeReleaseTag(releaseTag, currentTag)
     return `curl -fsSL https://raw.githubusercontent.com/${config.githubRepo}/${targetTag}/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=${targetTag} bash -s -- --mode native`
   }

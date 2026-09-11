@@ -1711,7 +1711,9 @@ pull_runtime_images() {
   if ! run_with_retry "docker pull ${PANEL_IMAGE}" run_as_root docker pull "${PANEL_IMAGE}"; then
     log_error "Failed to pull runtime image: ${PANEL_IMAGE}"
     log_error "GHCR 的镜像层域名（pkg-containers.githubusercontent.com）在国内常不可达，表现为 TLS handshake timeout。"
-    log_error "请改用 Release 离线镜像包，见 docs/INSTALL.md「网络受限时的安装方式」。"
+    log_error "请改用 Release 离线镜像包：下载 game-server-hub-${GSH_RELEASE_TAG}-docker-image.tar.gz（同目录有 .sha256），再用 docker load -i 导入，然后重跑本安装器（镜像已在本地，会自动跳过拉取）。"
+    log_error "离线包下载页：https://github.com/PMAT77/game-serve-hub/releases/tag/${GSH_RELEASE_TAG}"
+    log_error "完整步骤见仓库 docs/INSTALL.md 第 3.3 节「离线镜像包完整步骤」，README 快速开始中也有入口。"
     log_error "如需强制重新拉取，可设置 GSH_FORCE_IMAGE_PULL=1。"
     return 1
   fi

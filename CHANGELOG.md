@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-11
+
+### Added
+
+- **实例管理节点监控自动刷新**：展开「运行环境与安装镜像」面板后，节点 CPU/内存/磁盘卡片每 10 秒静默刷新，不再需要手动点「刷新节点」；面板折叠或离开页面时自动停止，后端恢复后自动续传。
+
+### Fixed
+
+- **实例管理折叠面板不再闪动**：面板默认保持折叠，节点列表与 SteamCMD 安装状态改为页面挂载时预取 —— 首次进入顶部标签即显示「就绪/需要初始化」，不再依赖手动展开面板。
+
+- **空状态观感统一**：所有空态统一 24px 上下留白；表格空态图标与文字放大一档；模组管理空表格的空态不再贴顶，改为垂直居中。
+
+- **开发环境热更新偶发失效**：Vite 文件监听排除 .pnpm-store、.ci-node22 等数万文件的缓存目录，避免监听器过载导致改动不生效（需重启 dev server 生效）。
+
 ## [0.3.3] - 2026-09-11
 
 ### Fixed
@@ -216,8 +230,9 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.4...HEAD
 [0.3.3]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.2...v0.3.3
+[0.3.4]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.3...v0.3.4
 [0.3.2]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PMAT77/game-serve-hub/compare/v0.2.2...v0.3.0

@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-11
+
 ### Fixed
 
 - **面板检查不到跨版本更新（Docker 模式）**：检查更新只比对 `PANEL_IMAGE` 固定 tag 的本地与远端镜像摘要 —— 面板跑 v0.3.3 时永远拿 v0.3.3 与 v0.3.3 比，结论恒为「无更新」，GitHub Release 上的新版本号被短路、不参与判断。现在只要读取到更新的 Release 版本，就改以该版本的目标镜像作为远端基准重新比对，跨版本提示恢复生效。
@@ -235,9 +237,10 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.5...HEAD
 [0.3.3]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.2...v0.3.3
 [0.3.4]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.3...v0.3.4
+[0.3.5]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.4...v0.3.5
 [0.3.2]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PMAT77/game-serve-hub/compare/v0.2.2...v0.3.0

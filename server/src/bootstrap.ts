@@ -4,7 +4,8 @@ import process from 'node:process'
 import { createServerApp } from './app'
 import { startScheduleScheduler } from './modules/schedule/scheduler'
 import { syncPanelPortSettingIfStale } from './modules/system/panel-port'
-import { writeAdminCredentialsFile } from './shared/config/credentials-file'
+import type { AdminCredentialOutcome } from './shared/config/credentials-file'
+import { shouldWriteAdminCredentialsFile, writeAdminCredentialsFile } from './shared/config/credentials-file'
 import { ensureServerRuntimeDirs, loadServerConfig } from './shared/config'
 import { initDatabase } from './shared/db/index'
 import { resolveRepoRoot } from './shared/repo-root'
@@ -45,19 +46,33 @@ export async function bootstrap() {
 
   // 打包后 bundle 位于 dist-server/，固定相对路径失效；改从仓库根定位（server/drizzle）
   const migrationsFolder = path.resolve(resolveRepoRoot(), 'server/drizzle')
+  let adminCredentialOutcome: AdminCredentialOutcome = 'absent'
   const dbFilePath = await initDatabase(config.dbPath, migrationsFolder, {
     forcePasswordChange: config.forcePasswordChange,
     adminUsername: config.adminUsername,
     adminPassword: config.adminPassword,
     syncAdminPasswordFromEnv: config.syncAdminPasswordFromEnv,
     seedDevelopmentUsers: config.mode !== 'production',
+    onAdminCredentialOutcome: (outcome) => {
+      adminCredentialOutcome = outcome
+    },
   })
   if (config.adminPasswordGenerated) {
-    // 初始密码只落 0600 凭据文件，绝不写入日志（journald/日志采集管道不可信）。
-    const credentialsFile = writeAdminCredentialsFile(config.dbPath, config.adminUsername, config.adminPassword)
-    app.log.warn(
-      `生产环境未配置 ADMIN_PASSWORD，已为管理员「${config.adminUsername}」自动生成初始密码，已写入 0600 权限凭据文件（请立即读取保存，首次登录改密后可删除）: ${credentialsFile}`,
-    )
+    if (shouldWriteAdminCredentialsFile(adminCredentialOutcome)) {
+      // 初始密码只落 0600 凭据文件，绝不写入日志（journald/日志采集管道不可信）。
+      const credentialsFile = writeAdminCredentialsFile(config.dbPath, config.adminUsername, config.adminPassword)
+      app.log.warn(
+        `生产环境未配置 ADMIN_PASSWORD，已为管理员「${config.adminUsername}」自动生成初始密码，已写入 0600 权限凭据文件（请立即读取保存，首次登录改密后可删除）: ${credentialsFile}`,
+      )
+    }
+    else {
+      // 管理员已存在且未开启 GSH_SYNC_ADMIN_PASSWORD_FROM_ENV 时，本次随机密码并没有写进数据库。
+      // 此时若照旧落盘，用户会拿到一个永远登录不上的密码，而且每次启动都会被新的随机值覆盖；
+      // 已有的凭据文件保持原样 —— 它记录的是首次创建管理员时的初始密码，仍可能是用户唯一的一手记录。
+      app.log.warn(
+        `生产环境未配置 ADMIN_PASSWORD，但管理员「${config.adminUsername}」已存在于数据库且未开启 GSH_SYNC_ADMIN_PASSWORD_FROM_ENV，本次自动生成的随机密码未写入数据库，已忽略（不会覆盖初始凭据文件）。如需用环境变量中的密码覆盖数据库密码，请设置 GSH_SYNC_ADMIN_PASSWORD_FROM_ENV=1 后重启面板。`,
+      )
+    }
   }
   await syncPanelPortSettingIfStale({ mode: config.mode })
 

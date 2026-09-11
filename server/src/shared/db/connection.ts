@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { drizzle } from 'drizzle-orm/sqlite-proxy'
 import { migrate } from 'drizzle-orm/sqlite-proxy/migrator'
+import type { AdminCredentialOutcome } from '../config/credentials-file'
 import { OPS_MANAGE_PERMISSION, OPS_READ_PERMISSION, SYSTEM_MANAGE_PERMISSION, SYSTEM_READ_PERMISSION } from '../menu-routes'
 import {
   systemSettings,
@@ -22,6 +23,8 @@ interface InitDatabaseOptions {
   syncAdminPasswordFromEnv?: boolean
   /** 开发/测试环境种子账号（superadmin/test）；生产环境应关闭 */
   seedDevelopmentUsers?: boolean
+  /** 管理员凭证落库结果回调；调用方据此决定是否落盘初始凭据文件 */
+  onAdminCredentialOutcome?: (outcome: AdminCredentialOutcome) => void
 }
 
 interface AuthForcePasswordChangeState {
@@ -434,6 +437,7 @@ async function seedAdminUserFromEnv(options: InitDatabaseOptions) {
   const adminUsername = options.adminUsername?.trim() ?? ''
   const adminPassword = options.adminPassword ?? ''
   if (!adminUsername || !adminPassword) {
+    options.onAdminCredentialOutcome?.('absent')
     return
   }
 
@@ -459,6 +463,7 @@ async function seedAdminUserFromEnv(options: InitDatabaseOptions) {
       createdAt: now,
       updatedAt: now,
     })
+    options.onAdminCredentialOutcome?.('created')
   }
   else if (options.syncAdminPasswordFromEnv) {
     await drizzleDb
@@ -469,6 +474,10 @@ async function seedAdminUserFromEnv(options: InitDatabaseOptions) {
         updatedAt: now,
       })
       .where(eq(users.id, userId))
+    options.onAdminCredentialOutcome?.('updated')
+  }
+  else {
+    options.onAdminCredentialOutcome?.('skipped')
   }
 
   for (const permission of ADMIN_DEFAULT_PERMISSIONS) {

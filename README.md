@@ -38,6 +38,10 @@
 
 ### Docker 模式
 
+> **中国大陆服务器请先做这一步。** Docker 模式的安装器必须从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名 `pkg-containers.githubusercontent.com` 在国内基本不可达 —— 直接执行下面的命令几乎必然卡在 `net/http: TLS handshake timeout`，重试无效。正确顺序是：先按[离线镜像包完整步骤](docs/INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)下载离线包并 `docker load` 导入，再执行下面的命令；镜像已在本地，安装器会自动跳过拉取。
+>
+> Native 模式不拉取任何容器镜像，不需要这一步。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.1/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
@@ -70,7 +74,7 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
 
 首次登录必须修改密码。
 
-> **国内网络**：若卡在镜像下载（`TLS handshake timeout`，GHCR 的镜像层域名常不可达），请改用 Release 离线镜像包，步骤见[安装与运维指南 · 离线镜像包完整步骤](docs/INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
+> **国内网络**：若你跳过了上面的离线镜像包步骤、结果卡在镜像下载（`TLS handshake timeout`），那正是 GHCR 镜像层域名不可达 —— `docker load` 导入 Release 离线镜像包后重跑安装器即可，步骤见[安装与运维指南 · 离线镜像包完整步骤](docs/INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
 
 镜像分发与代理、端口、升级、回滚和完整排错说明见 [安装与运维指南](docs/INSTALL.md)。
 
@@ -92,7 +96,11 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
 
 ### GHCR 镜像拉取失败
 
-这是 Docker 模式最常见的受限网络问题。请配置 HTTPS 代理，或把 `PANEL_IMAGE`、`GSH_GAME_DST_IMAGE`、`GSH_STEAMCMD_IMAGE` 指向你控制的可信仓库，并核对 Release digest。Native 模式不拉取这些容器镜像。
+这是 Docker 模式在国内最常见的失败点。典型症状是**能列出镜像清单、但下载层时超时**（`pkg-containers.githubusercontent.com` 不可达，报 `net/http: TLS handshake timeout`）—— 这是网络不可达，不是鉴权问题，换代理或反复重试都不会成功。
+
+**首选方案是离线镜像包**：每个 Release 都附带 `game-server-hub-<tag>-docker-image.tar.gz`。下载 → `sha256sum -c` 校验 → `docker load -i` 导入 → 再跑安装器（检测到本地已有镜像会跳过拉取）。完整命令见[离线镜像包完整步骤](docs/INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
+
+其他备选路径：配置 HTTPS 代理；或把 `PANEL_IMAGE`、`GSH_GAME_DST_IMAGE`、`GSH_STEAMCMD_IMAGE` 指向你控制的可信仓库，并按 Release 的 `release-images.json` 核对 digest；或改用 `--mode native`。Native 模式不拉取任何容器镜像。
 
 ### Native 显示 systemd 不可用
 

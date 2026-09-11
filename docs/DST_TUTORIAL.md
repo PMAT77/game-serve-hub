@@ -68,6 +68,8 @@ SSH 登录服务器后，按部署模式选择一条命令执行。
 
 **Docker 模式**（推荐托管与社区使用）：
 
+> 中国大陆服务器请**先导入离线镜像包，再跑这条命令**。安装器要从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名在国内基本不可达，直接跑几乎必然失败（`TLS handshake timeout`）。离线包步骤见 [INSTALL.md · 离线镜像包完整步骤](INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.1/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker

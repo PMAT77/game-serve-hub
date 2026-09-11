@@ -47,6 +47,8 @@ Native 不安装、不调用 Docker，不支持 tmux、screen 或 PM2。两种�
 
 ### 3.1 Docker
 
+> **中国大陆服务器请先读 [3.3 离线镜像包完整步骤](#离线镜像包完整步骤国内推荐先读这一节)，再回来执行下面的命令。** 安装器要从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名在国内基本不可达，直接执行几乎必然失败（`net/http: TLS handshake timeout`）。先用 `docker load` 导入离线包，安装器会自动跳过拉取。Native 模式不涉及容器镜像，无需此步。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.1/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
@@ -95,7 +97,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.1/scripts/inst
 
 安装资源默认从 jsDelivr、GitHub 资源代理、GitHub Raw 依次回退。Compose 使用安装器内置 SHA256，不会为了校验再次访问 Raw。
 
-v0.2.0 起官方容器镜像仅发布 GHCR（`ghcr.io/pmat77/game-server-hub`），一次拉取即包含面板、DST 运行库与 SteamCMD。GHCR 不可达时的国内安装路径（按优先级）：
+v0.2.0 起官方容器镜像仅发布 GHCR（`ghcr.io/pmat77/game-server-hub`），一次拉取即包含面板、DST 运行库与 SteamCMD。**中国大陆服务器请把下面第 1 条当作默认路径，而不是等报错后再回来查** —— GHCR 的镜像层域名在国内基本不可达，直连拉取的成功率可以忽略。按优先级：
 
 1. **离线镜像包**：从 GitHub Release 下载 `game-server-hub-<tag>-docker-image.tar.gz`（可用 GitHub 加速代理），`docker load` 导入后运行安装器（镜像已存在，跳过在线拉取）；
 2. **自选镜像代理**：在 `panel.env` 配置 `GSH_IMAGE_MIRRORS`（逗号分隔的 registry 主机名，面板按序回退拉取）；
@@ -103,14 +105,14 @@ v0.2.0 起官方容器镜像仅发布 GHCR（`ghcr.io/pmat77/game-server-hub`）
 
 #### 离线镜像包完整步骤（国内推荐先读这一节）
 
-安装器需要从 GHCR 拉取统一镜像，而 GHCR 的**镜像层域名** `pkg-containers.githubusercontent.com` 在国内经常不可达。典型症状是「能看见镜像列表、但下载层时超时」，重试多少次都一样：
+安装器需要从 GHCR 拉取统一镜像，而 GHCR 的**镜像层域名** `pkg-containers.githubusercontent.com` 在国内基本不可达。典型症状是「能看见镜像列表、但下载层时超时」，重试多少次都一样：
 
 ```text
 failed to copy: ... Get "https://pkg-containers.githubusercontent.com/ghcrblobs/...":
 net/http: TLS handshake timeout
 ```
 
-此时用每个 Release 附带的**离线镜像包**绕过 GHCR：
+所以国内 Docker 部署的正确顺序是：**先用每个 Release 附带的离线镜像包把镜像导进本机，再运行安装器**。
 
 **1. 下载镜像包与校验文件**（用安装器同款的 GitHub 加速代理）
 
@@ -282,7 +284,7 @@ sudo -u gsh \
 
 ## 8. 配置可信镜像或代理
 
-Docker 模式若无法访问 GHCR，请优先使用自己控制的仓库：
+Docker 模式若无法访问 GHCR，首选[离线镜像包](#离线镜像包完整步骤国内推荐先读这一节)；若你已自建仓库（可先 `docker load` 离线包、再 `docker tag`/`push` 到内网仓库），用法如下：
 
 ```bash
 sudo docker login registry.example.com
@@ -382,7 +384,9 @@ sudo cat /var/log/game-server-hub/install.diagnostics.log
 
 ### `Cannot reach GHCR` / `Image pull failed`
 
-仅影响 Docker。运行 `curl -I https://ghcr.io/v2/` 与 `sudo docker pull <完整镜像>` 区分 DNS、HTTPS 代理和 Registry 鉴权问题。配置可信镜像副本，或根据使用场景改为显式 `--mode native`。
+仅影响 Docker。**国内服务器请直接用[离线镜像包](#离线镜像包完整步骤国内推荐先读这一节)**，这是成功率最高的路径，不必先花时间区分是 DNS、代理还是鉴权问题。
+
+若仍要定位：`curl -I https://ghcr.io/v2/` 探测连通性，`sudo docker pull <完整镜像>` 复现拉取。注意「清单能取到、层下载超时」（`pkg-containers.githubusercontent.com` / `TLS handshake timeout`）属于网络不可达而非鉴权失败，换代理或重试都不会成功。备选路径是配置可信镜像副本，或按使用场景改为显式 `--mode native`。
 
 ### `download.docker.com` 不可达
 

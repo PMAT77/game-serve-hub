@@ -8,6 +8,10 @@ export interface PanelUpdatePresentation {
   versionLine: string
   /** 有更新但当前部署方式不能在面板内更新时为 true */
   needsManualCommand: boolean
+  /** 更新进行中或失败时的过程说明；没有进行中的更新且没有失败时为 null */
+  phaseLine: string | null
+  /** 上一次更新失败，需用户处理后重试 */
+  updateFailed: boolean
 }
 
 /** 四种环境原因的解决办法完全一样，对用户只说一句 */
@@ -16,6 +20,14 @@ export const MANUAL_UPDATE_NOTE = '当前部署方式不支持面板内自动更
 export const MANUAL_UPDATE_COMMAND = 'sudo gsh update'
 
 export const MANUAL_UPDATE_HINT = '用安装脚本升级可恢复面板内一键更新。'
+
+const PHASE_LINES: Record<PanelUpdateStatus['updatePhase'], string> = {
+  idle: '',
+  preparing: '正在检查本地镜像…',
+  pulling: '正在下载镜像，请勿关闭面板…',
+  recreating: '正在重建面板，约 30 秒后自动重连…',
+  failed: '',
+}
 
 function resolveLocalVersion(image: PanelImage): string | null {
   const label = image.releaseVersion?.trim()
@@ -45,22 +57,42 @@ function resolveUpdateKind(status: PanelUpdateStatus, latestVersion: string | nu
   return latestVersion ? 'newer' : 'unknown'
 }
 
+/**
+ * 过程说明：后端的 updateMessage 优先（它知道更细的情况，比如「本地已有镜像」），
+ * 否则按阶段给一句通用文案；旧后端只有 updating 布尔值时退化为原提示。
+ */
+function resolvePhaseLine(status: PanelUpdateStatus): string | null {
+  if (status.updatePhase === 'failed') {
+    return status.updateError?.trim() || '更新失败，请稍后重试。'
+  }
+  if (!status.updatePhase || status.updatePhase === 'idle') {
+    return status.updating ? '正在更新，面板稍后会自动重启…' : null
+  }
+  return status.updateMessage?.trim() || PHASE_LINES[status.updatePhase] || null
+}
+
 export function buildPanelUpdatePresentation(status: PanelUpdateStatus | null): PanelUpdatePresentation {
   if (!status) {
     return {
       versionLine: '',
       needsManualCommand: false,
+      phaseLine: null,
+      updateFailed: false,
     }
   }
 
   const image = status.image
   const version = resolveLocalVersion(image)
   const latestVersion = status.release?.tagName?.trim() || null
+  const phaseLine = resolvePhaseLine(status)
+  const updateFailed = status.updatePhase === 'failed'
 
   if (status.updating) {
     return {
-      versionLine: '正在更新，面板约 30 秒后自动重启',
+      versionLine: buildVersionLine(version, '更新进行中'),
       needsManualCommand: false,
+      phaseLine,
+      updateFailed,
     }
   }
 
@@ -84,5 +116,7 @@ export function buildPanelUpdatePresentation(status: PanelUpdateStatus | null): 
   return {
     versionLine: buildVersionLine(version, suffix),
     needsManualCommand: image.updateAvailable && !status.imageApplySupported,
+    phaseLine,
+    updateFailed,
   }
 }

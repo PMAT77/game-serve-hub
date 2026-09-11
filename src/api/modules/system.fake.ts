@@ -38,7 +38,13 @@ const panelUpdateStatus = {
   applyHint: '开发环境未配置 GSH_STACK_DIR',
   updateKind: 'same-version-changed' as const,
   manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d',
+  offlineImageCommand: 'wget https://github.com/PMAT77/game-serve-hub/releases/download/v0.2.0/game-server-hub-v0.2.0-docker-image.tar.gz\ngunzip -c game-server-hub-v0.2.0-docker-image.tar.gz | docker load',
   checkError: null,
+  updatePhase: 'idle' as const,
+  updateMessage: null,
+  updateError: null,
+  targetImage: null,
+  targetImageReady: false,
 }
 
 let networkTick = 0

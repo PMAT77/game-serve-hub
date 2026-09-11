@@ -141,7 +141,19 @@ export const panelUpdateStatusSchema = z.object({
   /** 更新语义分类：无更新 / 版本更高 / 版本号相同但镜像内容不同 / 有更新但读不到版本号 */
   updateKind: z.enum(['none', 'newer', 'same-version-changed', 'unknown']),
   manualUpdateCommand: z.string().nullable(),
+  /** 离线镜像包下载与导入命令（国内推荐路径） */
+  offlineImageCommand: z.string().nullable(),
   checkError: z.string().nullable(),
+  /** 一键更新的实时阶段：界面据此显示进度，而不是笼统的「更新中」 */
+  updatePhase: z.enum(['idle', 'preparing', 'pulling', 'recreating', 'failed']),
+  /** 当前阶段的用户可读说明 */
+  updateMessage: z.string().nullable(),
+  /** 上一次更新的失败原因（未开始或已成功时为 null） */
+  updateError: z.string().nullable(),
+  /** 本次更新的目标镜像引用：跨版本升级时指向 Release tag 对应的镜像 */
+  targetImage: z.string().nullable(),
+  /** 目标镜像是否已在本地（离线镜像包导入后为 true，可直接重建） */
+  targetImageReady: z.boolean(),
 })
 export type PanelUpdateStatus = z.infer<typeof panelUpdateStatusSchema>
 

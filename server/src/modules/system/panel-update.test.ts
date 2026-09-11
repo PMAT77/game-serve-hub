@@ -5,11 +5,14 @@ import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import type { ServerConfig } from '../../shared/config'
 import {
+  buildOfflineImageCommand,
+  buildUpdaterShellCommand,
   hasStackRequiredFiles,
   isImageOutdated,
   isReleaseNewer,
   resolveApplySupport,
   resolveStackPaths,
+  resolveTargetImageRef,
   resolveUpdateKind,
 } from './panel-update'
 
@@ -252,5 +255,67 @@ describe('isImageOutdated', () => {
       local: { digests: [indexDigest], layers },
       remote: { digests: [], layers: [] },
     }), false)
+  })
+})
+
+describe('resolveTargetImageRef', () => {
+  it('targets the release tag so a one-click update actually crosses versions', () => {
+    assert.equal(
+      resolveTargetImageRef('v0.3.3', 'ghcr.io/pmat77/game-server-hub:v0.3.2'),
+      'ghcr.io/pmat77/game-server-hub:v0.3.3',
+    )
+  })
+
+  it('falls back to the configured tag when the release cannot be read', () => {
+    assert.equal(
+      resolveTargetImageRef(null, 'ghcr.io/pmat77/game-server-hub:v0.3.2'),
+      'ghcr.io/pmat77/game-server-hub:v0.3.2',
+    )
+    assert.equal(
+      resolveTargetImageRef('not-a-tag', 'ghcr.io/pmat77/game-server-hub:v0.3.2'),
+      'ghcr.io/pmat77/game-server-hub:v0.3.2',
+    )
+  })
+
+  it('keeps the registry and repository of the configured image', () => {
+    assert.equal(
+      resolveTargetImageRef('v0.3.3', 'registry.example.com:5000/gsh/panel:dev'),
+      'registry.example.com:5000/gsh/panel:v0.3.3',
+    )
+  })
+})
+
+describe('buildOfflineImageCommand', () => {
+  it('points at the release asset and how to load it', () => {
+    const command = buildOfflineImageCommand('PMAT77/game-serve-hub', 'v0.3.3') ?? ''
+    assert.match(command, /releases\/download\/v0\.3\.3\/game-server-hub-v0\.3\.3-docker-image\.tar\.gz/)
+    assert.match(command, /gunzip -c game-server-hub-v0\.3\.3-docker-image\.tar\.gz \| docker load/)
+  })
+
+  it('returns null without a release tag or repo', () => {
+    assert.equal(buildOfflineImageCommand('PMAT77/game-serve-hub', null), null)
+    assert.equal(buildOfflineImageCommand('', 'v0.3.3'), null)
+  })
+})
+
+describe('buildUpdaterShellCommand', () => {
+  it('writes the target image into panel.env and rebuilds without pulling', () => {
+    const script = buildUpdaterShellCommand('ghcr.io/pmat77/game-server-hub:v0.3.3', 'v0.3.3', buildConfig({}))
+    assert.match(script, /PANEL_IMAGE=ghcr\.io\/pmat77\/game-server-hub:v0\.3\.3/)
+    assert.match(script, /GSH_GAME_DST_IMAGE=ghcr\.io\/pmat77\/game-server-hub:v0\.3\.3/)
+    assert.match(script, /GSH_STEAMCMD_IMAGE=ghcr\.io\/pmat77\/game-server-hub:v0\.3\.3/)
+    assert.match(script, /GSH_RELEASE_VERSION=v0\.3\.3/)
+    assert.match(script, /cp panel\.env "\$backup"/)
+    assert.match(script, /up -d panel/)
+    // 目标镜像此刻必然已在本地：多一次 pull 只会在国内网络下白等或直接失败
+    assert.doesNotMatch(script, /compose[^\n]*pull/)
+  })
+
+  it('keeps every compose file of the stack in the rebuild command', () => {
+    const script = buildUpdaterShellCommand('img:v1', 'v1', buildConfig({
+      composeFiles: ['docker-compose.yml', 'docker-compose.bind.yml'],
+    }))
+    assert.match(script, /-f \/stack\/docker-compose\.yml/)
+    assert.match(script, /-f \/stack\/docker-compose\.bind\.yml/)
   })
 })

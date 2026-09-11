@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'node:fs'
 import path from 'node:path'
-import { pullGameDstImage } from '../../infra/container'
+import {
+  buildImageCandidates,
+  buildImageRef,
+  formatPullError,
+  isImagePresentByRef,
+  pullImageWithCandidates,
+} from '../../infra/container/image-candidates'
 import {
   normalizeDigest,
   parseImageRef,
@@ -9,12 +15,19 @@ import {
 } from '../../infra/container/image-ref'
 import { fetchRemoteImageIdentity } from '../../infra/container/registry-manifest'
 import { createDockerClient } from '../../infra/docker-connect'
+import type { ServerConfig } from '../../shared/config'
 import { loadServerConfig } from '../../shared/config'
 import { getSystemPanelSettings } from '../../shared/db/index'
 import { getDefaultPanelSettings } from './defaults'
 
 /** 更新语义分类，用于把"同版本号但镜像变了"与"版本更高"区分展示 */
 export type UpdateKind = 'none' | 'newer' | 'same-version-changed' | 'unknown'
+
+/**
+ * 一键更新的执行阶段。
+ * idle 之外的状态都意味着有一个更新任务正在进行（failed 是终态，需用户处理后再试）。
+ */
+export type PanelUpdatePhase = 'idle' | 'preparing' | 'pulling' | 'recreating' | 'failed'
 
 export interface HubImageUpdateInfo {
   image: string
@@ -52,7 +65,19 @@ export interface PanelUpdateStatus {
   /** 更新语义分类：区分"版本更高"与"同版本号但镜像内容变了" */
   updateKind: UpdateKind
   manualUpdateCommand: string | null
+  /** 离线镜像包下载与导入命令（国内推荐路径）；拼不出时为 null */
+  offlineImageCommand: string | null
   checkError: string | null
+  /** 一键更新的实时阶段；界面据此显示进度而不是笼统的"更新中" */
+  updatePhase: PanelUpdatePhase
+  /** 当前阶段的用户可读说明 */
+  updateMessage: string | null
+  /** 上一次更新的失败原因（未开始或已成功时为 null） */
+  updateError: string | null
+  /** 本次更新的目标镜像引用：跨版本升级时指向 Release tag 对应的镜像 */
+  targetImage: string | null
+  /** 目标镜像是否已在本地（离线镜像包导入后为 true，可直接重建、无需下载） */
+  targetImageReady: boolean
 }
 
 export const STACK_CONTAINER_MOUNT = '/stack'
@@ -74,12 +99,99 @@ export interface ApplySupport {
 const DEFAULT_CHECK_INTERVAL_HOURS = 1
 const UPDATER_IMAGE = 'docker:27-cli'
 const UPDATER_CONTAINER_NAME = 'game-server-hub-updater'
+/** 目标镜像拉取的重试策略（与实例镜像拉取保持一致） */
+const TARGET_PULL_MAX_ATTEMPTS = 3
+const TARGET_PULL_RETRY_BASE_MS = 2_000
+/** 更新任务的最长容忍时间；超时即判定失败并复位状态，避免界面永久停在"更新中" */
+const UPDATE_WATCHDOG_MS = 30 * 60 * 1000
 
 let cachedStatus: PanelUpdateStatus | null = null
 let checkInFlight: Promise<PanelUpdateStatus> | null = null
-let updating = false
 let schedulerStarted = false
 let schedulerTimer: NodeJS.Timeout | null = null
+let watchdogTimer: NodeJS.Timeout | null = null
+
+/** 一次更新的内存态；面板容器重启后自然归零 */
+interface PanelUpdateRuntime {
+  phase: PanelUpdatePhase
+  message: string | null
+  error: string | null
+  startedAt: number | null
+  targetImage: string | null
+  targetImageReady: boolean
+}
+
+function createIdleRuntime(): PanelUpdateRuntime {
+  return {
+    phase: 'idle',
+    message: null,
+    error: null,
+    startedAt: null,
+    targetImage: null,
+    targetImageReady: false,
+  }
+}
+
+let runtime: PanelUpdateRuntime = createIdleRuntime()
+
+function isUpdating(): boolean {
+  return runtime.phase === 'preparing' || runtime.phase === 'pulling' || runtime.phase === 'recreating'
+}
+
+function buildRuntimeFields(): Pick<
+  PanelUpdateStatus,
+  'updating' | 'updatePhase' | 'updateMessage' | 'updateError' | 'targetImage' | 'targetImageReady'
+> {
+  return {
+    updating: isUpdating(),
+    updatePhase: runtime.phase,
+    updateMessage: runtime.message,
+    updateError: runtime.error,
+    targetImage: runtime.targetImage,
+    targetImageReady: runtime.targetImageReady,
+  }
+}
+
+function syncRuntimeToCachedStatus(): void {
+  if (cachedStatus) {
+    cachedStatus = { ...cachedStatus, ...buildRuntimeFields() }
+  }
+}
+
+function updateRuntime(patch: Partial<PanelUpdateRuntime>): void {
+  runtime = { ...runtime, ...patch }
+  syncRuntimeToCachedStatus()
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function resolveImageMirrorsRaw(): string | null {
+  const { imageMirrors } = loadServerConfig()
+  return imageMirrors.length > 0 ? imageMirrors.join(',') : null
+}
+
+/** 看门狗只保留一份：超时后把状态复位成可重试的失败态，而不是永久"更新中" */
+function ensureUpdateWatchdog(): void {
+  if (watchdogTimer) {
+    return
+  }
+  watchdogTimer = setInterval(() => {
+    if (!isUpdating() || !runtime.startedAt) {
+      return
+    }
+    if (Date.now() - runtime.startedAt < UPDATE_WATCHDOG_MS) {
+      return
+    }
+    updateRuntime({
+      phase: 'failed',
+      message: null,
+      error: '更新超时未完成，已停止等待。请检查网络后重试，或改用离线镜像包导入。',
+    })
+  }, 60_000)
+  watchdogTimer.unref()
+}
 
 function normalizeErrorMessages(messages: Array<string | null | undefined>): string | null {
   const normalized = messages
@@ -355,6 +467,7 @@ function buildApplyFields(applySupport: ApplySupport, releaseTag?: string | null
     imageApplySupported: applySupport.imageSupported,
     applyHint: applySupport.hint,
     manualUpdateCommand: buildManualUpdateCommand(applySupport.stackPaths, releaseTag),
+    offlineImageCommand: buildOfflineImageCommand(loadServerConfig().githubRepo, releaseTag ?? null),
   }
 }
 
@@ -477,7 +590,7 @@ function buildEmptyStatus(): PanelUpdateStatus {
     release: null,
     lastCheckedAt: null,
     checking: false,
-    updating,
+    ...buildRuntimeFields(),
     ...buildApplyFields(applySupport),
     updateKind: 'none',
     checkError: null,
@@ -520,7 +633,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
         release,
         lastCheckedAt: new Date().toISOString(),
         checking: false,
-        updating,
+        ...buildRuntimeFields(),
         ...buildApplyFields(applySupport, latestVersion),
         updateKind: resolveUpdateKind({
           runtimeMode: 'native',
@@ -544,7 +657,7 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       release,
       lastCheckedAt: new Date().toISOString(),
       checking: false,
-      updating,
+      ...buildRuntimeFields(),
       ...buildApplyFields(applySupport, release?.tagName),
       updateKind: resolveUpdateKind({
         runtimeMode: 'docker',
@@ -564,24 +677,84 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
     cachedStatus = {
       ...cachedStatus,
       checking: true,
-      updating,
+      ...buildRuntimeFields(),
     }
   }
   return checkInFlight
 }
 
-function buildComposeCommand(action: 'pull' | 'up'): string {
-  const config = loadServerConfig()
-  const composeArgs = config.composeFiles.map(file => `-f /stack/${file}`).join(' ')
-  if (action === 'pull') {
-    return `docker compose --env-file /stack/panel.env ${composeArgs} pull panel`
-  }
-  return `docker compose --env-file /stack/panel.env ${composeArgs} up -d panel`
+/**
+ * 目标镜像引用：Release tag 优先（跨版本升级），读不到 Release 时回退到当前 panelImage，
+ * 保留「同一个 tag 的镜像内容被重推」这一场景的行为。
+ */
+export function resolveTargetImageRef(releaseTag: string | null, panelImage: string): string {
+  const parsed = parseImageRef(panelImage)
+  const tag = normalizeReleaseTag(releaseTag, parsed.tag)
+  return buildImageRef(parsed.registry, parsed.repository, tag)
 }
 
-async function startPanelComposeUpdater(): Promise<void> {
-  const config = loadServerConfig()
-  const applySupport = resolveApplySupport(config)
+/** 离线镜像包的两步命令；与发布流水线上传的资产命名一致（docker-publish.yml）。 */
+export function buildOfflineImageCommand(githubRepo: string, releaseTag: string | null): string | null {
+  const tag = releaseTag?.trim()
+  const repo = githubRepo.trim()
+  if (!tag || !repo) {
+    return null
+  }
+  const asset = `game-server-hub-${tag}-docker-image.tar.gz`
+  return [
+    `wget https://github.com/${repo}/releases/download/${tag}/${asset}`,
+    `gunzip -c ${asset} | docker load`,
+  ].join('\n')
+}
+
+/**
+ * updater 容器内执行的脚本：把目标镜像写进 panel.env，再重建面板。
+ * 面板容器以只读方式挂载 stack 目录、改不了 panel.env，只有这个临时容器有写权限。
+ * 这里刻意不调用 compose pull：镜像要么已在本地（离线包导入），要么刚由面板拉好。
+ */
+export function buildUpdaterShellCommand(
+  targetImage: string,
+  releaseTag: string | null,
+  config: ServerConfig = loadServerConfig(),
+): string {
+  const composeArgs = config.composeFiles.map(file => `-f /stack/${file}`).join(' ')
+  const resolvedTag = normalizeReleaseTag(releaseTag, parseImageRef(targetImage).tag)
+  const pairs = [
+    `PANEL_IMAGE=${targetImage}`,
+    `GSH_GAME_DST_IMAGE=${targetImage}`,
+    `GSH_STEAMCMD_IMAGE=${targetImage}`,
+    `GSH_RELEASE_VERSION=${resolvedTag}`,
+  ]
+  const quotedPairs = pairs.map(pair => `'${pair}'`).join(' ')
+  const rollback = `cp /stack/$backup /stack/panel.env && docker compose --env-file /stack/panel.env ${composeArgs} up -d panel`
+  return [
+    'set -e',
+    'cd /stack',
+    'backup="panel.env.bak.$(date +%Y%m%d%H%M%S)"',
+    'cp panel.env "$backup"',
+    'echo "[gsh] panel.env 已备份到 $backup"',
+    `for pair in ${quotedPairs}; do`,
+    '  key="${pair%%=*}"',
+    '  if grep -q "^${key}=" panel.env; then',
+    '    sed -i "s|^${key}=.*|${pair}|" panel.env',
+    '  else',
+    '    echo "${pair}" >> panel.env',
+    '  fi',
+    'done',
+    `if ! docker compose --env-file panel.env ${composeArgs} up -d panel; then`,
+    `  echo "[gsh] 重建面板失败，可回滚：${rollback}"`,
+    '  exit 1',
+    'fi',
+    'echo "[gsh] 面板重建完成"',
+  ].join('\n')
+}
+
+async function startPanelComposeUpdater(input: {
+  applySupport: ApplySupport
+  targetImage: string
+  releaseTag: string | null
+}): Promise<string> {
+  const { applySupport } = input
   if (!applySupport.imageSupported || !applySupport.stackPaths) {
     throw new Error(applySupport.hint || '当前环境不支持一键更新面板')
   }
@@ -593,78 +766,154 @@ async function startPanelComposeUpdater(): Promise<void> {
     await existing.remove({ force: true })
   }
   catch {
-    // no existing updater
+    // 没有残留的 updater 容器
   }
 
-  const shellCommand = [
-    buildComposeCommand('pull'),
-    buildComposeCommand('up'),
-  ].join(' && ')
-
-  await docker.createContainer({
+  const container = await docker.createContainer({
     name: UPDATER_CONTAINER_NAME,
     Image: UPDATER_IMAGE,
-    Cmd: ['sh', '-c', shellCommand],
+    Cmd: ['sh', '-c', buildUpdaterShellCommand(input.targetImage, input.releaseTag)],
     HostConfig: {
       AutoRemove: true,
       Binds: [
         '/var/run/docker.sock:/var/run/docker.sock',
-        `${applySupport.stackPaths.hostDir}:/stack:ro`,
+        // 可写：updater 要把目标镜像写进 panel.env，否则面板重启后会回退到旧版本
+        `${applySupport.stackPaths.hostDir}:/stack`,
       ],
     },
-  }).then(container => container.start())
+  })
+  await container.start()
+  return container.id
 }
 
-export async function applyPanelUpdate(): Promise<{ status: 'updating' | 'completed', message: string }> {
-  if (updating) {
+/** updater 失败（面板没被换掉）时必须复位状态，否则界面会永久停在「更新中」 */
+function watchUpdaterContainer(containerId: string): void {
+  resolveDocker().getContainer(containerId).wait()
+    .then((result: unknown) => {
+      const code = (result as { StatusCode?: number } | null)?.StatusCode ?? 0
+      if (code !== 0 && runtime.phase === 'recreating') {
+        updateRuntime({
+          phase: 'failed',
+          message: null,
+          error: `重建面板失败（updater 退出码 ${code}）。panel.env 备份保留在 stack 目录，可按提示回滚。`,
+        })
+      }
+    })
+    .catch(() => {
+      // 容器已被 AutoRemove 清理，或面板正在重启导致连接中断：都不算失败
+    })
+}
+
+export interface PanelUpdateApplyResult {
+  status: 'updating' | 'completed'
+  message: string
+}
+
+/**
+ * 触发一键更新。
+ * 这里只做校验与状态登记，真正的下载与重建交给后台任务 —— 拉取动辄数分钟，
+ * 同步等待会让前端请求超时，界面就会看到「更新失败」而服务端其实还在跑。
+ */
+export async function applyPanelUpdate(): Promise<PanelUpdateApplyResult> {
+  if (isUpdating()) {
     throw new Error('更新正在进行中，请稍后再试')
   }
 
   const status = cachedStatus ?? await refreshPanelUpdateStatus()
   if (!status.image.updateAvailable) {
-    return {
-      status: 'completed',
-      message: '当前已是最新版本',
-    }
+    return { status: 'completed', message: '当前已是最新版本' }
   }
 
-  const applySupport = resolveApplySupport()
-  updating = true
-  if (cachedStatus) {
-    cachedStatus = { ...cachedStatus, updating: true }
-  }
+  const config = loadServerConfig()
+  const applySupport = resolveApplySupport(config)
+  const releaseTag = status.release?.tagName ?? null
+  const targetImage = resolveTargetImageRef(releaseTag, config.panelImage)
 
-  // 统一镜像：预拉取即同时完成 DST/SteamCMD 运行环境更新
-  const pullResult = await pullGameDstImage({ force: true })
-  if (!pullResult.ok) {
-    updating = false
-    if (cachedStatus) {
-      cachedStatus = { ...cachedStatus, updating: false }
-    }
-    throw new Error(pullResult.error)
+  ensureUpdateWatchdog()
+  runtime = {
+    phase: 'preparing',
+    message: '正在检查本地镜像…',
+    error: null,
+    startedAt: Date.now(),
+    targetImage,
+    targetImageReady: false,
   }
+  syncRuntimeToCachedStatus()
 
-  if (!applySupport.imageSupported || !applySupport.stackPaths) {
-    updating = false
-    if (cachedStatus) {
-      cachedStatus = { ...cachedStatus, updating: false }
-    }
-    await refreshPanelUpdateStatus()
-    return {
-      status: 'completed',
-      message: '统一镜像已拉取到本地，重启面板容器后生效。请使用下方手动命令或 gsh update。',
-    }
-  }
+  void runPanelUpdate({ applySupport, targetImage, releaseTag })
 
-  await startPanelComposeUpdater()
   return {
     status: 'updating',
-    message: '面板更新已启动，服务将在约 30 秒内重启。请稍后刷新页面。',
+    message: '更新已开始，页面会自动显示进度。',
+  }
+}
+
+function buildPullFailureMessage(
+  result: { error: string, tried: string[] },
+  targetImage: string,
+  releaseTag: string | null,
+): string {
+  const detail = formatPullError(result.error, targetImage, result.tried)
+  const offlineCommand = buildOfflineImageCommand(loadServerConfig().githubRepo, releaseTag)
+  if (!offlineCommand) {
+    return detail
+  }
+  return [
+    detail,
+    '也可以改用离线镜像包（国内推荐）：',
+    offlineCommand,
+    '导入后回到本页再次点击「应用更新」，面板会检测到本地镜像并直接重建，不再下载。',
+  ].join('\n')
+}
+
+async function runPanelUpdate(input: {
+  applySupport: ApplySupport
+  targetImage: string
+  releaseTag: string | null
+}): Promise<void> {
+  try {
+    const docker = resolveDocker()
+    if (await isImagePresentByRef(docker, input.targetImage)) {
+      updateRuntime({ targetImageReady: true, message: '检测到本地已有目标镜像，跳过下载' })
+    }
+    else {
+      updateRuntime({ phase: 'pulling', message: '正在下载镜像，请勿关闭面板' })
+      const candidates = buildImageCandidates(input.targetImage, resolveImageMirrorsRaw())
+      const result = await pullImageWithCandidates(docker, candidates, input.targetImage, {
+        maxAttempts: TARGET_PULL_MAX_ATTEMPTS,
+        retryBaseMs: TARGET_PULL_RETRY_BASE_MS,
+        sleep,
+      })
+      if (!result.ok) {
+        throw new Error(buildPullFailureMessage(result, input.targetImage, input.releaseTag))
+      }
+      updateRuntime({ targetImageReady: true, message: '镜像已就绪，准备重建面板' })
+    }
+
+    if (!input.applySupport.imageSupported || !input.applySupport.stackPaths) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: `镜像已就绪，但${input.applySupport.hint || '当前部署方式不支持面板内重建。'}请使用下方手动命令，或重跑安装脚本后重试。`,
+      })
+      return
+    }
+
+    updateRuntime({ phase: 'recreating', message: '正在重建面板，约 30 秒后自动重连' })
+    const containerId = await startPanelComposeUpdater(input)
+    watchUpdaterContainer(containerId)
+  }
+  catch (error) {
+    updateRuntime({
+      phase: 'failed',
+      message: null,
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
 }
 
 export function isPanelUpdateInProgress(): boolean {
-  return updating
+  return isUpdating()
 }
 
 async function resolveCheckIntervalMs(): Promise<number> {

@@ -162,15 +162,66 @@ async function loadSettings(options?: { silent?: boolean }) {
   }
 }
 
-async function loadUpdateStatus() {
+async function loadUpdateStatus(options?: { silent?: boolean }): Promise<boolean> {
   try {
     const res = await apiSystem.getPanelUpdateStatus()
     updateStatus.value = res.data
+    return true
   }
   catch {
-    updateStatus.value = null
+    // 轮询期间（silent）请求失败通常意味着面板正在重启：保留上一次状态，界面才不会闪成"无法获取"
+    if (!options?.silent) {
+      updateStatus.value = null
+    }
+    return false
   }
 }
+
+/** 连续轮询失败次数：面板重建期间会持续失败，超过上限就停止并提示手动刷新 */
+let updatePollFailures = 0
+const UPDATE_POLL_INTERVAL_MS = 3000
+const UPDATE_POLL_MAX_FAILURES = 60
+
+/**
+ * 更新进度轮询：「应用更新」现在立即返回，真正的下载与重建在后台跑，
+ * 界面靠这里拿到 preparing / pulling / recreating / failed 各阶段。
+ */
+const updatePoller = usePollingTask(async () => {
+  const reachable = await loadUpdateStatus({ silent: true })
+  if (!reachable) {
+    updatePollFailures += 1
+    if (updatePollFailures === 5) {
+      faToast.info('面板正在重启，恢复后本页会自动继续刷新。')
+    }
+    if (updatePollFailures >= UPDATE_POLL_MAX_FAILURES) {
+      updatePoller.stop()
+      faToast.warning('等待面板重启超时，请手动刷新本页查看结果。')
+    }
+    return
+  }
+  updatePollFailures = 0
+  const phase = updateStatus.value?.updatePhase
+  if (!phase || phase === 'idle' || phase === 'failed') {
+    updatePoller.stop()
+    if (phase === 'failed') {
+      faToast.error('更新失败，请查看「面板与游戏版本」区块中的提示')
+    }
+  }
+}, { intervalMs: UPDATE_POLL_INTERVAL_MS })
+
+const offlineUpdateCommand = computed(() => updateStatus.value?.offlineImageCommand?.trim() || null)
+
+const targetImageHint = computed(() => {
+  const status = updateStatus.value
+  if (!status?.targetImageReady || !status.targetImage) {
+    return null
+  }
+  return `检测到本地已有 ${status.targetImage}，将直接重建面板，不再下载。`
+})
+
+onBeforeUnmount(() => {
+  updatePoller.stop()
+})
 
 async function checkHubUpdate() {
   updateStatusLoading.value = true
@@ -211,9 +262,9 @@ async function applyHubUpdate() {
     const res = await apiSystem.applyPanelUpdate()
     faToast.success(res.data.message)
     if (res.data.status === 'updating') {
-      updateStatus.value = updateStatus.value
-        ? { ...updateStatus.value, updating: true }
-        : updateStatus.value
+      await loadUpdateStatus({ silent: true })
+      updatePollFailures = 0
+      updatePoller.start()
     }
     else {
       await loadUpdateStatus()
@@ -308,6 +359,16 @@ onActivated(async () => {
           <p class="font-medium">
             {{ updateView.versionLine }}
           </p>
+          <p
+            v-if="updateView.phaseLine"
+            class="text-xs whitespace-pre-wrap"
+            :class="updateView.updateFailed ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'"
+          >
+            {{ updateView.phaseLine }}
+          </p>
+          <p v-if="targetImageHint" class="text-xs text-muted-foreground">
+            {{ targetImageHint }}
+          </p>
           <p v-if="releaseMetaLine" class="text-xs text-muted-foreground">
             {{ releaseMetaLine }}
             <a
@@ -353,6 +414,29 @@ onActivated(async () => {
             </FaButton>
           </div>
         </div>
+
+        <NCollapse v-if="offlineUpdateCommand" class="pt-1">
+          <NCollapseItem title="下载慢或失败？改用离线镜像包" name="offline-update">
+            <div class="space-y-2 text-sm">
+              <p class="text-xs text-muted-foreground">
+                在无法稳定访问 GHCR 的服务器上，可在能访问 GitHub 的机器或服务器上下载离线镜像包并导入：
+              </p>
+              <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ offlineUpdateCommand }}</pre>
+              <div class="flex flex-wrap gap-2 items-center">
+                <FaButton
+                  variant="outline"
+                  size="sm"
+                  @click="copyUpdateCommand(offlineUpdateCommand ?? '', '离线更新命令')"
+                >
+                  复制
+                </FaButton>
+                <span class="text-xs text-muted-foreground">
+                  导入后回到本页再次点击「应用更新」，面板会检测到本地镜像并直接重建。
+                </span>
+              </div>
+            </div>
+          </NCollapseItem>
+        </NCollapse>
 
         <NCollapse v-if="needsManualUpdate && manualUpdateCommand" class="pt-1">
           <NCollapseItem title="其他更新方式" name="manual-update">

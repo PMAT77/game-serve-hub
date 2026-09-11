@@ -45,7 +45,13 @@ function buildStatus(overrides: StatusOverrides = {}): PanelUpdateStatus {
     applyHint: '未配置 GSH_STACK_DIR，无法一键更新面板。',
     updateKind: 'same-version-changed',
     manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env pull',
+    offlineImageCommand: null,
     checkError: null,
+    updatePhase: 'idle',
+    updateMessage: null,
+    updateError: null,
+    targetImage: null,
+    targetImageReady: false,
     ...rest,
   }
 }
@@ -87,16 +93,43 @@ describe('buildPanelUpdatePresentation', () => {
     })).needsManualCommand, false)
   })
 
-  it('prioritises the in-progress state', () => {
-    const view = buildPanelUpdatePresentation(buildStatus({ updating: true }))
-    assert.equal(view.versionLine, '正在更新，面板约 30 秒后自动重启')
+  it('prioritises the in-progress state and shows the running phase', () => {
+    const view = buildPanelUpdatePresentation(buildStatus({ updating: true, updatePhase: 'pulling' }))
+    assert.equal(view.versionLine, '当前版本：v0.2.2 · 更新进行中')
     assert.equal(view.needsManualCommand, false)
+    assert.match(view.phaseLine ?? '', /下载镜像/)
+    assert.equal(view.updateFailed, false)
+  })
+
+  it('prefers the backend message over the generic phase text', () => {
+    const view = buildPanelUpdatePresentation(buildStatus({
+      updating: true,
+      updatePhase: 'preparing',
+      updateMessage: '检测到本地已有目标镜像，跳过下载',
+    }))
+    assert.equal(view.phaseLine, '检测到本地已有目标镜像，跳过下载')
+  })
+
+  it('surfaces the failure reason instead of staying silent', () => {
+    const view = buildPanelUpdatePresentation(buildStatus({
+      updatePhase: 'failed',
+      updateError: '无法从镜像仓库拉取镜像（网络超时或被阻断）',
+    }))
+    assert.equal(view.updateFailed, true)
+    assert.match(view.phaseLine ?? '', /网络超时或被阻断/)
+    assert.equal(view.needsManualCommand, true)
+  })
+
+  it('stays quiet when no update is running', () => {
+    assert.equal(buildPanelUpdatePresentation(buildStatus()).phaseLine, null)
   })
 
   it('handles a null status without throwing', () => {
     const view = buildPanelUpdatePresentation(null)
     assert.equal(view.versionLine, '')
     assert.equal(view.needsManualCommand, false)
+    assert.equal(view.phaseLine, null)
+    assert.equal(view.updateFailed, false)
   })
 })
 

@@ -317,6 +317,21 @@ GSH_STEAMCMD_HTTPS_PROXY=http://proxy.example.com:7890
 - `panel.env` 中的 `GSH_STACK_DIR` 是安装目录的**绝对路径**（安装脚本默认写为 `/opt/game-server-hub`）；
 - compose 叠加了 `docker-compose.bind.yml`，使面板容器能通过 `/stack` 读到 `panel.env` 与 compose 文件。
 
+面板内更新会把 Release 对应版本的镜像准备到本地（**本地已有该镜像时完全跳过下载**），再把目标镜像写进 `panel.env` 并重建面板容器。整个过程在区块内显示阶段：检查本地镜像 → 下载镜像 → 重建面板；面板重启期间页面会提示正在重启，恢复后自动继续。
+
+国内服务器的主要瓶颈就是从 GHCR 下载镜像。推荐顺序：
+
+1. 先下载离线镜像包（Release 附件）并导入：
+
+   ```bash
+   wget https://github.com/PMAT77/game-serve-hub/releases/download/<tag>/game-server-hub-<tag>-docker-image.tar.gz
+   wget https://github.com/PMAT77/game-serve-hub/releases/download/<tag>/game-server-hub-<tag>-docker-image.tar.gz.sha256
+   sha256sum -c game-server-hub-<tag>-docker-image.tar.gz.sha256
+   gunzip -c game-server-hub-<tag>-docker-image.tar.gz | docker load
+   ```
+
+2. 回到面板点「应用更新」：检测到本地已有目标镜像后直接重建，秒级完成，不再产生任何下载。
+
 任一条件不满足时按钮置灰，面板只说明「当前部署方式不支持面板内自动更新」并给出一条可复制的手动更新命令：
 
 ```bash

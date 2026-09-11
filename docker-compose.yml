@@ -1,6 +1,6 @@
 services:
   panel:
-    image: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
+    image: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.8}
     build:
       context: .
       dockerfile: docker/unified/Dockerfile
@@ -29,10 +29,10 @@ services:
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
-      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
+      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.8}
       # v0.2.2 起面板/DST/SteamCMD 合并为同一统一镜像；三个变量值一致，保留以便旧配置平滑迁移
-      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.8}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.8}
       # 备选镜像 registry 候选（逗号分隔）：按顺序优先尝试，全部失败后回退主引用
       GSH_IMAGE_MIRRORS: ${GSH_IMAGE_MIRRORS:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
@@ -62,6 +62,17 @@ services:
       GSH_STACK_DIR: ${GSH_STACK_DIR:-/opt/game-server-hub}
       GSH_COMPOSE_FILES: ${GSH_COMPOSE_FILES:-docker-compose.yml:docker-compose.bind.yml}
       GSH_GITHUB_REPO: ${GSH_GITHUB_REPO:-PMAT77/game-serve-hub}
+      # 初始管理员凭证与首登策略：docker compose --env-file panel.env 只做 compose 文件插值，
+      # panel.env 里的值必须在这里显式映射才会进入容器，否则容器会以为没配密码而随机生成一个。
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-superadmin}
+      # 留空即回退「自动生成随机密码并写凭据文件」；非空时该密码即为初始密码
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # 为空/0 时不强制改密；安装器写入的 1 会经此进入容器，首次登录拦截至 /force-change-password
+      FORCE_PASSWORD_CHANGE: ${FORCE_PASSWORD_CHANGE:-0}
+      # 紧急同步：为 1 时每次启动用 ADMIN_PASSWORD 覆盖数据库中的管理员密码（用完后改回 0）
+      GSH_SYNC_ADMIN_PASSWORD_FROM_ENV: ${GSH_SYNC_ADMIN_PASSWORD_FROM_ENV:-0}
+      # 在线找回密码：至少 16 位才在登录页启用「忘记密码」
+      GSH_PASSWORD_RECOVERY_TOKEN: ${GSH_PASSWORD_RECOVERY_TOKEN:-}
     volumes:
       - gsh-data:/app/data
       - gsh-logs:/app/logs
@@ -78,7 +89,7 @@ services:
       retries: 3
 
   steamcmd:
-    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
+    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.8}
     profiles:
       - tools
     entrypoint: ["/bin/true"]

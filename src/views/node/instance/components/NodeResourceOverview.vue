@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NodeListItem } from '@/api/modules/node'
 import { NAlert, NButton, NEmpty, NStatistic, NTag } from 'naive-ui'
-import { onMounted, ref } from 'vue'
+import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 import apiNode from '@/api/modules/node'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 import { formatDateTime, formatPercent } from '../utils'
@@ -14,6 +14,9 @@ const emit = defineEmits<{
   nodesChange: [nodes: NodeListItem[]]
 }>()
 
+/** 节点资源变化较慢，10 秒与监控台系统信息的默认频率对齐 */
+const NODE_POLL_MS = 10_000
+
 const registerLoading = ref(false)
 const nodes = ref<NodeListItem[]>([])
 
@@ -25,12 +28,54 @@ const {
   runLoad,
 } = useAdminPageState(nodes)
 
+let pollTimer: ReturnType<typeof setInterval> | undefined
+let isPolling = false
+
 async function fetchNodes() {
   await runLoad(async () => {
     const res = await apiNode.getNodeList()
     nodes.value = res.data
     emit('nodesChange', nodes.value)
   })
+}
+
+/**
+ * 轮询走静默路径：不触发 loading，失败时保留上次数据，
+ * 否则「刷新节点」按钮每 10 秒转圈一次、卡片同步闪烁。
+ */
+async function pollNodesSilently() {
+  if (isPolling) {
+    return
+  }
+  isPolling = true
+  try {
+    const res = await apiNode.getNodeList()
+    nodes.value = res.data
+    emit('nodesChange', nodes.value)
+  }
+  catch {
+    // 静默失败：保留上次数据，不打断轮询
+  }
+  finally {
+    isPolling = false
+  }
+}
+
+function startNodePolling() {
+  if (pollTimer) {
+    return
+  }
+  pollTimer = setInterval(() => {
+    void pollNodesSilently()
+  }, NODE_POLL_MS)
+}
+
+function stopNodePolling() {
+  if (!pollTimer) {
+    return
+  }
+  clearInterval(pollTimer)
+  pollTimer = undefined
 }
 
 async function registerLocalNode() {
@@ -47,7 +92,13 @@ async function registerLocalNode() {
 
 onMounted(() => {
   void fetchNodes()
+  startNodePolling()
 })
+
+// 页面被 KeepAlive 缓存时不会触发 unmounted，用 activated / deactivated 控制轮询
+onActivated(startNodePolling)
+onDeactivated(stopNodePolling)
+onUnmounted(stopNodePolling)
 </script>
 
 <template>

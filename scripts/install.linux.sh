@@ -938,9 +938,14 @@ install_docker() {
       run_as_root apt-get update -y || return 1
       apt_install docker.io || return 1
       if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
+        # Ubuntu 23.04+：官方源收录的 Compose v2
         apt_install docker-compose-v2 || return 1
       elif apt-cache show docker-compose-plugin >/dev/null 2>&1; then
+        # Docker 官方 apt 源的插件包
         apt_install docker-compose-plugin || return 1
+      elif apt-cache show docker-compose 2>/dev/null | grep -q '^Version: 2'; then
+        # Debian 13+：官方源打包的 Compose v2（包名 docker-compose；Debian 12 同名包是 v1，版本不匹配不会误装）
+        apt_install docker-compose || return 1
       fi
     fi
   fi

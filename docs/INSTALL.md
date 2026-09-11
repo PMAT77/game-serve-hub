@@ -37,25 +37,23 @@ gsh doctor
 
 ```bash
 # 下载安装器（gh-proxy 加速；不可用时换 https://ghfast.top/ 前缀）
-tag=v0.3.6   # 与目标 Release 一致，后续发布流程会同步替换
+tag=v0.3.6
 wget "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
 
-# 第一次运行安装器：自动 apt 安装 Docker Engine + containerd。
-# Debian 12 的 docker.io 不含 Compose v2 插件，预期结尾报
-# 「Docker Compose v2 plugin is required but unavailable」——正常，先去装插件；
-# 这条命令在阶段三还会原样重跑一次
-sudo GSH_PANEL_ENV_PRESET=small bash install.linux.sh --mode docker
-
-# 手动安装 Compose v2 CLI 插件（Debian 官方源没有这个包）
-sudo mkdir -p /usr/local/lib/docker/cli-plugins
-sudo curl -fL --retry 3 "https://gh-proxy.com/https://github.com/docker/compose/releases/download/v2.39.2/docker-compose-linux-x86_64" -o /usr/local/lib/docker/cli-plugins/docker-compose
-sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+# 第一次运行：自动装好 Docker 与 Compose 插件。
+# 结尾报「Cannot reach GHCR / Image pull failed」属正常（镜像包未导入）→ 进入阶段二；阶段三原样重跑本命令
+sudo GSH_PANEL_ENV_PRESET=small bash install.linux.sh --mode docker --network cn
 
 # 验证插件（期望输出：Docker Compose version v2.39.2）
 docker compose version
+
+# 仅当安装器提示自动补装失败时，手动装好插件，再重新执行上面的安装命令：
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -fL --retry 3 "https://gh-proxy.com/https://github.com/docker/compose/releases/download/v2.39.2/docker-compose-linux-x86_64" -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 ```
 
-> 不要 `apt install docker-compose`：那是 v1 命令，安装器用的是 v2 的 `docker compose` 子命令，不通用。
+> 兜底用的是二进制而不是 `apt install docker-compose`：源里那个是 1.x 旧版（命令叫 `docker-compose`），没有安装器所需的 v2 `docker compose` 子命令，装了也过不了安装器检查。
 
 ### 阶段二：导入离线镜像包
 
@@ -151,11 +149,11 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' /opt/gam
 
 ### `download.docker.com` 不可达（装 Docker 时）
 
-安装器会尝试发行版自带的 Docker/Compose 包。若仍失败，使用 `--network cn`，检查 apt 源签名、系统时间和 HTTPS 出站。
+安装器会回退发行版自带的 `docker.io`，并在发行版源不含 Compose v2 时（Debian 12）自动从 GitHub Release 补装插件（gh-proxy 加速）。自动补装失败时按报错里的手动命令操作后重跑。apt 下载慢可加 `--network cn` 切国内源；其余排查 apt 源签名、系统时间和 HTTPS 出站。
 
 ### `Docker Compose v2 plugin is required but unavailable`（装 Docker 时）
 
-仅 Debian 12 需要：其官方源的 `docker.io` 不含 Compose v2 插件（`docker-compose-v2` 与 `docker-compose-plugin` 包都不存在）。手动安装插件后重跑安装器（命令见[路线 B 阶段一](#阶段一docker-引擎与-compose-插件)）。Debian 13+ 官方源已含 Compose v2（`docker-compose` 包，版本 2.x），安装器会自动装上，无需手动操作。
+仅当自动补装也失败时出现（加速节点全不可达或校验不过）：按报错信息里的手动命令安装插件后重跑安装器（命令见[路线 B 阶段一](#阶段一docker-引擎与-compose-插件)兜底小节）。正常情况下无需手动操作：Debian 12 由安装器从 GitHub Release 自动补装；Debian 13+ 与 Ubuntu 22.04（jammy-updates）起官方源已含 Compose v2（包名 `docker-compose` / `docker-compose-v2`），安装器直接装发行版包。
 
 ### `Cannot reach GHCR` / `Image pull failed`（拉镜像时）
 

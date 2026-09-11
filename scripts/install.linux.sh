@@ -550,8 +550,10 @@ verify_installer_asset_checksum() {
   fi
 
   if ! expected_sum="$(resolve_installer_asset_sha256 "${relative_path}")" || [[ -z "${expected_sum}" ]]; then
-    log_warn "No embedded checksum for installer asset: ${relative_path}"
-    return 1
+    # 未登记摘要的资源（如 scripts/gsh.sh）只告警放行。把「没有内置摘要」当成校验失败，
+    # 会让这些资源在所有镜像源上都被判成下载失败并被静默跳过（gsh CLI 因此永远装不上）。
+    log_warn "No embedded checksum for installer asset, skipping verification: ${relative_path}"
+    return 0
   fi
 
   actual_sum="$(sha256sum "${downloaded_file}" | awk '{print $1}')"
@@ -1808,6 +1810,7 @@ print_summary() {
     log_info "Panel service: game-server-hub.service"
   else
     log_info "Unified image (panel + DST + SteamCMD): ${PANEL_IMAGE}"
+    log_info "Compose project: cd ${PANEL_INSTALL_DIR} && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml ps"
     log_info "CLI: run gsh (or bash /usr/local/bin/gsh) to manage the panel stack; gsh doctor for diagnostics."
   fi
   log_info "Panel URL: ${PANEL_ACCESS_URL}"

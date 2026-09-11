@@ -1,317 +1,99 @@
-# 安装与运维指南
+# 安装指南
 
-本文面向 Linux 生产部署。Docker 模式适合小型社区和托管商，Native systemd 模式适合个人服主。本地开发见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+- **海外，或网络可直达 GitHub 与 GHCR** → [路线 A](#路线-a海外机器一个命令装完)，一个命令装完。
+- **国内服务器** → [路线 B](#路线-b国内服务器debian-12-离线镜像包全程)，离线镜像包全程，按 Debian 12 验证。
 
-> **Windows 不受支持，也不是部署目标。** 它只用于本机开发调试，不提供安装脚本，也不为"让他人联机"做兼容。开发时的进服方式见 [DEVELOPMENT.md 平台定位](DEVELOPMENT.md#平台定位)；容器网络边界的说明见 [DST 开服教程 5.2](DST_TUTORIAL.md#52-windows-开发环境只保证本机进服)。
+**环境要求**：Debian 12 或 Ubuntu 22.04 / 24.04（只支持 apt 系列）；内存最低约 4 GiB，洞穴与中等 Mod 建议 6 GiB+（档位与预设见 [MEMORY.md](MEMORY.md)，安装器默认自动选档）；根分区至少 4 GiB 空闲；root 或 sudo。
 
-## 1. 选择部署模式
+> Windows 不受支持；本地开发见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
-| 对比项 | Docker | Native systemd |
-| --- | --- | --- |
-| 目标用户 | 社区、托管商 | 个人服主 |
-| 隔离 | 容器 | 专用 Linux 用户与 systemd unit |
-| 面板 | Docker Compose | `game-server-hub.service` |
-| SteamCMD | 容器 | `/opt/game-server-hub/runtime/steamcmd` |
-| 游戏进程 | Docker 容器 | systemd 用户服务 |
-| 日志 | Docker logs | journald |
-| 主机重启恢复 | Docker restart policy | systemd + linger |
-| 支持架构 | x86_64；ARM64 实验性 | x86_64 |
+---
 
-Native 不安装、不调用 Docker，不支持 tmux、screen 或 PM2。两种模式之间暂不自动迁移。
-
-## 2. 环境要求
-
-| 项目 | 要求 |
-| --- | --- |
-| 系统 | Ubuntu 22.04 / 24.04，Debian 12 |
-| 初始化系统 | systemd（Native 强制要求） |
-| 内存 | 最低约 4 GiB；洞穴与中等 Mod 推荐 6 GiB；8 GiB+ 更稳妥 |
-| 磁盘 | 根分区至少 4 GiB 空闲；游戏文件与存档另计 |
-| 权限 | root 或 sudo |
-| 网络 | HTTPS 出站；Docker 模式还需可访问所配置的镜像仓库 |
-
-安装器会检查发行版、架构、磁盘、端口与运行时连通性。只支持 apt 系列，不支持 CentOS/RHEL/Alpine。
-
-## 3. 一键安装
-
-安装器支持：
-
-```text
---mode auto|docker|native
---network auto|cn|global
---open-panel-port
---open-dst-ports
-```
-
-交互终端的 `--mode auto` 会在未安装 Docker 时询问；非交互管道默认选择 Docker。任何 Docker 失败都不会静默改为 Native，因此生产部署建议明确写模式。
-
-### 3.1 Docker
-
-> **中国大陆服务器请先读 [3.3 离线镜像包完整步骤](#离线镜像包完整步骤国内推荐先读这一节)，再回来执行下面的命令。** 安装器要从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名在国内基本不可达，直接执行几乎必然失败（`net/http: TLS handshake timeout`）。先用 `docker load` 导入离线包，安装器会自动跳过拉取。Native 模式不涉及容器镜像，无需此步。
+## 路线 A：海外机器（一个命令装完）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.5/scripts/install.linux.sh \
+curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.5/scripts/install.linux.sh" \
   | sudo bash -s -- --mode docker
 ```
 
-安装器会：
-
-1. 检测网络档位并准备 apt；
-2. 尝试 Docker 官方仓库，失败后回退发行版签名软件包；
-3. 获取并校验 Compose 文件；
-4. 生成 `panel.env`，拉取统一镜像（面板 + DST 运行库 + SteamCMD 三合一）；
-5. 启动 Compose 并等待 `/health`。
-
-### 3.2 Native systemd
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.5/scripts/install.linux.sh \
-  | sudo bash -s -- --mode native
+# 初始密码：安装器默认不打印，从 panel.env 读取（管理员名 superadmin，首登强制改密）
+sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' /opt/game-server-hub/panel.env
+
+# 健康检查：runtime.status 应为 running；或 gsh doctor 全面体检
+curl -fsS http://127.0.0.1:9527/health
+gsh doctor
 ```
 
-安装器会：
+浏览器访问 `http://<服务器IP>:9527`（默认端口，安装器结尾输出实际地址；安全组放行 TCP）。碰到任何报错 → [问题清单](#问题清单按报错关键词对照)。
 
-1. 安装 SteamCMD 所需的 i386 运行库；
-2. 创建无登录 shell 的 `gsh` 系统用户并启用 linger；
-3. 下载 Native Release 与 `.sha256`，校验摘要及归档路径；
-4. 安装到 `/opt/game-server-hub/releases/v0.2.0` 并原子切换 `current`；
-5. 安装 SteamCMD；
-6. 写入并启动 `game-server-hub.service`；
-7. 等待 `/health`，失败时切回先前 Release。
+---
 
-Native Release 内置 Node.js Linux x64 运行时，宿主机无需另装 Node.js 或 pnpm。
+## 路线 B：国内服务器（Debian 12 离线镜像包全程）
 
-### 3.3 国内网络档位
+> 安装器要从 GHCR 拉统一镜像，其镜像层域名国内基本不可达（症状：能见镜像清单、层下载 `TLS handshake timeout`，重试无用）。正确顺序：先导入离线镜像包，再跑安装器 —— 检测到本地镜像即跳过拉取。
+
+### 阶段一：Docker 引擎与 Compose 插件
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.5/scripts/install.linux.sh \
-  | sudo bash -s -- --mode native --network cn
-```
-
-`--network auto` 实测 GitHub Raw、Docker 仓库、GHCR 与国内镜像连通性；`cn` 会：
-
-- 备份 Ubuntu/Debian 软件源并临时使用清华镜像；
-- 软件源失败时恢复原配置；
-- 将 SteamCMD 区域设为 `cn`；
-- 将 SteamCMD 安装重试次数提高到 8。
-
-安装资源默认从 jsDelivr、GitHub 资源代理、GitHub Raw 依次回退。Compose 使用安装器内置 SHA256，不会为了校验再次访问 Raw。
-
-v0.2.0 起官方容器镜像仅发布 GHCR（`ghcr.io/pmat77/game-server-hub`），一次拉取即包含面板、DST 运行库与 SteamCMD。**中国大陆服务器请把下面第 1 条当作默认路径，而不是等报错后再回来查** —— GHCR 的镜像层域名在国内基本不可达，直连拉取的成功率可以忽略。按优先级：
-
-1. **离线镜像包**：从 GitHub Release 下载 `game-server-hub-<tag>-docker-image.tar.gz`（可用 GitHub 加速代理），`docker load` 导入后运行安装器（镜像已存在，跳过在线拉取）；
-2. **自选镜像代理**：在 `panel.env` 配置 `GSH_IMAGE_MIRRORS`（逗号分隔的 registry 主机名，面板按序回退拉取）；
-3. **PANEL_IMAGE 覆盖**：安装时设置 `PANEL_IMAGE=<你控制的镜像仓库引用>`。
-
-#### 离线镜像包完整步骤（国内推荐先读这一节）
-
-> **怎么用本节**：下面 1–4 步解释每一步的**原理与排错**；在全新机器上操作时，直接照抄文末的[端到端命令清单](#端到端命令清单国内--debian-12从零到面板运行)即可 —— 它从安装 Docker 引擎开始，额外覆盖 Debian 12 缺失 Compose v2 插件的修复与初始密码获取，两套内容一致、清单是唯一需要照抄的路径。
-
-安装器需要从 GHCR 拉取统一镜像，而 GHCR 的**镜像层域名** `pkg-containers.githubusercontent.com` 在国内基本不可达。典型症状是「能看见镜像列表、但下载层时超时」，重试多少次都一样：
-
-```text
-failed to copy: ... Get "https://pkg-containers.githubusercontent.com/ghcrblobs/...":
-net/http: TLS handshake timeout
-```
-
-所以国内 Docker 部署的正确顺序是：**先用每个 Release 附带的离线镜像包把镜像导进本机，再运行安装器**。
-
-**1. 下载镜像包与校验文件**（用安装器同款的 GitHub 加速代理）
-
-```bash
-tag=v0.3.5
-base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
-curl -fL --retry 3 -o gsh-image.tar.gz          "${base}/game-server-hub-${tag}-docker-image.tar.gz"
-curl -fL --retry 3 -o gsh-image.tar.gz.sha256   "${base}/game-server-hub-${tag}-docker-image.tar.gz.sha256"
-```
-
-> `gh-proxy.com` 不可用时换成 `https://ghfast.top/` 前缀（两者都在安装器的代理清单里）。
-
-**2. 校验**
-
-`.sha256` 内记录的是**原始文件名**。本地另存成别的名字会报 `No such file or directory`，改名或手工比对即可：
-
-```bash
-mv gsh-image.tar.gz "game-server-hub-${tag}-docker-image.tar.gz"
-sha256sum -c gsh-image.tar.gz.sha256      # 期望输出：...: OK
-```
-
-**3. 导入镜像**
-
-```bash
-docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
-docker images | grep game-server-hub
-```
-
-> 用 `docker load -i` 而不要用 `gunzip -c ... | docker load`：管道方式没有进度输出，大文件会看起来像卡住（实际在解压）。离线包约 420 MB，导入后镜像约 3.2 GB，请预留 4 GB 以上磁盘。
-
-**4. 运行安装器**
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh" \
-  | sudo bash -s -- --mode docker
-```
-
-镜像已在本地，安装器会**跳过拉取**（日志打印 `Runtime image already present locally, skipping pull`）。确实需要强制重新拉取时，加 `GSH_FORCE_IMAGE_PULL=1`。
-
-#### 端到端命令清单（国内 + Debian 12，从零到面板运行）
-
-把上述步骤与 Compose 插件修复串成一份可照抄的速查清单，适用于「全新 Debian 12 机器 + 国内网络 + 离线镜像包」。其他发行版把 apt 相关步骤替换为对应包管理即可。
-
-**阶段一：Docker 引擎与 Compose 插件**
-
-```bash
-# 下载安装器（gh-proxy 加速 raw.githubusercontent.com，国内直连不通）
+# 下载安装器（gh-proxy 加速；不可用时换 https://ghfast.top/ 前缀）
 tag=v0.3.5   # 与目标 Release 一致，后续发布流程会同步替换
 wget "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
 
-# 第一次运行安装器：自动 apt 安装 Docker Engine + containerd（Debian 官方源）。
+# 第一次运行安装器：自动 apt 安装 Docker Engine + containerd。
 # Debian 12 的 docker.io 不含 Compose v2 插件，预期结尾报
-# 「Docker Compose v2 plugin is required but unavailable」——正常，按下一步手动补装
-sudo bash install.linux.sh --mode docker
+# 「Docker Compose v2 plugin is required but unavailable」——正常，先去装插件；
+# 这条命令在阶段三还会原样重跑一次
+sudo GSH_PANEL_ENV_PRESET=small bash install.linux.sh --mode docker
 
-# 手动安装 Compose v2 CLI 插件（gh-proxy 加速 GitHub Release）
+# 手动安装 Compose v2 CLI 插件（Debian 官方源没有这个包）
 sudo mkdir -p /usr/local/lib/docker/cli-plugins
-sudo curl -fL --retry 3 \
-  "https://gh-proxy.com/https://github.com/docker/compose/releases/download/v2.39.2/docker-compose-linux-x86_64" \
-  -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo curl -fL --retry 3 "https://gh-proxy.com/https://github.com/docker/compose/releases/download/v2.39.2/docker-compose-linux-x86_64" -o /usr/local/lib/docker/cli-plugins/docker-compose
 sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-# 验证插件被 docker 识别（期望输出：Docker Compose version v2.39.2）
+# 验证插件（期望输出：Docker Compose version v2.39.2）
 docker compose version
 ```
 
-> 不要 `apt install docker-compose`：那是 v1 独立命令，安装器全程使用 v2 的 `docker compose` 子命令，二者不通用。
+> 不要 `apt install docker-compose`：那是 v1 命令，安装器用的是 v2 的 `docker compose` 子命令，不通用。
 
-**阶段二：导入离线镜像包**
+### 阶段二：导入离线镜像包
 
 ```bash
 tag=v0.3.5
 base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
 
-# 下载镜像包与校验文件（420 MB，gh-proxy 加速）
+# 下载镜像包与校验文件（420 MB）
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz"        "${base}/game-server-hub-${tag}-docker-image.tar.gz"
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz.sha256" "${base}/game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
-# 校验完整性（期望输出末尾 OK，防止大文件下载中断损坏）
+# 校验完整性（期望输出末尾 OK）。.sha256 记录原始文件名，改过名需先改回
 sha256sum -c "game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
-# 导入镜像（420 MB 解压为约 3.2 GB，预留 4 GB 以上磁盘；-i 带进度条）
+# 导入镜像（解压约 3.2 GB，预留 4 GB 磁盘；-i 带进度条，不要用 gunzip 管道；
+# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.3.5 即成功）
 docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
-
-# 确认镜像存在（应看到 ghcr.io/pmat77/game-server-hub，tag 与版本一致）
-docker images | grep game-server-hub
 ```
 
-**阶段三：重跑安装器完成部署**
+### 阶段三：重跑安装器完成部署
+
+原样重跑[阶段一](#阶段一docker-引擎与-compose-插件)那条安装命令 —— 这次镜像已在本地，日志出现 `Runtime image already present locally, skipping pull` 后一路走完，结尾输出面板地址。
 
 ```bash
-# 镜像已在本地，安装器跳过 GHCR 拉取（日志出现
-# "Runtime image already present locally, skipping pull" 即正确）。
-# 内存预设默认 auto 按总内存自动选档；4 GiB 机器可显式指定 small（见 docs/MEMORY.md）
-sudo GSH_PANEL_ENV_PRESET=small bash install.linux.sh --mode docker
-
-# 验证面板容器 Up、日志无循环重启
-docker ps
-docker logs --tail 50 game-server-hub-panel
+docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问题清单
 ```
 
-**阶段四：访问面板**
+### 阶段四：访问面板
 
-```bash
-# 查看面板端口（安装器写入 panel.env，默认见安装器输出）
-grep PANEL_PORT /opt/game-server-hub/panel.env
+安装器结尾输出的 `Panel URL` 是内网地址，本地访问改用公网 IP 并放行面板端口。初始密码获取见[登录与安全](#登录与安全)。
 
-# 本机防火墙放行（云服务器同时在控制台安全组放行同端口）
-sudo ufw allow 9527/tcp   # 未启用 ufw 可跳过
-```
+浏览器 `http://<服务器公网IP>:<PANEL_PORT>` 登录，首登强制改密。若之后「检查更新」超时，panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
 
-安装器结尾输出的 `Panel URL` 是服务器**内网地址**，从本地访问请改用公网 IP 并在安全组放行面板端口。管理员名默认 `superadmin`，**初始密码默认不打印**，从 panel.env 读取（详见[登录与安全](#5-登录与安全)）：
+---
 
-```bash
-sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
-  /opt/game-server-hub/panel.env
-```
+## 装好之后
 
-浏览器访问 `http://<服务器公网IP>:<PANEL_PORT>`，用 `superadmin` 与初始密码登录，首次登录会强制改密，**监控台会显示内存档位**。若后续「检查更新」超时（国内直连 api.github.com 不通），在 panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
-
-**相关 FAQ**：[`Docker Compose v2 plugin is required but unavailable`](#docker-compose-v2-plugin-is-required-but-unavailable)、[`Cannot reach GHCR` / `Image pull failed`](#cannot-reach-ghcr--image-pull-failed)、[`download.docker.com` 不可达](#downloaddockercom-不可达)、[`checksum mismatch`](#checksum-mismatch)、[SteamCMD 下载慢或失败](#steamcmd-下载慢或失败)。
-
-### 3.4 本地安装
-
-```bash
-git clone --branch v0.3.5 --depth 1 https://github.com/PMAT77/game-serve-hub.git
-cd game-server-hub
-sudo bash ./scripts/install.linux.sh --mode native --network auto
-```
-
-离线或内网安装 Native Release 时可指定本地包。旁边必须有同名 `.sha256`，或显式提供摘要：
-
-```bash
-sudo \
-  GSH_RELEASE_TAG=v0.2.0 \
-  GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.2.0-linux-x64.tar.gz \
-  bash ./scripts/install.linux.sh --mode native
-```
-
-## 4. 安装后的文件与服务
-
-### Docker
-
-```text
-/opt/game-server-hub/
-  panel.env
-  docker-compose.yml
-  docker-compose.bind.yml
-/var/lib/game-server-hub/
-  game-server-hub.sqlite
-  instances/
-  backups/
-/var/log/game-server-hub/
-  install.status
-  install.diagnostics.log
-```
-
-### Native
-
-```text
-/opt/game-server-hub/
-  panel.env
-  current -> releases/<version>
-  releases/<version>/
-  runtime/steamcmd/
-/var/lib/game-server-hub/
-  game-server-hub.sqlite
-  instances/
-  backups/
-  runtime/
-/var/lib/game-server-hub/home/.config/systemd/user/
-  gsh-instance-<id>-master.service
-  gsh-instance-<id>-caves.service
-```
-
-面板是系统服务；游戏实例是 `gsh` 的用户服务。这样面板可以保持受限的 `/opt` 只读权限，同时管理自己的游戏 unit。
-
-## 5. 登录与安全
-
-安装器默认使用管理员名 `superadmin`，并生成随机密码写入权限受限的 `panel.env`。摘要默认不显示密码：
-
-```bash
-sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
-  /opt/game-server-hub/panel.env
-```
-
-也可以在首次安装时显式设置：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.5/scripts/install.linux.sh \
-  | sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='替换为强密码' \
-      bash -s -- --mode native
-```
-
-首次登录会强制改密。不要把 `panel.env`、诊断之外的面板日志或授权文件发到公开 Issue。
-
-## 6. 端口与防火墙
+### 端口与防火墙
 
 | 用途 | 协议 | 默认端口 |
 | --- | --- | --- |
@@ -320,202 +102,94 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.5/script
 | Steam 认证 | UDP | `8766` |
 | DST 主服务器 | UDP | `12346` |
 
-安装器默认不修改防火墙。需要时添加：
+安装器默认不改防火墙；需要时加 `--open-panel-port` / `--open-dst-ports`，云服务器安全组单独放行。
+
+### 常用命令
 
 ```bash
-sudo bash ./scripts/install.linux.sh \
-  --mode native \
-  --open-panel-port \
-  --open-dst-ports
-```
-
-云服务器安全组仍需单独放行。
-
-## 7. 验证和常用命令
-
-### 通用健康检查
-
-```bash
+# 健康检查（runtime.status 应为 running）
 curl -fsS http://127.0.0.1:9527/health
-```
 
-返回中的 `runtime.mode` 应为 `docker` 或 `native`，`runtime.status` 应为 `running`。
-
-### Docker
-
-```bash
+# 面板容器：状态 / 日志 / 重启
 cd /opt/game-server-hub
-sudo docker compose --env-file panel.env \
-  -f docker-compose.yml -f docker-compose.bind.yml ps
+sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml ps
 sudo docker logs -f game-server-hub-panel
-sudo docker compose --env-file panel.env \
-  -f docker-compose.yml -f docker-compose.bind.yml restart panel
+sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml restart panel
 ```
 
-### Native
+### 镜像运行层说明
+
+统一镜像的运行层只包含面板产物（前端 dist + 服务端 bundle + 数据库迁移），**不带 node_modules，也没有 pnpm / npm / tsx**：服务端依赖已在构建期全部打进 bundle，因此不要 `docker exec` 进容器执行包管理或 Node 工具链命令（会提示命令不存在）。排障走 `docker logs`、面板 API 与宿主机 `gsh` CLI。
+
+### 登录与安全
+
+管理员名默认 `superadmin`，初始密码默认不打印，从 panel.env 读取：
 
 ```bash
-sudo systemctl status game-server-hub.service --no-pager
-sudo journalctl -u game-server-hub.service -f
-
-GSH_UID="$(id -u gsh)"
-sudo -u gsh \
-  XDG_RUNTIME_DIR="/run/user/${GSH_UID}" \
-  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${GSH_UID}/bus" \
-  systemctl --user list-units 'gsh-instance-*'
+sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' /opt/game-server-hub/panel.env
 ```
 
-游戏日志进入对应 user unit 的 journald。面板控制台也会通过同一日志源持续推送。
+也可安装时显式指定：`sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='强密码' bash install.linux.sh --mode docker`。不要把 `panel.env` 或授权文件发到公开 Issue。
 
-## 8. 配置可信镜像或代理
+### 升级（面板内一键更新）
 
-Docker 模式若无法访问 GHCR，首选[离线镜像包](#离线镜像包完整步骤国内推荐先读这一节)；若你已自建仓库（可先 `docker load` 离线包、再 `docker tag`/`push` 到内网仓库），用法如下：
+「系统设置 → 面板与游戏版本」→「应用更新」：检查本地镜像 → 下载镜像（本地已有则跳过）→ 写入 panel.env → 重建面板容器。
 
-```bash
-sudo docker login registry.example.com
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.5/scripts/install.linux.sh \
-  | sudo env \
-      PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.5 \
-      bash -s -- --mode docker --network cn
-```
+国内先 `docker load` 离线镜像包（命令同[阶段二](#阶段二导入离线镜像包)）再点「应用更新」，秒级完成。按钮置灰时用面板给出的 `sudo gsh update`。
 
-统一镜像引用应与 Release tag 一致，并按 Release 的 `release-images.json` 核对 digest。不要使用无法说明来源的公共镜像。
+> 只按 `docker compose pull && up -d` 升级不会更新 compose 文件；一键更新长期不可用时，重跑一次安装脚本补齐（路线 B 阶段三）。
 
-SteamCMD 支持在 `panel.env` 中设置：
+### 备份与恢复（v0.2.0 起）
 
-```bash
-GSH_STEAMCMD_DOWNLOAD_REGION=cn
-GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8
-GSH_STEAMCMD_HTTP_PROXY=http://proxy.example.com:7890
-GSH_STEAMCMD_HTTPS_PROXY=http://proxy.example.com:7890
-```
+面板「备份与恢复」页：实例存档备份/恢复（运行中自动 `c_save()`，恢复要求实例停止），更新与删实例前自动备份；每实例保留 10 份、SQLite 快照 5 份；备份包可直接下载，落在 `/var/lib/game-server-hub/backups/`。重要服自行异地留存。
 
-修改后重启面板。
+---
 
-## 9. 原地升级与回滚
+## 问题清单（按报错关键词对照）
 
-### 面板内一键更新
+按安装时序排列，Ctrl+F 搜报错关键词。
 
-面板「系统设置 → 面板与游戏版本」里的「应用更新」需要同时满足三个条件：
+### `download.docker.com` 不可达（装 Docker 时）
 
-- 使用 Docker 部署。Native（systemd）安装没有容器镜像可换，需在服务器终端重跑安装脚本；
-- `panel.env` 中的 `GSH_STACK_DIR` 是安装目录的**绝对路径**（安装脚本默认写为 `/opt/game-server-hub`）；
-- compose 叠加了 `docker-compose.bind.yml`，使面板容器能通过 `/stack` 读到 `panel.env` 与 compose 文件。
+安装器会尝试发行版自带的 Docker/Compose 包。若仍失败，使用 `--network cn`，检查 apt 源签名、系统时间和 HTTPS 出站。
 
-面板内更新会把 Release 对应版本的镜像准备到本地（**本地已有该镜像时完全跳过下载**），再把目标镜像写进 `panel.env` 并重建面板容器。整个过程在区块内显示阶段：检查本地镜像 → 下载镜像 → 重建面板；面板重启期间页面会提示正在重启，恢复后自动继续。
+### `Docker Compose v2 plugin is required but unavailable`（装 Docker 时）
 
-国内服务器的主要瓶颈就是从 GHCR 下载镜像。推荐顺序：
+仅 Debian 12 需要：其官方源的 `docker.io` 不含 Compose v2 插件（`docker-compose-v2` 与 `docker-compose-plugin` 包都不存在）。手动安装插件后重跑安装器（命令见[路线 B 阶段一](#阶段一docker-引擎与-compose-插件)）。Debian 13+ 官方源已含 Compose v2（`docker-compose` 包，版本 2.x），安装器会自动装上，无需手动操作。
 
-1. 先下载离线镜像包（Release 附件）并导入：
+### `Cannot reach GHCR` / `Image pull failed`（拉镜像时）
 
-   ```bash
-   wget https://github.com/PMAT77/game-serve-hub/releases/download/<tag>/game-server-hub-<tag>-docker-image.tar.gz
-   wget https://github.com/PMAT77/game-serve-hub/releases/download/<tag>/game-server-hub-<tag>-docker-image.tar.gz.sha256
-   sha256sum -c game-server-hub-<tag>-docker-image.tar.gz.sha256
-   gunzip -c game-server-hub-<tag>-docker-image.tar.gz | docker load
-   ```
+国内服务器直接用[路线 B](#路线-b国内服务器debian-12-离线镜像包全程)。定位：`curl -I https://ghcr.io/v2/`（HTTP 401 属正常）；「清单能取到、层下载超时」是网络不可达而非鉴权失败，换代理或重试都不会成功。
 
-2. 回到面板点「应用更新」：检测到本地已有目标镜像后直接重建，秒级完成，不再产生任何下载。
+### `checksum mismatch`（校验离线包时）
 
-任一条件不满足时按钮置灰，面板只说明「当前部署方式不支持面板内自动更新」并给出一条可复制的手动更新命令：
+下载内容与 Release 不一致。清理代理/CDN 缓存，确认 `GSH_RELEASE_TAG` 与资源 URL 是同一版本，或改用本地 Release 包和官方 `.sha256`。
 
-```bash
-sudo gsh update
-```
+### 面板服务不断重启（部署后）
 
-注意：**只按面板给出（或历史文档里）那条 `docker compose pull && up -d` 升级，不会更新宿主机上的 compose 文件**。如果一键更新一直不可用，说明 compose 文件或 `/stack` 挂载停留在旧版本，在服务器终端重跑一次安装脚本即可补齐并恢复（脚本默认 `auto`，有 Docker 的机器会自动判定为 Docker 模式）：
+`docker logs --tail 100 game-server-hub-panel` 定位；常见为端口占用、panel.env 缺键或数据库权限，修正后 `docker compose up -d panel`。
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/<版本 tag>/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=<版本 tag> bash -s
-```
+### 忘记初始密码（登录时）
 
-### 安装脚本原地升级
+按[登录与安全](#登录与安全)提取 `ADMIN_PASSWORD`；已改密遗忘则用 `GSH_PASSWORD_RECOVERY_TOKEN`（安装时写入 panel.env）走面板找回，或重跑安装器并显式传 `ADMIN_PASSWORD`。
 
-同模式重跑新版安装脚本即原地升级：
+### SteamCMD 下载慢或失败（装游戏时）
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.1.5/scripts/install.linux.sh \
-  | sudo env GSH_RELEASE_TAG=v0.1.5 bash -s -- --mode native
-```
+`panel.env` 设 `GSH_STEAMCMD_DOWNLOAD_REGION=cn` 与 `GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8` 后重启面板重试；安装前停掉运行中的实例（4 GiB 机器 SteamCMD 峰值 +1–1.5 GiB）。
 
-升级会：
+### DST 启动后立即退出（开服时）
 
-- 保留 SQLite、`instances/`、`backups/`、管理员账号和自定义 `panel.env`；
-- 先用 SQLite 在线备份保存一致性数据库快照，并备份 `panel.env` 与 Compose 文件；
-- Docker 仅更新 Release/镜像键并重建面板栈，不删除数据卷；
-- Native 解压到新目录后切换 `current`，健康检查失败则恢复旧链接、配置和数据库；
-- 拒绝自动跨 Docker/Native 模式迁移。
+看实例日志；常见为 token 失效、Mod 下载不全、内存不足（exit 137 多为 OOM）。详见 [DST_TUTORIAL.md](DST_TUTORIAL.md)。
 
-Native 手动回滚：
+### 玩家看不到或连不上服务器（开服时）
 
-```bash
-sudo systemctl stop game-server-hub.service
-sudo ln -sfn /opt/game-server-hub/releases/v0.2.0 /opt/game-server-hub/current.rollback
-sudo mv -Tf /opt/game-server-hub/current.rollback /opt/game-server-hub/current
-sudo systemctl start game-server-hub.service
-```
+放行 UDP `10999`/`8766`/`12346`；确认房间未勾选「离线」模式；集群配置见 [DST_TUTORIAL.md](DST_TUTORIAL.md)。
 
-Docker 回滚时，把 `/opt/game-server-hub/panel.env` 中镜像键（PANEL_IMAGE 与两个 GSH_*_IMAGE）改回同一旧版本 tag，再执行 `docker compose pull && docker compose up -d`。不要执行带 `-v` 的 `docker compose down`。
+### `Native Release ... missing`（Native 安装时）
 
-### 面板内备份与恢复（v0.2.0 起）
+Release 未发布 `game-server-hub-native-<tag>-linux-x64.tar.gz` 及 `.sha256`。换已发布版本，或 `GSH_NATIVE_RELEASE_ARCHIVE` 指定本地包（见[附录 A](#附录-a-native-systemd-部署个人服主)）。
 
-日常备份不再需要 SSH。面板「备份与恢复」页提供：
-
-- **存档备份**：对单个实例的 `klei-storage`（世界数据、房间配置、集群令牌）打 tar.gz。实例运行中会先发送 `c_save()` 保存世界再打包；恢复前会自动创建一份安全备份。恢复要求实例已停止，恢复后可启动实例验证世界状态。
-- **自动备份钩子**：更新服务端前、删除实例前自动创建备份（系统级开关，默认开启）。
-- **保留策略**：每实例默认保留最近 10 份存档备份，超出自动淘汰最旧。
-- **数据库快照**：面板 SQLite 的 `VACUUM INTO` 一致性快照，默认保留 5 份；升级前的数据库备份仍由安装脚本完成。
-- **下载**：备份包可从面板直接下载到本地异地留存。
-
-备份文件落在 `/var/lib/game-server-hub/backups/`（Docker 卷 `gsh-backups`）。面板内备份不覆盖异地容灾：重要服建议配合定时下载或自行 rsync。
-
-## 10. 诊断文件
-
-安装器按阶段写入：
-
-```bash
-sudo cat /var/log/game-server-hub/install.status
-sudo cat /var/log/game-server-hub/install.diagnostics.log
-```
-
-诊断报告权限为 `600`，包含系统资源、服务或 Compose 状态，不包含管理员密码、Registry 凭据和面板业务日志。反馈安装问题时请同时附上失败阶段和诊断文件的脱敏内容。
-
-## FAQ：按错误关键词排查
-
-### `Cannot reach GHCR` / `Image pull failed`
-
-仅影响 Docker。**国内服务器请直接用[离线镜像包](#离线镜像包完整步骤国内推荐先读这一节)**，这是成功率最高的路径，不必先花时间区分是 DNS、代理还是鉴权问题。
-
-若仍要定位：`curl -I https://ghcr.io/v2/` 探测连通性，`sudo docker pull <完整镜像>` 复现拉取。注意「清单能取到、层下载超时」（`pkg-containers.githubusercontent.com` / `TLS handshake timeout`）属于网络不可达而非鉴权失败，换代理或重试都不会成功。备选路径是配置可信镜像副本，或按使用场景改为显式 `--mode native`。
-
-### `download.docker.com` 不可达
-
-安装器会尝试发行版自带的 Docker/Compose 包。若仍失败，使用 `--network cn`，检查 apt 源签名、系统时间和 HTTPS 出站。安装器不会悄悄切换运行模式。
-
-### `Docker Compose v2 plugin is required but unavailable`
-
-Debian 12 官方源的 `docker.io` **不包含** Compose v2 插件（`docker-compose-v2` 与 `docker-compose-plugin` 包都不存在），Docker 官方 apt 源不可达时安装器会在 dependencies 阶段报此错。手动安装插件后重跑安装器：
-
-```bash
-mkdir -p /usr/local/lib/docker/cli-plugins
-curl -fL --retry 3 \
-  "https://gh-proxy.com/https://github.com/docker/compose/releases/download/v2.39.2/docker-compose-linux-x86_64" \
-  -o /usr/local/lib/docker/cli-plugins/docker-compose
-chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-docker compose version   # 期望输出：Docker Compose version v2.39.2
-```
-
-> gh-proxy.com 不可用时换 `https://ghfast.top/` 前缀。不要 `apt install docker-compose` —— 那是 v1 独立命令，安装器全程使用 v2 的 `docker compose` 子命令，二者不通用。
-
-### `checksum mismatch`
-
-下载内容与指定 Release 不一致。不要关闭校验；清理代理/CDN 缓存，确认脚本的 `GSH_RELEASE_TAG` 与资源 URL 是同一版本，或改用本地 Release 包和官方 `.sha256`。
-
-### `Native Release ... missing`
-
-对应 GitHub Release 尚未发布 `game-server-hub-native-<tag>-linux-x64.tar.gz` 及 `.sha256`。换用已发布版本，或通过 `GSH_NATIVE_RELEASE_ARCHIVE` 指定本地包。
-
-### `systemd user manager` / `Failed to connect to bus`
+### `systemd user manager` / `Failed to connect to bus`（Native 运行时）
 
 ```bash
 sudo loginctl enable-linger gsh
@@ -525,41 +199,64 @@ sudo systemctl restart game-server-hub.service
 sudo loginctl show-user gsh -p Linger
 ```
 
-不要用 tmux、screen 或 PM2 绕过该错误；这会破坏日志、自恢复和资源限制语义。
+不要用 tmux、screen 或 PM2 绕过；会破坏日志、自恢复和资源限制语义。
 
-### 面板服务不断重启
+### `cross-mode migration is not supported`（重装时）
 
-Docker：
+Docker 与 Native 之间不自动迁移。保留数据目录后按目标模式重装，再手工迁移 `/var/lib/game-server-hub` 下的数据。
+
+---
+
+## 附录 A Native systemd 部署（个人服主）
+
+不安装、不调用 Docker；游戏进程为 systemd 用户服务，日志进 journald。只支持 x86_64，与 Docker 模式不互相迁移。
 
 ```bash
-sudo docker logs --tail 200 game-server-hub-panel
+# 安装
+git clone --branch v0.3.5 --depth 1 https://github.com/PMAT77/game-serve-hub.git
+cd game-server-hub
+sudo bash ./scripts/install.linux.sh --mode native --network auto
+
+# 离线安装：指定本地 Native Release 包（旁须有同名 .sha256）
+sudo GSH_RELEASE_TAG=v0.3.5 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.3.5-linux-x64.tar.gz \
+  bash ./scripts/install.linux.sh --mode native
 ```
 
-Native：
-
 ```bash
+# 常用命令与回滚
 sudo systemctl status game-server-hub.service --no-pager
-sudo journalctl -u game-server-hub.service -n 200 --no-pager
+sudo journalctl -u game-server-hub.service -f
+GSH_UID="$(id -u gsh)"
+sudo -u gsh XDG_RUNTIME_DIR="/run/user/${GSH_UID}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${GSH_UID}/bus" \
+  systemctl --user list-units 'gsh-instance-*'
+
+# 回滚到旧版本
+sudo systemctl stop game-server-hub.service
+sudo ln -sfn /opt/game-server-hub/releases/v0.2.0 /opt/game-server-hub/current.rollback
+sudo mv -Tf /opt/game-server-hub/current.rollback /opt/game-server-hub/current
+sudo systemctl start game-server-hub.service
 ```
 
-重点检查 `panel.env` 路径、端口占用、SQLite 权限和 systemd user bus。
+## 附录 B 安装器参数与自建仓库
 
-### SteamCMD 下载慢或失败
+```text
+--mode auto|docker|native      交互终端 auto 在未装 Docker 时询问；非交互管道默认 Docker。
+                               任何 Docker 失败都不会静默改为 Native，生产建议显式写模式
+--network auto|cn|global       网络档位（影响镜像源与代理选择）
+--open-panel-port              自动放行面板端口
+--open-dst-ports               自动放行 DST 端口
+GSH_FORCE_IMAGE_PULL=1         强制重新拉取镜像（默认本地已有即跳过）
+GSH_PANEL_ENV_PRESET=auto      内存预设档位：auto|small|medium|large
+```
 
-启用 `--network cn`，设置下载区域和重试；必要时配置 `HTTP_PROXY`/`HTTPS_PROXY`。检查磁盘、i386 依赖（Native）和镜像仓库（Docker）。
+自建仓库（先 `docker load` 离线包，再 `docker tag`/`push` 到内网）：
 
-### DST 启动后立即退出
+```bash
+sudo docker login registry.example.com
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.5/scripts/install.linux.sh \
+  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.5 bash -s -- --mode docker --network cn
+```
 
-查看对应实例日志，确认安装完整、Cluster Token、端口、Mod 配置和内存。洞穴分片会增加内存占用，低于 6 GiB 的机器建议先关闭洞穴和大量 Mod。
+镜像引用与 Release tag 一致，按 Release 的 `release-images.json` 核对 digest。
 
-### 玩家看不到或连不上服务器
-
-同时检查 UDP 端口、本机防火墙、云安全组、NAT 和 Cluster Token。面板 TCP 端口开放不代表 DST UDP 已开放。
-
-### 重跑脚本提示 `cross-mode migration is not supported`
-
-检测到现有模式与请求模式不同。当前版本不会自动转换运行中的游戏实例。先备份 `/var/lib/game-server-hub` 和 `panel.env`，再按后续迁移文档操作。
-
-### 忘记初始密码
-
-尚未改密时可从 root 可读的 `/opt/game-server-hub/panel.env` 查看。已经在面板内改密后，以数据库中的凭据为准；不要通过反复重跑安装器覆盖认证状态。
+SteamCMD 可在 `panel.env` 设置（改后重启面板）：`GSH_STEAMCMD_DOWNLOAD_REGION=cn`、`GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8`、`GSH_STEAMCMD_HTTP_PROXY` / `GSH_STEAMCMD_HTTPS_PROXY`。

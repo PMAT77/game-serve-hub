@@ -38,7 +38,7 @@
 
 ### Docker 模式
 
-> **中国大陆服务器请先做这一步。** Docker 模式的安装器必须从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名 `pkg-containers.githubusercontent.com` 在国内基本不可达 —— 直接执行下面的命令几乎必然卡在 `net/http: TLS handshake timeout`，重试无效。正确顺序是：先按[离线镜像包完整步骤](docs/INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)下载离线包并 `docker load` 导入，再执行下面的命令；镜像已在本地，安装器会自动跳过拉取。
+> **中国大陆服务器请先做这一步。** Docker 模式的安装器必须从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名 `pkg-containers.githubusercontent.com` 在国内基本不可达 —— 直接执行下面的命令几乎必然卡在 `net/http: TLS handshake timeout`，重试无效。正确顺序是：先按[离线镜像包完整步骤](docs/INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)下载离线包并 `docker load` 导入，再执行下面的命令；镜像已在本地，安装器会自动跳过拉取。
 >
 > Native 模式不拉取任何容器镜像，不需要这一步。
 
@@ -74,7 +74,7 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
 
 首次登录必须修改密码。
 
-> **国内网络**：若你跳过了上面的离线镜像包步骤、结果卡在镜像下载（`TLS handshake timeout`），那正是 GHCR 镜像层域名不可达 —— `docker load` 导入 Release 离线镜像包后重跑安装器即可，步骤见[安装与运维指南 · 离线镜像包完整步骤](docs/INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
+> **国内网络**：若你跳过了上面的离线镜像包步骤、结果卡在镜像下载（`TLS handshake timeout`），那正是 GHCR 镜像层域名不可达 —— `docker load` 导入 Release 离线镜像包后重跑安装器即可，步骤见[安装与运维指南 · 离线镜像包完整步骤](docs/INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)。
 
 镜像分发与代理、端口、升级、回滚和完整排错说明见 [安装与运维指南](docs/INSTALL.md)。
 
@@ -98,7 +98,7 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
 
 这是 Docker 模式在国内最常见的失败点。典型症状是**能列出镜像清单、但下载层时超时**（`pkg-containers.githubusercontent.com` 不可达，报 `net/http: TLS handshake timeout`）—— 这是网络不可达，不是鉴权问题，换代理或反复重试都不会成功。
 
-**首选方案是离线镜像包**：每个 Release 都附带 `game-server-hub-<tag>-docker-image.tar.gz`。下载 → `sha256sum -c` 校验 → `docker load -i` 导入 → 再跑安装器（检测到本地已有镜像会跳过拉取）。完整命令见[离线镜像包完整步骤](docs/INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
+**首选方案是离线镜像包**：每个 Release 都附带 `game-server-hub-<tag>-docker-image.tar.gz`。下载 → `sha256sum -c` 校验 → `docker load -i` 导入 → 再跑安装器（检测到本地已有镜像会跳过拉取）。完整命令见[离线镜像包完整步骤](docs/INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)。
 
 其他备选路径：配置 HTTPS 代理；或把 `PANEL_IMAGE`、`GSH_GAME_DST_IMAGE`、`GSH_STEAMCMD_IMAGE` 指向你控制的可信仓库，并按 Release 的 `release-images.json` 核对 digest；或改用 `--mode native`。Native 模式不拉取任何容器镜像。
 
@@ -124,7 +124,7 @@ sudo loginctl show-user gsh -p Linger
 
 不会。同模式重跑被视为原地升级：保留数据库、实例、备份、账号和自定义配置，备份 `panel.env` 后只更新版本相关键。Docker 与 Native 之间不自动迁移。
 
-更多按错误关键词整理的处理方法见 [INSTALL.md 的 FAQ](docs/INSTALL.md#faq按错误关键词排查)。
+更多按错误关键词整理的处理方法见 [INSTALL.md 的 FAQ](docs/INSTALL.md#问题清单按报错关键词对照)。
 
 ## 交流与反馈
 

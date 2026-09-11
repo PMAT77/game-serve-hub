@@ -68,7 +68,7 @@ SSH 登录服务器后，按部署模式选择一条命令执行。
 
 **Docker 模式**（推荐托管与社区使用）：
 
-> 中国大陆服务器请**先导入离线镜像包，再跑这条命令**。安装器要从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名在国内基本不可达，直接跑几乎必然失败（`TLS handshake timeout`）。离线包步骤见 [INSTALL.md · 离线镜像包完整步骤](INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
+> 中国大陆服务器请**先导入离线镜像包，再跑这条命令**。安装器要从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名在国内基本不可达，直接跑几乎必然失败（`TLS handshake timeout`）。离线包步骤见 [INSTALL.md · 离线镜像包完整步骤](INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.5/scripts/install.linux.sh \
@@ -514,7 +514,7 @@ DST 出新版本后：
 
 ### 面板打不开
 
-curl -fsS http://127.0.0.1:9527/health 在服务器本机执行：本机通而外网不通 → 安全组没放行 9527/tcp；本机也不通 → 按关键词查 [INSTALL.md 的 FAQ](INSTALL.md#faq按错误关键词排查)。
+curl -fsS http://127.0.0.1:9527/health 在服务器本机执行：本机通而外网不通 → 安全组没放行 9527/tcp；本机也不通 → 按关键词查 [INSTALL.md 的 FAQ](INSTALL.md#问题清单按报错关键词对照)。
 
 ### 镜像拉取失败（Docker 模式）
 

@@ -105,6 +105,8 @@ v0.2.0 起官方容器镜像仅发布 GHCR（`ghcr.io/pmat77/game-server-hub`）
 
 #### 离线镜像包完整步骤（国内推荐先读这一节）
 
+> **怎么用本节**：下面 1–4 步解释每一步的**原理与排错**；在全新机器上操作时，直接照抄文末的[端到端命令清单](#端到端命令清单国内--debian-12从零到面板运行)即可 —— 它从安装 Docker 引擎开始，额外覆盖 Debian 12 缺失 Compose v2 插件的修复与初始密码获取，两套内容一致、清单是唯一需要照抄的路径。
+
 安装器需要从 GHCR 拉取统一镜像，而 GHCR 的**镜像层域名** `pkg-containers.githubusercontent.com` 在国内基本不可达。典型症状是「能看见镜像列表、但下载层时超时」，重试多少次都一样：
 
 ```text
@@ -224,7 +226,14 @@ grep PANEL_PORT /opt/game-server-hub/panel.env
 sudo ufw allow 9527/tcp   # 未启用 ufw 可跳过
 ```
 
-浏览器访问 `http://<服务器IP>:<PANEL_PORT>` 初始化管理员账号（初始密码见安装器输出或 panel.env 的 `ADMIN_PASSWORD`）。登录后**监控台会显示内存档位**；若后续「检查更新」超时（国内直连 api.github.com 不通），在 panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
+安装器结尾输出的 `Panel URL` 是服务器**内网地址**，从本地访问请改用公网 IP 并在安全组放行面板端口。管理员名默认 `superadmin`，**初始密码默认不打印**，从 panel.env 读取（详见[登录与安全](#5-登录与安全)）：
+
+```bash
+sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
+  /opt/game-server-hub/panel.env
+```
+
+浏览器访问 `http://<服务器公网IP>:<PANEL_PORT>`，用 `superadmin` 与初始密码登录，首次登录会强制改密，**监控台会显示内存档位**。若后续「检查更新」超时（国内直连 api.github.com 不通），在 panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
 
 **相关 FAQ**：[`Docker Compose v2 plugin is required but unavailable`](#docker-compose-v2-plugin-is-required-but-unavailable)、[`Cannot reach GHCR` / `Image pull failed`](#cannot-reach-ghcr--image-pull-failed)、[`download.docker.com` 不可达](#downloaddockercom-不可达)、[`checksum mismatch`](#checksum-mismatch)、[SteamCMD 下载慢或失败](#steamcmd-下载慢或失败)。
 

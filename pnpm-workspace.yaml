@@ -34,7 +34,7 @@ catalog:
   '@types/dockerode': ^3.3.47
   dayjs: ^1.11.23
   defu: ^6.1.7
-  dockerode: ^4.0.9
+  dockerode: ^5.0.1
   drizzle-kit: ^0.31.10
   drizzle-orm: ^0.45.2
   echarts: ^6.1.0

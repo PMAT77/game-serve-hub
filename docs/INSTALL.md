@@ -152,6 +152,82 @@ curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scrip
 
 镜像已在本地，安装器会**跳过拉取**（日志打印 `Runtime image already present locally, skipping pull`）。确实需要强制重新拉取时，加 `GSH_FORCE_IMAGE_PULL=1`。
 
+#### 端到端命令清单（国内 + Debian 12，从零到面板运行）
+
+把上述步骤与 Compose 插件修复串成一份可照抄的速查清单，适用于「全新 Debian 12 机器 + 国内网络 + 离线镜像包」。其他发行版把 apt 相关步骤替换为对应包管理即可。
+
+**阶段一：Docker 引擎与 Compose 插件**
+
+```bash
+# 下载安装器（gh-proxy 加速 raw.githubusercontent.com，国内直连不通）
+tag=v0.3.5   # 与目标 Release 一致，后续发布流程会同步替换
+wget "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
+
+# 第一次运行安装器：自动 apt 安装 Docker Engine + containerd（Debian 官方源）。
+# Debian 12 的 docker.io 不含 Compose v2 插件，预期结尾报
+# 「Docker Compose v2 plugin is required but unavailable」——正常，按下一步手动补装
+sudo bash install.linux.sh --mode docker
+
+# 手动安装 Compose v2 CLI 插件（gh-proxy 加速 GitHub Release）
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -fL --retry 3 \
+  "https://gh-proxy.com/https://github.com/docker/compose/releases/download/v2.39.2/docker-compose-linux-x86_64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# 验证插件被 docker 识别（期望输出：Docker Compose version v2.39.2）
+docker compose version
+```
+
+> 不要 `apt install docker-compose`：那是 v1 独立命令，安装器全程使用 v2 的 `docker compose` 子命令，二者不通用。
+
+**阶段二：导入离线镜像包**
+
+```bash
+tag=v0.3.5
+base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
+
+# 下载镜像包与校验文件（420 MB，gh-proxy 加速）
+curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz"        "${base}/game-server-hub-${tag}-docker-image.tar.gz"
+curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz.sha256" "${base}/game-server-hub-${tag}-docker-image.tar.gz.sha256"
+
+# 校验完整性（期望输出末尾 OK，防止大文件下载中断损坏）
+sha256sum -c "game-server-hub-${tag}-docker-image.tar.gz.sha256"
+
+# 导入镜像（420 MB 解压为约 3.2 GB，预留 4 GB 以上磁盘；-i 带进度条）
+docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
+
+# 确认镜像存在（应看到 ghcr.io/pmat77/game-server-hub，tag 与版本一致）
+docker images | grep game-server-hub
+```
+
+**阶段三：重跑安装器完成部署**
+
+```bash
+# 镜像已在本地，安装器跳过 GHCR 拉取（日志出现
+# "Runtime image already present locally, skipping pull" 即正确）。
+# 内存预设默认 auto 按总内存自动选档；4 GiB 机器可显式指定 small（见 docs/MEMORY.md）
+sudo GSH_PANEL_ENV_PRESET=small bash install.linux.sh --mode docker
+
+# 验证面板容器 Up、日志无循环重启
+docker ps
+docker logs --tail 50 game-server-hub-panel
+```
+
+**阶段四：访问面板**
+
+```bash
+# 查看面板端口（安装器写入 panel.env，默认见安装器输出）
+grep PANEL_PORT /opt/game-server-hub/panel.env
+
+# 本机防火墙放行（云服务器同时在控制台安全组放行同端口）
+sudo ufw allow 9527/tcp   # 未启用 ufw 可跳过
+```
+
+浏览器访问 `http://<服务器IP>:<PANEL_PORT>` 初始化管理员账号（初始密码见安装器输出或 panel.env 的 `ADMIN_PASSWORD`）。登录后**监控台会显示内存档位**；若后续「检查更新」超时（国内直连 api.github.com 不通），在 panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
+
+**相关 FAQ**：[`Docker Compose v2 plugin is required but unavailable`](#docker-compose-v2-plugin-is-required-but-unavailable)、[`Cannot reach GHCR` / `Image pull failed`](#cannot-reach-ghcr--image-pull-failed)、[`download.docker.com` 不可达](#downloaddockercom-不可达)、[`checksum mismatch`](#checksum-mismatch)、[SteamCMD 下载慢或失败](#steamcmd-下载慢或失败)。
+
 ### 3.4 本地安装
 
 ```bash

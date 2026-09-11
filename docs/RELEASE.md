@@ -15,8 +15,8 @@
 
 **单一事实来源：**
 
-1. Git tag：`v0.3.1`
-2. `package.json` → `"version": "0.3.0"`
+1. Git tag：`v0.3.2`
+2. `package.json` → `"version": "0.3.2"`
 3. `CHANGELOG.md` → 对应章节
 4. GitHub Release 说明（镜像 tag 与升级指引）
 

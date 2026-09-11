@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-11
+
 ### Fixed
 
 - **面板更新提示永远显示「镜像内容有更新」**：Docker 部署下更新只按镜像摘要比对，而同一个镜像在不同层级各有一个摘要 —— 多架构镜像的 manifest list（索引入口）、各平台清单、平台清单里的 config，以及 config 内部的未压缩层摘要。`docker pull` 在本地记录的是 manifest list 摘要，检查更新时却把远端索引下钻成平台清单摘要来比，两侧口径不同，v0.3.1 对 v0.3.1 也永远对不上号：每次检查都报「镜像内容有更新」，把镜像重新拉取一遍也照报不误。现在改成成套比对 —— 本地收集 `RepoDigests`、镜像 Id 与 `RootFS.Layers`，远端收集 manifest list、各平台清单、config 摘要与层摘要，任何一种凭据对上就认定是同一个镜像。这条链也顺带修好了**离线镜像包安装**（`docs/INSTALL.md` 推荐的国内路径）：离线包经 `docker save`/`load` 或 buildx 重新导出后，其 config 摘要与 registry 上的并不一致（`docker inspect` 看到的镜像 Id 因此对不上，在 ghcr 上也查不到这个摘要），此前同样必然误报，现在靠层指纹即可认出是同一份内容。
@@ -205,7 +207,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PMAT77/game-serve-hub/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/PMAT77/game-serve-hub/compare/v0.2.1...v0.2.2

@@ -56,7 +56,7 @@ catalog:
   pinia-plugin-persistedstate: ^4.7.1
   pinyin-pro: ^3.29.3
   postcss: ^8.5.28
-  postcss-nested: ^7.0.2
+  postcss-nested: ^8.0.1
   reka-ui: ^2.10.4
   rollup-plugin-visualizer: ^7.1.1
   sass-embedded: ^1.104.0

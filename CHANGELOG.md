@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-11
+
 ### Fixed
 
 - **面板内「应用更新」升不动版本**：此前它只重新拉取 `panel.env` 里写死的当前镜像 tag，从不理会 Release 上的新版本号 —— v0.3.1 点更新会白白下载几百 MB 的 v0.3.1 镜像再原样重建，版本号纹丝不动。现在以 Release tag 为目标镜像，一次点击即可真正跨版本升级。
@@ -214,7 +216,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PMAT77/game-serve-hub/compare/v0.2.2...v0.3.0

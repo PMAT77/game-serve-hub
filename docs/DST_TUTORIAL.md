@@ -71,21 +71,21 @@ SSH 登录服务器后，按部署模式选择一条命令执行。
 > 中国大陆服务器请**先导入离线镜像包，再跑这条命令**。安装器要从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名在国内基本不可达，直接跑几乎必然失败（`TLS handshake timeout`）。离线包步骤见 [INSTALL.md · 离线镜像包完整步骤](INSTALL.md#离线镜像包完整步骤国内推荐先读这一节)。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.2/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.3/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 **Native systemd 模式**（推荐个人服主，不依赖 Docker）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.2/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.3/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
 **国内网络**（GitHub Raw 不稳定时，换 jsDelivr 源并启用国内档位）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.2/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.3/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 
@@ -218,7 +218,7 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
 默认管理员用户名是 superadmin。也可以在首次安装时显式指定账号密码：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.2/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.3/scripts/install.linux.sh \
   | sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='替换为强密码' \
       bash -s -- --mode native
 ```

@@ -156,6 +156,9 @@ catalogs:
     reka-ui:
       specifier: ^2.9.6
       version: 2.9.7
+    rollup-plugin-visualizer:
+      specifier: ^7.1.1
+      version: 7.1.1
     sass-embedded:
       specifier: ^1.99.0
       version: 1.99.0
@@ -305,9 +308,6 @@ importers:
       echarts:
         specifier: 'catalog:'
         version: 6.0.0
-      eruda:
-        specifier: 'catalog:'
-        version: 3.4.3
       es-toolkit:
         specifier: 'catalog:'
         version: 1.46.1
@@ -353,15 +353,9 @@ importers:
       tailwind-merge:
         specifier: 'catalog:'
         version: 3.6.0
-      tsx:
-        specifier: 'catalog:'
-        version: 4.22.1
       ua-parser-js:
         specifier: 'catalog:'
         version: 2.0.9
-      vconsole:
-        specifier: 'catalog:'
-        version: 3.15.1
       vee-validate:
         specifier: 'catalog:'
         version: 4.15.1(vue@3.5.34(typescript@5.9.3))
@@ -429,6 +423,9 @@ importers:
       drizzle-kit:
         specifier: 'catalog:'
         version: 0.31.10
+      eruda:
+        specifier: 'catalog:'
+        version: 3.4.3
       esbuild:
         specifier: ^0.28.0
         version: 0.28.0
@@ -453,6 +450,9 @@ importers:
       postcss-nested:
         specifier: 'catalog:'
         version: 7.0.2(postcss@8.5.14)
+      rollup-plugin-visualizer:
+        specifier: 'catalog:'
+        version: 7.1.1(rolldown@1.0.1)(rollup@4.60.4)
       sass-embedded:
         specifier: 'catalog:'
         version: 1.99.0
@@ -462,6 +462,9 @@ importers:
       svgo:
         specifier: 'catalog:'
         version: 4.0.1
+      tsx:
+        specifier: 'catalog:'
+        version: 4.22.1
       unbuild:
         specifier: 'catalog:'
         version: 3.6.1(sass@1.99.0)(typescript@5.9.3)(vue-tsc@3.2.9(typescript@5.9.3))(vue@3.5.34(typescript@5.9.3))
@@ -480,6 +483,9 @@ importers:
       unplugin-vue-components:
         specifier: 'catalog:'
         version: 32.0.0(vue@3.5.34(typescript@5.9.3))
+      vconsole:
+        specifier: 'catalog:'
+        version: 3.15.1
       vite:
         specifier: 'catalog:'
         version: 8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.7.0)(sass-embedded@1.99.0)(sass@1.99.0)(terser@5.47.1)(tsx@4.22.1)(yaml@2.9.0)
@@ -3774,6 +3780,10 @@ packages:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
     engines: {node: '>=12'}
 
+  cliui@9.0.1:
+    resolution: {integrity: sha512-k7ndgKhwoQveBL+/1tqGJYNz097I7WOvwbmmU2AR5+magtbjPWQTS1C5vzGkBC8Ym8UWRzfKUzUUqFLypY4Q+w==}
+    engines: {node: '>=20'}
+
   clsx@2.1.1:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
     engines: {node: '>=6'}
@@ -4973,6 +4983,10 @@ packages:
     resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
     engines: {node: '>=12'}
 
+  picomatch@4.0.7:
+    resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
+    engines: {node: '>=12'}
+
   pidtree@0.6.0:
     resolution: {integrity: sha512-eG2dWTVw5bzqGRztnHExczNxt5VGsE6OwTeCG3fdUf9KBsZzO3R5OIIIzWR+iZA0NtZ+RDVdaoE2dK1cn6jH4g==}
     engines: {node: '>=0.10'}
@@ -5363,6 +5377,19 @@ packages:
       rollup: ^3.29.4 || ^4
       typescript: ^4.5 || ^5.0 || ^6.0
 
+  rollup-plugin-visualizer@7.1.1:
+    resolution: {integrity: sha512-ThaGiHTU8XW02OkK80TrTHATraJmM9OAduU4otal+7gyXLpYEtmGBLfx5kW+EHvvLwn03YGW2NnwKUIqsYlJAA==}
+    engines: {node: '>=22'}
+    hasBin: true
+    peerDependencies:
+      rolldown: 1.x || ^1.0.0-beta || ^1.0.0-rc
+      rollup: 2.x || 3.x || 4.x
+    peerDependenciesMeta:
+      rolldown:
+        optional: true
+      rollup:
+        optional: true
+
   rollup@4.60.4:
     resolution: {integrity: sha512-WHeFSbZYsPu3+bLoNRUuAO+wavNlocOPf3wSHTP7hcFKVnJeWsYlCDbr3mTS14FCizf9ccIxXA8sGL8zKeQN3g==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
@@ -5602,6 +5629,10 @@ packages:
     resolution: {integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==}
     engines: {node: '>=0.10.0'}
 
+  source-map@0.8.0:
+    resolution: {integrity: sha512-d8EqvL+k/SOXCreS/SUzg2ciyHqBBLcN/yuRjFsbvVhHTE2pgei7oAhmPM7kWFbkX6OSMQfUq4KbkF3au9lhYQ==}
+    engines: {node: '>= 12'}
+
   speakingurl@14.0.1:
     resolution: {integrity: sha512-1POYv7uv2gXoyGFpBCmpDVSNV74IfsWlDW216UPjbWufNf+bSU6GdbDsxdcxtfwb4xlI3yxzOTKClUosxARYrQ==}
     engines: {node: '>=0.10.0'}
@@ -5635,6 +5666,10 @@ packages:
   string-width@7.2.0:
     resolution: {integrity: sha512-tsaTIkKW9b4N+AEj+SVA+WhJzV7/zMhcSu78mLKWSk7cXMOSHsBKFWUs0fWwq8QyK3MgJBQRX6Gbi4kYbdvGkQ==}
     engines: {node: '>=18'}
+
+  string-width@8.2.2:
+    resolution: {integrity: sha512-GaPUh5gfdrYzqeVNZvUfT23vYYxXzKYidUcnMtJg/3rxRV63EFZy3k6xfKlmfeJD0176lnUV/Usr3XcwSvFzpg==}
+    engines: {node: '>=20'}
 
   string_decoder@1.1.1:
     resolution: {integrity: sha512-n/ShnvDi6FHbbVfviro+WojiFzv+s8MPMHBczVePfUpDJLwoLT0ht1l4YwBCbi8pJAveEEdnkHyPyTP/mzRfwg==}
@@ -6208,9 +6243,17 @@ packages:
     resolution: {integrity: sha512-tVpsJW7DdjecAiFpbIB1e3qxIQsE6NoPc5/eTdrbbIC4h0LVsWhnoa3g+m2HclBIujHzsxZ4VJVA+GUuc2/LBw==}
     engines: {node: '>=12'}
 
+  yargs-parser@22.0.0:
+    resolution: {integrity: sha512-rwu/ClNdSMpkSrUb+d6BRsSkLUq1fmfsY6TOpYzTwvwkg1/NRG85KBy3kq++A8LKQwX6lsu+aWad+2khvuXrqw==}
+    engines: {node: ^20.19.0 || ^22.12.0 || >=23}
+
   yargs@17.7.2:
     resolution: {integrity: sha512-7dSzzRQ++CKnNI/krKnYRV7JKKPUXMEh61soaHKg9mrWEhzFWhFnxPxGl+69cD1Ou63C13NUPCnmIcrvqCuM6w==}
     engines: {node: '>=12'}
+
+  yargs@18.1.0:
+    resolution: {integrity: sha512-2rAgRKu54VsHkqI0/tYkmluGXHD4KW7yZoycuqDQ15QOTnc2VVfy0nN/1eMhnQLO00A+dwtK20xuCnc1YGeUyg==}
+    engines: {node: ^20.19.0 || ^22.12.0 || >=23}
 
   yauzl@3.4.0:
     resolution: {integrity: sha512-jIH9yLR9wqr0wOS0TpBvo/g/2UgZH5qePVbjgRliiF0BYvOZyaBknKsF+x9Iht0O6sqgnB93rCICdOZFecJuDw==}
@@ -8978,6 +9021,12 @@ snapshots:
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
 
+  cliui@9.0.1:
+    dependencies:
+      string-width: 7.2.0
+      strip-ansi: 7.2.0
+      wrap-ansi: 9.0.2
+
   clsx@2.1.1: {}
 
   color-convert@2.0.1:
@@ -10218,6 +10267,8 @@ snapshots:
 
   picomatch@4.0.4: {}
 
+  picomatch@4.0.7: {}
+
   pidtree@0.6.0: {}
 
   pidusage@4.0.1:
@@ -10632,6 +10683,16 @@ snapshots:
     optionalDependencies:
       '@babel/code-frame': 7.29.0
 
+  rollup-plugin-visualizer@7.1.1(rolldown@1.0.1)(rollup@4.60.4):
+    dependencies:
+      open: 11.0.0
+      picomatch: 4.0.7
+      source-map: 0.8.0
+      yargs: 18.1.0
+    optionalDependencies:
+      rolldown: 1.0.1
+      rollup: 4.60.4
+
   rollup@4.60.4:
     dependencies:
       '@types/estree': 1.0.8
@@ -10885,6 +10946,8 @@ snapshots:
 
   source-map@0.6.1: {}
 
+  source-map@0.8.0: {}
+
   speakingurl@14.0.1: {}
 
   split-ca@1.0.1: {}
@@ -10925,6 +10988,11 @@ snapshots:
   string-width@7.2.0:
     dependencies:
       emoji-regex: 10.6.0
+      get-east-asian-width: 1.6.0
+      strip-ansi: 7.2.0
+
+  string-width@8.2.2:
+    dependencies:
       get-east-asian-width: 1.6.0
       strip-ansi: 7.2.0
 
@@ -11545,6 +11613,8 @@ snapshots:
 
   yargs-parser@21.1.1: {}
 
+  yargs-parser@22.0.0: {}
+
   yargs@17.7.2:
     dependencies:
       cliui: 8.0.1
@@ -11554,6 +11624,15 @@ snapshots:
       string-width: 4.2.3
       y18n: 5.0.8
       yargs-parser: 21.1.1
+
+  yargs@18.1.0:
+    dependencies:
+      cliui: 9.0.1
+      escalade: 3.2.0
+      get-caller-file: 2.0.5
+      string-width: 8.2.2
+      y18n: 5.0.8
+      yargs-parser: 22.0.0
 
   yauzl@3.4.0:
     dependencies:

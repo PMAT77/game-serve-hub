@@ -6,6 +6,7 @@ import VitePluginSvgSpritemap from '@spiriit/vite-plugin-svg-spritemap'
 import vueLegacy from '@vitejs/plugin-legacy'
 import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
+import { visualizer } from 'rollup-plugin-visualizer'
 import Unocss from 'unocss/vite'
 import autoImport from 'unplugin-auto-import/vite'
 import TurboConsole from 'unplugin-turbo-console/vite'
@@ -71,6 +72,13 @@ export default function createVitePlugins(mode: string, isBuild = false) {
     }),
 
     Unocss(),
+
+    // 构建体积分析：VITE_BUILD_ANALYZE=1 时输出 stats.html（产物构成报告，供体积优化决策）
+    viteEnv.VITE_BUILD_ANALYZE && visualizer({
+      filename: 'stats.html',
+      gzipSize: true,
+      brotliSize: true,
+    }),
 
     // https://github.com/SpiriitLabs/vite-plugin-svg-spritemap
     VitePluginSvgSpritemap('./src/assets/icons/*.svg'),

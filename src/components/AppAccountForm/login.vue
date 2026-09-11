@@ -29,15 +29,15 @@ const challengeToken = ref('')
 const challengeQuestion = ref('')
 
 function resolveLoginInitialValues() {
+  const saved = readSavedLoginCredentials()
   if (import.meta.env.DEV) {
     return {
-      account: String(import.meta.env.VITE_DEV_LOGIN_ACCOUNT ?? '').trim() || 'superadmin',
+      account: saved.account || String(import.meta.env.VITE_DEV_LOGIN_ACCOUNT ?? '').trim() || 'superadmin',
       password: String(import.meta.env.VITE_DEV_LOGIN_PASSWORD ?? '') || '123456',
-      remember: false,
+      remember: saved.remember,
       challengeAnswer: '',
     }
   }
-  const saved = readSavedLoginCredentials()
   return {
     account: props.account ?? saved.account,
     password: '',
@@ -47,12 +47,12 @@ function resolveLoginInitialValues() {
 }
 
 function restoreSavedCredentials() {
-  if (import.meta.env.DEV) {
-    return
-  }
   const saved = readSavedLoginCredentials()
-  // 只恢复账号与记住状态，不触碰密码输入框。
-  form.setFieldValue('account', props.account ?? saved.account)
+  // 只恢复账号与记住状态，不触碰密码输入框（密码交给浏览器密码管理器）。
+  const account = props.account ?? saved.account
+  if (account) {
+    form.setFieldValue('account', account)
+  }
   form.setFieldValue('remember', saved.remember)
 }
 
@@ -169,7 +169,7 @@ function testAccount(account: string) {
         <FormField v-slot="{ componentField, errors }" name="account">
           <FormItem class="pb-6 relative space-y-0">
             <FormControl>
-              <FaInput type="text" placeholder="用户名" class="w-full" :class="{ 'border-destructive': errors.length }" v-bind="componentField">
+              <FaInput type="text" placeholder="用户名" autocomplete="username" class="w-full" :class="{ 'border-destructive': errors.length }" v-bind="componentField">
                 <template #start>
                   <FaIcon name="i-lucide:user" />
                 </template>
@@ -183,7 +183,7 @@ function testAccount(account: string) {
         <FormField v-slot="{ componentField, errors }" name="password">
           <FormItem class="pb-6 relative space-y-0">
             <FormControl>
-              <FaInput type="password" placeholder="密码" class="w-full" :class="{ 'border-destructive': errors.length }" v-bind="componentField">
+              <FaInput type="password" placeholder="密码" autocomplete="current-password" class="w-full" :class="{ 'border-destructive': errors.length }" v-bind="componentField">
                 <template #start>
                   <FaIcon name="i-lucide:lock" />
                 </template>
@@ -234,6 +234,7 @@ function testAccount(account: string) {
                 <FormControl>
                   <FaCheckbox
                     :model-value="value === true"
+                    title="密码由浏览器密码管理器保存，不会写入本地存储"
                     @update:model-value="handleChange"
                   >
                     记住账号

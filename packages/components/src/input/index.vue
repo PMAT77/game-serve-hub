@@ -18,9 +18,11 @@ const props = withDefaults(defineProps<{
   inputClass?: HTMLAttributes['class']
   startClass?: HTMLAttributes['class']
   endClass?: HTMLAttributes['class']
+  autocomplete?: string
 }>(), {
   type: 'text',
   align: 'inline',
+  autocomplete: 'off',
 })
 
 const emits = defineEmits<{
@@ -63,7 +65,7 @@ defineExpose({
       ref="inputRef"
       v-model="value"
       data-slot="input-group-control"
-      autocomplete="off"
+      :autocomplete="props.autocomplete"
       @focus="isFocused = true"
       @blur="isFocused = false"
     />

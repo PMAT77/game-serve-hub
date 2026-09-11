@@ -22,6 +22,7 @@
 | `inputClass` | `HTMLAttributes['class']` | - | 输入框 CSS 类 |
 | `startClass` | `HTMLAttributes['class']` | - | 前缀区域 CSS 类 |
 | `endClass` | `HTMLAttributes['class']` | - | 后缀区域 CSS 类 |
+| `autocomplete` | `string` | `'off'` | 原生 autocomplete 提示（如 `username`、`current-password`、`new-password`） |
 
 ## Slots
 

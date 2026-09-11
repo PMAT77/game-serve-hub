@@ -4,7 +4,7 @@ import Login from '@/components/AppAccountForm/login.vue'
 import ResetPassword from '@/components/AppAccountForm/reset-password.vue'
 import ColorScheme from '@/layouts/components/Topbar/Toolbar/ColorScheme/index.vue'
 import { ensureDynamicRoutes } from '@/router/ensure-dynamic-routes'
-import { routeToNodeInstance } from '@/navigation/game-routes'
+import { FRONTEND_ROUTE_PATHS } from '../../shared/constants/frontend-routes'
 import settingsDefault from '@/settings'
 
 defineOptions({
@@ -15,8 +15,15 @@ const route = useRoute()
 const router = useRouter()
 const appSettingsStore = useAppSettingsStore()
 
-// 登录后默认直达实例管理（带 redirect 参数时以参数为准）
-const redirect = ref(route.query.redirect?.toString() ?? routeToNodeInstance())
+// 登录后默认回主页（带 redirect 参数时以参数为准；未开启主页则回退到实例管理）
+const redirect = computed(() => {
+  const fromQuery = route.query.redirect?.toString().trim()
+  if (fromQuery) {
+    return fromQuery
+  }
+  const home = appSettingsStore.settings.app.home
+  return home.enable ? home.fullPath : FRONTEND_ROUTE_PATHS.nodeInstance
+})
 
 // 布局对齐方式
 const layoutAlign = ref<'left' | 'center' | 'right'>('right')

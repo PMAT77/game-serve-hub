@@ -22,7 +22,7 @@ function setupRoutes(router: Router) {
       }
       if (to.name === 'forceChangePassword' && !appAccountStore.mustChangePassword) {
         return {
-          path: FRONTEND_ROUTE_PATHS.nodeInstance,
+          path: appSettingsStore.settings.app.home.fullPath,
           replace: true,
         }
       }
@@ -35,7 +35,7 @@ function setupRoutes(router: Router) {
           return {
             path: appAccountStore.mustChangePassword
               ? '/force-change-password'
-              : FRONTEND_ROUTE_PATHS.nodeInstance,
+              : appSettingsStore.settings.app.home.fullPath,
             replace: true,
           }
         }

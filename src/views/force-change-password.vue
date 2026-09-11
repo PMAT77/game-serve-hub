@@ -2,13 +2,13 @@
 import { NAlert } from 'naive-ui'
 import EditPassword from '@/components/AppAccountForm/edit-password.vue'
 import { ensureDynamicRoutes } from '@/router/ensure-dynamic-routes'
-import { FRONTEND_ROUTE_PATHS } from '../../shared/constants/frontend-routes'
 
 defineOptions({
   name: 'ForceChangePassword',
 })
 
 const router = useRouter()
+const appSettingsStore = useAppSettingsStore()
 
 async function handlePasswordChanged() {
   try {
@@ -20,7 +20,7 @@ async function handlePasswordChanged() {
     })
     return
   }
-  await router.replace(FRONTEND_ROUTE_PATHS.nodeInstance)
+  await router.replace(appSettingsStore.settings.app.home.fullPath)
 }
 </script>
 

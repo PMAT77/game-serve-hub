@@ -24,9 +24,17 @@ export function sanitizeSteamcmdLogLine(line: string): string {
 
 export type SteamcmdInstallFailureKind
   = | 'network'
+    | 'timeout'
     | 'permission'
     | 'subscription'
     | 'unknown'
+
+/**
+ * 面板自身因超时终止 SteamCMD 时写入输出的标记。
+ * 超时 kill 走 SIGKILL，容器退出码同样是 137；靠该标记与真正的 OOM 区分，
+ * 并让安装流程按「可重试」处理（重试走 Steam 断点续传，不清理下载缓存）。
+ */
+export const STEAMCMD_TIMEOUT_MARKER = 'GSH-STEAMCMD-TIMEOUT'
 
 export {
   resolveSteamcmdInstallMaxAttempts,
@@ -39,6 +47,9 @@ export {
  */
 export function classifySteamcmdInstallFailure(output: string): SteamcmdInstallFailureKind {
   const text = sanitizeSteamcmdLogLine(output) || output.trim()
+  if (text.includes(STEAMCMD_TIMEOUT_MARKER)) {
+    return 'timeout'
+  }
   if (/Missing file permissions/i.test(text)) {
     return 'permission'
   }
@@ -64,7 +75,9 @@ export function classifySteamcmdInstallFailure(output: string): SteamcmdInstallF
 }
 
 export function isRetriableSteamcmdInstallOutput(output: string): boolean {
-  return classifySteamcmdInstallFailure(output) === 'network'
+  const kind = classifySteamcmdInstallFailure(output)
+  // timeout 也重试：已下载内容保留在 steamapps/downloading，下一轮 app_update 断点续传
+  return kind === 'network' || kind === 'timeout'
 }
 
 /**
@@ -130,6 +143,17 @@ export function formatSteamcmdAppUpdateFailureMessage(input: {
       '通常为 Docker 卷挂载或安装目录权限问题：',
       '请检查 force_install_dir 是否可写、panel 是否正确解析 instances 卷挂载、',
       '必要时在 panel.env 设置 GSH_STEAMCMD_RUN_USER=0:0 或 GSH_STEAMCMD_BIND_OPTS=rw,z。',
+      `SteamCMD 输出：${failureSnippet}`,
+    ].join('')
+  }
+
+  if (kind === 'timeout') {
+    return [
+      `SteamCMD 安装 ${input.appId} 失败（下载超时）。`,
+      '面板在单次 app_update 超过 GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS（默认 60 分钟）后终止了任务；',
+      '已下载内容保留在 steamapps/downloading，重新安装会断点续传（共享内存不足与本次失败无关）。',
+      '建议：在 panel.env 调大 GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS（毫秒，例如 7200000），',
+      '并设置 GSH_STEAMCMD_DOWNLOAD_REGION=cn 提升下载速度。',
       `SteamCMD 输出：${failureSnippet}`,
     ].join('')
   }

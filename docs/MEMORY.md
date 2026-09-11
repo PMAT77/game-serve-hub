@@ -71,6 +71,7 @@ sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose
 | `GSH_DST_CONTAINER_MEMORY_MB` | 每个 DST 分片容器上限（MiB） |
 | `GSH_HOST_MEMORY_HEADROOM_MB` | 安装/启动守卫保留空闲（默认 512） |
 | `GSH_HOST_MIN_AVAILABLE_MB` | 设为 `0` 可关闭守卫（小内存慎用） |
+| `GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS` | 单次 app_update 超时（毫秒，默认 3600000 = 60 分钟），超时终止后重试断点续传 |
 
 完整示例见仓库根目录 `panel.env.example`。
 
@@ -106,6 +107,9 @@ docker stats --no-stream
 docker logs --tail 100 game-server-hub-panel
 ```
 
-SteamCMD 容器 exit 137 多为内存上限或宿主机 OOM，可调高预设或升级规格，并避免安装与多实例同时运行。
+SteamCMD 容器 exit 137 有两种来源：
+
+- **面板超时终止**：单次 app_update 超过 `GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS`（默认 60 分钟）后由面板 SIGKILL，日志含 `GSH-APP-UPDATE-TIMEOUT`。此时与内存无关，调大该值即可；已下载内容保留，重试会自动断点续传。
+- **内存不足**：容器硬上限或宿主机 OOM。可调高预设或升级规格，并避免安装与多实例同时运行。
 
 更多安装步骤见 [INSTALL.md](INSTALL.md)。

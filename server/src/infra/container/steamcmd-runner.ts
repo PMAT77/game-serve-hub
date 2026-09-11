@@ -8,7 +8,11 @@ import { resolveSteamcmdInstallBind } from './steamcmd-install-bind'
 import { appendSteamcmdBindMountOptions, resolveSteamcmdContainerUser } from './steamcmd-container-user'
 import { withSteamcmdAppUpdateLock } from './steamcmd-app-update-queue'
 import { loadServerConfig, resolveInstallLogsDir } from '../../shared/config'
-import { loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
+import {
+  formatSteamcmdTimeoutForLog,
+  loadSteamcmdRuntimeConfig,
+  resolveSteamcmdAppUpdateTimeoutMs,
+} from '../../shared/config/steamcmd'
 import { appendInstallResourceSnapshot } from './install-resource-monitor'
 import { formatSteamcmdMemoryLimitForLog, resolveSteamcmdContainerMemoryLimits } from './steamcmd-container-resources'
 import { DST_WORKSHOP_APP_ID } from '../game-adapter/dst/constants'
@@ -34,7 +38,6 @@ import {
 } from './steamcmd-job'
 
 
-const STEAMCMD_APP_UPDATE_TIMEOUT_MS = 30 * 60 * 1000
 const STEAMCMD_APP_INFO_TIMEOUT_MS = 90_000
 const DEFAULT_STEAMCMD_WORKSHOP_DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -161,6 +164,11 @@ async function runSteamcmdAppUpdateInContainerUnlocked(input: {
   const memoryLimits = resolveSteamcmdContainerMemoryLimits('app-update')
   pushLine(`SteamCMD 容器内存上限: ${formatSteamcmdMemoryLimitForLog(memoryLimits)}`)
 
+  const appUpdateTimeoutMs = resolveSteamcmdAppUpdateTimeoutMs()
+  pushLine(
+    `SteamCMD app_update 单次超时上限: ${formatSteamcmdTimeoutForLog(appUpdateTimeoutMs)}（GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS 可调；大体积游戏慢速下载需调高）`,
+  )
+
   const instanceId = input.cancelKey?.trim()
   if (instanceId) {
     try {
@@ -188,13 +196,16 @@ async function runSteamcmdAppUpdateInContainerUnlocked(input: {
     user: resolveSteamcmdContainerUser(),
     jobId: input.cancelKey,
     kind: 'app-update',
-    timeoutMs: STEAMCMD_APP_UPDATE_TIMEOUT_MS,
+    timeoutMs: appUpdateTimeoutMs,
     onLogLine: input.onLogLine,
   })
 
   if (result.ok) {
     pushLine('SteamCMD app_update 已完成')
   }
+
+  // 超时与取消也走 SIGKILL（137）：只有面板没主动杀容器时，137 才是真的 OOM
+  const oomKilled = result.exitCode === 137 && !result.timedOut && !result.cancelled
 
   if (instanceId) {
     try {
@@ -207,14 +218,14 @@ async function runSteamcmdAppUpdateInContainerUnlocked(input: {
           exitCode: result.exitCode,
           cancelled: result.cancelled ?? false,
           timedOut: result.timedOut ?? false,
-          oomKilled: result.exitCode === 137,
+          oomKilled,
         },
       })
       for (const line of resourceLines) {
         pushLine(line)
       }
-      if (result.exitCode === 137) {
-        pushLine('SteamCMD 容器可能因硬上限 OOM 被终止（exit 137）；可在 panel.env 酌情调高 GSH_STEAMCMD_CONTAINER_MEMORY_MB，并避免与运行中实例同时安装')
+      if (oomKilled) {
+        pushLine('SteamCMD 容器因内存硬上限 OOM 被终止（exit 137）；可在 panel.env 酌情调高 GSH_STEAMCMD_CONTAINER_MEMORY_MB，并避免与运行中实例同时安装')
       }
     }
     catch {

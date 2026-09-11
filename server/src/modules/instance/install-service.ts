@@ -567,9 +567,7 @@ async function runInstallPipeline(
     return
   }
 
-  await logInstallResourcePhase(logWriter, input.instanceId, 'install_pipeline_failed', {
-    exitCode: anonymousResult.output.includes('137') ? 137 : undefined,
-  })
+  await logInstallResourcePhase(logWriter, input.instanceId, 'install_pipeline_failed')
   const failureMessage = formatSteamcmdAppUpdateFailureMessage({
     appId: input.appId,
     output: anonymousResult.output,

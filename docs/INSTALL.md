@@ -113,11 +113,16 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 | 用途 | 协议 | 默认端口 |
 | --- | --- | --- |
 | 面板 | TCP | `9527` |
-| DST 游戏 | UDP | `10999` |
-| Steam 认证 | UDP | `8766` |
-| DST 主服务器 | UDP | `12346` |
+| 主世界 · 游戏端口 | UDP | `10999` |
+| 主世界 · Steam 认证端口 | UDP | `8766` |
+| 主世界 · Steam 主服端口 | UDP | `12346` |
+| 洞穴 · 游戏端口 | UDP | `11000` |
+| 洞穴 · Steam 认证端口 | UDP | `8768` |
+| 洞穴 · Steam 主服端口 | UDP | `12348` |
 
-安装器默认不改防火墙；需要时加 `--open-panel-port` / `--open-dst-ports`，云服务器安全组单独放行。
+开启洞穴后，洞穴的 3 个 UDP 端口同样必须放行，否则玩家一进洞穴就会崩线。
+
+安装器默认不改防火墙；需要时加 `--open-panel-port` / `--open-dst-ports`（后者放行主世界与洞穴共 6 个 UDP 端口），云服务器安全组单独放行。宿主服务器本身在 NAT 转发（云平台端口映射 / 路由器映射）后面时，还要在那边按**与内部相同的端口**逐条添加转发规则，见 [DST 开服教程](DST_TUTORIAL.md) 5.4 节。
 
 ### 常用命令
 
@@ -203,6 +208,8 @@ docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
 ### SteamCMD 下载慢或失败（装游戏时）
 
 `panel.env` 设 `GSH_STEAMCMD_DOWNLOAD_REGION=cn` 与 `GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=8` 后重启面板重试；安装前停掉运行中的实例（4 GiB 机器 SteamCMD 峰值 +1–1.5 GiB）。
+
+安装进度停在同一百分比后失败、资源快照里 `timedOut: true`：这是单次 app_update 超时（默认 60 分钟），与内存无关。设 `GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS=7200000`（2 小时）后重启面板重试，已下载内容会断点续传。
 
 ### DST 启动后立即退出（开服时）
 

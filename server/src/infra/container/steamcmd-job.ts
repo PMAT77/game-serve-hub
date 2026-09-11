@@ -4,7 +4,8 @@ import { resolveDockerConnectOptions } from '../docker-connect'
 import { getServerContainerConfig } from '../../shared/config/container'
 import { buildSteamcmdContainerEnv, loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
 import { decodeDockerMultiplexLogChunk } from './docker-log'
-import { sanitizeSteamcmdLogLine } from './steamcmd-errors'
+import { sanitizeSteamcmdLogLine, STEAMCMD_TIMEOUT_MARKER } from './steamcmd-errors'
+import { formatSteamcmdTimeoutForLog } from '../../shared/config/steamcmd'
 import { resolveSteamcmdContainerMemoryLimits } from './steamcmd-container-resources'
 
 export const STEAMCMD_LABEL_MANAGED = 'gsh.managed'
@@ -399,6 +400,13 @@ export async function runSteamcmdJob(spec: SteamcmdJobSpec): Promise<SteamcmdJob
   const wasCancelled = Boolean(jobId && cancelledSteamcmdInstallKeys.has(jobId))
   if (wasCancelled && jobId) {
     cancelledSteamcmdInstallKeys.delete(jobId)
+  }
+
+  if (timedOut) {
+    // 超时同样是 SIGKILL（退出码 137），必须留下标记，否则会被当成容器 OOM
+    pushLine(
+      `${STEAMCMD_TIMEOUT_MARKER}: SteamCMD 任务超过 ${formatSteamcmdTimeoutForLog(spec.timeoutMs)} 上限，已终止容器；已下载内容保留，重试将断点续传`,
+    )
   }
 
   const output = logLines.slice(-20).join('\n')

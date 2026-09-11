@@ -3,12 +3,15 @@ import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { buildSteamcmdAppUpdateArgs, buildSteamcmdWorkshopDownloadArgs } from './steamcmd-args'
 import { withSteamcmdAppUpdateLock } from './steamcmd-app-update-queue'
-import { sanitizeSteamcmdLogLine } from './steamcmd-errors'
+import { sanitizeSteamcmdLogLine, STEAMCMD_TIMEOUT_MARKER } from './steamcmd-errors'
 import { getServerContainerConfig } from '../../shared/config/container'
-import { loadSteamcmdRuntimeConfig } from '../../shared/config/steamcmd'
+import {
+  formatSteamcmdTimeoutForLog,
+  loadSteamcmdRuntimeConfig,
+  resolveSteamcmdAppUpdateTimeoutMs,
+} from '../../shared/config/steamcmd'
 import { DST_WORKSHOP_APP_ID } from '../game-adapter/dst/constants'
 
-const STEAMCMD_APP_UPDATE_TIMEOUT_MS = 30 * 60 * 1000
 const STEAMCMD_APP_INFO_TIMEOUT_MS = 90_000
 const DEFAULT_STEAMCMD_WORKSHOP_DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -147,6 +150,11 @@ async function runNativeSteamcmdJob(input: NativeSteamcmdJobInput): Promise<{
   if (spawnError) {
     pushLine(`SteamCMD 启动失败: ${spawnError.message}`)
   }
+  if (timedOut) {
+    pushLine(
+      `${STEAMCMD_TIMEOUT_MARKER}: SteamCMD 任务超过 ${formatSteamcmdTimeoutForLog(input.timeoutMs)} 上限，已终止进程；已下载内容保留，重试将断点续传`,
+    )
+  }
   const output = logLines.slice(-20).join('\n')
     || (timedOut ? 'SteamCMD 任务超时' : cancelled ? 'SteamCMD 任务已取消' : 'SteamCMD 任务执行失败')
   return {
@@ -183,7 +191,7 @@ export async function runSteamcmdAppUpdateNative(input: {
         { downloadRegion: steamcmdConfig.downloadRegion || undefined },
       ),
       cancelKey: input.cancelKey,
-      timeoutMs: STEAMCMD_APP_UPDATE_TIMEOUT_MS,
+      timeoutMs: resolveSteamcmdAppUpdateTimeoutMs(),
       onLogLine: input.onLogLine,
     })
     return {

@@ -12,6 +12,8 @@ export interface SteamcmdRuntimeConfig {
 
 const DEFAULT_INSTALL_MAX_ATTEMPTS = 5
 const DEFAULT_INSTALL_RETRY_DELAYS_MS = [4000, 8000, 8000, 8000]
+/** app_update 单次运行上限：30 分钟对 4 GiB+ 游戏在慢速 CDN 下不够（下载被腰斩后同样报 exit 137） */
+const DEFAULT_APP_UPDATE_TIMEOUT_MS = 60 * 60 * 1000
 
 function parseInstallMaxAttempts(): number {
   const raw = process.env.GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS?.trim()
@@ -40,6 +42,18 @@ function parseInstallRetryDelaysMs(): number[] {
   return delays
 }
 
+function parseAppUpdateTimeoutMs(): number {
+  const raw = process.env.GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS?.trim()
+  if (!raw) {
+    return DEFAULT_APP_UPDATE_TIMEOUT_MS
+  }
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_APP_UPDATE_TIMEOUT_MS
+  }
+  return Math.floor(parsed)
+}
+
 /** 读取 panel.env 中的 SteamCMD 运行时调优项（安装容器专用） */
 export function loadSteamcmdRuntimeConfig(): SteamcmdRuntimeConfig {
   const downloadRegion = process.env.GSH_STEAMCMD_DOWNLOAD_REGION?.trim() ?? ''
@@ -65,6 +79,15 @@ export function resolveSteamcmdInstallMaxAttempts(): number {
 
 export function resolveSteamcmdInstallRetryDelaysMs(): number[] {
   return parseInstallRetryDelaysMs()
+}
+
+/** app_update 超时上限（毫秒）；docker 与 native 两条安装路径共用，避免两处硬编码分叉 */
+export function resolveSteamcmdAppUpdateTimeoutMs(): number {
+  return parseAppUpdateTimeoutMs()
+}
+
+export function formatSteamcmdTimeoutForLog(timeoutMs: number): string {
+  return `${Math.round(timeoutMs / 60000)} 分钟`
 }
 
 /** 注入 SteamCMD 临时容器的代理与区域环境变量 */

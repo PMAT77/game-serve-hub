@@ -6,6 +6,7 @@ import {
   isRetriableSteamcmdInstallOutput,
   isSteamcmdCorruptStateOutput,
   sanitizeSteamcmdLogLine,
+  STEAMCMD_TIMEOUT_MARKER,
 } from './steamcmd-errors.ts'
 
 describe('sanitizeSteamcmdLogLine', () => {
@@ -93,6 +94,23 @@ describe('isRetriableSteamcmdInstallOutput', () => {
     assert.equal(isRetriableSteamcmdInstallOutput('Missing configuration'), true)
     assert.equal(isRetriableSteamcmdInstallOutput('Missing file permissions'), false)
     assert.equal(isRetriableSteamcmdInstallOutput('No subscription'), false)
+  })
+
+  it('retries panel timeouts so the download resumes', () => {
+    const output = `${STEAMCMD_TIMEOUT_MARKER}: app_update 超过 60 分钟上限，已终止容器`
+    assert.equal(classifySteamcmdInstallFailure(output), 'timeout')
+    assert.equal(isRetriableSteamcmdInstallOutput(output), true)
+    assert.equal(isSteamcmdCorruptStateOutput(output), false)
+
+    const message = formatSteamcmdAppUpdateFailureMessage({
+      appId: '343050',
+      output,
+      mode: 'anonymous',
+      hasAccountCredentials: false,
+    })
+    assert.match(message, /下载超时/)
+    assert.match(message, /GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS/)
+    assert.doesNotMatch(message, /GSH_STEAMCMD_CONTAINER_MEMORY_MB/)
   })
 })
 

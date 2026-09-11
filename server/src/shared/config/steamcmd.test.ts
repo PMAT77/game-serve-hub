@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test'
 import {
   buildSteamcmdContainerEnv,
   loadSteamcmdRuntimeConfig,
+  resolveSteamcmdAppUpdateTimeoutMs,
   resolveSteamcmdInstallMaxAttempts,
   resolveSteamcmdInstallRetryDelaysMs,
 } from './steamcmd.ts'
@@ -15,6 +16,7 @@ const ENV_KEYS = [
   'GSH_STEAMCMD_NETWORK_MODE',
   'GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS',
   'GSH_STEAMCMD_INSTALL_RETRY_DELAYS_MS',
+  'GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS',
 ] as const
 
 function clearSteamcmdEnv() {
@@ -43,6 +45,14 @@ describe('loadSteamcmdRuntimeConfig', () => {
   it('parses retry delays from comma-separated env', () => {
     process.env.GSH_STEAMCMD_INSTALL_RETRY_DELAYS_MS = '5000,10000'
     assert.deepEqual(resolveSteamcmdInstallRetryDelaysMs(), [5000, 10000])
+  })
+
+  it('defaults app_update timeout to 60 minutes and parses overrides', () => {
+    assert.equal(resolveSteamcmdAppUpdateTimeoutMs(), 60 * 60 * 1000)
+    process.env.GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS = '7200000'
+    assert.equal(resolveSteamcmdAppUpdateTimeoutMs(), 7200000)
+    process.env.GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS = 'abc'
+    assert.equal(resolveSteamcmdAppUpdateTimeoutMs(), 60 * 60 * 1000)
   })
 
   it('builds proxy env for SteamCMD container', () => {

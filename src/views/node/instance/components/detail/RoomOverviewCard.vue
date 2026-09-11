@@ -131,11 +131,11 @@ function goMods() {
       </div>
     </template>
     <template v-else-if="instance && isDst">
-      <NEmpty description="实例尚未完成安装，安装完成后可在此查看房间信息" size="small" class="py-6" />
+      <NEmpty description="实例尚未完成安装，安装完成后可在此查看房间信息" size="small" />
     </template>
     <template v-else-if="instance">
-      <NEmpty description="当前游戏暂不支持房间配置，仅饥荒（DST）实例提供房间概览" size="small" class="py-6" />
+      <NEmpty description="当前游戏暂不支持房间配置，仅饥荒（DST）实例提供房间概览" size="small" />
     </template>
-    <NEmpty v-else description="未找到实例" size="small" class="py-6" />
+    <NEmpty v-else description="未找到实例" size="small" />
   </NCard>
 </template>

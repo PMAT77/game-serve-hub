@@ -78,3 +78,18 @@ body {
 textarea {
   font-family: inherit;
 }
+
+/* 空态统一上下留白：空的表格 / 列表不再紧贴上下内容 */
+.n-empty {
+  margin-block: 24px;
+}
+
+/* 下拉弹层内的空态由组件自身留白承载，避免叠加 */
+.n-base-select-menu__empty .n-empty {
+  margin-block: 0;
+}
+
+/* 数据表格空态自带内边距，收窄后与上面的 margin 合计 48px，保持原有观感 */
+.n-data-table .n-data-table-empty {
+  padding: 24px 0;
+}

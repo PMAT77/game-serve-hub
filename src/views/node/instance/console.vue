@@ -913,7 +913,6 @@ onBeforeUnmount(() => {
             v-if="!maintenanceLoading && maintenancePushLogs.length === 0"
             description="暂无推送记录"
             size="small"
-            class="py-4"
           />
           <div v-else class="space-y-2 max-h-[min(48vh,520px)] overflow-y-auto">
             <div

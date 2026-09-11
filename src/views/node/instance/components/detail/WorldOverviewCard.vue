@@ -166,8 +166,8 @@ function goWorldSettings() {
       </div>
     </template>
     <template v-else-if="instance">
-      <NEmpty description="世界配置读取失败或实例暂不支持世界概览" size="small" class="py-6" />
+      <NEmpty description="世界配置读取失败或实例暂不支持世界概览" size="small" />
     </template>
-    <NEmpty v-else description="未找到实例" size="small" class="py-6" />
+    <NEmpty v-else description="未找到实例" size="small" />
   </NCard>
 </template>

@@ -11,7 +11,7 @@ import {
 } from './connect-host'
 import { parseClusterIni } from './cluster-ini'
 import { resolveClusterPaths } from './cluster-service'
-import { readMasterServerIniFields } from './shard-service'
+import { readCavesServerIniFields, readMasterServerIniFields } from './shard-service'
 
 const NETWORK_MODE_LABEL: Record<ClusterNetworkMode, string> = {
   offline: '离线',
@@ -93,6 +93,28 @@ function collectConnectHints(
   return hints
 }
 
+/**
+ * 直连进服需要玩家侧放行的 UDP 端口：主世界三个 + 洞穴三个。
+ *
+ * 洞穴分片同样要求公网可达（玩家从主世界切进洞穴时客户端会直连洞穴端口），只提示主世界端口
+ * 会让用户在防火墙 / NAT 转发里漏配洞穴，表现为一进洞穴就崩线；未生成洞穴分片时不追加。
+ */
+function collectUdpPorts(
+  installPath: string,
+  masterFields: { serverPort: number, steamAuthPort: number, steamMasterPort: number },
+): number[] {
+  const ports = [
+    masterFields.serverPort,
+    masterFields.steamAuthPort,
+    masterFields.steamMasterPort,
+  ]
+  const cavesFields = readCavesServerIniFields(installPath)
+  if (cavesFields) {
+    ports.push(cavesFields.serverPort, cavesFields.steamAuthPort, cavesFields.steamMasterPort)
+  }
+  return ports.filter((value, index, arr) => arr.indexOf(value) === index)
+}
+
 export async function buildDstConnectInfo(
   installPath: string,
   options?: { gamePort?: number | null, running?: boolean },
@@ -118,11 +140,7 @@ export async function buildDstConnectInfo(
   const lanCommand = lanHost && lanHost !== resolved.host && lanHost !== '127.0.0.1'
     ? buildDstDirectConnectCommand(lanHost, port, password)
     : null
-  const udpPorts = [
-    masterFields.serverPort,
-    masterFields.steamAuthPort,
-    masterFields.steamMasterPort,
-  ].filter((value, index, arr) => arr.indexOf(value) === index)
+  const udpPorts = collectUdpPorts(installPath, masterFields)
   const hints = collectConnectHints(resolved, networkMode)
   return {
     running: Boolean(options?.running),

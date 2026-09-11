@@ -42,6 +42,7 @@ export const instanceConnectInfoSchema = z.object({
   lanCommand: z.string().nullable(),
   host: z.string(),
   port: z.number().int().min(1).max(65535),
+  /** 直连进服需玩家侧放行的 UDP 端口：主世界三个；已生成洞穴分片时追加洞穴三个 */
   udpPorts: z.array(z.number().int().min(1).max(65535)),
   roomName: z.string(),
   networkMode: z.enum(['offline', 'lan_only', 'public']),

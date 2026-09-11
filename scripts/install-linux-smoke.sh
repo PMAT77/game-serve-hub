@@ -142,6 +142,18 @@ STUB_DOWNLOAD_SHA256="${COMPOSE_PLUGIN_SHA256_AARCH64}"
 ensure_compose_plugin
 grep -Fq 'docker-compose-linux-aarch64' "${CURL_LOG}"
 
+# ---- open_firewall_dst_ports 冒烟：主世界 + 洞穴共 6 个 UDP 端口都要放行 ----
+UFW_LOG="${COMPOSE_PLUGIN_TEST_DIR}/ufw.log"
+: > "${UFW_LOG}"
+ufw() {
+  printf 'ufw %s\n' "$*" >> "${UFW_LOG}"
+}
+open_firewall_dst_ports
+for dst_port in "${DST_GAME_PORT}" "${DST_AUTH_PORT}" "${DST_MASTER_PORT}" \
+  "${DST_CAVES_GAME_PORT}" "${DST_CAVES_AUTH_PORT}" "${DST_CAVES_MASTER_PORT}"; do
+  grep -Fq "ufw allow ${dst_port}/udp" "${UFW_LOG}"
+done
+
 rm -rf "${COMPOSE_PLUGIN_TEST_DIR}"
 
 printf 'install-linux-smoke-ok\n'

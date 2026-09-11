@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { clearDstConnectHostCache } from './connect-host'
-import { ensureDstClusterConfig } from './cluster-config'
+import { ensureDstCavesShardConfig, ensureDstClusterConfig } from './cluster-config'
 import {
   buildDstConnectInfo,
   buildDstDirectConnectCommand,
@@ -80,6 +80,30 @@ describe('direct-connect', () => {
       else {
         process.env.GSH_DST_CONNECT_HOST = previous
       }
+    }
+  })
+
+  it('buildDstConnectInfo appends caves UDP ports once the caves shard exists', async () => {
+    const previous = process.env.GSH_DST_CONNECT_HOST
+    process.env.GSH_DST_CONNECT_HOST = '203.0.113.10'
+    clearDstConnectHostCache()
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-direct-connect-caves-'))
+    ensureDstClusterConfig(dir, { instanceName: 'Caves Room', gamePort: 10999 })
+    try {
+      const before = await buildDstConnectInfo(dir, { gamePort: 10999, running: true })
+      assert.deepEqual(before.udpPorts, [10999, 8766, 12346])
+      ensureDstCavesShardConfig(dir, 10999)
+      const after = await buildDstConnectInfo(dir, { gamePort: 10999, running: true })
+      assert.deepEqual(after.udpPorts, [10999, 8766, 12346, 11000, 8768, 12348])
+    }
+    finally {
+      if (previous === undefined) {
+        delete process.env.GSH_DST_CONNECT_HOST
+      }
+      else {
+        process.env.GSH_DST_CONNECT_HOST = previous
+      }
+      clearDstConnectHostCache()
     }
   })
 })

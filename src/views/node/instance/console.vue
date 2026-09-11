@@ -733,7 +733,7 @@ onBeforeUnmount(() => {
           </template>
 
           <p v-if="udpPortsLabel" class="text-xs text-muted-foreground mb-2">
-            直连进服需放行 UDP 端口：{{ udpPortsLabel }}。从游戏浏览列表进入不受此限制。
+            直连进服需放行 UDP 端口：{{ udpPortsLabel }}（开启洞穴时含洞穴分片）。从游戏浏览列表进入不受此限制。
           </p>
           <ul
             v-if="connectInfo.hints.length > 0"

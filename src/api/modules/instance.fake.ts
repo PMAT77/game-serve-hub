@@ -464,7 +464,7 @@ export default defineFakeRoute([
           lanCommand: running ? 'c_connect("192.168.1.100", 10999)' : null,
           host: running ? '127.0.0.1' : '<宿主机 IP>',
           port: target?.gamePort ?? 10999,
-          udpPorts: [10999, 8766, 12346],
+          udpPorts: [10999, 8766, 12346, 11000, 8768, 12348],
           roomName: target?.name ?? 'Game Server Hub',
           networkMode: 'offline',
           networkModeLabel: '离线',

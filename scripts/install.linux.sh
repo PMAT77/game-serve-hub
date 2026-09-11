@@ -53,6 +53,10 @@ APT_SOURCES_BACKUP_DIR="/tmp/gsh-apt-sources-backup"
 DST_GAME_PORT="${DST_GAME_PORT:-10999}"
 DST_AUTH_PORT="${DST_AUTH_PORT:-8766}"
 DST_MASTER_PORT="${DST_MASTER_PORT:-12346}"
+# 洞穴分片端口（默认 = 主世界 +1 / +2，与 server-ini.ts 的 defaultCavesServerIniFields 一致）
+DST_CAVES_GAME_PORT="${DST_CAVES_GAME_PORT:-11000}"
+DST_CAVES_AUTH_PORT="${DST_CAVES_AUTH_PORT:-8768}"
+DST_CAVES_MASTER_PORT="${DST_CAVES_MASTER_PORT:-12348}"
 
 PANEL_NAME="${PANEL_NAME:-game-server-hub}" # 面板逻辑名称（可被环境变量覆盖）。
 PANEL_PORT="${PANEL_PORT:-9527}" # 面板对外暴露端口（默认使用高位端口以降低备案拦截影响）。
@@ -1403,9 +1407,13 @@ open_firewall_port() {
   log_warn "No ufw/firewalld detected. Please open tcp/${PANEL_PORT} manually."
 }
 
-# 可选：开放 DST 默认 UDP 游戏端口（地表 + Steam 注册/主服务器）
+# 可选：开放 DST 默认 UDP 游戏端口（主世界 + 洞穴，各含游戏 / Steam 认证 / Steam 主服务器）
+# 安装时无法预知用户之后是否开启洞穴，因此一并放行洞穴的 3 个端口（UDP 放行无副作用）
 open_firewall_dst_ports() {
-  local ports=("${DST_GAME_PORT}" "${DST_AUTH_PORT}" "${DST_MASTER_PORT}")
+  local ports=(
+    "${DST_GAME_PORT}" "${DST_AUTH_PORT}" "${DST_MASTER_PORT}"
+    "${DST_CAVES_GAME_PORT}" "${DST_CAVES_AUTH_PORT}" "${DST_CAVES_MASTER_PORT}"
+  )
   local port rule_desc
 
   for port in "${ports[@]}"; do
@@ -1427,7 +1435,7 @@ open_firewall_dst_ports() {
   if command -v firewall-cmd >/dev/null 2>&1; then
     run_as_root firewall-cmd --reload >/dev/null || true
   fi
-  log_warn "Firewall note: DST UDP ports ${DST_GAME_PORT}/${DST_AUTH_PORT}/${DST_MASTER_PORT} opened. Adjust if you changed server.ini ports."
+  log_warn "Firewall note: DST UDP ports ${DST_GAME_PORT}/${DST_AUTH_PORT}/${DST_MASTER_PORT} (master) and ${DST_CAVES_GAME_PORT}/${DST_CAVES_AUTH_PORT}/${DST_CAVES_MASTER_PORT} (caves) opened. Adjust if you changed server.ini ports."
 }
 
 print_usage() {
@@ -1438,7 +1446,7 @@ Options:
   --mode MODE         Deployment mode: auto, docker or native
   --network PROFILE   Network profile: auto, cn or global
   --open-panel-port  Open panel TCP port (${PANEL_PORT}) via ufw/firewalld
-  --open-dst-ports   Open default DST UDP ports (${DST_GAME_PORT}, ${DST_AUTH_PORT}, ${DST_MASTER_PORT}) via ufw/firewalld
+  --open-dst-ports   Open default DST UDP ports for master (${DST_GAME_PORT}, ${DST_AUTH_PORT}, ${DST_MASTER_PORT}) and caves (${DST_CAVES_GAME_PORT}, ${DST_CAVES_AUTH_PORT}, ${DST_CAVES_MASTER_PORT}) via ufw/firewalld
   -h, --help         Show this help
 
 Environment (optional):
@@ -2050,7 +2058,7 @@ main() {
   if [[ "${OPEN_DST_PORTS}" -eq 1 ]]; then
     open_firewall_dst_ports
   else
-    log_info "DST UDP ports not opened automatically. Use --open-dst-ports or configure firewall manually (see docs/others/DST.md)."
+    log_info "DST UDP ports not opened automatically. Use --open-dst-ports or configure firewall manually (see docs/DST_TUTORIAL.md)."
   fi
   write_status "network" "ok" "Port and firewall processed"
 

@@ -2,6 +2,21 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Added
+
+- **端口提示覆盖洞穴分片**：控制台「直连进服需放行 UDP 端口」此前只列主世界的 3 个端口，照它配置防火墙或 NAT 转发后玩家一进洞穴就会崩线；已生成洞穴分片时现在一并列出洞穴的 3 个端口（11000 / 8768 / 12348）。
+
+### Changed
+
+- **`--open-dst-ports` 同时放行洞穴端口**：此前只放行主世界的 10999 / 8766 / 12346，用户会以为端口已经开好，实际洞穴 3 个端口仍未放行。安装时无法预知之后是否开启洞穴，因此改为一律放行主世界 + 洞穴共 6 个 UDP 端口。
+
+### Fixed
+
+- **宿主机在 NAT 转发后面的端口与转发规则说明**：[DST 开服教程](docs/DST_TUTORIAL.md) 新增 5.4 节 —— 明确安全组之外还要在云平台端口转发 / 路由器映射里为主世界与洞穴的 6 个 UDP **各加一条**规则、外部端口必须与内部一致（DST 会按 `server_port` 上报 Klei/Steam，公网端口被改成随机高位会导致「列表搜得到、点不进去」），并说明分片间通信的 `10888` 不需要对外开放。同时修正 6.1 节「公网端口映射到内部 8888」的示例：Docker 模式下应映射**宿主机的面板端口**（生产安装默认 9527）。
+- **安装器提示的文档路径失效**：未启用 `--open-dst-ports` 时提示的 `docs/others/DST.md` 在本仓库已不存在，改为 `docs/DST_TUTORIAL.md`。
+
 ## [0.3.8] - 2026-09-12
 
 ### Added
@@ -271,7 +286,7 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.8...HEAD
 [0.3.3]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.2...v0.3.3
 [0.3.4]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.3...v0.3.4
 [0.3.5]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.4...v0.3.5

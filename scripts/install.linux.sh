@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # 安装脚本默认参数与运行时路径
 # -----------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")" # 当前脚本名称（用于日志展示）。
-GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.3.7}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
+GSH_RELEASE_TAG="${GSH_RELEASE_TAG:-${PANEL_IMAGE_TAG:-v0.3.8}}" # 默认安装的不可变 Release；同时锁定安装资源与镜像版本。
 INSTALLER_REPO_RAW="${INSTALLER_REPO_RAW:-}" # 兼容旧变量：指定单一安装资源源（为空时使用 INSTALLER_REPO_MIRRORS）。
 # GitHub 资源加速代理（前缀拼接型）：安装资源与 Native 包共用；GSH_GITHUB_PROXY 可强制指定单一节点。
 GITHUB_PROXY_SITES="${GITHUB_PROXY_SITES:-https://gh-proxy.com/,https://ghfast.top/,https://ghproxy.com/}"
@@ -14,7 +14,7 @@ GSH_GITHUB_PROXY="${GSH_GITHUB_PROXY:-}" # 强制指定 GitHub 加速代理（�
 INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-}" # 安装资源镜像池；为空时由 init_installer_repo_pool 按代理清单生成。
 # 校验对象是镜像源提供的 git blob 原始字节（LF）；改动 compose 后必须同步更新此处。
 # 历史 pin eb30aeae... 与 v0.1.4 tag 内 compose blob（a34665e2...）不匹配，导致严格校验必然失败。
-INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-19f4086b63521d9045fea85a860169b861747f9c832a5c06eb043c980840723b}"
+INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-43a3c64b691522daba1d5185391fd4ce7740c3cef965e092c8b431e82ecd1fff}"
 INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML:-525eaf74e17df33887fe47248f414c0de3e6cd94a8d20e072ab5d66284c760ae}"
 # Debian 12 等发行版源不含 Compose v2 时，从 docker/compose GitHub Release 自动补装 CLI 插件。
 # 摘要与官方 .sha256 / checksums.txt 资产双源核对；升级插件版本时需同步替换版本号与两个摘要。
@@ -1803,6 +1803,26 @@ pull_runtime_images() {
     return 0
   fi
 
+  # 常见误配：脚本默认 tag 与本地已导入镜像的 tag 不一致（脚本 v0.3.5 + 离线包 v0.3.7）。
+  # 安装器只按完整引用判断，对不上就整份重拉；这里先把同仓库的本地 tag 摊开，省去逐条排查。
+  local image_repo local_tag_refs tag_ref
+  if [[ "${PANEL_IMAGE}" == *"@"* ]]; then
+    image_repo="${PANEL_IMAGE%%@*}"
+  else
+    image_repo="${PANEL_IMAGE%%:*}"
+  fi
+  local_tag_refs="$(run_as_root docker images --format '{{.Repository}}:{{.Tag}}' "${image_repo}" 2>/dev/null || true)"
+  if [[ -n "${local_tag_refs}" ]]; then
+    log_warn "Requested runtime image is not present locally: ${PANEL_IMAGE}"
+    log_warn "Local images in the same repository:"
+    while IFS= read -r tag_ref; do
+      if [[ -n "${tag_ref}" ]]; then
+        log_warn "  - ${tag_ref}"
+      fi
+    done <<< "${local_tag_refs}"
+    log_warn "若上面就是你要的版本，用 GSH_RELEASE_TAG=<对应的版本 tag> 重跑本安装器即可跳过下载。"
+  fi
+
   if ! run_with_retry "docker pull ${PANEL_IMAGE}" run_as_root docker pull "${PANEL_IMAGE}"; then
     log_error "Failed to pull runtime image: ${PANEL_IMAGE}"
     log_error "GHCR 的镜像层域名（pkg-containers.githubusercontent.com）在国内常不可达，表现为 TLS handshake timeout。"
@@ -1890,33 +1910,56 @@ install_gsh_cli() {
 }
 
 # 输出最终访问信息与安全提醒。
+# 关键信息用不带日志前缀的边框区块呈现：安装日志很长，带 [INFO] 前缀的收尾行很容易被忽略。
 print_summary() {
   write_status "install" "ok" "Installation completed"
   INSTALL_COMPLETED=1
   CURRENT_STAGE="complete"
-  log_info "Installation completed."
-  log_info "Deployment mode: ${RESOLVED_INSTALL_MODE}"
-  log_info "Network profile: ${RESOLVED_NETWORK_PROFILE}"
-  if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]]; then
-    log_info "Native Release: ${NATIVE_CURRENT_LINK}"
-    log_info "Native SteamCMD: ${NATIVE_STEAMCMD_PATH}"
-    log_info "Panel service: game-server-hub.service"
-  else
-    log_info "Unified image (panel + DST + SteamCMD): ${PANEL_IMAGE}"
-    log_info "Compose project: cd ${PANEL_INSTALL_DIR} && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml ps"
-    log_info "CLI: run gsh (or bash /usr/local/bin/gsh) to manage the panel stack; gsh doctor for diagnostics."
-  fi
-  log_info "Panel URL: ${PANEL_ACCESS_URL}"
-  log_info "Admin username: ${ADMIN_USERNAME}"
+
+  local rule sub_rule
+  rule="======================================================================"
+  sub_rule="----------------------------------------------------------------------"
+
+  printf '\n%s\n' "${rule}"
+  printf ' 安装完成：game-server-hub %s\n' "${GSH_RELEASE_TAG}"
+  printf ' 部署模式：%s    网络档：%s\n' "${RESOLVED_INSTALL_MODE}" "${RESOLVED_NETWORK_PROFILE}"
+  printf '%s\n' "${rule}"
+  printf ' 面板地址   %s\n' "${PANEL_ACCESS_URL}"
+  printf ' 管理员     %s\n' "${ADMIN_USERNAME}"
   if [[ "${EXPOSE_ADMIN_PASSWORD}" == "1" ]]; then
-    log_info "Admin password: ${ADMIN_PASSWORD}"
+    printf ' 初始密码   %s\n' "${ADMIN_PASSWORD}"
   else
-    log_warn "Admin password is hidden by default. Set EXPOSE_ADMIN_PASSWORD=1 to print it in summary."
+    printf ' 初始密码   默认不打印，用下面这条命令读取：\n'
+    printf "sudo sed -n 's/^ADMIN_PASSWORD=//p' %s\n" "${PANEL_ENV_FILE}"
+    if [[ "${RESOLVED_INSTALL_MODE}" != "native" ]]; then
+      printf '            该变量由 docker-compose.yml 注入面板容器；若登录提示密码错误，改读容器内初始凭据：\n'
+      printf '            docker exec game-server-hub-panel cat /app/data/admin-credentials.txt\n'
+    fi
   fi
-  log_warn "Security note: change the admin password immediately after first login."
-  log_info "First-login force password change flag: FORCE_PASSWORD_CHANGE=1"
-  log_info "Install status file: ${STATUS_FILE}"
-  log_info "Host memory guidance: docs/MEMORY.md (panel.env presets under config/panel.env.presets/)"
+  printf '%s\n' "${sub_rule}"
+  if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]]; then
+    printf ' 面板服务   game-server-hub.service（sudo systemctl status 查看）\n'
+    printf ' 程序目录   %s\n' "${NATIVE_CURRENT_LINK}"
+  else
+    printf ' 运行镜像   %s\n' "${PANEL_IMAGE}"
+    printf ' 安装目录   %s\n' "${PANEL_INSTALL_DIR}"
+  fi
+  printf ' 常用命令   gsh doctor（体检）· gsh status（状态）· gsh setup-swap（交换区）\n'
+  printf ' 安装状态   %s\n' "${STATUS_FILE}"
+  printf '%s\n' "${rule}"
+  printf ' 接下来\n'
+  printf ' 1. 浏览器打开上面的面板地址登录；首次登录会强制修改初始密码\n'
+  printf ' 2. 该地址是内网 IP：公网访问换成公网 IP，并在安全组放行 TCP %s\n' "${PANEL_PORT}"
+  printf ' 3. 内存偏小（≤ 6 GiB）建议执行 sudo gsh setup-swap，详见 docs/MEMORY.md\n'
+  printf '%s\n\n' "${rule}"
+
+  # 排障用的长命令留在带前缀的日志里，方便复制粘贴。
+  if [[ "${RESOLVED_INSTALL_MODE}" == "native" ]]; then
+    log_info "Native release: ${NATIVE_CURRENT_LINK}; SteamCMD: ${NATIVE_STEAMCMD_PATH}"
+  else
+    log_info "Compose: cd ${PANEL_INSTALL_DIR} && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml ps"
+    log_info "Panel logs: cd ${PANEL_INSTALL_DIR} && docker compose logs -f panel"
+  fi
 }
 
 # 主流程：安装依赖 -> 预检 -> 网络处理 -> 生成配置 -> 部署。
@@ -1975,6 +2018,8 @@ main() {
   validate_install_mode_transition
   if [[ "${RESOLVED_INSTALL_MODE}" == "docker" ]]; then
     finalize_image_refs
+    # 自证身份：脚本默认 tag 与本地镜像 tag 不一致时，这一行最先暴露问题（含实际执行的文件名）。
+    log_info "Installer: ${SCRIPT_NAME} release=${GSH_RELEASE_TAG} image=${PANEL_IMAGE}"
   fi
 
   begin_stage "dependencies" "Installing base dependencies"

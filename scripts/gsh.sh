@@ -212,11 +212,18 @@ cmd_doctor() {
   fi
 
   log_info "-- Version --"
-  log_info "Release version: $(read_env_value "${PANEL_ENV_FILE}" "GSH_RELEASE_VERSION" || echo unknown)"
+  local release_version
+  release_version="$(read_env_value "${PANEL_ENV_FILE}" "GSH_RELEASE_VERSION" 2>/dev/null || true)"
+  log_info "Release version: ${release_version:-unknown}"
   log_info "Unified image: $(read_env_value "${PANEL_ENV_FILE}" "PANEL_IMAGE" || echo unknown)"
   if [[ "${RUNTIME_MODE}" == "native" ]]; then
     log_info "Native upgrade (pinned, checksum-verified):"
-    log_info "  curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/main/scripts/install.linux.sh | sudo bash -s -- --mode native"
+    # 固定用已安装版本，不用 main 分支：main 的默认 tag 可能指向尚未发布的版本。
+    if [[ -n "${release_version}" ]]; then
+      log_info "  curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/${release_version}/scripts/install.linux.sh | sudo bash -s -- --mode native"
+    else
+      log_info "  从 Release 页下载对应版本的 install.linux.sh，再执行 sudo bash install.linux.sh --mode native"
+    fi
   fi
 
   if [[ "$exit_code" -eq 0 ]]; then

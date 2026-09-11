@@ -12,7 +12,7 @@
 ## 路线 A：海外机器（一个命令装完）
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.6/scripts/install.linux.sh" \
+curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh" \
   | sudo bash -s -- --mode docker
 ```
 
@@ -37,7 +37,7 @@ gsh doctor
 
 ```bash
 # 下载安装器（gh-proxy 加速；不可用时换 https://ghfast.top/ 前缀）
-tag=v0.3.6
+tag=v0.3.7
 wget "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
 
 # 第一次运行：自动装好 Docker 与 Compose 插件。
@@ -58,7 +58,7 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 ### 阶段二：导入离线镜像包
 
 ```bash
-tag=v0.3.6
+tag=v0.3.7
 base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
 
 # 下载镜像包与校验文件（420 MB）
@@ -69,7 +69,7 @@ curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz.sha256" "${bas
 sha256sum -c "game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
 # 导入镜像（解压约 3.2 GB，预留 4 GB 磁盘；-i 带进度条，不要用 gunzip 管道；
-# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.3.6 即成功）
+# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.3.7 即成功）
 docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
 ```
 
@@ -211,12 +211,12 @@ Docker 与 Native 之间不自动迁移。保留数据目录后按目标模式�
 
 ```bash
 # 安装
-git clone --branch v0.3.6 --depth 1 https://github.com/PMAT77/game-serve-hub.git
+git clone --branch v0.3.7 --depth 1 https://github.com/PMAT77/game-serve-hub.git
 cd game-server-hub
 sudo bash ./scripts/install.linux.sh --mode native --network auto
 
 # 离线安装：指定本地 Native Release 包（旁须有同名 .sha256）
-sudo GSH_RELEASE_TAG=v0.3.6 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.3.6-linux-x64.tar.gz \
+sudo GSH_RELEASE_TAG=v0.3.7 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.3.7-linux-x64.tar.gz \
   bash ./scripts/install.linux.sh --mode native
 ```
 
@@ -251,8 +251,8 @@ GSH_PANEL_ENV_PRESET=auto      内存预设档位：auto|small|medium|large
 
 ```bash
 sudo docker login registry.example.com
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.6/scripts/install.linux.sh \
-  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.6 bash -s -- --mode docker --network cn
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh \
+  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.7 bash -s -- --mode docker --network cn
 ```
 
 镜像引用与 Release tag 一致，按 Release 的 `release-images.json` 核对 digest。

@@ -1,6 +1,6 @@
 services:
   panel:
-    image: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.6}
+    image: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
     build:
       context: .
       dockerfile: docker/unified/Dockerfile
@@ -29,10 +29,10 @@ services:
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances
       GSH_BACKUPS_ROOT: /var/lib/game-server-hub/backups
       DOCKER_HOST: unix:///var/run/docker.sock
-      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.6}
+      PANEL_IMAGE: ${PANEL_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
       # v0.2.2 起面板/DST/SteamCMD 合并为同一统一镜像；三个变量值一致，保留以便旧配置平滑迁移
-      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.6}
-      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.6}
+      GSH_GAME_DST_IMAGE: ${GSH_GAME_DST_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
+      GSH_STEAMCMD_IMAGE: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
       # 备选镜像 registry 候选（逗号分隔）：按顺序优先尝试，全部失败后回退主引用
       GSH_IMAGE_MIRRORS: ${GSH_IMAGE_MIRRORS:-}
       GSH_STEAMCMD_CONTAINER_MEMORY_MB: ${GSH_STEAMCMD_CONTAINER_MEMORY_MB:-}
@@ -78,7 +78,7 @@ services:
       retries: 3
 
   steamcmd:
-    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.6}
+    image: ${GSH_STEAMCMD_IMAGE:-ghcr.io/pmat77/game-server-hub:v0.3.7}
     profiles:
       - tools
     entrypoint: ["/bin/true"]

@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-09-11
+
+### Changed
+
+- **安装器 Debian 12 自愈**：Docker 官方源不可达而回退发行版 `docker.io` 时，若发行版源不含 Compose v2（Debian 12），安装器自动从 GitHub Release（gh-proxy 加速 + 官方 sha256 校验）补装 Compose v2 CLI 插件，不再要求手动安装；自动补装失败时错误信息直接给出与文档一致的手动命令。路线 B 安装命令追加 `--network cn` 加速 apt 下载，文档与安装器冒烟测试同步更新。
+
 ## [0.3.6] - 2026-09-11
 
 ### Changed

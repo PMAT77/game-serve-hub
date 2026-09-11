@@ -169,7 +169,7 @@ pnpm run lint
 | 变量 | 用途 |
 |------|------|
 | `CORS_ORIGIN` | 跨域：`true`/`false` 或逗号分隔白名单；开发默认可跨域，生产默认同源 |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 初始化管理员；生产未设密码时自动生成并写日志 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 初始化管理员；未设密码且管理员尚不存在时自动生成强随机密码并写入 `data/admin-credentials.txt`（0600，不写日志）；管理员已存在时不覆盖，除非 `GSH_SYNC_ADMIN_PASSWORD_FROM_ENV=1` |
 | `FORCE_PASSWORD_CHANGE` | `1` 时首次登录进入强制改密页 |
 
 ### Steam / Mod 相关环境变量（开发排查）

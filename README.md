@@ -6,7 +6,7 @@
 
 面向 Steam 专用服务器的开源运维面板。当前以《饥荒联机版》（DST）为首个完整适配游戏，提供安装、更新、启停、监控、日志、控制台、世界和 Mod 管理。
 
-![Game Server Hub 首页](https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/game-server-hub/home.png)
+![Game Server Hub 首页](https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/game-server-hub/GameServer_W.png)
 
 ## 适合谁
 
@@ -25,7 +25,7 @@
 
 ## 快速开始
 
-当前为 `v0.3.7` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
+当前为 `v0.3.8` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
 
 | 模式 | 适合谁 | 面板 | SteamCMD / 游戏进程 | 进程管理 |
 | --- | --- | --- | --- | --- |
@@ -43,14 +43,14 @@
 > Native 模式不拉取任何容器镜像，不需要这一步。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.8/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 ### Native systemd 模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.8/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -59,20 +59,25 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/script
 若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.7/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.8/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 
 `--network auto` 根据 GitHub、Docker 仓库和国内软件源的实际连通性选择档位，不使用 IP 归属接口；`cn` 会临时切换 Ubuntu/Debian 软件源、增加 SteamCMD 重试，失败时恢复原软件源。
 
-安装完成后打开脚本输出的地址。安装器会生成随机初始密码，默认不在摘要中明文展示，可在服务器上读取：
+安装完成后打开脚本输出的地址。初始密码默认不在摘要中明文展示，写在 `panel.env` 里，由面板启动时据此创建管理员（Docker 模式经 `docker-compose.yml` 注入容器，Native 模式经 systemd `EnvironmentFile` 注入进程）：
 
 ```bash
-sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
-  /opt/game-server-hub/panel.env
+sudo sed -n 's/^ADMIN_PASSWORD=//p' /opt/game-server-hub/panel.env
 ```
 
-首次登录必须修改密码。
+Docker 部署若登录提示「账号或密码错误」，说明容器没收到这个变量（旧版 compose 或手动 `docker run` 未带 `-e`）：此时面板会自行生成随机密码并落盘，改读容器内的初始凭据即可：
+
+```bash
+docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
+```
+
+首次登录必须修改密码（`FORCE_PASSWORD_CHANGE=1` 时面板会拦截至改密页，改密成功后上述凭据文件自动删除）。
 
 > **国内网络**：若你跳过了上面的离线镜像包步骤、结果卡在镜像下载（`TLS handshake timeout`），那正是 GHCR 镜像层域名不可达 —— `docker load` 导入 Release 离线镜像包后重跑安装器即可，步骤见[安装与运维指南 · 离线镜像包完整步骤](docs/INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)。
 

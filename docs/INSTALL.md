@@ -12,13 +12,17 @@
 ## 路线 A：海外机器（一个命令装完）
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh" \
+curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.8/scripts/install.linux.sh" \
   | sudo bash -s -- --mode docker
 ```
 
+> 管道方式锁定的是当次下载内容，不会误用磁盘上的旧脚本。若想先确认拿到的是目标版本：
+> `curl -fsSL "<上面的 URL>" | sed -n '9p'`，第 9 行应输出 `...:-v0.3.8}}` —— 这一行的默认 tag 决定安装器要装的镜像版本。
+
 ```bash
 # 初始密码：安装器默认不打印，从 panel.env 读取（管理员名 superadmin，首登强制改密）
-sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' /opt/game-server-hub/panel.env
+sudo sed -n 's/^ADMIN_PASSWORD=//p' /opt/game-server-hub/panel.env
+# 若登录提示密码错误（容器没收到该变量）：docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
 
 # 健康检查：runtime.status 应为 running；或 gsh doctor 全面体检
 curl -fsS http://127.0.0.1:9527/health
@@ -37,12 +41,17 @@ gsh doctor
 
 ```bash
 # 下载安装器（gh-proxy 加速；不可用时换 https://ghfast.top/ 前缀）
-tag=v0.3.7
-wget "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
+# 用 curl -o 指定带版本号的文件名：wget 遇到同名文件不会覆盖而是另存为 .1，容易继续跑上一次的旧脚本
+tag=v0.3.8
+curl -fL --retry 3 -o "install-${tag}.sh" \
+  "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
+
+# 自证版本：必须输出 ...:-v0.3.8}}，对不上就停下排查（这行的默认 tag 决定安装器要装的镜像版本）
+sed -n '9p' "install-${tag}.sh"
 
 # 第一次运行：自动装好 Docker 与 Compose 插件。
 # 结尾报「Cannot reach GHCR / Image pull failed」属正常（镜像包未导入）→ 进入阶段二；阶段三原样重跑本命令
-sudo GSH_PANEL_ENV_PRESET=small bash install.linux.sh --mode docker --network cn
+sudo GSH_PANEL_ENV_PRESET=small GSH_RELEASE_TAG="${tag}" bash "install-${tag}.sh" --mode docker --network cn
 
 # 验证插件（期望输出：Docker Compose version v2.39.2）
 docker compose version
@@ -58,24 +67,32 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 ### 阶段二：导入离线镜像包
 
 ```bash
-tag=v0.3.7
+tag=v0.3.8
 base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
 
-# 下载镜像包与校验文件（420 MB）
+# 下载镜像包与校验文件（v0.3.8 约 200 MB；v0.3.5 是 420 MB，体积对不上说明下错了版本）
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz"        "${base}/game-server-hub-${tag}-docker-image.tar.gz"
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz.sha256" "${base}/game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
 # 校验完整性（期望输出末尾 OK）。.sha256 记录原始文件名，改过名需先改回
 sha256sum -c "game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
+# 核对包内镜像 tag 与目标版本一致（RepoTags 应为 ghcr.io/pmat77/game-server-hub:v0.3.8）
+tar -xOzf "game-server-hub-${tag}-docker-image.tar.gz" manifest.json | head -c 200; echo
+
 # 导入镜像（解压约 3.2 GB，预留 4 GB 磁盘；-i 带进度条，不要用 gunzip 管道；
-# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.3.7 即成功）
+# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.3.8 即成功）
 docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
+
+# 断言本地 tag 与目标版本一致：安装器只认完整引用字符串，tag 对不上即使内容相同也会重新拉取
+docker images --format '{{.Repository}}:{{.Tag}}' | grep "^ghcr.io/pmat77/game-server-hub:${tag}$"
 ```
 
 ### 阶段三：重跑安装器完成部署
 
 原样重跑[阶段一](#阶段一docker-引擎与-compose-插件)那条安装命令 —— 这次镜像已在本地，日志出现 `Runtime image already present locally, skipping pull` 后一路走完，结尾输出面板地址。
+
+> 没出现 `skipping pull` 却又开始下载，就是脚本默认 tag 与本地镜像 tag 不一致：`sed -n '9p' "install-${tag}.sh"` 与 `docker images | grep game-server-hub` 两边都必须等于 `${tag}`；也可以显式覆盖重跑 `sudo GSH_RELEASE_TAG="${tag}" bash "install-${tag}.sh" --mode docker --network cn`。
 
 ```bash
 docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问题清单
@@ -83,7 +100,7 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 
 ### 阶段四：访问面板
 
-安装器结尾输出的 `Panel URL` 是内网地址，本地访问改用公网 IP 并放行面板端口。初始密码获取见[登录与安全](#登录与安全)。
+安装器结尾会打印一个边框摘要块，其中的`面板地址`是内网地址：公网访问改用公网 IP 并放行面板端口，初始密码的读取命令也写在同一块里。初始密码获取见[登录与安全](#登录与安全)。
 
 浏览器 `http://<服务器公网IP>:<PANEL_PORT>` 登录，首登强制改密。若之后「检查更新」超时，panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
 
@@ -124,8 +141,20 @@ sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose
 管理员名默认 `superadmin`，初始密码默认不打印，从 panel.env 读取：
 
 ```bash
-sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' /opt/game-server-hub/panel.env
+sudo sed -n 's/^ADMIN_PASSWORD=//p' /opt/game-server-hub/panel.env
 ```
+
+面板首次启动时按 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 创建管理员：Docker 模式由 `docker-compose.yml` 的 `environment` 注入容器，Native 模式由 systemd `EnvironmentFile` 注入进程 —— 两条路径读的都是同一个 `panel.env`，改值后重启面板即生效。
+
+未设置 `ADMIN_PASSWORD`、或容器没收到该变量（旧版 compose、手动 `docker run` 漏了 `-e`）时，面板会随机生成密码并写入容器内数据目录：
+
+```bash
+docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
+```
+
+该文件只在"生成的密码确实写入了数据库"时才会生成（或重写）：管理员已存在且未开启 `GSH_SYNC_ADMIN_PASSWORD_FROM_ENV` 时不会生成新密码，避免给出一个登录不上的值。
+
+`FORCE_PASSWORD_CHANGE=1`（安装器默认写入）时首次登录会拦截至 `/force-change-password`，改密成功后凭据文件自动删除。
 
 也可安装时显式指定：`sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='强密码' bash install.linux.sh --mode docker`。不要把 `panel.env` 或授权文件发到公开 Issue。
 
@@ -169,7 +198,7 @@ sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' /opt/gam
 
 ### 忘记初始密码（登录时）
 
-按[登录与安全](#登录与安全)提取 `ADMIN_PASSWORD`；已改密遗忘则用 `GSH_PASSWORD_RECOVERY_TOKEN`（安装时写入 panel.env）走面板找回，或重跑安装器并显式传 `ADMIN_PASSWORD`。
+按[登录与安全](#登录与安全)提取 `ADMIN_PASSWORD`；已改密遗忘则用 `GSH_PASSWORD_RECOVERY_TOKEN`（在 panel.env 设置至少 16 位后重启面板）走登录页「忘记密码」，或重跑安装器并显式传 `ADMIN_PASSWORD`。两条路都要求变量真正进入面板进程，Docker 模式可先确认：`docker exec game-server-hub-panel sh -lc 'echo $ADMIN_PASSWORD'` 有值。
 
 ### SteamCMD 下载慢或失败（装游戏时）
 
@@ -211,12 +240,12 @@ Docker 与 Native 之间不自动迁移。保留数据目录后按目标模式�
 
 ```bash
 # 安装
-git clone --branch v0.3.7 --depth 1 https://github.com/PMAT77/game-serve-hub.git
-cd game-server-hub
+git clone --branch v0.3.8 --depth 1 https://github.com/PMAT77/game-serve-hub.git
+cd game-serve-hub          # 目录名取自仓库名（game-serve-hub），镜像名才是 game-server-hub
 sudo bash ./scripts/install.linux.sh --mode native --network auto
 
 # 离线安装：指定本地 Native Release 包（旁须有同名 .sha256）
-sudo GSH_RELEASE_TAG=v0.3.7 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.3.7-linux-x64.tar.gz \
+sudo GSH_RELEASE_TAG=v0.3.8 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.3.8-linux-x64.tar.gz \
   bash ./scripts/install.linux.sh --mode native
 ```
 
@@ -251,8 +280,9 @@ GSH_PANEL_ENV_PRESET=auto      内存预设档位：auto|small|medium|large
 
 ```bash
 sudo docker login registry.example.com
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh \
-  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.7 bash -s -- --mode docker --network cn
+# 版本三方必须一致：脚本默认 tag（sed -n '9p' 可查）= 本地镜像 tag = 这里 PANEL_IMAGE 的 tag
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.8/scripts/install.linux.sh \
+  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.8 bash -s -- --mode docker --network cn
 ```
 
 镜像引用与 Release tag 一致，按 Release 的 `release-images.json` 核对 digest。

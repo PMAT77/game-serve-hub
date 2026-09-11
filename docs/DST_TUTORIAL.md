@@ -71,25 +71,29 @@ SSH 登录服务器后，按部署模式选择一条命令执行。
 > 中国大陆服务器请**先导入离线镜像包，再跑这条命令**。安装器要从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名在国内基本不可达，直接跑几乎必然失败（`TLS handshake timeout`）。离线包步骤见 [INSTALL.md · 离线镜像包完整步骤](INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.8/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 **Native systemd 模式**（推荐个人服主，不依赖 Docker）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.8/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
 **国内网络**（GitHub Raw 不稳定时，换 jsDelivr 源并启用国内档位）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.7/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.8/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 
 建议**明确指定 --mode**，避免自动判断与你的预期不一致。
+
+> 三条命令都是管道下载，锁定当次内容、不会误用磁盘上的旧脚本。安装版本由脚本第 9 行的默认 tag 决定，想先确认可执行
+> `curl -fsSL "<上面的 URL>" | sed -n '9p'`，应输出 `...:-v0.3.8}}`。
+> 这个 tag 必须与本地镜像 tag 一致：用离线包导入过镜像时，两边对不上，安装器仍会重新拉取。
 
 ### 3.2 安装参数
 
@@ -211,14 +215,14 @@ http://<服务器公网 IP>:9527
 安装器生成随机初始密码，默认不在摘要中明文展示。在服务器上执行：
 
 ```bash
-sudo awk -F= '/^ADMIN_PASSWORD=/{print substr($0, index($0, "=") + 1)}' \
-  /opt/game-server-hub/panel.env
+sudo sed -n 's/^ADMIN_PASSWORD=//p' /opt/game-server-hub/panel.env
 ```
 
 默认管理员用户名是 superadmin。也可以在首次安装时显式指定账号密码：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.7/scripts/install.linux.sh \
+# 脚本默认 tag 决定安装版本；如需锁定别的版本，在 sudo env 里追加 GSH_RELEASE_TAG=v0.3.8
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.8/scripts/install.linux.sh \
   | sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='替换为强密码' \
       bash -s -- --mode native
 ```

@@ -1,4 +1,5 @@
 import {
+  buildRegistryBlobUrl,
   buildRegistryManifestUrl,
   normalizeDigest,
   parseImageRef,
@@ -30,6 +31,40 @@ interface ManifestIndex {
       architecture?: string
     }
   }>
+}
+
+interface ImageManifest {
+  config?: {
+    digest?: string
+  }
+}
+
+interface ImageConfig {
+  rootfs?: {
+    diff_ids?: string[]
+  }
+}
+
+/**
+ * 远端镜像的身份信息。
+ * 同一个镜像在不同层级各有一个摘要：manifest list（多架构索引入口）、
+ * 各平台清单、平台清单里的 config，以及 config 内部的未压缩层摘要 ——
+ * 本地镜像只会持有其中某几个，所以必须成套比对，否则永远对不上号。
+ */
+export interface RemoteImageIdentity {
+  /** 与 `docker pull` / `docker inspect .RepoDigests` 同口径的摘要；多架构镜像下即 manifest list 摘要 */
+  primary: string | null
+  /** 同一镜像的其它等价摘要：各平台清单摘要，以及平台清单指向的 config 摘要（等同本地 image Id） */
+  aliases: string[]
+  /** 平台清单 config 里的未压缩层摘要，等同本地 `RootFS.Layers`：打包方式变了也能认出同一份内容 */
+  layers: string[]
+}
+
+function readContentDigest(response: Response): string | null {
+  return normalizeDigest(
+    response.headers.get('docker-content-digest')
+    ?? response.headers.get('Docker-Content-Digest'),
+  )
 }
 
 export function parseBearerChallenge(wwwAuthenticate: string | null | undefined): BearerChallenge | null {
@@ -86,6 +121,15 @@ export function pickManifestDigestFromIndex(index: ManifestIndex): string | null
   return first ? normalizeDigest(first) : null
 }
 
+/** 列出索引里所有平台清单摘要（跳过 attestation 这类 os=unknown 的条目） */
+export function collectIndexManifestDigests(index: ManifestIndex): string[] {
+  const digests = (index.manifests ?? [])
+    .filter(item => (item.platform?.os ?? '') !== 'unknown')
+    .map(item => normalizeDigest(item.digest))
+    .filter((digest): digest is string => Boolean(digest))
+  return [...new Set(digests)]
+}
+
 function isManifestIndexContentType(contentType: string | null): boolean {
   if (!contentType) {
     return false
@@ -131,16 +175,15 @@ async function fetchBearerToken(
   return token
 }
 
-async function fetchRegistryManifest(
-  image: string,
+async function registryRequest(
+  url: string,
   method: 'HEAD' | 'GET',
+  accept: string,
   auth?: RegistryAuthOptions,
 ): Promise<Response> {
-  const parsed = parseImageRef(image)
-  const url = buildRegistryManifestUrl(parsed)
   const resolvedAuth = resolveRegistryAuthOptions(auth)
   const headers: Record<string, string> = {
-    Accept: MANIFEST_ACCEPT,
+    Accept: accept,
   }
 
   let response = await fetch(url, {
@@ -171,22 +214,93 @@ async function fetchRegistryManifest(
   return response
 }
 
-export async function fetchRemoteImageDigest(
+async function fetchRegistryManifest(
+  image: string,
+  method: 'HEAD' | 'GET',
+  auth?: RegistryAuthOptions,
+  reference?: string,
+): Promise<Response> {
+  const parsed = parseImageRef(image)
+  return registryRequest(buildRegistryManifestUrl(parsed, reference), method, MANIFEST_ACCEPT, auth)
+}
+
+async function fetchRegistryBlob(
+  image: string,
+  digest: string,
+  auth?: RegistryAuthOptions,
+): Promise<Response> {
+  const parsed = parseImageRef(image)
+  return registryRequest(buildRegistryBlobUrl(parsed, digest), 'GET', '*/*', auth)
+}
+
+function normalizeLayers(layers: string[] | undefined): string[] {
+  return (layers ?? [])
+    .map(layer => normalizeDigest(layer))
+    .filter((layer): layer is string => Boolean(layer))
+}
+
+/**
+ * 读取平台清单的 config：摘要等同本地 image Id，层摘要等同本地 `RootFS.Layers`。
+ * 两者都是"打包方式被改变但镜像内容没变"时唯一还能对上的凭据。
+ */
+async function fetchManifestConfig(
+  image: string,
+  manifestDigest: string,
+  auth?: RegistryAuthOptions,
+): Promise<{ digest: string | null, layers: string[] }> {
+  const manifestResponse = await fetchRegistryManifest(image, 'GET', auth, manifestDigest)
+  const manifest = await manifestResponse.json() as ImageManifest
+  const digest = normalizeDigest(manifest.config?.digest)
+  if (!digest) {
+    return { digest: null, layers: [] }
+  }
+  const configResponse = await fetchRegistryBlob(image, digest, auth)
+  const config = await configResponse.json() as ImageConfig
+  return { digest, layers: normalizeLayers(config.rootfs?.diff_ids) }
+}
+
+/**
+ * 读出远端镜像的身份信息。
+ *
+ * primary 与 `docker pull` 记录进 RepoDigests 的摘要同口径（多架构镜像下即
+ * manifest list 摘要），是最直接可比的一项；aliases 与 layers 是同一个镜像的
+ * 其它写法 —— 各平台清单摘要、config 摘要、未压缩层摘要，用来识别"内容相同但
+ * 打包方式不同"的镜像：`docker load` 导入的离线包、buildx 重新导出、
+ * 第三方镜像站重打包都会让 manifest 摘要甚至 config 摘要变化，层内容却不变。
+ *
+ * 下钻失败只降级为"只有 primary"，不影响主判断。
+ */
+export async function fetchRemoteImageIdentity(
   image: string,
   auth?: RegistryAuthOptions,
-): Promise<string | null> {
+): Promise<RemoteImageIdentity> {
   const headResponse = await fetchRegistryManifest(image, 'HEAD', auth)
-  const contentType = headResponse.headers.get('content-type')
-  const headDigest = normalizeDigest(
-    headResponse.headers.get('docker-content-digest')
-    ?? headResponse.headers.get('Docker-Content-Digest'),
-  )
+  const headDigest = readContentDigest(headResponse)
 
-  if (!isManifestIndexContentType(contentType)) {
-    return headDigest
+  try {
+    let primary = headDigest
+    let manifestDigest = headDigest
+    const aliases: string[] = []
+
+    if (isManifestIndexContentType(headResponse.headers.get('content-type'))) {
+      const indexResponse = await fetchRegistryManifest(image, 'GET', auth)
+      primary = primary ?? readContentDigest(indexResponse)
+      const index = await indexResponse.json() as ManifestIndex
+      aliases.push(...collectIndexManifestDigests(index))
+      manifestDigest = pickManifestDigestFromIndex(index) ?? primary
+    }
+
+    if (!manifestDigest) {
+      return { primary, aliases, layers: [] }
+    }
+
+    const config = await fetchManifestConfig(image, manifestDigest, auth)
+    if (config.digest) {
+      aliases.push(config.digest)
+    }
+    return { primary, aliases, layers: config.layers }
   }
-
-  const getResponse = await fetchRegistryManifest(image, 'GET', auth)
-  const index = await getResponse.json() as ManifestIndex
-  return pickManifestDigestFromIndex(index) ?? headDigest
+  catch {
+    return { primary: headDigest, aliases: [], layers: [] }
+  }
 }

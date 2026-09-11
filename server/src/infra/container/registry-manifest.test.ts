@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  collectIndexManifestDigests,
   parseBearerChallenge,
   pickManifestDigestFromIndex,
   resolvePreferredPlatform,
@@ -33,6 +34,23 @@ describe('registry-manifest', () => {
       ],
     })
     assert.equal(digest, 'sha256:linux-amd64')
+  })
+
+  it('collects every platform digest of an index and drops attestations', () => {
+    const amd64 = `sha256:${'a'.repeat(64)}`
+    const arm64 = `sha256:${'b'.repeat(64)}`
+    const attestation = `sha256:${'c'.repeat(64)}`
+    assert.deepEqual(
+      collectIndexManifestDigests({
+        manifests: [
+          { digest: amd64, platform: { os: 'linux', architecture: 'amd64' } },
+          { digest: attestation, platform: { os: 'unknown', architecture: 'unknown' } },
+          { digest: arm64, platform: { os: 'linux', architecture: 'arm64' } },
+          { digest: amd64, platform: { os: 'linux', architecture: 'amd64' } },
+        ],
+      }),
+      [amd64, arm64],
+    )
   })
 
   it('falls back to linux digest without explicit architecture', () => {

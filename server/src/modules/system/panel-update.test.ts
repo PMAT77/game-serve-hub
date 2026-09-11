@@ -6,6 +6,7 @@ import { afterEach, describe, it } from 'node:test'
 import type { ServerConfig } from '../../shared/config'
 import {
   hasStackRequiredFiles,
+  isImageOutdated,
   isReleaseNewer,
   resolveApplySupport,
   resolveStackPaths,
@@ -196,5 +197,60 @@ describe('isReleaseNewer', () => {
     assert.equal(isReleaseNewer('v0.2.0', 'v0.1.4'), false)
     assert.equal(isReleaseNewer('v0.2.0-beta.1', 'v0.2.0'), true)
     assert.equal(isReleaseNewer('v0.2.0', 'v0.2.0-beta.1'), false)
+  })
+})
+
+describe('isImageOutdated', () => {
+  // docker pull 在本地记录 manifest list 摘要，registry 的 HEAD 返回同一个值；
+  // 平台清单摘要、config 摘要与未压缩层摘要是同一镜像的另外几种写法。
+  const indexDigest = `sha256:${'1'.repeat(64)}`
+  const platformDigest = `sha256:${'2'.repeat(64)}`
+  const configDigest = `sha256:${'3'.repeat(64)}`
+  const otherDigest = `sha256:${'4'.repeat(64)}`
+  const layers = [`sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`]
+  const remote = { digests: [indexDigest, platformDigest, configDigest], layers }
+
+  it('accepts a local manifest list digest as the same image as its platform digests', () => {
+    assert.equal(isImageOutdated({ local: { digests: [indexDigest], layers }, remote }), false)
+  })
+
+  it('accepts a local image pinned to a platform digest', () => {
+    assert.equal(isImageOutdated({ local: { digests: [platformDigest], layers }, remote }), false)
+  })
+
+  it('accepts an offline image whose config digest still matches', () => {
+    assert.equal(isImageOutdated({ local: { digests: [configDigest], layers }, remote }), false)
+  })
+
+  it('accepts an offline image whose config digest was rewritten but layers match', () => {
+    assert.equal(isImageOutdated({
+      local: { digests: [otherDigest], layers },
+      remote,
+    }), false)
+  })
+
+  it('reports an update when neither digests nor layers line up', () => {
+    assert.equal(isImageOutdated({
+      local: { digests: [otherDigest], layers: [`sha256:${'c'.repeat(64)}`] },
+      remote,
+    }), true)
+  })
+
+  it('reports an update when the layer list differs', () => {
+    assert.equal(isImageOutdated({
+      local: { digests: [otherDigest], layers: [...layers, `sha256:${'c'.repeat(64)}`] },
+      remote,
+    }), true)
+  })
+
+  it('pulls when the image is missing locally', () => {
+    assert.equal(isImageOutdated({ local: { digests: [], layers: [] }, remote }), true)
+  })
+
+  it('never claims an update when the registry could not be read', () => {
+    assert.equal(isImageOutdated({
+      local: { digests: [indexDigest], layers },
+      remote: { digests: [], layers: [] },
+    }), false)
   })
 })

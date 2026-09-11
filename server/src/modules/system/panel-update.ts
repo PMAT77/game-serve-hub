@@ -7,7 +7,7 @@ import {
   parseImageRef,
   shortDigest,
 } from '../../infra/container/image-ref'
-import { fetchRemoteImageDigest } from '../../infra/container/registry-manifest'
+import { fetchRemoteImageIdentity } from '../../infra/container/registry-manifest'
 import { createDockerClient } from '../../infra/docker-connect'
 import { loadServerConfig } from '../../shared/config'
 import { getSystemPanelSettings } from '../../shared/db/index'
@@ -107,8 +107,15 @@ function resolveReleaseVersionFromEnv(): string | null {
   return null
 }
 
+/**
+ * 收集本地镜像持有的全部身份凭据。
+ * RepoDigests 来自 docker pull（多架构镜像下是 manifest list 摘要）；
+ * Id 是镜像 config 摘要；RootFS.Layers 是未压缩层摘要 ——
+ * docker load 导入的离线包连 config 摘要都与 registry 不同，只有层能对上。
+ */
 async function inspectLocalImageDigest(image: string): Promise<{
-  digest: string | null
+  digests: string[]
+  layers: string[]
   present: boolean
   releaseVersion: string | null
 }> {
@@ -116,23 +123,29 @@ async function inspectLocalImageDigest(image: string): Promise<{
     const info = await resolveDocker().getImage(image).inspect() as {
       Id?: string
       RepoDigests?: string[]
+      RootFS?: { Layers?: string[] }
       Config?: { Labels?: Record<string, string> }
     }
-    const repoDigest = info.RepoDigests?.find(item => item.includes('@sha256:'))
-    const digest = normalizeDigest(
-      repoDigest?.split('@')[1]
-      ?? info.Id,
-    )
+    const digests = [...new Set(
+      [...(info.RepoDigests ?? []), info.Id]
+        .map(item => normalizeDigest(item))
+        .filter((digest): digest is string => Boolean(digest)),
+    )]
+    const layers = (info.RootFS?.Layers ?? [])
+      .map(layer => normalizeDigest(layer))
+      .filter((layer): layer is string => Boolean(layer))
     const labelVersion = info.Config?.Labels?.['org.opencontainers.image.version']
     return {
-      digest,
+      digests,
+      layers,
       present: true,
       releaseVersion: labelVersion?.trim() || null,
     }
   }
   catch {
     return {
-      digest: null,
+      digests: [],
+      layers: [],
       present: false,
       releaseVersion: null,
     }
@@ -345,20 +358,59 @@ function buildApplyFields(applySupport: ApplySupport, releaseTag?: string | null
   }
 }
 
+/** 镜像身份：摘要集合 + 未压缩层指纹 */
+export interface ImageIdentity {
+  digests: string[]
+  layers: string[]
+}
+
+function hasSameLayers(left: string[], right: string[]): boolean {
+  return left.length > 0
+    && left.length === right.length
+    && left.every((layer, index) => layer === right[index])
+}
+
+/**
+ * 本地镜像是否落后于远端。
+ * Docker 部署下更新只按镜像内容判断，而同一份内容可以有多种凭据：manifest list、
+ * 平台清单、config、未压缩层摘要 —— 本地与远端各持其中一部分（`docker pull` 记录
+ * manifest list 摘要，`docker load` 导入的离线包连 config 摘要都与 registry 不同）。
+ * 所以先比摘要集合，再退回比层指纹：只要有一种凭据对上，就是同一个镜像。
+ */
+export function isImageOutdated(input: {
+  local: ImageIdentity
+  remote: ImageIdentity
+}): boolean {
+  if (input.remote.digests.length === 0 && input.remote.layers.length === 0) {
+    return false
+  }
+  if (input.local.digests.length === 0 && input.local.layers.length === 0) {
+    return true
+  }
+  if (input.local.digests.some(digest => input.remote.digests.includes(digest))) {
+    return false
+  }
+  return !hasSameLayers(input.local.layers, input.remote.layers)
+}
+
 async function buildImageUpdateInfo(
   image: string,
   fallbackReleaseVersion: string | null,
 ): Promise<HubImageUpdateInfo> {
   const parsed = parseImageRef(image)
-  let localDigest: string | null = null
-  let remoteDigest: string | null = null
+  let localDigests: string[] = []
+  let localLayers: string[] = []
+  let remoteDigests: string[] = []
+  let remoteLayers: string[] = []
+  let remotePrimary: string | null = null
   let localPresent = false
   let releaseVersion = fallbackReleaseVersion
   let checkError: string | null = null
 
   try {
     const local = await inspectLocalImageDigest(image)
-    localDigest = local.digest
+    localDigests = local.digests
+    localLayers = local.layers
     localPresent = local.present
     releaseVersion = local.releaseVersion || releaseVersion
   }
@@ -370,7 +422,13 @@ async function buildImageUpdateInfo(
   }
 
   try {
-    remoteDigest = await fetchRemoteImageDigest(image)
+    const remote = await fetchRemoteImageIdentity(image)
+    remotePrimary = remote.primary
+    remoteLayers = remote.layers
+    remoteDigests = [...new Set(
+      [remote.primary, ...remote.aliases]
+        .filter((digest): digest is string => Boolean(digest)),
+    )]
   }
   catch (error) {
     checkError = normalizeErrorMessages([
@@ -379,10 +437,7 @@ async function buildImageUpdateInfo(
     ])
   }
 
-  const updateAvailable = Boolean(
-    remoteDigest
-    && (!localDigest || localDigest !== remoteDigest),
-  )
+  const localDigest = localDigests[0] ?? null
 
   return {
     image,
@@ -390,9 +445,12 @@ async function buildImageUpdateInfo(
     releaseVersion,
     localDigest,
     localDigestShort: shortDigest(localDigest),
-    remoteDigest,
-    remoteDigestShort: shortDigest(remoteDigest),
-    updateAvailable,
+    remoteDigest: remotePrimary,
+    remoteDigestShort: shortDigest(remotePrimary),
+    updateAvailable: isImageOutdated({
+      local: { digests: localDigests, layers: localLayers },
+      remote: { digests: remoteDigests, layers: remoteLayers },
+    }),
     localPresent,
     checkError,
   }

@@ -35,9 +35,15 @@ export function parseImageRef(image: string): ParsedImageRef {
   }
 }
 
-export function buildRegistryManifestUrl(parsed: ParsedImageRef): string {
+/** reference 可以是 tag 或 digest，省略时用解析出的 tag */
+export function buildRegistryManifestUrl(parsed: ParsedImageRef, reference?: string): string {
   const host = parsed.registry.replace(/^https?:\/\//, '')
-  return `https://${host}/v2/${parsed.repository}/manifests/${parsed.tag}`
+  return `https://${host}/v2/${parsed.repository}/manifests/${reference ?? parsed.tag}`
+}
+
+export function buildRegistryBlobUrl(parsed: ParsedImageRef, digest: string): string {
+  const host = parsed.registry.replace(/^https?:\/\//, '')
+  return `https://${host}/v2/${parsed.repository}/blobs/${digest}`
 }
 
 export function normalizeDigest(value: string | undefined | null): string | null {

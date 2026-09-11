@@ -76,4 +76,72 @@ if grep -Fq 'ADMIN_PASSWORD' "${DIAGNOSTICS_FILE}"; then
   exit 1
 fi
 
+# ---- ensure_compose_plugin 冒烟（stub 网络/引擎/落盘，不触真实 GitHub 与 Docker）----
+COMPOSE_PLUGIN_TEST_DIR="$(mktemp -d)"
+CURL_LOG="${COMPOSE_PLUGIN_TEST_DIR}/curl.log"
+INSTALLED_LOG="${COMPOSE_PLUGIN_TEST_DIR}/installed.log"
+PLUGIN_ERR_LOG="${COMPOSE_PLUGIN_TEST_DIR}/plugin.err.log"
+
+# stub 原则：run_as_root 直通（CI 无 root）；install 落盘改记日志；curl 写假二进制并记录 URL；
+# sha256sum 返回可控哈希；uname 按用例切换架构；docker 按 stub 模式模拟 'docker compose version'。
+run_as_root() { "$@"; }
+install() { printf 'install %s\n' "$*" >> "${INSTALLED_LOG}"; }
+sleep() { :; }
+uname() { printf '%s' "${STUB_UNAME_ARCH}"; }
+docker() {
+  if [[ "${STUB_COMPOSE_MODE}" == "available" ]]; then
+    return 0
+  fi
+  if [[ "${STUB_COMPOSE_MODE}" == "after-install" && -s "${INSTALLED_LOG}" ]]; then
+    return 0
+  fi
+  return 1
+}
+curl() {
+  local args=("$@") out i
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    if [[ "${args[$i]}" == "-o" ]]; then
+      out="${args[$((i + 1))]}"
+    fi
+  done
+  printf 'curl %s\n' "${args[${#args[@]} - 1]}" >> "${CURL_LOG}"
+  printf 'fake-compose-binary' > "${out}"
+}
+sha256sum() { printf '%s  stub\n' "${STUB_DOWNLOAD_SHA256}"; }
+
+# 用例 1：插件已可用 → 幂等跳过
+STUB_UNAME_ARCH='x86_64'
+STUB_COMPOSE_MODE='available'
+STUB_DOWNLOAD_SHA256="${COMPOSE_PLUGIN_SHA256_X86_64}"
+ensure_compose_plugin
+
+# 用例 2：x86_64 下载 + 官方 sha256 匹配 → 落盘且 'docker compose version' 复验通过
+STUB_COMPOSE_MODE='after-install'
+: > "${INSTALLED_LOG}"
+: > "${CURL_LOG}"
+ensure_compose_plugin
+grep -Fq 'docker-compose-linux-x86_64' "${CURL_LOG}"
+grep -Fq 'install -m 0755' "${INSTALLED_LOG}"
+
+# 用例 3：校验不匹配 → 全源重试后失败，错误输出含可复制的手动命令
+STUB_DOWNLOAD_SHA256='deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
+: > "${INSTALLED_LOG}"
+if ensure_compose_plugin 2> "${PLUGIN_ERR_LOG}"; then
+  printf 'ensure_compose_plugin unexpectedly succeeded on checksum mismatch\n' >&2
+  exit 1
+fi
+grep -Fq 'Checksum mismatch' "${PLUGIN_ERR_LOG}"
+grep -Fq 'sudo curl -fL --retry 3' "${PLUGIN_ERR_LOG}"
+grep -Fq "${COMPOSE_PLUGIN_VERSION}" "${PLUGIN_ERR_LOG}"
+
+# 用例 4：aarch64 架构选择
+STUB_UNAME_ARCH='aarch64'
+STUB_DOWNLOAD_SHA256="${COMPOSE_PLUGIN_SHA256_AARCH64}"
+: > "${INSTALLED_LOG}"
+: > "${CURL_LOG}"
+ensure_compose_plugin
+grep -Fq 'docker-compose-linux-aarch64' "${CURL_LOG}"
+
+rm -rf "${COMPOSE_PLUGIN_TEST_DIR}"
+
 printf 'install-linux-smoke-ok\n'

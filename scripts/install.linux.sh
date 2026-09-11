@@ -16,6 +16,13 @@ INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-}" # 安装资源镜像池；�
 # 历史 pin eb30aeae... 与 v0.1.4 tag 内 compose blob（a34665e2...）不匹配，导致严格校验必然失败。
 INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-7302ab22a3d0ee87711c63888e07c6bb337f4753309a5d62096ba140034dbc0f}"
 INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML:-525eaf74e17df33887fe47248f414c0de3e6cd94a8d20e072ab5d66284c760ae}"
+# Debian 12 等发行版源不含 Compose v2 时，从 docker/compose GitHub Release 自动补装 CLI 插件。
+# 摘要与官方 .sha256 / checksums.txt 资产双源核对；升级插件版本时需同步替换版本号与两个摘要。
+COMPOSE_PLUGIN_VERSION="v2.39.2"
+COMPOSE_PLUGIN_SHA256_X86_64="a55a8cd4ef103aac282812554e531aac8df7e914a287ee81e14d695556a22902"
+COMPOSE_PLUGIN_SHA256_AARCH64="54488fffb60782f3c8787a48b95ed15f49f5a3a85f4105304bd46db5edd9db61"
+COMPOSE_PLUGIN_INSTALL_PATH="/usr/local/lib/docker/cli-plugins/docker-compose"
+COMPOSE_PLUGIN_MAX_TIME_SECONDS="${COMPOSE_PLUGIN_MAX_TIME_SECONDS:-1800}"
 INSTALL_MODE="${GSH_INSTALL_MODE:-auto}" # auto | docker | native
 NETWORK_PROFILE="${GSH_NETWORK_PROFILE:-auto}" # auto | cn | global
 RESOLVED_INSTALL_MODE=""
@@ -923,6 +930,78 @@ configure_docker_repo() {
   run_as_root bash -c "echo 'deb [arch=${arch} signed-by=${keyring}] ${repo} ${DISTRO_CODENAME} stable' > /etc/apt/sources.list.d/docker.list"
 }
 
+# 发行版源不含 Compose v2（如 Debian 12）时，从 docker/compose GitHub Release 补装 CLI 插件。
+# 下载复用安装器的 GitHub 加速代理池；插件为全用户安装（Docker 官方文档路径 /usr/local/lib/docker/cli-plugins）。
+ensure_compose_plugin() {
+  local arch asset expected_sum actual_sum source attempt tmp_file
+  if run_as_root docker compose version >/dev/null 2>&1; then
+    log_info "Docker Compose v2 plugin already available."
+    return 0
+  fi
+
+  case "$(uname -m)" in
+    x86_64)
+      arch="x86_64"
+      expected_sum="${COMPOSE_PLUGIN_SHA256_X86_64}"
+      ;;
+    aarch64)
+      arch="aarch64"
+      expected_sum="${COMPOSE_PLUGIN_SHA256_AARCH64}"
+      ;;
+    *)
+      log_warn "Compose plugin auto-install unsupported on $(uname -m); install the plugin manually."
+      return 1
+      ;;
+  esac
+  asset="docker-compose-linux-${arch}"
+
+  local variants
+  local raw_sources=()
+  variants="$(build_github_url_variants "https://github.com/docker/compose/releases/download/${COMPOSE_PLUGIN_VERSION}/${asset}")"
+  IFS=',' read -r -a raw_sources <<< "${variants}"
+
+  for source in "${raw_sources[@]}"; do
+    for ((attempt = 1; attempt <= REPO_DOWNLOAD_MAX_ATTEMPTS; attempt++)); do
+      tmp_file="$(mktemp)"
+      log_info "Downloading Compose v2 plugin from ${source} (attempt ${attempt}/${REPO_DOWNLOAD_MAX_ATTEMPTS}; progress below)..."
+      # 不加 -s：弱网下让 curl 输出进度，避免“看似卡死”。
+      if curl -fL \
+        --connect-timeout "${REPO_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${COMPOSE_PLUGIN_MAX_TIME_SECONDS}" \
+        -o "${tmp_file}" \
+        "${source}"; then
+        actual_sum="$(sha256sum "${tmp_file}" | awk '{print $1}')"
+        if [[ "${actual_sum}" == "${expected_sum}" ]]; then
+          run_as_root install -d -m 0755 /usr/local/lib/docker/cli-plugins
+          run_as_root install -m 0755 "${tmp_file}" "${COMPOSE_PLUGIN_INSTALL_PATH}"
+          rm -f "${tmp_file}"
+          if run_as_root docker compose version >/dev/null 2>&1; then
+            log_info "Docker Compose v2 plugin installed: ${COMPOSE_PLUGIN_INSTALL_PATH}"
+            return 0
+          fi
+          log_warn "Compose plugin installed but 'docker compose version' still fails; manual steps required."
+          return 1
+        fi
+        log_warn "Checksum mismatch for ${source} (attempt ${attempt}/${REPO_DOWNLOAD_MAX_ATTEMPTS}): expected ${expected_sum}, got ${actual_sum}."
+      else
+        log_warn "Download failed: ${source} (attempt ${attempt}/${REPO_DOWNLOAD_MAX_ATTEMPTS})."
+      fi
+      rm -f "${tmp_file}"
+      if (( attempt < REPO_DOWNLOAD_MAX_ATTEMPTS )); then
+        sleep "${RETRY_DELAY_SECONDS}"
+      fi
+    done
+  done
+
+  log_error "Unable to auto-install the Docker Compose v2 plugin from ${COMPOSE_PLUGIN_VERSION} (all sources failed or checksum mismatch)."
+  log_error "请手动安装 Compose v2 插件后原样重跑本安装器（与 docs/INSTALL.md 路线 B 阶段一兜底一致）："
+  log_error "  sudo mkdir -p /usr/local/lib/docker/cli-plugins"
+  log_error "  sudo curl -fL --retry 3 \"https://gh-proxy.com/https://github.com/docker/compose/releases/download/${COMPOSE_PLUGIN_VERSION}/${asset}\" -o /usr/local/lib/docker/cli-plugins/docker-compose"
+  log_error "  sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose"
+  log_error "  docker compose version   # 期望输出：Docker Compose version ${COMPOSE_PLUGIN_VERSION}"
+  return 1
+}
+
 # 安装 Docker（如未安装），并确保守护进程与 compose 插件可用。
 install_docker() {
   if command -v docker >/dev/null 2>&1; then
@@ -933,12 +1012,18 @@ install_docker() {
       && apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
       log_info "Docker CE installed from the official repository."
     else
-      log_warn "Docker CE repository is unavailable. Trying signed distribution packages..."
+      log_warn "Docker CE repository is unavailable. Falling back to signed distribution packages (docker.io; ~90 MB download + ~640 MB unpack — slow on weak networks is normal, safe to Ctrl+C and rerun later)."
+      write_status "dependencies" "warn" "Docker CE repo unreachable; falling back to distro docker.io"
       run_as_root rm -f /etc/apt/sources.list.d/docker.list
       run_as_root apt-get update -y || return 1
+      if ! apt-cache show docker-compose-v2 >/dev/null 2>&1 \
+        && ! apt-cache show docker-compose-plugin >/dev/null 2>&1 \
+        && ! apt-cache show docker-compose 2>/dev/null | grep -q '^Version: 2'; then
+        log_info "Distribution repos provide no Compose v2; the plugin will be auto-installed from GitHub Release (proxy-accelerated, ~65 MB) once Docker is in place."
+      fi
       apt_install docker.io || return 1
       if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
-        # Ubuntu 23.04+：官方源收录的 Compose v2
+        # Ubuntu 22.04（jammy-updates）+/Debian 13+：官方源收录的 Compose v2
         apt_install docker-compose-v2 || return 1
       elif apt-cache show docker-compose-plugin >/dev/null 2>&1; then
         # Docker 官方 apt 源的插件包
@@ -946,6 +1031,9 @@ install_docker() {
       elif apt-cache show docker-compose 2>/dev/null | grep -q '^Version: 2'; then
         # Debian 13+：官方源打包的 Compose v2（包名 docker-compose；Debian 12 同名包是 v1，版本不匹配不会误装）
         apt_install docker-compose || return 1
+      else
+        # Debian 12：发行版源无 Compose v2，走 GitHub Release 自动补装（gh-proxy 加速 + 官方 sha256 校验）
+        ensure_compose_plugin || return 1
       fi
     fi
   fi
@@ -1893,7 +1981,7 @@ main() {
   install_base_packages
   if [[ "${RESOLVED_INSTALL_MODE}" == "docker" ]]; then
     if ! install_docker; then
-      abort "Docker installation failed. Fix Docker networking or explicitly retry Native mode with --mode native."
+      abort "Docker installation failed. See /var/log/game-server-hub/install.status and the troubleshooting section in docs/INSTALL.md; if the error above contains manual commands, run them and rerun this installer."
     fi
     add_user_to_docker_group
     write_status "dependencies" "ok" "Docker dependencies installed"

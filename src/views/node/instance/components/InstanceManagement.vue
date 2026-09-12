@@ -325,7 +325,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
     {
       title: '操作',
       key: 'actions',
-      width: isMobileMode.value ? 88 : 150,
+      width: isMobileMode.value ? 88 : 180,
       fixed: 'right',
       render: row => renderInstanceRowActions(row),
     },

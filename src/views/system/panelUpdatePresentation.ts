@@ -25,19 +25,17 @@ export interface PanelUpdatePresentation {
 }
 
 /** 四种环境原因的解决办法完全一样，对用户只说一句 */
-export const MANUAL_UPDATE_NOTE = '当前部署方式不支持面板内自动更新，请在服务器终端执行'
+export const MANUAL_UPDATE_NOTE = '这种安装方式无法在面板里更新，请在服务器上执行'
 
 export const MANUAL_UPDATE_COMMAND = 'sudo gsh update'
 
-export const MANUAL_UPDATE_HINT = '用安装脚本升级可恢复面板内一键更新。'
-
 const PHASE_LINES: Record<UpdatePhase, string> = {
   idle: '',
-  preparing: '正在检查本地镜像…',
-  downloading: '正在下载更新镜像，请勿关闭面板…',
-  downloaded: '镜像已下载完成，点击「立即安装」完成更新。',
-  installing: '正在准备更新容器…',
-  recreating: '正在重建面板，约 30 秒后自动重连…',
+  preparing: '正在准备…',
+  downloading: '正在下载更新，请勿关闭页面…',
+  downloaded: '更新已下载，点「立即安装」完成更新。',
+  installing: '正在准备安装…',
+  recreating: '正在安装，约 30 秒后自动返回…',
   failed: '',
 }
 
@@ -123,7 +121,7 @@ function resolvePhaseLine(status: PanelUpdateStatus): string | null {
     return status.updateError?.trim() || '更新失败，请稍后重试。'
   }
   if (!status.updatePhase || status.updatePhase === 'idle') {
-    return status.updating ? '正在更新，面板稍后会自动重启…' : null
+    return status.updating ? '正在更新，稍后自动返回…' : null
   }
   return status.updateMessage?.trim() || PHASE_LINES[status.updatePhase] || null
 }
@@ -188,10 +186,10 @@ export function buildPanelUpdatePresentation(status: PanelUpdateStatus | null): 
       suffix = latestVersion ? `有新版本 ${latestVersion}` : '有新版本'
       break
     case 'same-version-changed':
-      suffix = '镜像内容有更新'
+      suffix = '已发布更新'
       break
     case 'unknown':
-      suffix = '检测到镜像有更新'
+      suffix = '检测到有新更新'
       break
     case 'none':
     default:

@@ -340,18 +340,6 @@ function applyJobResultToInstalledMods(workshopId: string, mod?: ModItemDto, err
     }
   }
 }
-const steamSourceLabel = computed(() => {
-  if (!steamMeta.value) {
-    return ''
-  }
-  if (steamMeta.value.upstreamSource === 'official') {
-    return '官方 Web API'
-  }
-  if (steamMeta.value.upstreamSource === 'relay') {
-    return '海外中转'
-  }
-  return '社区页面抓取'
-})
 const steamMetaText = computed(() => {
   if (!steamMeta.value) {
     return ''
@@ -360,16 +348,7 @@ const steamMetaText = computed(() => {
   const ageText = ageMs < 60_000
     ? `${Math.max(1, Math.round(ageMs / 1000))} 秒前`
     : `${Math.max(1, Math.round(ageMs / 60_000))} 分钟前`
-  if (steamMeta.value.stale) {
-    return `当前显示缓存结果（${ageText}），后台正在刷新，来源：${steamSourceLabel.value}`
-  }
-  if (steamMeta.value.cached) {
-    return `当前显示缓存结果（${ageText}），来源：${steamSourceLabel.value}`
-  }
-  if (steamMeta.value.upstreamSource === 'official') {
-    return '当前显示实时结果，来源：官方 Web API'
-  }
-  return `当前显示实时结果，已降级到${steamSourceLabel.value}`
+  return `更新于 ${ageText}`
 })
 
 const steamSortOptions = computed(() => [

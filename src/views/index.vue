@@ -10,63 +10,63 @@ const LINKS = {
 const products = ref([
   {
     name: '实例管理',
-    tagline: '创建、安装、启停与日志，掌控 DST 专用服生命周期',
+    tagline: '从开服到日常管理，一个页面搞定',
     url: LINKS.docs,
     features: [
-      'SteamCMD 安装与更新游戏服务端',
-      '实例创建、启动、停止与运行状态查看',
-      '安装过程日志与资源占用快照',
-      '多实例自动端口分配',
-      'Docker Compose 对齐的生产部署路径',
+      '一键安装与更新游戏服务端',
+      '创建、启动、停止实例，随时看运行状态',
+      '安装进度与资源占用',
+      '多开自动分配端口',
+      '一条命令部署到自己的服务器',
     ],
   },
   {
     name: '监控台',
-    tagline: '主机与容器资源一目了然，辅助日常运维决策',
+    tagline: '机器负载一目了然，不用登录服务器查',
     url: LINKS.docs,
     features: [
-      'CPU、内存、磁盘等主机指标',
-      'Docker 运行概况',
-      '网卡实时流量',
-      '与实例状态联动查看',
+      'CPU、内存、磁盘占用',
+      '游戏服务运行状态',
+      '实时网络流量',
+      '和实例状态一起看',
     ],
   },
   {
     name: '游戏控制台',
-    tagline: '贴近游戏内的运维体验，少登录、少切终端',
+    tagline: '在面板里看日志、发指令，不用切终端',
     url: LINKS.docs,
     features: [
-      '实例日志 SSE 实时流',
-      '游戏内命令下发',
-      '直连连接代码生成',
+      '实时查看运行日志',
+      '游戏内命令',
+      '直连邀请码',
     ],
   },
   {
     name: 'DST 房间 / 世界',
-    tagline: 'Cluster 与分片配置，可视化编辑房间与世界规则',
+    tagline: '可视化编辑房间与地上、洞穴世界',
     url: LINKS.docs,
     features: [
-      'Cluster 房间配置',
-      'Master / Caves 分片管理',
-      '地图与规则可视化编辑',
+      '房间名称、密码与联网方式',
+      '地上与洞穴两个世界',
+      '地图与规则可视化调整',
     ],
   },
   {
     name: '备份与恢复',
-    tagline: '单机完整生命周期管理的安全网',
+    tagline: '存档随时能找回',
     url: LINKS.docs,
     features: [
-      '存档一键备份 / 恢复（tar.gz）',
+      '存档一键备份与恢复',
       '更新、删除实例前自动备份',
-      '面板数据库一致性快照',
+      '面板数据备份',
     ],
   },
 ])
 
 const useCases = ref([
-  { title: '个人开服', description: 'VPS 或家用 Linux 一条命令拉起面板与 DST 实例' },
-  { title: '小圈子联机', description: '控制台看日志、下发命令，减少 SSH 维护' },
-  { title: '社区服运营', description: '监控台掌握 CPU、内存、磁盘与 Docker 状态' },
+  { title: '个人开服', description: '在自己电脑或云服务器上一键开服' },
+  { title: '小圈子联机', description: '在面板里看日志、发指令，不用 SSH' },
+  { title: '社区服运营', description: '一眼看清机器负载与游戏服务状态' },
   { title: '进阶运维', description: 'Mod、备份恢复已内置；计划任务、告警等能力按版本路线图发布' },
 ])
 
@@ -105,7 +105,7 @@ function goLogin() {
         <!-- Left: Title & CTA -->
         <div class="hero-enter p-6 border rounded-xl relative overflow-hidden md-p-8">
           <div class="text-xs text-muted-foreground tracking-widest font-medium mb-3 uppercase">
-            Docker · SteamCMD · DST · MIT
+            开源 · 自托管 · 免费
           </div>
           <h1 class="text-2xl leading-tight tracking-tight font-semibold mb-3 md-text-3xl">
             Steam 专用服务器，可视化管理
@@ -114,8 +114,8 @@ function goLogin() {
             </div>
           </h1>
           <p class="text-sm text-muted-foreground leading-relaxed mb-6 max-w-prose md-text-base">
-            开源 <span class="text-foreground font-medium">Steam 游戏专用服务器面板</span>，Community 版 MIT 完整自托管。v1 聚焦
-            <span class="text-foreground font-medium">饥荒联机版（DST）</span>，Linux 一键脚本 + Docker Compose 生产部署；面板与游戏容器分离，升级面板时实例可继续运行。
+            开源、可自托管的 <span class="text-foreground font-medium">游戏服务器面板</span>。目前支持
+            <span class="text-foreground font-medium">饥荒联机版（DST）</span>：一条命令装好，升级面板时玩家不掉线。
           </p>
           <div class="flex flex-wrap gap-3">
             <FaButton size="lg" @click="goLogin">
@@ -143,7 +143,7 @@ function goLogin() {
                   Linux
                 </div>
                 <div class="text-sm text-muted-foreground">
-                  安装脚本 + Docker Compose；宿主机无需 Node.js 或 SteamCMD
+                  一条命令安装，不用预先配好运行环境
                 </div>
               </div>
             </div>
@@ -155,10 +155,10 @@ function goLogin() {
               </div>
               <div>
                 <div class="text-3xl tracking-tight font-semibold mb-1 md-text-4xl">
-                  分离架构
+                  互不影响
                 </div>
                 <div class="text-sm text-muted-foreground">
-                  面板与 gsh 游戏容器独立运行，按文档升级时玩家通常不掉线
+                  升级面板时玩家不掉线
                 </div>
               </div>
             </div>

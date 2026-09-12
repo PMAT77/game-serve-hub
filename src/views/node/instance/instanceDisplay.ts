@@ -88,7 +88,7 @@ export function resolveInstallPhase(instance: InstanceItem): string {
     return '下载游戏'
   }
   if (text.includes('安装完成') || text.includes('启动脚本')) {
-    return '生成启动脚本'
+    return '准备启动'
   }
   if (/\d{1,3}\s*%/.test(text)) {
     return '下载游戏'

@@ -348,7 +348,7 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
       },
       delete: {
         title: '确认删除',
-        content: `确认删除实例「${row.name}」吗？若正在运行将先自动停止，并清理该实例安装目录。`,
+        content: `确认删除实例「${row.name}」吗？实例文件会一并清除。`,
         positiveText: '删除',
         type: 'error' as const,
       },
@@ -423,10 +423,10 @@ export function getUpdateInstanceButtonTitle(instance: InstanceItem) {
     return '实例异常，点击重新拉取服务端文件'
   }
   if (!instance.localBuildId) {
-    return '尚未检测到本地服务端文件，点击拉取安装'
+    return '尚未安装，点击开始安装'
   }
   if (isInstanceUpToDate(instance)) {
-    return `已是最新版本（Build ${instance.localBuildId}）`
+    return '已是最新版本'
   }
-  return '拉取最新游戏服务端'
+  return '更新游戏服务端'
 }

@@ -76,7 +76,7 @@ describe('buildPanelUpdatePresentation', () => {
 
   it('reports the same version with different image content', () => {
     const view = buildPanelUpdatePresentation(buildStatus())
-    assert.equal(view.versionLine, '当前版本：v0.2.2 · 镜像内容有更新')
+    assert.equal(view.versionLine, '当前版本：v0.2.2 · 已发布更新')
   })
 
   it('says it is up to date when the digests match', () => {
@@ -100,7 +100,7 @@ describe('buildPanelUpdatePresentation', () => {
     const view = buildPanelUpdatePresentation(buildStatus({ updating: true, updatePhase: 'downloading' }))
     assert.equal(view.versionLine, '当前版本：v0.2.2 · 正在下载更新')
     assert.equal(view.needsManualCommand, false)
-    assert.match(view.phaseLine ?? '', /下载更新镜像/)
+    assert.match(view.phaseLine ?? '', /正在下载更新/)
     assert.equal(view.updateFailed, false)
   })
 
@@ -194,7 +194,7 @@ describe('buildPanelUpdatePresentation', () => {
 
 describe('manual update note', () => {
   it('states the conclusion without deployment jargon', () => {
-    assert.match(MANUAL_UPDATE_NOTE, /不支持面板内自动更新/)
-    assert.doesNotMatch(MANUAL_UPDATE_NOTE, /digest|摘要|GSH_STACK_DIR|systemd|编排文件|compose/)
+    assert.match(MANUAL_UPDATE_NOTE, /无法在面板里更新/)
+    assert.doesNotMatch(MANUAL_UPDATE_NOTE, /digest|摘要|GSH_STACK_DIR|systemd|编排文件|compose|镜像|容器/)
   })
 })

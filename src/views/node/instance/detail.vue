@@ -182,7 +182,6 @@ onBeforeUnmount(() => {
             >
               {{ state.label }}
             </span>
-            <span class="text-xs text-muted-foreground">AppID {{ instance.gameCode }}</span>
           </template>
         </div>
         <div class="flex flex-wrap gap-2">

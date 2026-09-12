@@ -17,6 +17,9 @@ const emits = defineEmits<{
   onLogin: [account?: string]
 }>()
 
+/** 管理员在服务器上重置密码的步骤在文档里，登录页只给入口，不贴命令与环境变量 */
+const DOCS_RESET_PASSWORD_URL = 'https://github.com/PMAT77/game-serve-hub/blob/main/docs/DST_TUTORIAL.md'
+
 const loading = ref(false)
 const statusLoading = ref(true)
 const recoveryEnabled = ref(false)
@@ -81,7 +84,7 @@ const onSubmit = form.handleSubmit(async (values) => {
       emits('onLogin', values.account)
       return
     }
-    faToast.warning('当前未启用在线找回，请按下方说明在服务器上重置')
+    faToast.warning('当前未启用在线找回，请联系管理员重置')
   }
   finally {
     loading.value = false
@@ -107,7 +110,7 @@ onMounted(() => {
           {{ recoveryHint || '请输入服务器上配置的找回口令，并设置新密码。' }}
         </p>
         <p v-else class="text-sm text-muted-foreground lg:text-base">
-          面板未启用在线找回。请在服务器上执行下方命令重置管理员密码。
+          面板未启用在线找回。请联系管理员重置密码。
         </p>
       </div>
 
@@ -129,7 +132,7 @@ onMounted(() => {
       <FormField v-if="recoveryEnabled" v-slot="{ componentField, errors }" name="recoveryToken">
         <FormItem class="pb-6 relative space-y-0">
           <FormControl>
-            <FaInput type="password" placeholder="找回口令（panel.env 中的 GSH_PASSWORD_RECOVERY_TOKEN）" class="w-full" :class="{ 'border-destructive': errors.length }" v-bind="componentField">
+            <FaInput type="password" placeholder="找回口令" class="w-full" :class="{ 'border-destructive': errors.length }" v-bind="componentField">
               <template #start>
                 <FaIcon name="i-lucide:key-round" />
               </template>
@@ -172,25 +175,20 @@ onMounted(() => {
       </FormField>
 
       <FaButton :loading="loading" size="lg" class="w-full" type="submit">
-        {{ recoveryEnabled ? '重置密码' : '查看说明' }}
+        {{ recoveryEnabled ? '重置密码' : '查看重置方法' }}
       </FaButton>
 
       <NCollapse v-if="!statusLoading && !recoveryEnabled" class="mt-4">
-        <NCollapseItem title="服务器命令行重置说明（管理员）" name="cli">
-          <div class="text-xs text-muted-foreground space-y-2">
-            <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md whitespace-pre-wrap">cd /opt/game-server-hub
-docker compose --env-file panel.env exec panel \
-  pnpm exec tsx server/scripts/reset-admin-password.ts \
-  --account=superadmin --password='YourNewPass#123'</pre>
-            <p>
-              或在 <code class="text-xs">panel.env</code> 中设置 <code class="text-xs">ADMIN_PASSWORD</code> 与
-              <code class="text-xs">GSH_SYNC_ADMIN_PASSWORD_FROM_ENV=1</code> 后重启面板（用完后请改回 0）。
-            </p>
-            <p>
-              启用在线找回：在 <code class="text-xs">panel.env</code> 添加至少 16 位的
-              <code class="text-xs">GSH_PASSWORD_RECOVERY_TOKEN</code> 并重启面板。
-            </p>
-          </div>
+        <NCollapseItem title="管理员：在服务器上重置密码" name="cli">
+          <p class="text-xs text-muted-foreground">
+            重置步骤见
+            <a
+              class="text-primary hover:underline"
+              :href="DOCS_RESET_PASSWORD_URL"
+              target="_blank"
+              rel="noopener"
+            >项目文档</a>；开启在线找回后即可直接在本页重置。
+          </p>
         </NCollapseItem>
       </NCollapse>
 

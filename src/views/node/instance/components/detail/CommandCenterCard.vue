@@ -244,7 +244,7 @@ defineExpose({
       v-if="instance && !running"
       class="rounded-md bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground mb-3"
     >
-      实例未运行，指令模块暂不可用。启动实例后可在此发送世界公告、快捷指令与自定义命令。
+      实例未运行，启动后可用
     </p>
 
     <NTabs v-model:value="activeTab" type="line" size="small" @update:value="onTabChange">
@@ -259,9 +259,6 @@ defineExpose({
             （{{ cavesCommandDisabledHint }}）
           </span>
         </div>
-        <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
-          快捷指令覆盖常用运维动作：保存与回档作用于整个集群，改玩家属性等命令需按玩家所在世界选择分片。
-        </p>
         <NSpace wrap>
           <NButton
             v-for="item in INSTANCE_QUICK_COMMANDS"
@@ -314,18 +311,14 @@ defineExpose({
           </NButton>
         </form>
         <p class="text-xs text-muted-foreground mt-3 leading-relaxed">
-          命令通过面板下发到游戏服控制台执行；执行输出与回显请到
+          执行结果见
           <NButton text type="primary" size="tiny" class="align-baseline px-0" :disabled="!instance" @click="goConsole">
             实例控制台
           </NButton>
-          查看。
         </p>
       </NTabPane>
 
       <NTabPane name="announce" tab="世界公告">
-        <p class="text-xs text-muted-foreground mt-3 mb-4 leading-relaxed max-w-3xl">
-          向游戏内在线玩家推送公告。常见用法：面板升级或维护前先通知玩家（游戏服可继续运行）。
-        </p>
         <NInput
           v-model:value="maintenanceMessage"
           type="textarea"

@@ -194,7 +194,7 @@ const createFormRules: FormRules = {
         if (value?.trim()) {
           return true
         }
-        return new Error('请选择游戏 AppID')
+        return new Error('请选择游戏')
       },
     },
   ],
@@ -255,7 +255,7 @@ const instanceColumns = computed<DataTableColumns<InstanceItem>>(() => {
       },
     },
     {
-      title: 'Steam AppID',
+      title: '游戏',
       key: 'gameCode',
       width: 140,
     },
@@ -547,7 +547,7 @@ function renderInstanceStateColumn(row: InstanceItem) {
         { trigger: 'hover' },
         {
           trigger: () => h('span', { class: 'text-xs px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-500' }, '异常退出'),
-          default: () => `检测到进程异常退出（${unexpectedExitAt.replace('T', ' ').slice(0, 19)}）`,
+          default: () => `上次运行异常退出（${unexpectedExitAt.replace('T', ' ').slice(0, 19)}）`,
         },
       ),
     )
@@ -628,7 +628,7 @@ function renderInstanceCpuColumn(row: InstanceItem) {
     'span',
     {
       class: 'text-sm',
-      title: '进程 CPU 占用（非整机）',
+      title: '该实例的 CPU 占用',
     },
     formatCpuPercent(metrics.cpuUsageRate),
   )
@@ -643,7 +643,7 @@ function renderInstanceMemoryColumn(row: InstanceItem) {
     'span',
     {
       class: 'text-sm',
-      title: '进程常驻内存（RSS）',
+      title: '该实例占用的内存',
     },
     formatMemoryMb(metrics?.memoryMb),
   )
@@ -967,7 +967,7 @@ async function checkAllInstanceUpdates() {
     return
   }
   updateCheckLoading.value = true
-  faToast.info('版本检查已在后台进行，约需半分钟，完成后自动刷新', {
+  faToast.info('正在检查更新，约需半分钟', {
     duration: 6000,
   })
   try {
@@ -1007,7 +1007,7 @@ async function createInstance() {
       gameCode: createForm.gameCode,
       installPath: createForm.installPath?.trim() || undefined,
     })
-    faToast.success('实例创建成功，已进入后台安装流程')
+    faToast.success('实例创建成功，正在安装')
     createModalVisible.value = false
     resetCreateForm()
     await fetchInstances()
@@ -1087,7 +1087,7 @@ onBeforeUnmount(() => {
 
       <AdminListToolbar
         v-model:keyword="keywordFilter"
-        keyword-placeholder="实例名称 / Steam AppID"
+        keyword-placeholder="实例名称 / 游戏"
         :search-loading="instanceLoading"
         :reset-disabled="!keywordFilter && selectedNodeId === 'all' && statusFilter === 'all'"
         @search="searchInstances"
@@ -1311,10 +1311,10 @@ onBeforeUnmount(() => {
     >
       <div class="space-y-3 text-sm leading-relaxed text-foreground">
         <p>
-          实例「{{ createGuideTarget?.name || 'DST 实例' }}」正在后台安装，首次安装可能需要几分钟，完成后会自动提醒。
+          实例「{{ createGuideTarget?.name || 'DST 实例' }}」正在安装，可能需要几分钟，完成后会提醒你。
         </p>
         <p>
-          等待期间可以先配置房间与世界参数，配置会随安装完成后自动生效。
+          等待期间可以先配置房间与世界参数。
         </p>
       </div>
       <template #footer>

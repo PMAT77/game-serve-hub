@@ -7,7 +7,7 @@ export const SCHEDULE_KIND_LABELS: Record<ScheduleTaskItem['kind'], string> = {
   restart: '定时重启',
   backup: '定时备份',
   update_check: '更新检查',
-  db_snapshot: '数据库快照',
+  db_snapshot: '面板数据备份',
 }
 
 export const SCHEDULE_STATUS_LABELS: Record<NonNullable<ScheduleTaskItem['lastRunStatus']>, string> = {
@@ -29,7 +29,7 @@ export interface ScheduleTriggerNotice {
 export type ScheduleRunBaseline = Map<string, string | null>
 
 export function defaultScheduleTargetName(instanceId: string): string {
-  return instanceId === PANEL_DB_INSTANCE_ID ? '面板数据库' : instanceId
+  return instanceId === PANEL_DB_INSTANCE_ID ? '面板数据' : instanceId
 }
 
 function noticeLevel(status: NonNullable<ScheduleTaskItem['lastRunStatus']>): ScheduleTriggerNotice['level'] {

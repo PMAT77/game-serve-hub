@@ -229,7 +229,7 @@ async function loadConfig() {
     savedSnapshot.value = buildFormSnapshot()
   }
   catch {
-    message.error('加载世界配置失败，请确认实例已安装且后端服务正常')
+    message.error('加载世界配置失败，请确认实例已安装后重试')
     shardList.value = null
   }
   finally {
@@ -472,7 +472,7 @@ onActivated(() => {
       <NEmpty
         v-if="!shardList"
         class="py-16"
-        description="未能加载世界配置。请确认实例已安装、路由带有实例 ID，且后端服务可用。"
+        description="未能加载世界配置，请确认实例已安装后重试。"
       >
         <template #extra>
           <NButton size="small" @click="goBack">
@@ -487,7 +487,7 @@ onActivated(() => {
       <div v-else class="space-y-4">
         <AdminSettingsSection
           title="世界配置"
-          description="分别调整地上与洞穴的地图规则、端口与 Mod。保存后写入分片配置。"
+          description="分别调整地上与洞穴的地图规则、端口与 Mod。"
         />
         <NAlert v-if="configAlerts.warnings.length" type="warning" title="需要处理" class="mb-2">
           <ul class="list-disc pl-4 space-y-1">
@@ -540,7 +540,7 @@ onActivated(() => {
               <NTabs v-model:value="surfaceSubTab" type="card" placement="left" size="small" display-directive="show" class="mt-2">
                 <NTabPane name="rules" tab="世界规则">
                   <p v-if="masterShard?.worldGenerated" class="mt-2 mb-4 text-xs text-muted-foreground">
-                    地上世界已生成：世界规则的改动会在该分片重新生成地图时生效，不会改变现有存档。
+                    地上世界已生成：世界规则的改动只在重新生成地图时生效，不会改变现有存档。
                   </p>
                   <ShardWorldRulesSection
                     v-model="masterWorldRules"
@@ -605,7 +605,7 @@ onActivated(() => {
 
             <template v-if="!clusterShardEnabled">
               <p class="text-sm text-muted-foreground mt-2 mb-4">
-                洞穴未开启。请先在房间设置中打开「启用洞穴」并保存；保存后将自动生成洞穴默认配置，再在此调整世界规则与世界生成。
+                需先在房间设置中开启洞穴，才能调整洞穴的世界规则与世界生成。
               </p>
               <NButton size="small" @click="goClusterSettings">
                 前往房间设置
@@ -623,7 +623,7 @@ onActivated(() => {
                 <NTabs v-model:value="cavesSubTab" type="card" placement="left" size="small" display-directive="show" class="mt-2">
                   <NTabPane name="rules" tab="世界规则">
                     <p v-if="cavesShard?.worldGenerated" class="mt-2 mb-4 text-xs text-muted-foreground">
-                      洞穴世界已生成：世界规则的改动会在该分片重新生成地图时生效，不会改变现有存档。
+                      洞穴世界已生成：世界规则的改动只在重新生成地图时生效，不会改变现有存档。
                     </p>
                     <ShardWorldRulesSection
                       v-model="cavesWorldRules"

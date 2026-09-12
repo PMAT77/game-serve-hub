@@ -15,10 +15,8 @@ const props = withDefaults(defineProps<{
   mode: 'info',
 })
 
-const runtimeMode = computed(() => props.info?.runtimeMode ?? 'docker')
 const runtimeStatus = computed(() => props.info?.runtimeStatus ?? props.info?.dockerStatus ?? null)
-const runtimeLabel = computed(() => runtimeMode.value === 'native' ? 'systemd' : 'Docker')
-const runtimeDescription = computed(() => runtimeMode.value === 'native' ? '原生进程运行时' : '容器运行时')
+const runtimeLabel = computed(() => '运行环境')
 const isRunning = computed(() => runtimeStatus.value === 'running')
 /** 无数据（接口失败/未加载）时展示「未知」，不伪装成「未运行」 */
 const hasData = computed(() => runtimeStatus.value !== null)
@@ -57,6 +55,5 @@ const statusClass = computed(() => (isRunning.value ? 'text-emerald-600' : hasDa
         </span>
       </NSpace>
     </NProgress>
-    <span class="text-xs text-muted-foreground mt-4">{{ runtimeDescription }}</span>
   </div>
 </template>

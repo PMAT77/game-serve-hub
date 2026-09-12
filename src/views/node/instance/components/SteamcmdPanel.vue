@@ -2,7 +2,7 @@
 import { NTag } from 'naive-ui'
 import { computed, onMounted, shallowRef } from 'vue'
 import apiSystem from '@/api/modules/system'
-import { INSTANCE_ROOT_NOTE, resolveRuntimeEnvironmentView } from '../steamcmdPanelPresentation'
+import { resolveRuntimeEnvironmentView } from '../steamcmdPanelPresentation'
 
 defineOptions({
   name: 'NodeInstanceSteamcmdPanel',
@@ -87,14 +87,6 @@ onMounted(() => {
 
 <template>
   <div class="space-y-4">
-    <p class="text-sm text-muted-foreground">
-      <template v-if="isNativeMode">
-        SteamCMD 与游戏进程直接运行在宿主机，由 systemd 管理启动、自恢复、日志和资源限制。
-      </template>
-      <template v-else>
-        管理实例安装与运行所需的统一镜像。首次创建实例会自动准备，也可在此提前拉取。
-      </template>
-    </p>
     <div class="p-4 border border-border/70 rounded-lg bg-muted/20 space-y-4">
       <div class="flex flex-wrap gap-3 items-start justify-between">
         <div class="flex flex-wrap gap-2">
@@ -126,7 +118,7 @@ onMounted(() => {
             :disabled="!runtimeAvailable"
             @click="ensureGameDstImageManual"
           >
-            手动拉取 DST 运行镜像
+            手动拉取运行镜像
           </NButton>
         </div>
       </div>
@@ -151,15 +143,9 @@ onMounted(() => {
             readonly
             placeholder="未配置"
           />
-          <p class="text-xs text-muted-foreground">
-            {{ INSTANCE_ROOT_NOTE }}
-          </p>
         </div>
       </div>
 
-      <p v-if="environmentView.imageNote" class="text-xs text-muted-foreground">
-        {{ environmentView.imageNote }}
-      </p>
       <p
         v-if="environmentView.hint"
         class="text-xs"

@@ -267,7 +267,7 @@ function applyConfig(config: ClusterConfigDto) {
 async function loadConfig() {
   if (!instanceId.value) {
     serverConfig.value = null
-    loadError.value = '缺少实例标识，无法读取房间配置。'
+    loadError.value = '未找到这个房间，请返回房间列表后重新进入。'
     return
   }
   loading.value = true
@@ -278,7 +278,7 @@ async function loadConfig() {
   }
   catch {
     serverConfig.value = null
-    loadError.value = '加载房间配置失败，请确认实例已安装且后端服务正常。'
+    loadError.value = '加载房间配置失败，请确认实例已安装后重试。'
   }
   finally {
     loading.value = false
@@ -437,7 +437,7 @@ onActivated(() => {
     <div v-else class="space-y-4">
       <AdminSettingsSection
         title="房间配置"
-        description="设置联网方式、房间信息与洞穴开关。保存后写入实例配置目录。"
+        description="设置联网方式、房间信息与洞穴开关。"
       />
       <div class="space-y-4">
         <NAlert v-if="configAlerts.warnings.length" type="warning" title="需要处理" class="mb-2">
@@ -622,7 +622,7 @@ onActivated(() => {
                     <FaIcon name="i-lucide:info" class="size-4" />
                   </NButton>
                 </template>
-                <p>开启后地上与洞穴各运行一个服务器；保存后将自动准备洞穴默认配置，请到「世界设置」调整地图与端口。互联地址由系统在启动时自动配置。</p>
+                <p>开启后地上与洞穴各运行一个服务器；保存后将自动准备洞穴默认配置，请到「世界设置」调整地图与端口。</p>
               </NTooltip>
             </NFormItem>
             <template v-if="formModel.shardEnabled">

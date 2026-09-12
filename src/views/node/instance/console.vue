@@ -3,7 +3,6 @@ import type { InstanceConnectInfo, InstanceConsoleLogLine, InstanceItem, Instanc
 import apiInstance from '@/api/modules/instance'
 import { routeToNodeInstance } from '@/navigation/game-routes'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
-import { getStatusLabel } from './instanceDisplay'
 import { consoleLogShardLabel, formatConsoleLogLineForCopy } from './consoleLogDisplay'
 import { formatDateTime } from './utils'
 import type { InstanceConsoleCommandShard } from '@/api/modules/instance'
@@ -100,9 +99,9 @@ const cavesCommandDisabledHint = computed(() => {
 
 const emptyLogHint = computed(() => {
   if (activeTab.value === 'panel') {
-    return '暂无面板消息。命令回显与运行状态会显示在此。'
+    return '暂无面板消息'
   }
-  return '暂无运行日志。请先启动实例；地上与洞穴（若已开启）的输出将合并显示并带分片标签。'
+  return '暂无日志，启动实例后显示'
 })
 
 function streamClass(stream: InstanceConsoleLogLine['stream']) {
@@ -528,7 +527,7 @@ const connectDisplayBlock = computed(() => {
     return {
       title: '本机进服',
       command: info.localCommand,
-      hint: '游戏客户端与面板跑在同一台电脑时使用；面板运行在容器 / WSL2 里时，通常这一档最可靠。',
+      hint: '游戏和面板在同一台电脑上时用这一档。',
     }
   }
   if (connectDisplayMode.value === 'lan') {
@@ -536,14 +535,14 @@ const connectDisplayBlock = computed(() => {
       title: '局域网进服',
       command: info.lanCommand ?? '',
       hint: info.lanCommand
-        ? '同一 WiFi / 内网的其他电脑；地址为当前探测结果，连不上请在服务器主机 ipconfig 核对 IPv4。'
-        : '面板容器内看不到宿主机局域网网卡，未能自动探测局域网 IP。请在游戏服主机执行 ipconfig 查看 IPv4，或于环境配置中指定进服地址。',
+        ? '同一 WiFi 或内网的其他电脑用这一档。'
+        : '没能自动识别内网地址，请在服务器上查看本机 IP 后手动填写。',
     }
   }
   return {
     title: '公网 / 对外',
     command: info.command,
-    hint: '适合云服务器，或已把 UDP 端口映射到本机的独立主机；地址来源见下方提示。',
+    hint: '云服务器，或已做端口映射的独立主机用这一档。',
   }
 })
 
@@ -647,20 +646,11 @@ onBeforeUnmount(() => {
 <template>
   <FaPageMain :title="pageTitle">
     <div class="space-y-4">
-      <p class="text-xs text-muted-foreground max-w-3xl">
-        查看连接信息、运行日志，并使用面板消息与 Lua 命令控制<strong>正在运行</strong>的实例。实例的启动与停止请返回
-        <NButton text type="primary" size="tiny" class="align-baseline px-0" @click="goBack">
-          实例管理
-        </NButton>
-        ；主机资源使用情况见「监控台」。
-      </p>
-
       <div class="flex flex-wrap gap-2 items-center justify-between">
         <NSpace size="small">
           <NTag :type="running ? 'success' : 'default'" size="small">
             {{ running ? '运行中' : '未运行' }}
           </NTag>
-          <span v-if="instanceStatus" class="text-xs text-muted-foreground">实例状态：{{ getStatusLabel(instanceStatus) }}</span>
         </NSpace>
         <FaButton variant="outline" size="sm" @click="goBack">
           返回实例列表
@@ -733,7 +723,7 @@ onBeforeUnmount(() => {
           </template>
 
           <p v-if="udpPortsLabel" class="text-xs text-muted-foreground mb-2">
-            直连进服需放行 UDP 端口：{{ udpPortsLabel }}（开启洞穴时含洞穴分片）。从游戏浏览列表进入不受此限制。
+            直连进服需放行 UDP 端口：{{ udpPortsLabel }}。从游戏列表进入不需要。
           </p>
           <ul
             v-if="connectInfo.hints.length > 0"
@@ -871,9 +861,6 @@ onBeforeUnmount(() => {
         </NTabPane>
 
         <NTabPane name="maintenance" tab="维护公告">
-          <p class="text-xs text-muted-foreground mt-3 mb-4 leading-relaxed max-w-3xl">
-            向游戏内在线玩家推送公告。常见用法：面板升级或维护前先通知玩家（游戏服可继续运行）。
-          </p>
           <NInput
             v-model:value="maintenanceMessage"
             type="textarea"

@@ -31,7 +31,7 @@ const kindMeta: Record<ScheduleTaskItem['kind'], { label: string, type: 'default
   restart: { label: '定时重启', type: 'warning' },
   backup: { label: '定时备份', type: 'info' },
   update_check: { label: '更新检查', type: 'default' },
-  db_snapshot: { label: '数据库快照', type: 'success' },
+  db_snapshot: { label: '面板数据备份', type: 'success' },
 }
 
 const runStatusMeta: Record<NonNullable<ScheduleTaskItem['lastRunStatus']>, { label: string, type: 'default' | 'info' | 'warning' | 'error' | 'success' }> = {
@@ -51,7 +51,7 @@ function describeSchedule(task: ScheduleTaskItem): string {
 
 function instanceName(instanceId: string): string {
   if (instanceId === 'panel-db') {
-    return '面板数据库'
+    return '面板数据'
   }
   return instances.value.find(item => item.id === instanceId)?.name ?? instanceId
 }
@@ -184,8 +184,8 @@ function formatTsToHHmm(ts: number): string {
 const kindOptions: SelectOption[] = [
   { label: '定时备份（实例存档）', value: 'backup' },
   { label: '定时重启', value: 'restart' },
-  { label: '更新检查（SteamCMD）', value: 'update_check' },
-  { label: '数据库快照（面板全局）', value: 'db_snapshot' },
+  { label: '检查游戏更新', value: 'update_check' },
+  { label: '面板数据备份（全局）', value: 'db_snapshot' },
 ]
 
 const scheduleTypeOptions: SelectOption[] = [
@@ -299,7 +299,7 @@ async function toggleEnabled(task: ScheduleTaskItem, enabled: boolean) {
 function runNow(task: ScheduleTaskItem) {
   dialog.warning({
     title: '立即执行',
-    content: `确定立即执行「${kindMeta[task.kind].label}」？执行结果与周期顺延将记录到最近执行。`,
+    content: `确定立即执行「${kindMeta[task.kind].label}」？`,
     positiveText: '执行',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -426,7 +426,7 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
   <div class="flex flex-col gap-4 p-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="text-sm opacity-70">
-        单机计划任务：定时重启 / 备份 / 更新检查 / 数据库快照。面板离线期间错过的执行不补跑，恢复后自动顺延到下一周期。
+        单机计划任务：定时重启 / 备份 / 检查更新 / 面板数据备份。错过的执行不会补跑。
       </div>
       <NButton type="primary" @click="openCreateDialog">
         新建任务
@@ -473,7 +473,7 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
           />
         </NFormItem>
         <NFormItem v-else label="目标">
-          <NInput value="面板数据库（全局，仅允许一个启用任务）" disabled />
+          <NInput value="面板数据（全局）" disabled />
         </NFormItem>
         <NFormItem label="调度方式">
           <NSelect v-model:value="editorScheduleType" :options="scheduleTypeOptions" />
@@ -493,7 +493,7 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
           />
         </NFormItem>
         <div class="mb-3 text-xs opacity-50">
-          运行中实例的定时备份会先发送 c_save() 热保存。
+          运行中会先让世界保存一次。
         </div>
         <NSpace justify="end">
           <NButton @click="editorVisible = false">

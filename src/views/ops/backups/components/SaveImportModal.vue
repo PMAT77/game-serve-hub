@@ -54,8 +54,8 @@ const candidateOptions = computed<SelectOption[]>(() => {
 const tokenSourceLabels: Record<SaveImportTokenSource, string> = {
   provided: '使用导入时填写的令牌',
   existing: '沿用实例已有令牌',
-  source: '使用源存档自带的令牌文件',
-  none: '未配置令牌（公网模式需到房间设置补填）',
+  source: '使用源存档自带的令牌',
+  none: '未配置令牌（公网游玩需到房间设置补填）',
 }
 
 const canSubmit = computed(() => Boolean(props.instanceId) && Boolean(selectedCandidate.value) && !submitting.value)
@@ -101,7 +101,7 @@ function onFileChange(event: Event) {
   const lowerName = file.name.toLowerCase()
   if (!ACCEPT_EXTENSIONS.some(ext => lowerName.endsWith(ext))) {
     selectedFile.value = null
-    uploadError.value = '仅支持 zip 或 tar.gz 压缩包'
+    uploadError.value = '仅支持 zip 压缩包或面板备份包'
     return
   }
   if (file.size > MAX_UPLOAD_BYTES) {
@@ -145,9 +145,9 @@ function confirmImport() {
   if (!candidate || !props.instanceId || !probeResult.value) {
     return
   }
-  const content = '将把实例「' + props.instanceName + '」的世界存档整体替换为所选集群存档（'
-    + candidate.dirName + '）。若实例已有存档，会先自动创建一份「导入前」安全备份，可在备份列表恢复回退。'
-    + '导入要求实例已停止且已完成游戏安装。'
+  const content = '将把实例「' + props.instanceName + '」的世界存档整体替换为所选房间存档（'
+    + candidate.dirName + '）。已有存档会先自动备份为「导入前」，可在备份列表恢复。'
+    + '导入前请先停止实例，并确认游戏已安装。'
   dialog.warning({
     title: '确认导入存档',
     content,
@@ -194,8 +194,8 @@ watch(() => props.show, (visible) => {
     <div class="importer">
       <template v-if="!importResult">
         <NAlert type="info" :show-icon="false">
-          将你电脑上的 Klei 存档压缩包（如压缩后的 Cluster_2 目录）上传并导入为所选实例的世界存档。
-          世界进度与房间设置来自源档；端口会自动改写为本实例配置，避免与其它实例冲突。
+          上传你电脑上的 Klei 存档压缩包（如压缩后的房间目录），导入为所选实例的世界存档。
+          世界进度与房间设置来自源档；端口会自动改成这个实例能用的，避免冲突。
         </NAlert>
 
         <div class="importer-field">
@@ -220,7 +220,7 @@ watch(() => props.show, (visible) => {
           </div>
           <NProgress v-if="uploading" type="line" :percentage="uploadPercent" :height="6" />
           <div class="importer-hint">
-            支持 zip 与 tar.gz：可直接压缩整个 Cluster_x 目录，也可压缩 DoNotStarveTogether 目录；面板下载的 tar.gz 备份包也可直接导入。
+            支持 zip 压缩包：可直接压缩 DoNotStarveTogether 目录；面板下载的备份包也可直接导入。
           </div>
         </div>
 
@@ -235,19 +235,19 @@ watch(() => props.show, (visible) => {
               type="error"
               :show-icon="false"
             >
-              {{ probeResult.warnings?.[0] ?? '未识别到可导入的集群存档' }}
+              {{ probeResult.warnings?.[0] ?? '未识别到可导入的房间存档' }}
             </NAlert>
 
             <template v-else>
               <div v-if="probeResult.candidates.length > 1" class="importer-field">
                 <div class="importer-label">
-                  识别到多个集群，选择要导入的存档
+                  识别到多个房间，请选择要导入的存档
                 </div>
                 <NSelect
                   :value="selectedPath"
                   size="small"
                   :options="candidateOptions"
-                  placeholder="选择集群存档"
+                  placeholder="选择房间存档"
                   @update:value="(value: string) => selectedPath = value"
                 />
               </div>
@@ -255,7 +255,7 @@ watch(() => props.show, (visible) => {
               <div v-if="selectedCandidate" class="importer-candidate">
                 <div class="importer-candidate-row">
                   <span class="importer-label">房间名</span>
-                  <span>{{ selectedCandidate.clusterName ?? '未知（cluster.ini 解析失败）' }}</span>
+                  <span>{{ selectedCandidate.clusterName ?? '未知' }}</span>
                   <NTag
                     size="small"
                     :bordered="false"
@@ -265,11 +265,11 @@ watch(() => props.show, (visible) => {
                   </NTag>
                 </div>
                 <div class="importer-candidate-row">
-                  <span class="importer-label">分片</span>
+                  <span class="importer-label">包含世界</span>
                   <span>{{ selectedCandidate.shards.map(shardLabel).join('、') || '无' }}</span>
                   <span class="importer-label">存档大小</span>
                   <span>
-                    {{ formatSize(selectedCandidate.sizeBytes) }}{{ selectedCandidate.sizeIncomplete ? '（超大档，仅部分统计）' : '' }}
+                    {{ formatSize(selectedCandidate.sizeBytes) }}{{ selectedCandidate.sizeIncomplete ? '（存档过大，未完全统计）' : '' }}
                   </span>
                 </div>
                 <div class="importer-candidate-row">
@@ -295,7 +295,7 @@ watch(() => props.show, (visible) => {
           <NInput
             v-model:value="clusterToken"
             size="small"
-            placeholder="留空则沿用实例已有令牌；公网模式需要 pds- 前缀令牌"
+            placeholder="留空则沿用实例已有令牌；公网游玩需填 pds- 开头的令牌"
             maxlength="512"
           />
         </div>
@@ -307,12 +307,12 @@ watch(() => props.show, (visible) => {
         </NAlert>
         <div class="importer-result">
           <div class="importer-candidate-row">
-            <span class="importer-label">导入分片</span>
+            <span class="importer-label">导入世界</span>
             <span>{{ importResult.importedShards.map(shardLabel).join('、') || '无' }}</span>
           </div>
           <div class="importer-candidate-row">
             <span class="importer-label">Mod</span>
-            <span>{{ importResult.modCount }} 个已写入面板</span>
+            <span>{{ importResult.modCount }} 个已导入</span>
           </div>
           <div class="importer-candidate-row">
             <span class="importer-label">令牌</span>
@@ -324,16 +324,16 @@ watch(() => props.show, (visible) => {
           </div>
           <div v-if="importResult.gamePortSynced" class="importer-candidate-row">
             <span class="importer-label">端口</span>
-            <span>已按本机实例配置重写，面板记录已同步</span>
+            <span>端口已自动改成这个实例能用的</span>
           </div>
           <div v-if="importResult.missingWorkshopContent.length > 0" class="importer-warn">
-            ⚠ 以下 Mod 的创意工坊内容尚未下载：{{ importResult.missingWorkshopContent.join('、') }}。首次启动由游戏自动拉取（可能较慢），也可到 Mod 页面手动下载。
+            ⚠ 以下 Mod 的创意工坊内容尚未下载：{{ importResult.missingWorkshopContent.join('、') }}。首次启动由游戏自动下载（可能较慢），也可到 Mod 页面手动下载。
           </div>
           <div v-for="warning in importResult.warnings" :key="warning" class="importer-warn">
             ⚠ {{ warning }}
           </div>
           <div class="importer-warn">
-            ⚠ 建议到「房间设置」核对导入的房间信息并重新保存一次，让面板状态与源档完全对齐。
+            ⚠ 建议到「房间设置」核对导入的房间信息后重新保存一次。
           </div>
         </div>
       </template>

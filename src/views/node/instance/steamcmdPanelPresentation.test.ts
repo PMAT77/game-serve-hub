@@ -1,12 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { RuntimeEnvironmentInput } from './steamcmdPanelPresentation.ts'
-import {
-  resolveRuntimeEnvironmentView,
-  SPLIT_IMAGE_NOTE,
-  UNIFIED_IMAGE_LABEL,
-  UNIFIED_IMAGE_NOTE,
-} from './steamcmdPanelPresentation.ts'
+import { resolveRuntimeEnvironmentView } from './steamcmdPanelPresentation.ts'
 
 const UNIFIED_REF = 'ghcr.io/pmat77/game-server-hub:v0.4.1'
 
@@ -22,35 +17,32 @@ function baseInput(overrides: Partial<RuntimeEnvironmentInput> = {}): RuntimeEnv
   }
 }
 
-function tagTexts(input: RuntimeEnvironmentInput): string[] {
+function tagsOf(input: RuntimeEnvironmentInput): string[] {
   return resolveRuntimeEnvironmentView(input).tags.map(tag => tag.text)
 }
 
 describe('resolveRuntimeEnvironmentView', () => {
-  it('Docker 同源：合并为一行镜像与一条镜像就绪标签', () => {
+  it('Docker 同源：合并为一行游戏镜像与一条就绪标签', () => {
     const view = resolveRuntimeEnvironmentView(baseInput())
 
     assert.equal(view.imageUnified, true)
-    assert.deepEqual(view.imageRows, [{ label: UNIFIED_IMAGE_LABEL, value: UNIFIED_REF }])
-    assert.equal(view.imageNote, UNIFIED_IMAGE_NOTE)
-    assert.deepEqual(tagTexts(baseInput()), ['Docker 可用', '统一镜像已就绪'])
-    assert.equal(view.primaryActionLabel, '准备运行镜像')
+    assert.deepEqual(view.imageRows, [{ label: '游戏镜像', value: UNIFIED_REF }])
+    assert.deepEqual(tagsOf(baseInput()), ['Docker 可用', '游戏镜像已就绪'])
+    assert.equal(view.primaryActionLabel, '准备游戏镜像')
     assert.equal(view.secondaryPullVisible, false)
     assert.equal(view.hint, null)
   })
 
-  it('Docker 同源且镜像缺失：标签与提示都指向统一镜像', () => {
-    const view = resolveRuntimeEnvironmentView(baseInput({
-      steamcmdInstalled: false,
-      gameDstInstalled: false,
-    }))
+  it('Docker 同源且镜像缺失：标签与提示都说游戏镜像', () => {
+    const input = baseInput({ steamcmdInstalled: false, gameDstInstalled: false })
+    const view = resolveRuntimeEnvironmentView(input)
 
-    assert.deepEqual(tagTexts(baseInput({ steamcmdInstalled: false, gameDstInstalled: false })), ['Docker 可用', '统一镜像未就绪'])
+    assert.deepEqual(tagsOf(input), ['Docker 可用', '游戏镜像未就绪'])
     assert.equal(view.hint?.tone, 'warning')
-    assert.match(view.hint?.text ?? '', /统一镜像/)
+    assert.match(view.hint?.text ?? '', /提前准备/)
   })
 
-  it('Docker 异构：退回两行镜像与三条标签，并提示会被同步', () => {
+  it('Docker 异构：退回两行镜像与三条标签', () => {
     const input = baseInput({
       steamcmdInstalled: true,
       gameDstInstalled: false,
@@ -60,22 +52,17 @@ describe('resolveRuntimeEnvironmentView', () => {
 
     assert.equal(view.imageUnified, false)
     assert.deepEqual(view.imageRows, [
-      { label: '游戏安装镜像', value: UNIFIED_REF },
-      { label: '游戏运行镜像', value: 'ghcr.io/pmat77/game-server-hub:v0.3.10' },
+      { label: '安装镜像', value: UNIFIED_REF },
+      { label: '运行镜像', value: 'ghcr.io/pmat77/game-server-hub:v0.3.10' },
     ])
-    assert.equal(view.imageNote, SPLIT_IMAGE_NOTE)
-    assert.deepEqual(tagTexts(input), ['Docker 可用', 'SteamCMD 已就绪', '安装实例后自动准备'])
+    assert.deepEqual(tagsOf(input), ['Docker 可用', '安装镜像已就绪', '安装实例后自动准备'])
     assert.equal(view.secondaryPullVisible, true)
   })
 
   it('Docker 异构时运行镜像已就绪也单独成标签', () => {
-    const input = baseInput({
-      steamcmdInstalled: false,
-      gameDstInstalled: true,
-      steamcmdImage: '',
-    })
+    const input = baseInput({ steamcmdInstalled: false, gameDstInstalled: true, steamcmdImage: '' })
 
-    assert.deepEqual(tagTexts(input), ['Docker 可用', 'SteamCMD 未就绪', 'DST 运行镜像已就绪'])
+    assert.deepEqual(tagsOf(input), ['Docker 可用', '安装镜像未就绪', '运行镜像已就绪'])
   })
 
   it('两侧均为空不误判为同源，也不误报已就绪', () => {
@@ -84,7 +71,7 @@ describe('resolveRuntimeEnvironmentView', () => {
 
     assert.equal(view.imageUnified, false)
     assert.equal(view.imageRows.length, 2)
-    assert.deepEqual(tagTexts(input), ['Docker 可用', 'SteamCMD 已就绪', 'DST 运行镜像已就绪'])
+    assert.deepEqual(tagsOf(input), ['Docker 可用', '安装镜像已就绪', '运行镜像已就绪'])
   })
 
   it('只有一侧为空按异构处理', () => {
@@ -101,16 +88,12 @@ describe('resolveRuntimeEnvironmentView', () => {
   })
 
   it('Docker 不可用时给出连接排障提示，而不是「镜像未就绪」提示', () => {
-    const input = baseInput({
-      runtimeAvailable: false,
-      steamcmdInstalled: false,
-      gameDstInstalled: false,
-    })
+    const input = baseInput({ runtimeAvailable: false, steamcmdInstalled: false, gameDstInstalled: false })
     const view = resolveRuntimeEnvironmentView(input)
 
-    assert.deepEqual(tagTexts(input), ['Docker 不可用', '统一镜像未就绪'])
+    assert.deepEqual(tagsOf(input), ['Docker 不可用', '游戏镜像未就绪'])
     assert.equal(view.hint?.tone, 'error')
-    assert.match(view.hint?.text ?? '', /无法连接 Docker/)
+    assert.match(view.hint?.text ?? '', /Docker 已启动/)
   })
 
   it('Native 模式：SteamCMD 路径单行、无运行镜像行与 Docker 标签', () => {
@@ -123,8 +106,7 @@ describe('resolveRuntimeEnvironmentView', () => {
 
     assert.equal(view.imageUnified, false)
     assert.deepEqual(view.imageRows, [{ label: 'SteamCMD 路径', value: '/opt/game-server-hub/runtime/steamcmd/steamcmd.sh' }])
-    assert.equal(view.imageNote, '')
-    assert.deepEqual(tagTexts(input), ['systemd 可用', 'SteamCMD 已就绪', '游戏进程由 systemd 管理'])
+    assert.deepEqual(tagsOf(input), ['运行环境正常', 'SteamCMD 已就绪'])
     assert.equal(view.primaryActionLabel, '检查 SteamCMD')
     assert.equal(view.secondaryPullVisible, false)
     assert.equal(view.hint, null)
@@ -138,6 +120,30 @@ describe('resolveRuntimeEnvironmentView', () => {
     }))
 
     assert.equal(view.hint?.tone, 'error')
-    assert.match(view.hint?.text ?? '', /systemd/)
+    assert.match(view.hint?.text ?? '', /运行环境不可用/)
+  })
+
+  it('界面文案不含部署变量名与容器内路径这类实现细节', () => {
+    const inputs = [
+      baseInput(),
+      baseInput({ steamcmdInstalled: false, gameDstInstalled: false }),
+      baseInput({ gameDstImage: 'other:tag' }),
+      baseInput({ runtimeAvailable: false }),
+      baseInput({ isNativeMode: true, gameDstImage: '' }),
+    ]
+
+    const texts = inputs.flatMap((input) => {
+      const view = resolveRuntimeEnvironmentView(input)
+      return [
+        ...view.imageRows.map(row => row.label),
+        ...view.tags.map(tag => tag.text),
+        view.primaryActionLabel,
+        view.hint?.text ?? '',
+      ]
+    }).join('\n')
+
+    for (const forbidden of ['PANEL_INSTANCES_DIR', '容器内', '数据卷', '统一镜像', '面板更新', 'GSH_', 'systemd', 'linger', 'user bus', 'Compose', 'panel.env']) {
+      assert.equal(texts.includes(forbidden), false, `界面文案不应出现「${forbidden}」`)
+    }
   })
 })

@@ -35,7 +35,7 @@ const kindMeta: Record<BackupItem['kind'], { label: string, type: 'default' | 'i
   pre_delete: { label: '删除前', type: 'warning' },
   pre_restore: { label: '恢复前', type: 'default' },
   pre_import: { label: '导入前', type: 'warning' },
-  database: { label: '数据库快照', type: 'success' },
+  database: { label: '面板数据备份', type: 'success' },
 }
 
 const statusMeta: Record<BackupItem['status'], { label: string, type: 'default' | 'info' | 'warning' | 'error' | 'success' }> = {
@@ -146,18 +146,18 @@ async function submitCreateBackup() {
 
 function handleCreateDbBackup() {
   dialog.warning({
-    title: '创建数据库快照',
-    content: '将对面板 SQLite 数据库创建一致性快照（VACUUM INTO），实例、账号与面板设置都会包含在内。快照期间会有短暂 I/O 占用。',
-    positiveText: '创建快照',
+    title: '备份面板数据',
+    content: '备份面板账号与设置，期间请勿关闭面板。',
+    positiveText: '开始备份',
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
         await apiBackup.createDbBackup()
-        faToast.success('数据库快照创建成功')
+        faToast.success('面板数据备份已创建')
         triggerLoad()
       }
       catch (err) {
-        const message = err instanceof Error ? err.message : '数据库快照创建失败'
+        const message = err instanceof Error ? err.message : '面板数据备份失败'
         faToast.error(message)
       }
     },
@@ -167,7 +167,7 @@ function handleCreateDbBackup() {
 function handleRestore(row: BackupItem) {
   dialog.error({
     title: '确认恢复存档',
-    content: `将把实例「${instanceName(row.instanceId)}」的存档回滚到 ${formatTime(row.createdAt)} 的备份点。恢复前会自动创建一份安全备份；实例运行中会被拒绝，请先停止实例。`,
+    content: `将把实例「${instanceName(row.instanceId)}」的存档回滚到 ${formatTime(row.createdAt)} 的备份点。恢复前会自动创建一份安全备份。请先停止实例，运行中无法恢复。`,
     positiveText: '确认恢复',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -311,8 +311,8 @@ onMounted(() => {
     <div class="page-header">
       <h2>备份与恢复</h2>
       <p class="page-description">
-        管理实例存档备份与面板数据库快照：手动备份、恢复、下载与保留策略清理。
-        恢复会整体替换实例存档目录，请先停止实例。
+        备份实例存档与面板数据，可恢复、下载与清理旧备份。
+        恢复会整体替换实例存档，请先停止实例。
       </p>
     </div>
 
@@ -345,7 +345,7 @@ onMounted(() => {
         导入外部存档
       </NButton>
       <NButton @click="handleCreateDbBackup">
-        创建数据库快照
+        备份面板数据
       </NButton>
       <NButton :loading="loading" @click="triggerLoad">
         刷新
@@ -384,10 +384,10 @@ onMounted(() => {
     >
       <div style="display: flex; flex-direction: column; gap: 8px">
         <p style="margin: 0">
-          将为实例「{{ instanceName(selectedInstanceId ?? '') }}」创建存档备份（klei-storage 全量打包，tar.gz）。
+          将为实例「{{ instanceName(selectedInstanceId ?? '') }}」创建完整的存档备份。
         </p>
         <p style="margin: 0; color: #909090">
-          实例运行中会先发送 c_save() 保存世界再打包；洞穴数据随房间一并保存。
+          运行中会先让世界保存一次再打包。
         </p>
         <NInput
           v-model:value="createDialogNote"

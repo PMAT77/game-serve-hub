@@ -104,7 +104,7 @@ onUnmounted(stopNodePolling)
 <template>
   <div class="space-y-4">
     <p class="text-sm text-muted-foreground">
-      查看各节点 CPU、内存与磁盘占用。节点离线时请先重注册本地节点。
+      节点离线时请先重注册本地节点。
     </p>
     <section class="p-4 border border-border rounded-xl bg-card space-y-4">
       <div class="flex flex-wrap gap-3 items-center justify-between">
@@ -183,7 +183,7 @@ onUnmounted(stopNodePolling)
             </div>
           </div>
           <p class="text-xs text-muted-foreground mt-3">
-            最近心跳：{{ formatDateTime(node.lastHeartbeatAt) }}
+            最近上报：{{ formatDateTime(node.lastHeartbeatAt) }}
           </p>
         </article>
       </div>

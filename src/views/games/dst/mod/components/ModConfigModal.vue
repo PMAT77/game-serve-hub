@@ -226,7 +226,7 @@ async function saveConfig() {
     <NSpin :show="loading">
       <div class="min-h-24">
         <p class="mb-3 text-xs text-muted-foreground">
-          配置写入 modoverrides.lua（configuration_options），保存后需重启实例生效。
+          保存后重启实例生效。
         </p>
 
         <template v-if="definitionsParsed">
@@ -278,7 +278,7 @@ async function saveConfig() {
 
         <template v-else>
           <p class="mb-2 text-xs text-muted-foreground">
-            未解析到该 Mod 的配置定义（modinfo.lua 无 configuration_options 或解析失败），请按键值编辑。值会按「布尔 / 数字 / 字符串」自动推断。
+            无法读取这个 Mod 的配置选项，请手动填写键和值。
           </p>
           <div class="space-y-2">
             <div v-for="(row, index) in kvRows" :key="index" class="flex items-center gap-2">

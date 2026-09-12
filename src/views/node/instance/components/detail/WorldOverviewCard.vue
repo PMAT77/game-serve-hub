@@ -150,7 +150,7 @@ function goWorldSettings() {
       </div>
 
       <div v-if="!cavesEnabled" class="mt-3 rounded-md bg-muted/50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
-        <span class="text-xs text-muted-foreground">未开启洞穴：如需地下世界，请先在世界设置中开启。</span>
+        <span class="text-xs text-muted-foreground">未开启洞穴</span>
         <NButton size="tiny" secondary @click="goWorldSettings">
           去世界设置
         </NButton>
@@ -159,14 +159,14 @@ function goWorldSettings() {
         v-else-if="cavesEnabled && cavesShard && !cavesShard.configured"
         class="mt-3 rounded-md bg-muted/50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2"
       >
-        <span class="text-xs text-muted-foreground">洞穴尚未初始化，初始化后会自动分配端口并生成默认配置。</span>
+        <span class="text-xs text-muted-foreground">洞穴还没准备好，初始化后即可使用</span>
         <NButton size="tiny" type="primary" secondary :loading="initCavesLoading" @click="initCaves">
           初始化洞穴
         </NButton>
       </div>
     </template>
     <template v-else-if="instance">
-      <NEmpty description="世界配置读取失败或实例暂不支持世界概览" size="small" />
+      <NEmpty description="世界配置读取失败，请稍后重试" size="small" />
     </template>
     <NEmpty v-else description="未找到实例" size="small" />
   </NCard>

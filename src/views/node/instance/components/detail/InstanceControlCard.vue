@@ -176,10 +176,10 @@ function goConsole() {
       </div>
 
       <div class="grid grid-cols-3 gap-x-4 gap-y-3 mb-4">
-        <NStatistic label="CPU（进程）">
+        <NStatistic label="CPU">
           {{ instance.status === 'running' && metrics?.cpuUsageRate != null ? `${metrics.cpuUsageRate.toFixed(1)}%` : '—' }}
         </NStatistic>
-        <NStatistic label="内存（RSS）">
+        <NStatistic label="内存">
           {{ instance.status === 'running' ? formatMemoryMb(metrics?.memoryMb) : '—' }}
         </NStatistic>
         <NStatistic label="运行时长">

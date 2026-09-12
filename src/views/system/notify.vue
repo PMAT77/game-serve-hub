@@ -35,7 +35,7 @@ const typeOptions: SelectOption[] = (Object.keys(typeMeta) as NotifyChannelType[
 
 const healthMeta: Record<NotifyChannelItem['healthStatus'], { label: string, type: 'default' | 'error' | 'success' }> = {
   healthy: { label: '正常', type: 'success' },
-  failing: { label: '连续失败', type: 'error' },
+  failing: { label: '发送失败', type: 'error' },
 }
 
 async function loadAll() {
@@ -163,7 +163,7 @@ async function submitEditor() {
         name: editorName.value.trim(),
         config,
       })
-      faToast.success('渠道已创建，建议发送测试消息验证连通性')
+      faToast.success('渠道已创建，可点「测试」验证')
     }
     editorVisible.value = false
     loadAll()
@@ -189,7 +189,7 @@ function testChannel(item: NotifyChannelItem) {
   apiNotify.testChannel({ channelId: item.id }).then((response) => {
     faToast.success(response.data.message ?? '测试消息已发送')
   }).catch(() => {
-    faToast.error('测试发送失败，请检查配置与网络连通性')
+    faToast.error('测试发送失败，请检查配置后重试')
   }).finally(() => {
     tableLoading.value = false
   })
@@ -229,7 +229,7 @@ const columns = computed<DataTableColumns<NotifyChannelItem>>(() => [
       }
       return h(NTooltip, null, {
         trigger: () => tag,
-        default: () => `${row.lastErrorMessage}（${row.lastErrorAt?.replace('T', ' ').slice(0, 19) ?? ''}）`,
+        default: () => `最近发送失败（${row.lastErrorAt?.replace('T', ' ').slice(0, 19) ?? ''}）。请检查配置后重试。详情：${row.lastErrorMessage}`,
       })
     },
   },
@@ -264,16 +264,16 @@ const columns = computed<DataTableColumns<NotifyChannelItem>>(() => [
       <NFormItem label="通知总开关">
         <NSwitch v-model:value="settings.enabled" />
       </NFormItem>
-      <NFormItem label="冷却窗口（分钟，同实例同事件在窗口内不重复推送）">
+      <NFormItem label="相同告警的静默时间（分钟）">
         <NInputNumber v-model:value="settings.cooldownMinutes" :min="1" :max="1440" :step="1" class="w-full" />
       </NFormItem>
-      <NFormItem label="CPU 告警阈值（%）">
+      <NFormItem label="CPU 占用超过（%）时提醒">
         <NInputNumber v-model:value="settings.thresholds.cpuPercent" :min="1" :max="100" class="w-full" />
       </NFormItem>
-      <NFormItem label="内存告警阈值（%）">
+      <NFormItem label="内存占用超过（%）时提醒">
         <NInputNumber v-model:value="settings.thresholds.memPercent" :min="1" :max="100" class="w-full" />
       </NFormItem>
-      <NFormItem label="磁盘告警阈值（%）">
+      <NFormItem label="磁盘占用超过（%）时提醒">
         <NInputNumber v-model:value="settings.thresholds.diskPercent" :min="1" :max="100" class="w-full" />
       </NFormItem>
       <NButton type="primary" :loading="settingsSaving" @click="saveSettings">
@@ -283,7 +283,7 @@ const columns = computed<DataTableColumns<NotifyChannelItem>>(() => [
 
     <div class="flex items-center justify-between">
       <div class="text-sm opacity-70">
-        告警事件：实例异常退出、CPU/内存/磁盘超阈值、计划任务备份结果。渠道连续失败 5 次将标记为「连续失败」。
+        告警事件：实例异常退出、CPU / 内存 / 磁盘占用过高、计划任务备份结果。
       </div>
       <NButton type="primary" @click="openCreateDialog">
         新建渠道

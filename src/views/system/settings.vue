@@ -5,7 +5,7 @@ import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
 import apiSystem from '@/api/modules/system'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
-import { buildPanelUpdatePresentation, MANUAL_UPDATE_COMMAND, MANUAL_UPDATE_HINT, MANUAL_UPDATE_NOTE } from './panelUpdatePresentation'
+import { buildPanelUpdatePresentation, MANUAL_UPDATE_COMMAND, MANUAL_UPDATE_NOTE } from './panelUpdatePresentation'
 
 defineOptions({
   name: 'SystemSettings',
@@ -54,18 +54,18 @@ const themeOptions = [
 
 const updateSourceOptions = [
   { label: '自动（推荐）', value: 'auto' },
-  { label: '仅离线镜像包', value: 'offline' },
-  { label: '仅镜像仓库', value: 'pull' },
+  { label: '仅下载更新包', value: 'offline' },
+  { label: '仅在线获取', value: 'pull' },
 ]
 
 const updateSourceHint = computed(() => {
   switch (form.updateSource) {
     case 'offline':
-      return '只从 GitHub Release 下载离线镜像包（可用 GSH_GITHUB_PROXY 换加速代理），失败即报错。'
+      return '只下载更新包，拿不到时不会自动改成在线获取。'
     case 'pull':
-      return '直接从 GHCR / 配置的镜像源拉取镜像，不下载离线包。'
+      return '直接在线获取更新，不下载更新包。'
     default:
-      return '优先下载 Release 离线镜像包，失败时自动回退镜像仓库拉取。保存后对下一次下载生效。'
+      return '优先下载更新包，拿不到时自动改为在线获取。'
   }
 })
 
@@ -172,7 +172,7 @@ async function loadSettings(options?: { silent?: boolean }) {
       settingsLoadError.value = `加载系统设置失败${detail}`
     }
     else if (!options?.silent) {
-      faToast.error('刷新失败，页面保留当前设置。')
+      faToast.error('刷新失败，请重试。')
     }
   }
   finally {
@@ -225,7 +225,7 @@ const updatePoller = usePollingTask(async () => {
   updatePollFailures = 0
   const phase = updateStatus.value?.updatePhase
   if (phase === 'downloaded' && previousUpdatePhase === 'downloading') {
-    faToast.success('更新已下载完成，点击「立即安装」重建面板。')
+    faToast.success('更新已下载，点「立即安装」完成更新。')
   }
   previousUpdatePhase = phase ?? null
   // downloaded 是等用户点「立即安装」的静默态，不必继续轮询
@@ -245,7 +245,7 @@ const targetImageHint = computed(() => {
   if (!status?.targetImageReady || !status.targetImage || status.updatePhase === 'downloaded') {
     return null
   }
-  return `检测到本地已有 ${status.targetImage}，安装时将直接使用，不再下载。`
+  return '更新包已就绪，安装时无需再次下载。'
 })
 
 onBeforeUnmount(() => {
@@ -295,7 +295,7 @@ async function downloadUpdate() {
 function confirmInstallUpdate() {
   dialog.warning({
     title: '确认安装更新',
-    content: '安装会重建面板容器，页面短暂无法访问，游戏服务器不受影响。是否继续？',
+    content: '安装时面板会短暂无法访问，游戏服务器不受影响。是否继续？',
     positiveText: '立即安装',
     negativeText: '取消',
     onPositiveClick: () => {
@@ -379,7 +379,6 @@ onActivated(async () => {
     <div v-else class="space-y-6">
       <AdminSettingsSection
         title="面板端口"
-        description="浏览器打开本面板所使用的端口。"
       >
         <p class="text-sm text-muted-foreground">
           当前访问端口：{{ browserAccessPort }}
@@ -392,14 +391,13 @@ onActivated(async () => {
 
       <AdminSettingsSection
         title="界面主题"
-        description="选择面板的显示主题，保存后立即生效。"
+        description="保存后立即生效。"
       >
         <NSelect v-model:value="form.theme" :options="themeOptions" class="max-w-80" />
       </AdminSettingsSection>
 
       <AdminSettingsSection
         title="面板与游戏版本"
-        description="检查面板与游戏服务端是否有新版本。"
       >
         <div v-if="updateStatus" class="space-y-2 text-sm">
           <p class="font-medium">
@@ -435,7 +433,7 @@ onActivated(async () => {
           </p>
         </div>
         <div v-else class="text-sm text-muted-foreground">
-          暂时无法获取版本信息
+          暂时无法获取版本信息，点「检查更新」重试
         </div>
 
         <div class="space-y-2 pt-1">
@@ -473,10 +471,10 @@ onActivated(async () => {
         </div>
 
         <NCollapse v-if="offlineUpdateCommand" class="pt-1">
-          <NCollapseItem title="面板下载失败？手动导入离线镜像包" name="offline-update">
+          <NCollapseItem title="面板下载失败？手动导入更新包" name="offline-update">
             <div class="space-y-2 text-sm">
               <p class="text-xs text-muted-foreground">
-                「下载更新」默认先从 GitHub Release 下载离线镜像包（可用 GSH_GITHUB_PROXY 换加速代理）。若面板所在网络连它也拿不到，就在能访问 GitHub 的机器上下载并导入：
+                在能联网的电脑上下载更新包，再导入这台服务器：
               </p>
               <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ offlineUpdateCommand }}</pre>
               <div class="flex flex-wrap gap-2 items-center">
@@ -488,7 +486,7 @@ onActivated(async () => {
                   复制
                 </FaButton>
                 <span class="text-xs text-muted-foreground">
-                  导入后回到本页点击「下载更新」，面板会检测到本地镜像并直接进入安装，不再下载。
+                  导入后点「下载更新」即可安装。
                 </span>
               </div>
             </div>
@@ -507,7 +505,6 @@ onActivated(async () => {
                 >
                   复制
                 </FaButton>
-                <span class="text-xs text-muted-foreground">{{ MANUAL_UPDATE_HINT }}</span>
               </div>
             </div>
           </NCollapseItem>
@@ -516,13 +513,9 @@ onActivated(async () => {
 
       <AdminSettingsSection
         title="自动检查更新"
-        description="按设定间隔自动检查面板是否有新版本。"
       >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.autoUpdate" />
-          <span class="text-sm text-muted-foreground">
-            {{ form.autoUpdate ? '已开启自动检查' : '已关闭自动检查' }}
-          </span>
         </div>
         <div class="space-y-2 max-w-80">
           <label class="text-sm text-muted-foreground">检查间隔（小时）</label>
@@ -532,13 +525,9 @@ onActivated(async () => {
 
       <AdminSettingsSection
         title="启动前检查游戏更新"
-        description="启动或重启游戏服务器前，先向 Steam 检查是否有新版本。"
       >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.checkUpdateBeforeStart" />
-          <span class="text-sm text-muted-foreground">
-            {{ form.checkUpdateBeforeStart ? '启动前自动检查游戏更新，避免版本过旧' : '启动前不检查游戏更新' }}
-          </span>
         </div>
       </AdminSettingsSection>
 

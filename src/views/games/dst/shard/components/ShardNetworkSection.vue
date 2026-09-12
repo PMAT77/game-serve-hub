@@ -14,7 +14,7 @@ const steamMasterPort = defineModel<number>('steamMasterPort', { required: true 
 <template>
   <div class="space-y-2">
     <p class="text-sm text-muted-foreground mb-4">
-      游戏端口与 Steam 端口，保存后写入服务器。公网游玩需在防火墙或云安全组放行对应的 UDP 端口。
+      公网游玩需在防火墙或云安全组放行这两个 UDP 端口。
     </p>
     <NFormItem label="游戏端口" path="serverPort">
       <NInputNumber v-model:value="serverPort" :min="1" :max="65535" class="w-40" />

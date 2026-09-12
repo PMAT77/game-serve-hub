@@ -82,12 +82,12 @@ describe('collectScheduleTriggerNotices', () => {
   })
 
   it('面板数据库任务显示固定中文目标名', () => {
-    assert.equal(defaultScheduleTargetName('panel-db'), '面板数据库')
+    assert.equal(defaultScheduleTargetName('panel-db'), '面板数据')
     assert.equal(defaultScheduleTargetName('inst-1'), 'inst-1')
     const notice = buildScheduleTriggerNotice(
       makeTask({ id: 'st-3', instanceId: 'panel-db', kind: 'db_snapshot', lastRunAt: TRIGGERED_AT, lastRunStatus: 'ok' }),
       defaultScheduleTargetName('panel-db'),
     )
-    assert.equal(notice.content, '数据库快照｜面板数据库：成功')
+    assert.equal(notice.content, '面板数据备份｜面板数据：成功')
   })
 })

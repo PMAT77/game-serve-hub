@@ -2,6 +2,12 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Fixed
+
+- **面板显示「已就绪」的 Mod 在游戏里不加载（例如本地开了两个 Mod、游戏里只出一个）**：面板一直把 Mod 下载到 SteamCMD 的 `steamapps/workshop/content/322330/<id>`，就据此认定「已安装」、写进 `modoverrides.lua` 并把状态标成「已就绪」；但 **DST 专用服只从实例目录的 `ugc_mods/<存档名>/<分片>/content/322330/<id>` 加载创意工坊 Mod**，完全不看 SteamCMD 的下载位置。于是服务器启动时会自行去创意工坊补下载：带 manifest 的新式包通常能补成功，而老式 **legacy 包**（目录里只有 `*_legacy.bin`，对应 `ugchandle` 且 `manifest=-1`）在容器网络下常下载超时（服务器日志 `ODPF failed entirely: 16`，紧接着 `DownloadServerMods timed out with no response from Workshop...`），DST 等待约 30 秒后放弃并继续启动——玩家进游戏只看到一部分 Mod。现在面板会在**下载完成、写入 Lua 之前以及面板启动时**把已下载内容落位到 `ugc_mods`（`*_legacy.bin` 实测为标准 zip，会自动解包出 `modinfo.lua`／`modmain.lua` 等文件），DST 启动时即识别为已安装（日志 `already have IDs`）并直接加载，不再依赖服务器自身联网下载；落位失败时该 Mod 会明确标记为「安装失败」并给出原因，而不是继续显示「已就绪」。**已有实例会在面板重启后自动补齐**，无需卸载重装 Mod。
+
 ## [0.4.0] - 2026-09-12
 
 ### Fixed

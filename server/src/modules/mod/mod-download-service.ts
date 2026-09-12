@@ -8,6 +8,7 @@ import {
   readModDependencyMap,
   writeModDependencyMap,
 } from '../../infra/game-adapter/dst/mod-service'
+import { ensureDstUgcModLayout } from '../../infra/game-adapter/dst/ugc-mod-install'
 import { syncInstanceModFilesFromDb } from './mod-file-sync-service'
 import {
   getInstanceModByWorkshopId,
@@ -213,6 +214,18 @@ async function runModDownloadJob(input: ModDownloadJobInput, record: ModInstallJ
     record.status = 'failed'
     record.phase = null
     record.error = formatMissingWorkshopModError(input.installPath, missingIds)
+    record.finishedAt = new Date().toISOString()
+    await markModInstallFailed(input.instanceId, workshopId, record.error)
+    return
+  }
+  // DST 专用服只从 ugc_mods 读取创意工坊 Mod；只下载到 steamapps 时服务器会自行联网重下，
+  // legacy 包（ugchandle）在容器网络下常因超时失败，表现为「已启用但游戏里没有」。
+  const layoutOutcomes = await ensureDstUgcModLayout(input.installPath, downloadIds)
+  const layoutFailure = layoutOutcomes.find(outcome => outcome.status === 'failed')
+  if (layoutFailure) {
+    record.status = 'failed'
+    record.phase = null
+    record.error = `Mod 文件未能安装到服务器目录：${layoutFailure.error ?? layoutFailure.workshopId}`
     record.finishedAt = new Date().toISOString()
     await markModInstallFailed(input.instanceId, workshopId, record.error)
     return

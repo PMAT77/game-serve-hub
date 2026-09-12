@@ -3,7 +3,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
+import { strToU8, zipSync } from 'fflate'
 import { resolveDstSteamWorkshopModDir } from '../../infra/game-adapter/dst/mod-download'
+import { resolveDstUgcModDir } from '../../infra/game-adapter/dst/ugc-mod-install'
 import type { DbInstanceMod } from '../../shared/db/index'
 import {
   resetModFileSyncDbHooksForTest,
@@ -170,6 +172,8 @@ describe('mod-download-service', () => {
     assert.equal(upsertCalls.some(call => call.installStatus === 'pending'), true)
     assert.equal(upsertCalls.some(call => call.installStatus === 'ready'), true)
     assert.equal(fs.existsSync(path.join(installPath, 'mods', 'dedicated_server_mods_setup.lua')), true)
+    // DST 只从 ugc_mods 加载创意工坊 Mod，下载完成即必须完成落位
+    assert.equal(fs.existsSync(path.join(resolveDstUgcModDir(installPath, 'Master', '54321'), 'modinfo.lua')), true)
   })
 
   it('returns success immediately when mod files already exist and mod is ready', async () => {
@@ -283,6 +287,53 @@ describe('mod-download-service', () => {
 
     assert.ok(updateCalls.some(call => call.installStatus === 'pending' && call.installError === null))
     assert.equal(listedMods[0]?.installStatus, 'failed')
+  })
+
+  it('unpacks a legacy workshop download into ugc_mods and marks the mod ready', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    const modDir = resolveDstSteamWorkshopModDir(installPath, '501385076')
+    fs.mkdirSync(modDir, { recursive: true })
+    const archive = zipSync({
+      'modinfo.lua': strToU8('name = "Quick Pick"\n'),
+      'modmain.lua': strToU8('-- main\n'),
+    })
+    fs.writeFileSync(path.join(modDir, '1665728219799633209_legacy.bin'), Buffer.from(archive))
+    setModDownloadExecutorForTest(async () => ({ ok: true }))
+
+    await enqueueModDownload({
+      instanceId: 'instance-h',
+      installPath,
+      payload: { workshopId: '501385076', name: '快速采集' },
+    })
+    await waitForModInstallJob('instance-h', '501385076')
+
+    assert.equal(getModInstallJob('instance-h', '501385076').status, 'success')
+    assert.equal(listedMods[0]?.installStatus, 'ready')
+    const ugcModDir = resolveDstUgcModDir(installPath, 'Master', '501385076')
+    assert.equal(fs.existsSync(path.join(ugcModDir, 'modmain.lua')), true)
+  })
+
+  it('fails the subscription when the downloaded mod cannot be placed into ugc_mods', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    const modDir = resolveDstSteamWorkshopModDir(installPath, '40404')
+    fs.mkdirSync(modDir, { recursive: true })
+    fs.writeFileSync(path.join(modDir, '123_legacy.bin'), Buffer.from('not a zip'))
+    setModDownloadExecutorForTest(async () => ({ ok: true }))
+
+    await enqueueModDownload({
+      instanceId: 'instance-g',
+      installPath,
+      payload: { workshopId: '40404', name: 'Broken Legacy Mod' },
+    })
+    await waitForModInstallJob('instance-g', '40404')
+
+    const finished = getModInstallJob('instance-g', '40404')
+    assert.equal(finished.status, 'failed')
+    assert.match(finished.error ?? '', /未能安装到服务器目录/)
+    assert.equal(listedMods[0]?.installStatus, 'failed')
+    assert.equal(upsertCalls.some(call => call.installStatus === 'ready'), false)
   })
 
   it('resolveModInstallJob falls back to failed mod record when memory job is gone', async () => {

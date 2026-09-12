@@ -43,6 +43,7 @@ import {
   readModDependencyMap,
   writeModDependencyMap,
 } from '../../infra/game-adapter/dst/mod-service'
+import { ensureDstUgcModLayout } from '../../infra/game-adapter/dst/ugc-mod-install'
 import { LOCAL_NODE_ID, resolveLocalDstInstance } from '../../shared/dst/local-dst-instance'
 import { syncInstanceModFilesFromDb } from './mod-file-sync-service'
 import { fetchDstSteamWorkshopMods, fetchWorkshopFileDetail, fetchWorkshopPreviewImages, fetchWorkshopRatings, isSteamWorkshopFetchError, scheduleWarmSteamWorkshopModCache } from '../../infra/game-adapter/dst/steam-workshop'
@@ -369,6 +370,35 @@ function normalizeLoadOrder(mods: Awaited<ReturnType<typeof listInstanceMods>>) 
 }
 
 /**
+ * 面板启动自愈：把已就绪 Mod 落位到 ugc_mods。
+ * 历史上面板只把 Mod 下载到 steamapps/workshop/content，DST 专用服不读该位置，
+ * 于是服务器会自己联网重下、legacy 包超时后静默丢弃——表现为「已启用但游戏里没有」。
+ */
+async function ensureInstanceUgcModLayout(app: FastifyInstance, instanceId: string, installPath: string) {
+  try {
+    const mods = (await listInstanceMods(instanceId)).filter(mod => mod.installStatus === 'ready')
+    if (mods.length === 0) {
+      return
+    }
+    const outcomes = await ensureDstUgcModLayout(installPath, mods.map(mod => mod.workshopId))
+    for (const outcome of outcomes) {
+      if (outcome.status === 'failed') {
+        app.log.warn(
+          { instanceId, workshopId: outcome.workshopId, error: outcome.error },
+          'Mod 文件未能落位到 ugc_mods，DST 启动时可能无法加载该 Mod',
+        )
+      }
+      else if (outcome.status === 'installed') {
+        app.log.info({ instanceId, workshopId: outcome.workshopId }, '已将已下载的 Mod 落位到 ugc_mods')
+      }
+    }
+  }
+  catch (error) {
+    app.log.warn({ instanceId, err: error }, '同步 Mod 落位时发生异常')
+  }
+}
+
+/**
  * mod 模块注册入口
  * 负责创意工坊安装、启停与排序，并维护 modoverrides.lua。
  */
@@ -388,6 +418,8 @@ export function registerModModule(app: FastifyInstance) {
         instanceId: instance.id,
         installPath,
       })
+      // 不阻塞面板启动：落位在后台补齐，失败只记日志
+      void ensureInstanceUgcModLayout(app, instance.id, installPath)
     }
   })
 

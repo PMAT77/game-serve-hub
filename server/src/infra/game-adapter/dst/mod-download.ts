@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { runSteamcmdWorkshopDownloadInContainer } from '../../container/steamcmd-runner'
-import { DST_CLUSTER_NAME, DST_WORKSHOP_APP_ID } from './constants'
+import { DST_CLUSTER_NAME, DST_WORKSHOP_APP_ID, resolveDstSteamWorkshopModDir } from './constants'
 
 const DEFAULT_WORKSHOP_DOWNLOAD_TIMEOUT_MS = readPositiveIntEnv('GSH_STEAMCMD_WORKSHOP_DOWNLOAD_TIMEOUT_MS', 10 * 60 * 1000)
 
@@ -45,9 +45,7 @@ function hasWorkshopDownloadArtifacts(modDir: string): boolean {
   }
 }
 
-export function resolveDstSteamWorkshopModDir(installPath: string, workshopId: string): string {
-  return path.join(installPath, 'steamapps', 'workshop', 'content', DST_WORKSHOP_APP_ID, workshopId)
-}
+export { resolveDstSteamWorkshopModDir }
 
 function resolveDstLegacyModDir(installPath: string, workshopId: string): string {
   return path.join(installPath, 'mods', `workshop-${workshopId}`)

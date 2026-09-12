@@ -2,7 +2,7 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.4.0] - 2026-09-12
 
 ### Fixed
 
@@ -16,6 +16,11 @@
 ### Deprecated
 
 - `GET app/instance/shards` 与 `GET app/instance/cluster` 的 `effectiveHints` 恒为空数组，保留仅为兼容浏览器缓存中的旧前端，将在下个版本移除。
+
+### Upgrade notes
+
+- 面板与后端随统一镜像一起升级，无需迁移数据库或配置文件；浏览器缓存的旧页面不会因字段变更报错（`effectiveHints` 仍返回空数组）。
+- 若有自建脚本调用 `GET app/instance/shards`：分片摘要的 `warnings` 字段已移除；`effectiveHints` 已弃用，请改读页面上展示的提示，或依据 `clusterShardEnabled` / `configured` / `worldGenerated` 自行判断。
 
 ## [0.3.10] - 2026-09-12
 
@@ -327,7 +332,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.10...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.10...v0.4.0
 [0.3.10]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.8...v0.3.9
 [0.3.3]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.2...v0.3.3

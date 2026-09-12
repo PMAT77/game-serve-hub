@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -27,6 +28,35 @@ for (const [relativePath, expectedValues] of requiredReferences) {
     if (!content.includes(expected)) {
       failures.push(`${relativePath} is missing ${expected}`)
     }
+  }
+}
+
+// 安装器内置的 compose 资产校验和：镜像源提供的是 git blob 原始字节（LF），
+// 改过 compose 却忘了同步 pin 时，发布门禁的「Installer syntax and smoke test」
+// 会在 verify_installer_asset_checksum 处失败并阻断整条 Container Pipeline
+// （v0.3.9、v0.3.10 都踩过）。这里提前到 release:verify 阶段拦住，并直接给出新值。
+const installerComposePins = [
+  { asset: 'docker-compose.yml', envKey: 'INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML' },
+  { asset: 'docker-compose.bind.yml', envKey: 'INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML' },
+]
+const installerScript = fs.readFileSync(path.join(repoRoot, 'scripts/install.linux.sh'), 'utf8')
+
+for (const { asset, envKey } of installerComposePins) {
+  const content = fs.readFileSync(path.join(repoRoot, asset), 'utf8')
+  // Windows 检出可能是 CRLF，安装器校验的是 LF（git blob）字节
+  const actual = createHash('sha256').update(content.replace(/\r\n/g, '\n'), 'utf8').digest('hex')
+  const pinLine = installerScript.split(/\r?\n/).find(line => line.startsWith(`${envKey}=`))
+  const pinned = pinLine ? /([0-9a-f]{64})/.exec(pinLine)?.[1] ?? null : null
+  // 安装器允许环境变量覆盖 pin，覆盖时以覆盖值为准
+  const effective = process.env[envKey]?.trim() || pinned
+  if (!pinned) {
+    failures.push(`scripts/install.linux.sh is missing ${envKey}`)
+  }
+  else if (effective !== actual) {
+    failures.push(
+      `${asset} 与 ${envKey} 不一致：文件当前为 ${actual}，安装器内置 ${pinned}。`
+      + `改过 compose 后必须同步 install.linux.sh 的内置校验和（新值：${actual}）`,
+    )
   }
 }
 

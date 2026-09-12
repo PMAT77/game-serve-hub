@@ -2,6 +2,7 @@
 import { NTag } from 'naive-ui'
 import { computed, onMounted, shallowRef } from 'vue'
 import apiSystem from '@/api/modules/system'
+import { INSTANCE_ROOT_NOTE, resolveRuntimeEnvironmentView } from '../steamcmdPanelPresentation'
 
 defineOptions({
   name: 'NodeInstanceSteamcmdPanel',
@@ -22,8 +23,20 @@ const installRoot = shallowRef('')
 
 const isNativeMode = computed(() => runtimeMode.value === 'native')
 const runtimeAvailable = computed(() => runtimeStatus.value === 'running')
-const runtimeLabel = computed(() => isNativeMode.value ? 'systemd' : 'Docker')
-const steamcmdLabel = computed(() => isNativeMode.value ? 'SteamCMD 路径' : '游戏安装镜像')
+
+/**
+ * 镜像行 / 状态标签 / 按钮文案 / 提示全部由纯函数决定：
+ * 默认部署下安装镜像与运行镜像是同一个统一镜像引用，展示为一行；
+ * 仅在显式配置了两个不同引用时才退回两行，保留诊断能力。
+ */
+const environmentView = computed(() => resolveRuntimeEnvironmentView({
+  isNativeMode: isNativeMode.value,
+  runtimeAvailable: runtimeAvailable.value,
+  steamcmdInstalled: steamcmdInstalled.value,
+  gameDstInstalled: gameDstInstalled.value,
+  steamcmdImage: steamcmdImage.value,
+  gameDstImage: gameDstImage.value,
+}))
 
 function emitStateChange() {
   emit('stateChange', {
@@ -47,7 +60,7 @@ async function ensureSteamcmdImage() {
   steamcmdInstalling.value = true
   try {
     const res = await apiSystem.installSteamcmd()
-    faToast.success(res.data.message || '游戏安装镜像已就绪')
+    faToast.success(res.data.message || '运行环境已就绪')
     await fetchSteamcmdConfig()
   }
   finally {
@@ -79,23 +92,20 @@ onMounted(() => {
         SteamCMD 与游戏进程直接运行在宿主机，由 systemd 管理启动、自恢复、日志和资源限制。
       </template>
       <template v-else>
-        管理游戏安装与运行所需的 Docker 镜像。首次创建实例会自动准备镜像，也可在此提前拉取。
+        管理实例安装与运行所需的统一镜像。首次创建实例会自动准备，也可在此提前拉取。
       </template>
     </p>
     <div class="p-4 border border-border/70 rounded-lg bg-muted/20 space-y-4">
       <div class="flex flex-wrap gap-3 items-start justify-between">
         <div class="flex flex-wrap gap-2">
-          <NTag size="small" :bordered="false" :type="runtimeAvailable ? 'success' : 'error'">
-            {{ runtimeAvailable ? `${runtimeLabel} 可用` : `${runtimeLabel} 不可用` }}
-          </NTag>
-          <NTag size="small" :bordered="false" :type="steamcmdInstalled ? 'success' : 'default'">
-            {{ steamcmdInstalled ? 'SteamCMD 已就绪' : 'SteamCMD 未就绪' }}
-          </NTag>
-          <NTag v-if="!isNativeMode" size="small" :bordered="false" :type="gameDstInstalled ? 'success' : 'warning'">
-            {{ gameDstInstalled ? 'DST 运行镜像已就绪' : '安装实例后自动准备' }}
-          </NTag>
-          <NTag v-else size="small" :bordered="false" type="info">
-            游戏进程由 systemd 管理
+          <NTag
+            v-for="tag in environmentView.tags"
+            :key="tag.text"
+            size="small"
+            :bordered="false"
+            :type="tag.type"
+          >
+            {{ tag.text }}
           </NTag>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -106,10 +116,10 @@ onMounted(() => {
             :disabled="!runtimeAvailable"
             @click="ensureSteamcmdImage"
           >
-            {{ isNativeMode ? '检查 SteamCMD' : '预拉游戏安装镜像' }}
+            {{ environmentView.primaryActionLabel }}
           </NButton>
           <NButton
-            v-if="!isNativeMode && !gameDstInstalled"
+            v-if="environmentView.secondaryPullVisible"
             type="default"
             secondary
             :loading="steamcmdInstalling"
@@ -122,27 +132,17 @@ onMounted(() => {
       </div>
 
       <div class="gap-3 grid md:grid-cols-2">
-        <div class="space-y-1">
+        <div v-for="row in environmentView.imageRows" :key="row.label" class="space-y-1">
           <div class="text-xs text-muted-foreground">
-            {{ steamcmdLabel }}
+            {{ row.label }}
           </div>
           <NInput
-            :value="steamcmdImage"
+            :value="row.value"
             readonly
             placeholder="未配置"
           />
         </div>
-        <div v-if="!isNativeMode" class="space-y-1">
-          <div class="text-xs text-muted-foreground">
-            游戏运行镜像
-          </div>
-          <NInput
-            :value="gameDstImage"
-            readonly
-            placeholder="未配置"
-          />
-        </div>
-        <div class="space-y-1" :class="{ 'md:col-span-2': !isNativeMode }">
+        <div class="space-y-1" :class="{ 'md:col-span-2': environmentView.imageRows.length > 1 }">
           <div class="text-xs text-muted-foreground">
             实例数据目录
           </div>
@@ -151,24 +151,23 @@ onMounted(() => {
             readonly
             placeholder="未配置"
           />
+          <p class="text-xs text-muted-foreground">
+            {{ INSTANCE_ROOT_NOTE }}
+          </p>
         </div>
       </div>
 
-      <p
-        v-if="!steamcmdInstalled && runtimeAvailable"
-        class="text-xs text-amber-600 dark:text-amber-400"
-      >
-        {{ isNativeMode
-          ? '安装脚本通常会预装 SteamCMD；若检查失败，请确认路径与执行权限。'
-          : '首次创建实例时会自动拉取游戏安装镜像；提前拉取可减少创建等待时间。' }}
+      <p v-if="environmentView.imageNote" class="text-xs text-muted-foreground">
+        {{ environmentView.imageNote }}
       </p>
       <p
-        v-if="!runtimeAvailable"
-        class="text-xs text-rose-600 dark:text-rose-400"
+        v-if="environmentView.hint"
+        class="text-xs"
+        :class="environmentView.hint.tone === 'error'
+          ? 'text-rose-600 dark:text-rose-400'
+          : 'text-amber-600 dark:text-amber-400'"
       >
-        {{ isNativeMode
-          ? '面板无法连接 systemd 用户服务管理器。请检查 gsh 用户 linger、user bus 与系统服务状态。'
-          : '面板无法连接 Docker。请确认 Docker 已启动，且 Compose 部署时已挂载 Docker 套接字。' }}
+        {{ environmentView.hint.text }}
       </p>
     </div>
   </div>

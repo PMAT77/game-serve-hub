@@ -64,7 +64,7 @@ function onSteamcmdStateChange(payload: { installed: boolean }) {
       <NCollapse v-model:expanded-names="envExpandedNames" display-directive="show">
         <NCollapseItem name="env">
           <template #header>
-            <span class="font-medium">运行环境与安装镜像</span>
+            <span class="font-medium">运行环境</span>
             <NTag
               size="small"
               :bordered="false"

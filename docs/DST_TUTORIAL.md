@@ -72,28 +72,28 @@ SSH 登录服务器后，按部署模式选择一条命令执行。
 > 中国大陆服务器请**先导入离线镜像包，再跑这条命令**。安装器要从 GHCR 拉取统一镜像，而 GHCR 的镜像层域名在国内基本不可达，直接跑几乎必然失败（`TLS handshake timeout`）。离线包步骤见 [INSTALL.md · 离线镜像包完整步骤](INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.9/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.10/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 **Native systemd 模式**（推荐个人服主，不依赖 Docker）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.9/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.10/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
 **国内网络**（GitHub Raw 不稳定时，换 jsDelivr 源并启用国内档位）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.9/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.3.10/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 
 建议**明确指定 --mode**，避免自动判断与你的预期不一致。
 
 > 三条命令都是管道下载，锁定当次内容、不会误用磁盘上的旧脚本。安装版本由脚本第 9 行的默认 tag 决定，想先确认可执行
-> `curl -fsSL "<上面的 URL>" | sed -n '9p'`，应输出 `...:-v0.3.9}}`。
+> `curl -fsSL "<上面的 URL>" | sed -n '9p'`，应输出 `...:-v0.3.10}}`。
 > 这个 tag 必须与本地镜像 tag 一致：用离线包导入过镜像时，两边对不上，安装器仍会重新拉取。
 
 ### 3.2 安装参数
@@ -261,8 +261,8 @@ sudo sed -n 's/^ADMIN_PASSWORD=//p' /opt/game-server-hub/panel.env
 默认管理员用户名是 superadmin。也可以在首次安装时显式指定账号密码：
 
 ```bash
-# 脚本默认 tag 决定安装版本；如需锁定别的版本，在 sudo env 里追加 GSH_RELEASE_TAG=v0.3.9
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.9/scripts/install.linux.sh \
+# 脚本默认 tag 决定安装版本；如需锁定别的版本，在 sudo env 里追加 GSH_RELEASE_TAG=v0.3.10
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.10/scripts/install.linux.sh \
   | sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='替换为强密码' \
       bash -s -- --mode native
 ```
@@ -385,6 +385,8 @@ DST 出新版本后：
 ## 12. 创建世界
 
 世界在**首次启动实例时自动生成**，你要做的是提前把规则配好。进入 **世界管理**，点击实例进入 **世界设置**，页面分为"地上 / 洞穴 / 模组"三个页签（洞穴页签需先在房间设置开启洞穴）。
+
+> 世界规则与地图生成参数**只在生成地图时生效**：面板把它们写进 `worldgenoverride.lua`（预设 + 全部覆盖项），游戏在第一次生成地图时读取。地图生成后再改这里不会改变现有存档，只在该分片重新生成地图（例如删掉 `<分片>/save` 目录后重启）时生效——页面会提示这一句。
 
 ### 12.1 地上世界（Master）
 

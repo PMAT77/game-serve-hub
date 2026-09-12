@@ -2,6 +2,30 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.10] - 2026-09-12
+
+### Fixed
+
+- **世界设置从未真正生效（严重）**：面板一直把世界规则写进 `leveldataoverride.lua`。DST 生成地图时的实际顺序是：先读 `leveldataoverride.lua`，再读 `worldgenoverride.lua`——而面板在安装/启动时写下的 `worldgenoverride.lua` 只带预设（`preset = "SURVIVAL_TOGETHER"`），DST 判定该预设同时命中 worldgen 与 settings 预设后会**用它整份替换世界配置**，于是面板里保存的世界规则、地图生成参数在生成地图时被全部丢弃，玩家看到的是预设默认地图。现在改为**只写 `worldgenoverride.lua`（预设 + 全部覆盖项）这一份真源**，本文件不再写 `leveldataoverride.lua`；启动或保存时会把存量 `leveldataoverride.lua` 的覆盖项迁移进来（迁移前备份、迁移后删除旧文件）。注意：**已生成的地图不会自动改变**，需要该分片重新生成地图才会按面板配置生成；世界设置页对此新增了提示。
+- **「准备启动服务器」弹窗的「下次启动不再提示」勾不上**：该复选框的选中状态存在一个普通对象里（不是 Vue 响应式 ref），naive-ui 的 `NCheckbox` 在传入 `checked` 时按受控组件处理，点击后界面不会更新，看起来永远勾不上。现在改用真正的 `ref`；勾选后的记忆也从 `sessionStorage` 改为 `localStorage`，关掉浏览器后依然生效（旧键自动迁移）。
+- **面板内「应用更新」在离线/受限网络下必然失败**：重建面板用的 updater 容器固定使用官方 CLI 镜像 `docker:27-cli`，本地没有该镜像时直接报 `(HTTP code 404) no such container - No such image: docker:27-cli`，而国内/离线部署通常也拉不到它。现在**优先使用本地已有的镜像**（目标镜像 → 当前面板镜像 → 官方 CLI 镜像，逐个试跑 `docker compose version` 探测），只有本地都不行时才按顺序拉取兜底镜像（走 `GSH_IMAGE_MIRRORS`），并在失败时列出试过的镜像、拉取原因与手动更新命令。
+- **启动引导文案重复**：「已保存房间与地上世界设置，但地图尚未生成。」与「现在启动将按当前房间与世界配置生成地图。」合并为一句话。
+
+### Changed
+
+- **镜像内置 `docker` CLI 与 compose 插件**：统一镜像新增 `/usr/local/bin/docker` 与 `/usr/local/lib/docker/cli-plugins/docker-compose`，供面板内一键更新的 updater 容器直接使用，因此离线环境也能完成面板更新。构建可用 `DOCKER_CLI_URL` / `COMPOSE_PLUGIN_URL`（或 `DOCKER_CLI_VERSION` / `COMPOSE_VERSION`）指向可达的镜像站或内网制品库；代价是镜像约 +100 MB（未压缩）。
+- **新增 `GSH_PANEL_UPDATER_IMAGE`**：可选，指定 updater 容器使用的镜像（需自带 docker CLI 与 compose 插件）。留空即自动挑选。
+- **世界配置读写字段改名**：`GET /app/instance/shards` 的分片摘要字段 `leveldataOverrides` 改名为 `overrides`（真源变为 `worldgenoverride.lua` 的 `overrides`），语义不变；`ShardSavePayload` 的 `worldRuleOverrides` / `worldgenOverrides` 保持不变。
+- **世界已生成时给出明确提示**：世界设置页提示「地上世界已生成：世界规则的改动会在该分片重新生成地图时生效，不会改变现有存档」。
+
+### Removed
+
+- 面板不再写入 `leveldataoverride.lua`，随之移除随包的 Klei leveldata 模板与「极简 leveldata 导致 DST 反复崩溃」的修复逻辑（该文件不再存在）。
+
+### Upgrade notes
+
+- 从 v0.3.9 及更早版本升级：这些版本的镜像不含 `docker` CLI，若本机也没有 `docker:27-cli`，面板内一键更新仍会失败并给出提示；请按 [INSTALL.md 路线 B](docs/INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程) 用离线镜像包升级到 v0.3.10 一次，之后面板内更新即可离线完成。
+- 世界配置改动需重新生成地图才生效（生成地图后 DST 不会重读这些文件）。
 ## [0.3.9] - 2026-09-12
 
 ### Added
@@ -288,7 +312,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.9...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.10...HEAD
+[0.3.10]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.8...v0.3.9
 [0.3.3]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.2...v0.3.3
 [0.3.4]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.3...v0.3.4

@@ -12,12 +12,12 @@
 ## 路线 A：海外机器（一个命令装完）
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.9/scripts/install.linux.sh" \
+curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.10/scripts/install.linux.sh" \
   | sudo bash -s -- --mode docker
 ```
 
 > 管道方式锁定的是当次下载内容，不会误用磁盘上的旧脚本。若想先确认拿到的是目标版本：
-> `curl -fsSL "<上面的 URL>" | sed -n '9p'`，第 9 行应输出 `...:-v0.3.9}}` —— 这一行的默认 tag 决定安装器要装的镜像版本。
+> `curl -fsSL "<上面的 URL>" | sed -n '9p'`，第 9 行应输出 `...:-v0.3.10}}` —— 这一行的默认 tag 决定安装器要装的镜像版本。
 
 ```bash
 # 初始密码：安装器默认不打印，从 panel.env 读取（管理员名 superadmin，首登强制改密）
@@ -42,11 +42,11 @@ gsh doctor
 ```bash
 # 下载安装器（gh-proxy 加速；不可用时换 https://ghfast.top/ 前缀）
 # 用 curl -o 指定带版本号的文件名：wget 遇到同名文件不会覆盖而是另存为 .1，容易继续跑上一次的旧脚本
-tag=v0.3.9
+tag=v0.3.10
 curl -fL --retry 3 -o "install-${tag}.sh" \
   "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
 
-# 自证版本：必须输出 ...:-v0.3.9}}，对不上就停下排查（这行的默认 tag 决定安装器要装的镜像版本）
+# 自证版本：必须输出 ...:-v0.3.10}}，对不上就停下排查（这行的默认 tag 决定安装器要装的镜像版本）
 sed -n '9p' "install-${tag}.sh"
 
 # 第一次运行：自动装好 Docker 与 Compose 插件。
@@ -67,21 +67,21 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 ### 阶段二：导入离线镜像包
 
 ```bash
-tag=v0.3.9
+tag=v0.3.10
 base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
 
-# 下载镜像包与校验文件（v0.3.9 约 200 MB；v0.3.5 是 420 MB，体积对不上说明下错了版本）
+# 下载镜像包与校验文件（v0.3.10 约 200 MB；v0.3.5 是 420 MB，体积对不上说明下错了版本）
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz"        "${base}/game-server-hub-${tag}-docker-image.tar.gz"
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz.sha256" "${base}/game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
 # 校验完整性（期望输出末尾 OK）。.sha256 记录原始文件名，改过名需先改回
 sha256sum -c "game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
-# 核对包内镜像 tag 与目标版本一致（RepoTags 应为 ghcr.io/pmat77/game-server-hub:v0.3.9）
+# 核对包内镜像 tag 与目标版本一致（RepoTags 应为 ghcr.io/pmat77/game-server-hub:v0.3.10）
 tar -xOzf "game-server-hub-${tag}-docker-image.tar.gz" manifest.json | head -c 200; echo
 
 # 导入镜像（解压约 3.2 GB，预留 4 GB 磁盘；-i 带进度条，不要用 gunzip 管道；
-# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.3.9 即成功）
+# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.3.10 即成功）
 docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
 
 # 断言本地 tag 与目标版本一致：安装器只认完整引用字符串，tag 对不上即使内容相同也会重新拉取
@@ -169,7 +169,9 @@ docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
 
 国内先 `docker load` 离线镜像包（命令同[阶段二](#阶段二导入离线镜像包)）再点「应用更新」，秒级完成。按钮置灰时用面板给出的 `sudo gsh update`。
 
-> 只按 `docker compose pull && up -d` 升级不会更新 compose 文件；一键更新长期不可用时，重跑一次安装脚本补齐（路线 B 阶段三）。
+重建动作由一个临时的 updater 容器完成，它需要镜像里有 `docker` CLI 与 compose 插件。v0.3.10 起统一镜像自带这两样，面板会优先用**本地已有的目标镜像 / 当前面板镜像**当 updater 运行时，因此离线环境也能完成更新，不再去 Docker Hub 拉 `docker:27-cli`。若你所在网络要求固定某个 updater 镜像（例如内网制品库里的同等镜像），在 `panel.env` 里设置 `GSH_PANEL_UPDATER_IMAGE` 即可。
+
+> 从 v0.3.9 及更早版本升到 v0.3.10：旧镜像不含 docker CLI，且本机也没有 `docker:27-cli` 时，面板内更新会失败并提示；按路线 B 用离线镜像包升到 v0.3.10 一次，之后面板内更新即可离线完成。
 
 ### 备份与恢复（v0.2.0 起）
 
@@ -247,12 +249,12 @@ Docker 与 Native 之间不自动迁移。保留数据目录后按目标模式�
 
 ```bash
 # 安装
-git clone --branch v0.3.9 --depth 1 https://github.com/PMAT77/game-serve-hub.git
+git clone --branch v0.3.10 --depth 1 https://github.com/PMAT77/game-serve-hub.git
 cd game-serve-hub          # 目录名取自仓库名（game-serve-hub），镜像名才是 game-server-hub
 sudo bash ./scripts/install.linux.sh --mode native --network auto
 
 # 离线安装：指定本地 Native Release 包（旁须有同名 .sha256）
-sudo GSH_RELEASE_TAG=v0.3.9 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.3.9-linux-x64.tar.gz \
+sudo GSH_RELEASE_TAG=v0.3.10 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.3.10-linux-x64.tar.gz \
   bash ./scripts/install.linux.sh --mode native
 ```
 
@@ -288,8 +290,8 @@ GSH_PANEL_ENV_PRESET=auto      内存预设档位：auto|small|medium|large
 ```bash
 sudo docker login registry.example.com
 # 版本三方必须一致：脚本默认 tag（sed -n '9p' 可查）= 本地镜像 tag = 这里 PANEL_IMAGE 的 tag
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.9/scripts/install.linux.sh \
-  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.9 bash -s -- --mode docker --network cn
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.3.10/scripts/install.linux.sh \
+  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.3.10 bash -s -- --mode docker --network cn
 ```
 
 镜像引用与 Release tag 一致，按 Release 的 `release-images.json` 核对 digest。

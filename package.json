@@ -1,7 +1,7 @@
 {
   "name": "game-server-hub",
   "type": "module",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "engines": {

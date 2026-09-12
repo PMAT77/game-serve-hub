@@ -255,7 +255,7 @@ export function registerBackupModule(app: FastifyInstance) {
     const probed = probeSaveImportSource(extractDir)
     if (!probed.ok || !probed.result) {
       removeUploadDirectory(received.uploadId)
-      reply.status(400).send(businessError(probed.message ?? '未在压缩包中识别到 DST 集群存档', request, ErrorCode.BACKUP_IMPORT_SOURCE_INVALID))
+      reply.status(400).send(businessError(probed.message ?? '未在压缩包中找到存档', request, ErrorCode.BACKUP_IMPORT_SOURCE_INVALID))
       return
     }
     return reply.send(success({

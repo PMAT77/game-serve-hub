@@ -249,10 +249,10 @@ function buildCandidateDetail(candidate: ClusterCandidate): { detail: {
     shardEnabled = parsed.fields.shardEnabled
   }
   catch {
-    warnings.push('cluster.ini 解析失败，无法识别房间名与分片设置')
+    warnings.push('房间配置文件解析失败，未能识别房间名与包含的世界')
   }
   if (shardEnabled && !cavesDir) {
-    warnings.push('cluster.ini 启用了分片但未找到 Caves 目录，导入后需在面板重新保存房间设置以启用洞穴')
+    warnings.push('源档包含洞穴但没找到洞穴目录，导入后请在「房间设置」重新保存以启用洞穴')
   }
 
   const extraShardDirs = fs
@@ -305,7 +305,7 @@ export function probeSaveImportSource(rawSourcePath: string): ProbeSaveImportRes
   }
   const candidates = findClusterCandidates(sourcePath).slice(0, PROBE_MAX_CANDIDATES)
   if (candidates.length === 0) {
-    return { ok: false, message: '未在该目录下识别出 DST 集群存档（缺少 cluster.ini 或 Cluster_* 子目录）' }
+    return { ok: false, message: '未在该目录下找到存档（缺少房间配置文件或房间目录）' }
   }
   return {
     ok: true,
@@ -552,7 +552,7 @@ async function importSaveToInstanceLocked(options: ImportSaveToInstanceOptions):
     return { ok: false, message: '源存档目录不存在' }
   }
   if (!isClusterDirectory(sourcePath)) {
-    return { ok: false, message: '源目录不是有效的 DST 集群存档（缺少 cluster.ini）' }
+    return { ok: false, message: '这不是有效的存档目录（缺少房间配置文件）' }
   }
   const { clusterRoot } = resolveClusterPaths(installPath)
   const disjointError = validateSourceTargetDisjoint(sourcePath, installPath, clusterRoot)
@@ -647,7 +647,7 @@ async function importSaveToInstanceLocked(options: ImportSaveToInstanceOptions):
       }
     }
     if (tokenSource === 'none') {
-      warnings.push('未配置 Klei 集群令牌，公网模式需在房间设置中粘贴令牌后才能对外可见')
+      warnings.push('未配置 Klei 集群令牌，公网游玩需在「房间设置」粘贴后才能被搜到')
     }
 
     // 面板元数据：房间与主世界均来自源档，标记后面板状态与导入档对齐

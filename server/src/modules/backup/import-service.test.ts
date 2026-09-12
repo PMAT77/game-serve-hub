@@ -169,7 +169,7 @@ describe('save import probe', () => {
     fs.mkdirSync(emptyDir, { recursive: true })
     const probed = probeSaveImportSource(emptyDir)
     assert.equal(probed.ok, false)
-    assert.match(probed.message ?? '', /未在该目录下识别出 DST 集群存档/)
+    assert.match(probed.message ?? '', /未在该目录下找到存档/)
   })
 
   it('fails on a missing directory', () => {
@@ -342,7 +342,7 @@ describe('save import execution', () => {
       sourceClusterPath: notCluster,
     })
     assert.equal(result.ok, false)
-    assert.match(result.message ?? '', /缺少 cluster.ini/)
+    assert.match(result.message ?? '', /缺少房间配置文件/)
   })
 
   it('rejects a source path that contains the instance install path (self-copy)', async () => {

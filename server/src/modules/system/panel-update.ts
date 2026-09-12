@@ -502,7 +502,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
     return {
       imageSupported: false,
       supported: false,
-      hint: '当前部署方式需通过安装脚本更新面板，请执行下方命令。',
+      hint: '这种安装方式需要在服务器上更新，请执行下方命令。',
       stackPaths: null,
     }
   }
@@ -510,7 +510,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
     return {
       imageSupported: false,
       supported: true,
-      hint: '未配置 GSH_STACK_DIR，无法一键更新面板。请在 panel.env 中设置后重启面板，或使用下方手动命令。',
+      hint: '缺少更新所需的目录配置，无法一键更新面板。请使用下方手动命令。',
       stackPaths: null,
     }
   }
@@ -518,7 +518,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
     return {
       imageSupported: false,
       supported: true,
-      hint: 'GSH_STACK_DIR 必须是绝对路径。',
+      hint: '更新目录必须填绝对路径。',
       stackPaths: null,
     }
   }
@@ -527,7 +527,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
     return {
       imageSupported: false,
       supported: true,
-      hint: '面板无法在容器内访问 compose 目录，无法一键更新面板。请使用下方手动命令。',
+      hint: '面板无法访问更新所需的目录，请使用下方手动命令。',
       stackPaths: null,
     }
   }

@@ -164,7 +164,7 @@ export async function unpackSaveImportArchive(archivePath: string, extractDir: s
     await extractArchive(archivePath, extractDir)
     return format
   }
-  throw new Error('存档包格式无法识别，仅支持 zip 或 tar.gz 压缩包')
+  throw new Error('存档包格式无法识别，仅支持 zip 压缩包或面板备份包')
 }
 
 /** 上传时记录原始文件名（仅用于展示与安全备份备注，不参与磁盘命名） */
@@ -204,7 +204,7 @@ export function validateUploadClusterPath(uploadId: string, rawClusterPath: stri
     return { ok: false, message: '上传记录不存在或已清理，请重新上传存档包' }
   }
   if (!fs.existsSync(path.join(clusterPath, 'cluster.ini'))) {
-    return { ok: false, message: '源目录不是有效的 DST 集群存档（缺少 cluster.ini）' }
+    return { ok: false, message: '这不是有效的存档目录（缺少房间配置文件）' }
   }
   return { ok: true, clusterPath }
 }

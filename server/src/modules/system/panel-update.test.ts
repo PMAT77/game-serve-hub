@@ -120,14 +120,14 @@ describe('resolveApplySupport', () => {
     const support = resolveApplySupport(buildConfig({ stackDir: '' }))
     assert.equal(support.imageSupported, false)
     assert.equal(support.supported, true)
-    assert.match(support.hint ?? '', /GSH_STACK_DIR/)
+    assert.match(support.hint ?? '', /目录配置/)
   })
 
   it('uses the verified installer path for Native upgrades', () => {
     const support = resolveApplySupport(buildConfig({ runtimeMode: 'native' }))
     assert.equal(support.imageSupported, false)
     assert.equal(support.supported, false)
-    assert.match(support.hint ?? '', /安装脚本/)
+    assert.match(support.hint ?? '', /服务器上更新/)
   })
 
   it('enables image apply when stack files are reachable', () => {

@@ -8,7 +8,7 @@ import { loadModeEnv } from './env-file'
 import { resolveRepoRoot } from '../repo-root'
 
 /** v0.2.0 起面板/DST/SteamCMD 共用的统一镜像引用（tag 随版本发布推进）。 */
-export const UNIFIED_IMAGE_REF = 'ghcr.io/pmat77/game-server-hub:v0.3.9'
+export const UNIFIED_IMAGE_REF = 'ghcr.io/pmat77/game-server-hub:v0.3.10'
 
 const envSchema = z.object({
   SERVER_HOST: z.string().trim().min(1).default('0.0.0.0'),
@@ -32,6 +32,8 @@ const envSchema = z.object({
   GSH_NATIVE_STEAMCMD_PATH: z.string().trim().optional(),
   GSH_NATIVE_SYSTEMD_UNIT_DIR: z.string().trim().optional(),
   PANEL_IMAGE: z.string().trim().optional(),
+  /** 面板内一键更新时用的 updater 容器镜像（需自带 docker CLI + compose 插件）；留空自动挑选 */
+  GSH_PANEL_UPDATER_IMAGE: z.string().trim().optional(),
   GSH_STACK_DIR: z.string().trim().optional(),
   GSH_COMPOSE_FILES: z.string().trim().optional(),
   GSH_PANEL_CONTAINER_NAME: z.string().trim().optional(),
@@ -88,6 +90,8 @@ export interface ServerConfig {
   nativeSteamcmdPath: string
   nativeSystemdUnitDir: string
   panelImage: string
+  /** updater 容器镜像覆盖；空字符串表示自动挑选（目标镜像 → 当前面板镜像 → 官方 CLI 镜像） */
+  panelUpdaterImage: string
   stackDir: string
   composeFiles: string[]
   panelContainerName: string
@@ -133,6 +137,7 @@ export function loadServerConfig(): ServerConfig {
     GSH_NATIVE_STEAMCMD_PATH: process.env.GSH_NATIVE_STEAMCMD_PATH ?? env.GSH_NATIVE_STEAMCMD_PATH,
     GSH_NATIVE_SYSTEMD_UNIT_DIR: process.env.GSH_NATIVE_SYSTEMD_UNIT_DIR ?? env.GSH_NATIVE_SYSTEMD_UNIT_DIR,
     PANEL_IMAGE: process.env.PANEL_IMAGE ?? env.PANEL_IMAGE,
+    GSH_PANEL_UPDATER_IMAGE: process.env.GSH_PANEL_UPDATER_IMAGE ?? env.GSH_PANEL_UPDATER_IMAGE,
     GSH_STACK_DIR: process.env.GSH_STACK_DIR ?? env.GSH_STACK_DIR,
     GSH_COMPOSE_FILES: process.env.GSH_COMPOSE_FILES ?? env.GSH_COMPOSE_FILES,
     GSH_PANEL_CONTAINER_NAME: process.env.GSH_PANEL_CONTAINER_NAME ?? env.GSH_PANEL_CONTAINER_NAME,
@@ -184,6 +189,7 @@ export function loadServerConfig(): ServerConfig {
     nativeSteamcmdPath: path.resolve(parsed.GSH_NATIVE_STEAMCMD_PATH || '/opt/game-server-hub/runtime/steamcmd/steamcmd.sh'),
     nativeSystemdUnitDir: path.resolve(parsed.GSH_NATIVE_SYSTEMD_UNIT_DIR || path.join(os.homedir(), '.config/systemd/user')),
     panelImage: parsed.PANEL_IMAGE || UNIFIED_IMAGE_REF,
+    panelUpdaterImage: parsed.GSH_PANEL_UPDATER_IMAGE?.trim() || '',
     stackDir: parsed.GSH_STACK_DIR?.trim() || '',
     composeFiles: (parsed.GSH_COMPOSE_FILES?.trim() || 'docker-compose.yml:docker-compose.bind.yml')
       .split(':')

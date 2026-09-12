@@ -76,6 +76,27 @@ RUN dpkg --add-architecture i386 \
   done \
   && rm -rf /var/lib/apt/lists/* /tmp/steamcmd.tar.gz
 
+# 面板内「一键更新」：updater 容器直接以本镜像运行 `docker compose up -d panel`，
+# 不再依赖从 Docker Hub 拉取 docker:27-cli（国内/离线部署下必然拉不到）。
+# 静态二进制地址可用构建参数指向镜像站或内网制品库；仅 x86_64（本镜像本就只支持 amd64）。
+ARG DOCKER_CLI_VERSION=29.8.0
+ARG COMPOSE_VERSION=v5.5.1
+ARG DOCKER_CLI_URL=
+ARG COMPOSE_PLUGIN_URL=
+RUN set -eux; \
+  docker_cli_url="${DOCKER_CLI_URL:-https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz}"; \
+  compose_url="${COMPOSE_PLUGIN_URL:-https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64}"; \
+  curl --fail --location --retry 3 --retry-delay 2 --output /tmp/docker-cli.tgz "$docker_cli_url"; \
+  mkdir -p /tmp/docker-cli; \
+  tar --extract --gzip --file /tmp/docker-cli.tgz --directory /tmp/docker-cli --strip-components 1 docker/docker; \
+  install -m 0755 /tmp/docker-cli/docker /usr/local/bin/docker; \
+  mkdir -p /usr/local/lib/docker/cli-plugins; \
+  curl --fail --location --retry 3 --retry-delay 2 --output /usr/local/lib/docker/cli-plugins/docker-compose "$compose_url"; \
+  chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose; \
+  docker --version; \
+  docker compose version; \
+  rm -rf /tmp/docker-cli /tmp/docker-cli.tgz
+
 # DST 实例容器内默认游戏根目录（游戏二进制由 SteamCMD 安装到挂载卷）。
 ENV GAME_ROOT=/game
 

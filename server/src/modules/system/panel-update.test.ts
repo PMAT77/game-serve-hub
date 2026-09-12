@@ -6,6 +6,8 @@ import { afterEach, describe, it } from 'node:test'
 import type { ServerConfig } from '../../shared/config'
 import {
   buildOfflineImageCommand,
+  buildUpdaterImageCandidates,
+  buildUpdaterImageFailureMessage,
   buildUpdaterShellCommand,
   hasStackRequiredFiles,
   isImageOutdated,
@@ -14,6 +16,7 @@ import {
   resolveStackPaths,
   resolveTargetImageRef,
   resolveUpdateKind,
+  resolveUpdaterImage,
 } from './panel-update'
 
 const tempDirs: string[] = []
@@ -54,6 +57,7 @@ function buildConfig(partial: Partial<ServerConfig>): ServerConfig {
     nativeSteamcmdPath: '/opt/game-server-hub/runtime/steamcmd/steamcmd.sh',
     nativeSystemdUnitDir: '/tmp/systemd',
     panelImage: 'ghcr.io/pmat77/game-server-hub:latest',
+    panelUpdaterImage: '',
     stackDir: '',
     composeFiles: ['docker-compose.yml', 'docker-compose.bind.yml'],
     panelContainerName: 'game-server-hub-panel',
@@ -320,3 +324,101 @@ describe('buildUpdaterShellCommand', () => {
     assert.match(script, /-f \/stack\/docker-compose\.bind\.yml/)
   })
 })
+
+describe('updater 容器镜像选择', () => {
+  const target = 'ghcr.io/pmat77/game-server-hub:v0.3.10'
+  const panel = 'ghcr.io/pmat77/game-server-hub:v0.3.9'
+
+  it('prefers the configured override, then the target image, then the panel image', () => {
+    const candidates = buildUpdaterImageCandidates({
+      configuredUpdaterImage: ' mirror.example.com/docker:27-cli ',
+      targetImage: target,
+      panelImage: panel,
+    })
+    assert.deepEqual(candidates.slice(0, 3), [
+      { ref: 'mirror.example.com/docker:27-cli', canPull: true },
+      { ref: target, canPull: false },
+      { ref: panel, canPull: false },
+    ])
+    assert.deepEqual(candidates.slice(3).map(c => c.ref), [
+      'docker.io/library/docker:27-cli',
+      'docker.io/library/docker:cli',
+    ])
+  })
+
+  it('probes local candidates before pulling anything', async () => {
+    const probes: string[] = []
+    const pulled: string[] = []
+    const resolution = await resolveUpdaterImage(
+      buildUpdaterImageCandidates({ targetImage: target, panelImage: panel }),
+      {
+        isPresent: async image => image === target || image === panel,
+        probe: async (image) => {
+          probes.push(image)
+          return false
+        },
+        pull: async (image) => {
+          pulled.push(image)
+          return { ok: false as const, error: 'offline', tried: [image] }
+        },
+      },
+    )
+    assert.equal(resolution.image, null)
+    // 本地候选先探测；兜底镜像本地没有，直接进入拉取（拉取失败就不必再探测）
+    assert.deepEqual(probes, [target, panel])
+    assert.deepEqual(pulled, ['docker.io/library/docker:27-cli', 'docker.io/library/docker:cli'])
+  })
+
+  it('falls back to the target image when the panel image lacks docker compose', async () => {
+    const resolution = await resolveUpdaterImage(
+      buildUpdaterImageCandidates({ targetImage: target, panelImage: panel }),
+      {
+        isPresent: async image => image === target || image === panel,
+        probe: async image => image === target,
+        pull: async () => {
+          throw new Error('本地已有可用候选时不应触发拉取')
+        },
+      },
+    )
+    assert.equal(resolution.image, target)
+  })
+
+  it('pulls the official CLI image only when nothing local works', async () => {
+    const pulled: string[] = []
+    const resolution = await resolveUpdaterImage(
+      buildUpdaterImageCandidates({ targetImage: target, panelImage: panel }),
+      {
+        isPresent: async () => false,
+        probe: async () => true,
+        pull: async (image) => {
+          pulled.push(image)
+          return { ok: true as const }
+        },
+      },
+    )
+    assert.deepEqual(pulled, ['docker.io/library/docker:27-cli'])
+    assert.equal(resolution.image, 'docker.io/library/docker:27-cli')
+  })
+
+  it('reports every candidate plus the manual command when none is usable', async () => {
+    const resolution = await resolveUpdaterImage(
+      buildUpdaterImageCandidates({ targetImage: target, panelImage: panel }),
+      {
+        isPresent: async () => false,
+        probe: async () => false,
+        pull: async () => ({ ok: false as const, error: 'network unreachable', tried: ['docker.io/library/docker:27-cli'] }),
+      },
+    )
+    assert.equal(resolution.image, null)
+    const message = buildUpdaterImageFailureMessage(resolution, 'v0.3.10', buildConfig({
+      stackDir: '/opt/game-server-hub',
+      runtimeMode: 'docker',
+      composeFiles: ['docker-compose.yml', 'docker-compose.bind.yml'],
+    }))
+    assert.match(message, /无法准备面板更新容器/)
+    assert.match(message, /up -d/)
+    assert.match(message, /network unreachable/)
+    assert.match(message, /ghcr\.io\/pmat77\/game-server-hub:v0\.3\.10/)
+  })
+})
+

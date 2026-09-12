@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import type DockerClient from 'dockerode'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -97,7 +98,13 @@ export interface ApplySupport {
 }
 
 const DEFAULT_CHECK_INTERVAL_HOURS = 1
-const UPDATER_IMAGE = 'docker:27-cli'
+/**
+ * updater 容器运行时：需要 `docker` CLI + compose 插件。
+ * v0.3.10 起统一镜像自带这两样，因此优先用「目标镜像 / 当前面板镜像」在本地直接跑，
+ * 不再依赖从 Docker Hub 拉取官方 CLI 镜像；下面两个只是本地没有可用镜像时的兜底。
+ * 用全限定引用，备选 registry（GSH_IMAGE_MIRRORS）才能拼出 <mirror>/library/docker:... 。
+ */
+const FALLBACK_UPDATER_IMAGES = ['docker.io/library/docker:27-cli', 'docker.io/library/docker:cli']
 const UPDATER_CONTAINER_NAME = 'game-server-hub-updater'
 /** 目标镜像拉取的重试策略（与实例镜像拉取保持一致） */
 const TARGET_PULL_MAX_ATTEMPTS = 3
@@ -409,7 +416,7 @@ export function resolveUpdateKind(input: {
 function buildManualUpdateCommand(stackPaths: StackPaths | null, releaseTag?: string | null): string {
   const config = loadServerConfig()
   if (config.runtimeMode === 'native') {
-    const currentTag = normalizeReleaseTag(config.releaseVersion, 'v0.3.9')
+    const currentTag = normalizeReleaseTag(config.releaseVersion, 'v0.3.10')
     const targetTag = normalizeReleaseTag(releaseTag, currentTag)
     return `curl -fsSL https://raw.githubusercontent.com/${config.githubRepo}/${targetTag}/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=${targetTag} bash -s -- --mode native`
   }
@@ -757,10 +764,143 @@ export function buildUpdaterShellCommand(
   ].join('\n')
 }
 
+export interface UpdaterImageCandidate {
+  ref: string
+  /** 本地缺失时是否允许拉取；目标镜像/当前面板镜像在重建前必然已在本地 */
+  canPull: boolean
+}
+
+/**
+ * updater 容器镜像候选（按序尝试）：
+ * 显式配置 → 目标镜像 → 当前面板镜像 → 官方 CLI 镜像兜底。
+ * v0.3.10 起统一镜像自带 docker CLI 与 compose 插件，因此前三个通常直接命中，
+ * 离线/国内网络下不会再因为拉不到 docker:27-cli 而整条更新链路失败。
+ */
+export function buildUpdaterImageCandidates(input: {
+  configuredUpdaterImage?: string | null
+  targetImage: string
+  panelImage: string
+}): UpdaterImageCandidate[] {
+  const candidates: UpdaterImageCandidate[] = []
+  const seen = new Set<string>()
+  const push = (ref: string | null | undefined, canPull: boolean) => {
+    const normalized = ref?.trim()
+    if (!normalized || seen.has(normalized)) {
+      return
+    }
+    seen.add(normalized)
+    candidates.push({ ref: normalized, canPull })
+  }
+  push(input.configuredUpdaterImage, true)
+  push(input.targetImage, false)
+  push(input.panelImage, false)
+  for (const image of FALLBACK_UPDATER_IMAGES) {
+    push(image, true)
+  }
+  return candidates
+}
+
+export interface UpdaterImageResolverDeps {
+  isPresent: (image: string) => Promise<boolean>
+  probe: (image: string) => Promise<boolean>
+  pull: (image: string) => Promise<{ ok: true } | { ok: false, error: string, tried: string[] }>
+}
+
+export interface UpdaterImageResolution {
+  image: string | null
+  tried: string[]
+  failures: string[]
+}
+
+/** 逐个候选探测 updater 能力：本地已存在的优先，本地都不行时才拉取兜底镜像 */
+export async function resolveUpdaterImage(
+  candidates: UpdaterImageCandidate[],
+  deps: UpdaterImageResolverDeps,
+): Promise<UpdaterImageResolution> {
+  const tried: string[] = []
+  const failures: string[] = []
+  for (const candidate of candidates) {
+    tried.push(candidate.ref)
+    if (await deps.isPresent(candidate.ref)) {
+      if (await deps.probe(candidate.ref)) {
+        return { image: candidate.ref, tried, failures }
+      }
+      failures.push(`${candidate.ref}：镜像内没有可用的 docker compose`)
+      continue
+    }
+    if (!candidate.canPull) {
+      failures.push(`${candidate.ref}：本地不存在`)
+      continue
+    }
+    const pulled = await deps.pull(candidate.ref)
+    if (!pulled.ok) {
+      failures.push(formatPullError(pulled.error, candidate.ref, pulled.tried))
+      continue
+    }
+    if (await deps.probe(candidate.ref)) {
+      return { image: candidate.ref, tried, failures }
+    }
+    failures.push(`${candidate.ref}：拉取成功但镜像内没有可用的 docker compose`)
+  }
+  return { image: null, tried, failures }
+}
+
+/** 所有候选都不可用时的用户可读说明：先说清试过什么，再给手动更新与离线路径 */
+export function buildUpdaterImageFailureMessage(
+  resolution: UpdaterImageResolution,
+  releaseTag: string | null,
+  config: ServerConfig = loadServerConfig(),
+): string {
+  const manual = buildManualUpdateCommand(resolveApplySupport(config).stackPaths, releaseTag)
+  return [
+    `无法准备面板更新容器：${resolution.tried.join('、')} 都不可用。`,
+    ...resolution.failures,
+    '可在服务器终端执行手动更新：',
+    manual,
+    '更新完成后面板内一键更新会恢复可用（新版本镜像自带 docker CLI 与 compose）。',
+  ].join('\n')
+}
+
+const updaterImageProbeCache = new Map<string, boolean>()
+
+/** 试跑一次 `docker compose version`，确认候选镜像能当 updater 运行时用 */
+async function probeUpdaterImage(docker: DockerClient, image: string): Promise<boolean> {
+  const cached = updaterImageProbeCache.get(image)
+  if (cached !== undefined) {
+    return cached
+  }
+  let container: DockerClient.Container | null = null
+  let usable = false
+  try {
+    container = await docker.createContainer({
+      Image: image,
+      Entrypoint: ['sh'],
+      Cmd: ['-c', 'docker compose version >/dev/null 2>&1'],
+    })
+    await container.start()
+    const result = await container.wait() as { StatusCode?: number } | undefined
+    usable = (result?.StatusCode ?? 1) === 0
+  }
+  catch {
+    usable = false
+  }
+  finally {
+    try {
+      await container?.remove({ force: true })
+    }
+    catch {
+      // 探针容器已自行退出/被清理
+    }
+  }
+  updaterImageProbeCache.set(image, usable)
+  return usable
+}
+
 async function startPanelComposeUpdater(input: {
   applySupport: ApplySupport
   targetImage: string
   releaseTag: string | null
+  updaterImage: string
 }): Promise<string> {
   const { applySupport } = input
   if (!applySupport.imageSupported || !applySupport.stackPaths) {
@@ -779,7 +919,7 @@ async function startPanelComposeUpdater(input: {
 
   const container = await docker.createContainer({
     name: UPDATER_CONTAINER_NAME,
-    Image: UPDATER_IMAGE,
+    Image: input.updaterImage,
     Cmd: ['sh', '-c', buildUpdaterShellCommand(input.targetImage, input.releaseTag)],
     HostConfig: {
       AutoRemove: true,
@@ -907,8 +1047,41 @@ async function runPanelUpdate(input: {
       return
     }
 
-    updateRuntime({ phase: 'recreating', message: '正在重建面板，约 30 秒后自动重连' })
-    const containerId = await startPanelComposeUpdater(input)
+    updateRuntime({ phase: 'recreating', message: '正在准备更新容器…' })
+    const config = loadServerConfig()
+    const resolution = await resolveUpdaterImage(
+      buildUpdaterImageCandidates({
+        configuredUpdaterImage: config.panelUpdaterImage,
+        targetImage: input.targetImage,
+        panelImage: config.panelImage,
+      }),
+      {
+        isPresent: image => isImagePresentByRef(docker, image),
+        probe: image => probeUpdaterImage(docker, image),
+        pull: async (image) => {
+          const result = await pullImageWithCandidates(
+            docker,
+            buildImageCandidates(image, resolveImageMirrorsRaw()),
+            image,
+            { maxAttempts: TARGET_PULL_MAX_ATTEMPTS, retryBaseMs: TARGET_PULL_RETRY_BASE_MS, sleep },
+          )
+          return result.ok ? { ok: true as const } : result
+        },
+      },
+    )
+    if (!resolution.image) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: buildUpdaterImageFailureMessage(resolution, input.releaseTag),
+      })
+      return
+    }
+    updateRuntime({
+      phase: 'recreating',
+      message: `正在重建面板（更新容器：${resolution.image}），约 30 秒后自动重连`,
+    })
+    const containerId = await startPanelComposeUpdater({ ...input, updaterImage: resolution.image })
     watchUpdaterContainer(containerId)
   }
   catch (error) {

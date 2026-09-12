@@ -15,11 +15,14 @@ const REQUIRED_PANEL_ENV_KEYS = [
   'FORCE_PASSWORD_CHANGE',
   'GSH_SYNC_ADMIN_PASSWORD_FROM_ENV',
   'GSH_PASSWORD_RECOVERY_TOKEN',
+  // 面板内一键更新：updater 容器镜像覆盖项，漏映射会让用户设了也不生效
+  'GSH_PANEL_UPDATER_IMAGE',
 ]
 
 const REQUIRED_DEV_PANEL_ENV_KEYS = [
   'ADMIN_USERNAME',
   'ADMIN_PASSWORD',
+  'GSH_PANEL_UPDATER_IMAGE',
 ]
 
 /** 取第一个匹配的服务块中 environment: 段下的键名（compose 缩进固定：服务 2 空格、键 4 空格、条目 6 空格） */

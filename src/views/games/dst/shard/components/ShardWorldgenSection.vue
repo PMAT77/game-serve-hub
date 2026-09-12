@@ -75,7 +75,7 @@ const worldgenConfigModel = computed({
       </div>
 
       <p v-if="worldgenLocked" class="text-xs text-muted-foreground">
-        世界已按当前预设生成，预设与生成参数不再修改；如需更换，请备份存档后重建实例。
+        世界已按当前预设生成：世界规则与生成参数只在重新生成地图时生效，不会改变现有存档；如需更换预设，请备份存档后重建实例。
       </p>
     </section>
 

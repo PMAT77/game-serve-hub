@@ -163,6 +163,44 @@ describe('cluster-service', () => {
     assert.match(content, /server_port = 11000/)
   })
 
+  it('reports caves-not-ready as a warning instead of a hint', () => {
+    const installPath = createTempInstallDir()
+    const instance = buildInstance(installPath)
+    saveClusterConfig(instance, {
+      instanceId: instance.id,
+      networkMode: 'offline',
+      clusterName: 'Shard Room',
+      clusterDescription: '',
+      clusterPassword: '',
+      gameMode: 'survival',
+      maxPlayers: 6,
+      pvp: false,
+      pauseWhenEmpty: true,
+      voteEnabled: true,
+      clusterIntention: 'cooperative',
+      tickRate: 15,
+      maxSnapshots: 6,
+      shardEnabled: true,
+      bindIp: '127.0.0.1',
+      masterIp: '127.0.0.1',
+      masterPort: 10888,
+      clusterKey: 'secret-key',
+      steamGroupOnly: false,
+      steamGroupId: '0',
+      steamGroupAdmins: false,
+    })
+    // 洞穴配置就绪：无异常，提示恒为空（说明已内联到页面）
+    const ready = getClusterConfig(instance)
+    assert.deepEqual(ready.warnings, [])
+    assert.deepEqual(ready.effectiveHints, [])
+
+    // 洞穴配置缺失：降级为「需要处理」的警告，而不是常驻提示
+    fs.rmSync(path.dirname(resolveCavesServerIniPath(installPath)), { recursive: true, force: true })
+    const missing = getClusterConfig(instance)
+    assert.match(missing.warnings.join('；'), /洞穴配置尚未就绪/)
+    assert.deepEqual(missing.effectiveHints, [])
+  })
+
   it('keeps caves files when disabling shard on room save', () => {
     const installPath = createTempInstallDir()
     const instance = buildInstance(installPath)

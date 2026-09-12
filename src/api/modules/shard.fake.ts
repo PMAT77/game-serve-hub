@@ -24,7 +24,6 @@ function defaultShardList(instanceId: string): ShardListDto {
         isMaster: true,
         panelSaved: false,
         configDirty: false,
-        warnings: [],
       },
       {
         id: 'caves',
@@ -40,10 +39,10 @@ function defaultShardList(instanceId: string): ShardListDto {
         isMaster: false,
         panelSaved: false,
         configDirty: false,
-        warnings: ['洞穴世界尚未初始化'],
       },
     ],
-    effectiveHints: ['若需地下洞穴，请在房间设置中开启「启用洞穴」并保存'],
+    // 服务端恒为空数组（说明已内联到页面），fake 保持同形状
+    effectiveHints: [],
     warnings: [],
   }
 }

@@ -56,37 +56,6 @@ export function ensureClusterDirectory(installPath: string): void {
   fs.mkdirSync(clusterRoot, { recursive: true })
 }
 
-function buildEffectiveHints(
-  networkMode: ClusterConfigDto['networkMode'],
-  instanceStatus: DbGameInstance['status'],
-  shardEnabled: boolean,
-  cavesConfigured: boolean,
-): string[] {
-  const hints: string[] = []
-  if (instanceStatus === 'running') {
-    hints.push('实例运行中，配置变更需重启实例后生效')
-  }
-  if (!shardEnabled) {
-    hints.push('若需地下洞穴，请在下方开启「启用洞穴」并保存')
-  }
-  else if (!cavesConfigured) {
-    hints.push('洞穴配置尚未就绪，请重新保存房间设置或启动实例')
-  }
-  else {
-    hints.push('洞穴的端口、地图与世界规则请在「世界设置」中调整')
-  }
-  if (networkMode === 'public') {
-    hints.push('公网模式需确保防火墙已放行游戏端口')
-  }
-  if (networkMode === 'lan_only') {
-    hints.push('仅局域网模式：同一局域网内玩家可发现房间')
-  }
-  if (networkMode === 'offline') {
-    hints.push('离线模式：不向 Klei 注册，不会出现在游戏浏览列表')
-  }
-  return hints
-}
-
 function readClusterIniFields(clusterIniPath: string, instanceName: string) {
   if (!fs.existsSync(clusterIniPath)) {
     const fields = defaultClusterIniFields(instanceName)
@@ -112,6 +81,9 @@ export function getClusterConfig(instance: DbGameInstance): ClusterConfigDto {
 
   if (fields.networkMode === 'public' && !tokenConfigured) {
     warnings.push('公网模式但未配置有效的 Klei 集群令牌，请粘贴令牌或切换联网模式')
+  }
+  if (fields.shardEnabled && !isCavesShardConfigured(installPath)) {
+    warnings.push('洞穴配置尚未就绪，请重新保存房间设置或启动实例')
   }
 
   const instanceStatus = instance.status
@@ -144,12 +116,8 @@ export function getClusterConfig(instance: DbGameInstance): ClusterConfigDto {
     clusterTokenMasked: tokenConfigured && token ? maskClusterToken(token) : null,
     panelRoomSaved: isPanelRoomSaved(panelMeta),
     configDirty: instanceStatus === 'running',
-    effectiveHints: buildEffectiveHints(
-      fields.networkMode,
-      instanceStatus,
-      fields.shardEnabled,
-      isCavesShardConfigured(installPath),
-    ),
+    // 恒为空：面向用户的说明已内联到页面（联网模式说明、洞穴卡片与世界设置入口）。
+    effectiveHints: [],
     warnings,
   }
 }

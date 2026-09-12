@@ -59,7 +59,6 @@ export const shardSummarySchema = z.object({
   isMaster: z.boolean(),
   panelSaved: z.boolean(),
   configDirty: z.boolean(),
-  warnings: z.array(z.string()),
 })
 export type ShardSummaryDto = z.infer<typeof shardSummarySchema>
 
@@ -69,6 +68,10 @@ export const shardListSchema = z.object({
   instanceStatus: instanceStatusSchema,
   clusterShardEnabled: z.boolean(),
   shards: z.array(shardSummarySchema),
+  /**
+   * @deprecated 服务端不再产生提示文案，恒为空数组：面向用户的说明已内联到页面对应位置。
+   * 字段暂时保留，仅为兼容仍执行缓存中旧前端的浏览器（旧代码做 `[...effectiveHints]`，缺字段会崩），下个版本移除。
+   */
   effectiveHints: z.array(z.string()),
   warnings: z.array(z.string()),
 })

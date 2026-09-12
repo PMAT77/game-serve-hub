@@ -141,19 +141,19 @@ const clusterShardEnabled = computed(() => Boolean(shardList.value?.clusterShard
 const masterShard = computed(() => shardList.value?.shards.find(s => s.id === 'master'))
 const cavesShard = computed(() => shardList.value?.shards.find(s => s.id === 'caves'))
 
+/**
+ * 顶部只承载「现在需要处理」的信息：异常警告，以及实例运行中这条会影响保存行为的条件提示。
+ * 静态说明（世界已生成、放行端口、洞穴未开启）一律内联到对应页签与控件旁，避免同一信息重复出现。
+ */
 const configAlerts = computed(() => {
   const list = shardList.value
   if (!list) {
     return { warnings: [] as string[], hints: [] as string[] }
   }
-  const hints = [...list.effectiveHints]
-  const anyDirty = list.shards.some(s => s.configDirty)
-  if (anyDirty && !hints.some(h => h.includes('重启'))) {
-    hints.unshift('实例运行中，配置变更需重启实例后生效')
-  }
+  const running = list.shards.some(s => s.configDirty)
   return {
     warnings: list.warnings,
-    hints,
+    hints: running ? ['实例运行中，配置变更需重启实例后生效'] : [],
   }
 })
 
@@ -489,13 +489,13 @@ onActivated(() => {
           title="世界配置"
           description="分别调整地上与洞穴的地图规则、端口与 Mod。保存后写入分片配置。"
         />
-        <NAlert
-          v-for="(w, i) in configAlerts.warnings"
-          :key="`w-${i}`"
-          type="warning"
-          :title="w"
-          class="mb-2"
-        />
+        <NAlert v-if="configAlerts.warnings.length" type="warning" title="需要处理" class="mb-2">
+          <ul class="list-disc pl-4 space-y-1">
+            <li v-for="(w, i) in configAlerts.warnings" :key="`w-${i}`">
+              {{ w }}
+            </li>
+          </ul>
+        </NAlert>
         <NAlert
           v-for="(hint, i) in configAlerts.hints"
           :key="`h-${i}`"
@@ -539,6 +539,9 @@ onActivated(() => {
             >
               <NTabs v-model:value="surfaceSubTab" type="card" placement="left" size="small" display-directive="show" class="mt-2">
                 <NTabPane name="rules" tab="世界规则">
+                  <p v-if="masterShard?.worldGenerated" class="mt-2 mb-4 text-xs text-muted-foreground">
+                    地上世界已生成：世界规则的改动会在该分片重新生成地图时生效，不会改变现有存档。
+                  </p>
                   <ShardWorldRulesSection
                     v-model="masterWorldRules"
                     shard="master"
@@ -619,6 +622,9 @@ onActivated(() => {
               >
                 <NTabs v-model:value="cavesSubTab" type="card" placement="left" size="small" display-directive="show" class="mt-2">
                   <NTabPane name="rules" tab="世界规则">
+                    <p v-if="cavesShard?.worldGenerated" class="mt-2 mb-4 text-xs text-muted-foreground">
+                      洞穴世界已生成：世界规则的改动会在该分片重新生成地图时生效，不会改变现有存档。
+                    </p>
                     <ShardWorldRulesSection
                       v-model="cavesWorldRules"
                       shard="caves"

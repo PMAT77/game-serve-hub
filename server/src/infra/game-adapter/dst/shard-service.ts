@@ -140,17 +140,13 @@ function buildShardSummary(
   const configured = shardId === 'master'
     ? isMasterShardConfigured(installPath)
     : clusterShardEnabled && isCavesShardConfigured(installPath)
-  const warnings: string[] = []
   let serverPort: number | null = null
   let steamAuthPort: number | null = null
   let steamMasterPort: number | null = null
   let worldgenPreset: ShardWorldgenPreset | null = null
   let savedOverrides: Record<string, string> | null = null
   let worldGenerated = false
-  if (shardId === 'caves' && !clusterShardEnabled) {
-    warnings.push('洞穴未开启，请在房间设置中打开「启用洞穴」并保存')
-  }
-  else if (configured) {
+  if (configured) {
     const fields = readShardIniFields(installPath, shardId)
     if (fields) {
       serverPort = fields.serverPort
@@ -160,9 +156,6 @@ function buildShardSummary(
     worldgenPreset = readShardWorldgenPreset(installPath, shardId)
     savedOverrides = readShardSavedOverrides(installPath, shardId)
     worldGenerated = isShardWorldGenerated(installPath, shardId)
-  }
-  else if (shardId === 'caves' && clusterShardEnabled) {
-    warnings.push('洞穴配置尚未就绪，请重新保存房间设置或启动实例')
   }
   return {
     id: shardId,
@@ -178,33 +171,7 @@ function buildShardSummary(
     isMaster: shardId === 'master',
     panelSaved: shardId === 'master' && isPanelMasterWorldSaved(panelMeta),
     configDirty: instanceStatus === 'running',
-    warnings,
   }
-}
-
-function buildEffectiveHints(
-  clusterShardEnabled: boolean,
-  instanceStatus: DbGameInstance['status'],
-  cavesConfigured: boolean,
-  masterWorldGenerated: boolean,
-): string[] {
-  const hints: string[] = []
-  if (instanceStatus === 'running') {
-    hints.push('实例运行中，世界配置变更需重启实例后生效')
-  }
-  if (masterWorldGenerated) {
-    hints.push('地上世界已生成：世界规则的改动会在该分片重新生成地图时生效，不会改变现有存档')
-  }
-  if (clusterShardEnabled) {
-    hints.push('公网游玩时，请在防火墙或云安全组放行地上与洞穴的游戏端口')
-  }
-  if (!clusterShardEnabled) {
-    hints.push('洞穴未开启：请在房间设置中打开「启用洞穴」并保存')
-  }
-  else if (!cavesConfigured) {
-    hints.push('洞穴配置尚未就绪，请重新保存房间设置或启动实例')
-  }
-  return hints
 }
 
 export async function getShardList(instance: DbGameInstance): Promise<ShardListDto> {
@@ -217,9 +184,6 @@ export async function getShardList(instance: DbGameInstance): Promise<ShardListD
   if (clusterShardEnabled && !isCavesShardConfigured(installPath)) {
     warnings.push('房间已开启洞穴，但配置尚未就绪，请重新保存房间设置或启动实例')
   }
-  if (!clusterShardEnabled) {
-    warnings.push('洞穴已关闭：配置文件仍保留，启动时不会运行洞穴服务器')
-  }
   const panelMeta = readPanelConfigMeta(installPath)
   return {
     instanceId: instance.id,
@@ -230,12 +194,8 @@ export async function getShardList(instance: DbGameInstance): Promise<ShardListD
       buildShardSummary('master', installPath, instance.status, masterStatus, clusterShardEnabled, panelMeta),
       buildShardSummary('caves', installPath, instance.status, cavesStatus, clusterShardEnabled, panelMeta),
     ],
-    effectiveHints: buildEffectiveHints(
-      clusterShardEnabled,
-      instance.status,
-      isCavesShardConfigured(installPath),
-      isShardWorldGenerated(installPath, 'master'),
-    ),
+    // 恒为空：面向用户的说明已内联到页面（世界规则/世界生成/网络页签与洞穴开关卡片）。
+    effectiveHints: [],
     warnings,
   }
 }

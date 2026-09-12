@@ -75,7 +75,6 @@ function baseShardList(overrides: Partial<ShardListDto> = {}): ShardListDto {
         isMaster: true,
         panelSaved: false,
         configDirty: false,
-        warnings: [],
       },
     ],
     effectiveHints: [],

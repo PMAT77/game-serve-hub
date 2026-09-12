@@ -32,7 +32,8 @@ function defaultClusterConfig(instanceId: string, instanceName: string): Cluster
     clusterTokenMasked: null,
     panelRoomSaved: false,
     configDirty: false,
-    effectiveHints: ['离线模式：不向 Klei 注册，不会出现在游戏浏览列表'],
+    // 服务端恒为空数组（说明已内联到页面），fake 保持同形状
+    effectiveHints: [],
     warnings: [],
   }
 }
@@ -120,11 +121,7 @@ export default defineFakeRoute([
         clusterTokenMasked,
         panelRoomSaved: true,
         configDirty: previous.instanceStatus === 'running',
-        effectiveHints: previous.instanceStatus === 'running'
-          ? ['实例运行中，配置变更需重启实例后生效']
-          : payload.shardEnabled
-            ? ['洞穴的端口、地图与世界规则请在「世界设置」中调整']
-            : [],
+        effectiveHints: [],
         warnings: payload.networkMode === 'public' && !tokenConfigured
           ? ['公网模式但未配置有效的 Klei 集群令牌']
           : [],

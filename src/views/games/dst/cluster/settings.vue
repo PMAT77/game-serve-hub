@@ -33,7 +33,7 @@ import apiCluster from '@/api/modules/cluster'
 import apiInstance from '@/api/modules/instance'
 import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
 import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
-import { routeToDstRoomList } from '@/navigation/game-routes'
+import { routeToDstRoomList, routeToDstWorldSettings } from '@/navigation/game-routes'
 import { isInstanceInstallingStatus } from '@/views/node/instance/instanceDisplay'
 import { getPortConflictDialogLabels, isInstancePortConflictError } from '@/utils/instancePortConflict'
 import { tryNotifyHostMemoryPressure } from '@/utils/hostMemoryPressure'
@@ -137,18 +137,24 @@ const clusterTokenPlaceholder = computed(() => {
   return '联机模式须填写 pds- 开头的 Klei 集群令牌'
 })
 
+/** 联网模式说明：原先作为常驻横幅推送，现内联在模式选择下方，跟随选中项变化。 */
+const NETWORK_MODE_HINTS: Record<ClusterNetworkMode, string> = {
+  offline: '离线模式：不向 Klei 注册，不会出现在游戏浏览列表。',
+  lan_only: '仅局域网模式：同一局域网内玩家可发现房间。',
+  public: '公网模式：需确保防火墙或云安全组已放行游戏端口。',
+}
+
+const networkModeHint = computed(() => NETWORK_MODE_HINTS[formModel.networkMode])
+
+/** 顶部只承载异常警告与「实例运行中」这条影响保存行为的条件提示。 */
 const configAlerts = computed(() => {
   const config = serverConfig.value
   if (!config) {
     return { warnings: [] as string[], hints: [] as string[] }
   }
-  const hints = [...config.effectiveHints]
-  if (config.configDirty && !hints.some(h => h.includes('重启'))) {
-    hints.unshift('实例运行中，配置变更需重启实例后生效')
-  }
   return {
     warnings: config.warnings,
-    hints,
+    hints: config.configDirty ? ['实例运行中，配置变更需重启实例后生效'] : [],
   }
 })
 
@@ -365,6 +371,12 @@ function goBack() {
   router.push(routeToDstRoomList())
 }
 
+function goWorldSettings() {
+  if (instanceId.value) {
+    router.push(routeToDstWorldSettings(instanceId.value))
+  }
+}
+
 function confirmSaveAndRestart() {
   dialog.warning({
     title: '保存并重启',
@@ -428,24 +440,20 @@ onActivated(() => {
         description="设置联网方式、房间信息与洞穴开关。保存后写入实例配置目录。"
       />
       <div class="space-y-4">
-        <NAlert
-          v-for="(warning, index) in configAlerts.warnings"
-          :key="`warn-${index}`"
-          type="warning" 
-          :title="warning"
-          class="mb-2"
-        />
-        <NAlert
-          v-if="configAlerts.hints.length"
-          type="info"
-          title="提示"
-        >
+        <NAlert v-if="configAlerts.warnings.length" type="warning" title="需要处理" class="mb-2">
           <ul class="list-disc pl-4 space-y-1">
-            <li v-for="(hint, index) in configAlerts.hints" :key="`hint-${index}`">
-              {{ hint }}
+            <li v-for="(warning, index) in configAlerts.warnings" :key="`warn-${index}`">
+              {{ warning }}
             </li>
           </ul>
         </NAlert>
+        <NAlert
+          v-for="(hint, index) in configAlerts.hints"
+          :key="`hint-${index}`"
+          type="info"
+          :title="hint"
+          class="mb-2"
+        />
         <NForm
           ref="formRef"
           :model="formModel"
@@ -469,6 +477,9 @@ onActivated(() => {
                   </NRadio>
                 </NSpace>
               </NRadioGroup>
+              <template #feedback>
+                {{ networkModeHint }}
+              </template>
             </NFormItem>
             <NFormItem label="网络刷新率" path="tickRate">
               <NInputNumber v-model:value="formModel.tickRate" :min="15" :max="60" :step="15" class="w-40" />
@@ -633,6 +644,10 @@ onActivated(() => {
                 </template>
               </NFormItem>
             </template>
+            <NButton v-if="formModel.shardEnabled" size="small" class="mt-3" @click="goWorldSettings">
+              前往世界设置
+              <FaIcon name="i-lucide:arrow-right" class="size-4" />
+            </NButton>
           </NCard>
 
           <NCard title="Steam 组（可选）" size="small" class="mt-4">

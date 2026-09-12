@@ -7,11 +7,10 @@
  * - 仅 external 原生模块 cpu-features（esbuild 无法打包的 gyp addon，运行时
  *   由 createRequire banner 兜底解析）；
  * - splitting + format=esm 处理 bundle 内的动态 import；
- * - DST leveldata 模板按相对路径 fs 读取，打包后随产物拷贝到 dist-server/templates。
+ * - 运行时不再有需要随包拷贝的静态资源（世界配置改由 worldgenoverride.lua 单一真源生成）。
  *
  * 用法：node scripts/build-server.mjs（或 pnpm run build:server）
  */
-import fs from 'node:fs'
 import path from 'node:path'
 import { build } from 'esbuild'
 
@@ -41,9 +40,3 @@ await build({
   logLevel: 'info',
 })
 
-fs.cpSync(
-  path.join(repoRoot, 'server/src/infra/game-adapter/dst/templates'),
-  path.join(repoRoot, 'dist-server/templates'),
-  { recursive: true },
-)
-console.log('[build-server] templates copied to dist-server/templates')

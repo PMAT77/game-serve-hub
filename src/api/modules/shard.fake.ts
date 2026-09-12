@@ -19,7 +19,7 @@ function defaultShardList(instanceId: string): ShardListDto {
         steamAuthPort: 8766,
         steamMasterPort: 12346,
         worldgenPreset: 'SURVIVAL_TOGETHER',
-        leveldataOverrides: { day: 'default', krampus: 'default', world_size: 'default' },
+        overrides: { day: 'default', krampus: 'default', world_size: 'default' },
         worldGenerated: false,
         isMaster: true,
         panelSaved: false,
@@ -35,7 +35,7 @@ function defaultShardList(instanceId: string): ShardListDto {
         steamAuthPort: null,
         steamMasterPort: null,
         worldgenPreset: null,
-        leveldataOverrides: null,
+        overrides: null,
         worldGenerated: false,
         isMaster: false,
         panelSaved: false,
@@ -99,12 +99,12 @@ export default defineFakeRoute([
         shard.steamMasterPort = payload.steamMasterPort
         shard.worldgenPreset = payload.worldgenPreset
         const merged = {
-          ...shard.leveldataOverrides,
+          ...shard.overrides,
           ...payload.worldRuleOverrides,
           ...payload.worldgenOverrides,
         }
         if (Object.keys(merged).length > 0) {
-          shard.leveldataOverrides = merged
+          shard.overrides = merged
         }
         if (payload.worldgenOverrides && !shard.worldGenerated) {
           shard.worldGenerated = false

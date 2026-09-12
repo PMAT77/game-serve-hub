@@ -1,74 +1,131 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { describe, it } from 'node:test'
-import {
-  isValidLeveldataStructure,
-  loadLeveldataTemplate,
-  mergeLeveldataOverrides,
-  parseLeveldataOverrides,
-  repairInvalidLeveldataOverrideFile,
-  validateWorldRuleOverrides,
-} from './leveldata-override'
+import { afterEach, describe, it } from 'node:test'
 import { ensureDstClusterConfig } from './cluster-config'
-import { resolveShardLeveldataPath } from './shard-layout'
+import {
+  migrateLegacyLeveldataOverride,
+  migrateLegacyLeveldataOverrides,
+  parseLeveldataOverrides,
+} from './leveldata-override'
+import { isCavesShardConfigured, resolveShardLeveldataPath, resolveShardWorldgenPath } from './shard-layout'
+import { parseWorldgenOverride } from './worldgen-override'
 
-const sampleLua = loadLeveldataTemplate('master')
+const tempDirs: string[] = []
 
-describe('leveldata-override', () => {
-  it('parseLeveldataOverrides reads overrides from official template', () => {
-    const overrides = parseLeveldataOverrides(sampleLua)
-    assert.equal(overrides.krampus, 'default')
-    assert.equal(overrides.branching, 'default')
+function makeTempInstall(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-leveldata-'))
+  tempDirs.push(dir)
+  return dir
+}
+
+function writeLegacyLeveldata(installPath: string, content: string): string {
+  const target = resolveShardLeveldataPath(installPath, 'master')
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, content, 'utf8')
+  return target
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+describe('leveldata-override 迁移', () => {
+  it('moves legacy overrides into worldgenoverride.lua and deletes the old file', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { instanceName: 'Test', gamePort: 10999 })
+    const legacyPath = writeLegacyLeveldata(installPath, [
+      'return {',
+      '  desc="Standard experience.",',
+      '  id="SURVIVAL_TOGETHER",',
+      '  location="forest",',
+      '  name="Standard Forest",',
+      '  overrides={',
+      '   krampus="often",',
+      '   day="longer"',
+      '  },',
+      '  settings_id="SURVIVAL_TOGETHER",',
+      '}',
+      '',
+    ].join('\n'))
+
+    assert.equal(migrateLegacyLeveldataOverride(installPath, 'master'), true)
+
+    assert.equal(fs.existsSync(legacyPath), false, '旧文件应被删除')
+    const worldgenPath = resolveShardWorldgenPath(installPath, 'master')
+    const parsed = parseWorldgenOverride(fs.readFileSync(worldgenPath, 'utf8'))
+    assert.equal(parsed.preset, 'SURVIVAL_TOGETHER')
+    assert.equal(parsed.overrides.krampus, 'often')
+    assert.equal(parsed.overrides.day, 'longer')
+    assert.equal(fs.readdirSync(path.dirname(worldgenPath)).some(name => name.startsWith('leveldataoverride.lua.bak.')), true)
   })
 
-  it('mergeLeveldataOverrides patches existing official template', () => {
-    const merged = mergeLeveldataOverrides(sampleLua, { krampus: 'often' }, 'master')
-    const overrides = parseLeveldataOverrides(merged)
-    assert.equal(overrides.krampus, 'often')
-    assert.equal(overrides.branching, 'default')
-    assert.ok(isValidLeveldataStructure(merged))
-    assert.match(merged, /id="SURVIVAL_TOGETHER"/)
+  it('keeps panel-saved worldgen values over legacy ones and stays idempotent', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { instanceName: 'Test', gamePort: 10999 })
+    const worldgenPath = resolveShardWorldgenPath(installPath, 'master')
+    fs.writeFileSync(worldgenPath, [
+      'return {',
+      '  override_enabled = true,',
+      '  preset = "SURVIVAL_TOGETHER",',
+      '  overrides = {',
+      '    krampus="rare",',
+      '  },',
+      '}',
+      '',
+    ].join('\n'), 'utf8')
+    writeLegacyLeveldata(installPath, 'return {\n  overrides={\n    krampus="often",\n    day="longer",\n  },\n}\n')
+
+    assert.equal(migrateLegacyLeveldataOverride(installPath, 'master'), true)
+    const parsed = parseWorldgenOverride(fs.readFileSync(worldgenPath, 'utf8'))
+    assert.equal(parsed.overrides.krampus, 'rare')
+    assert.equal(parsed.overrides.day, 'longer')
+
+    // 幂等：旧文件已删除，再次调用不再改动
+    assert.equal(migrateLegacyLeveldataOverride(installPath, 'master'), false)
   })
 
-  it('mergeLeveldataOverrides creates valid master file from template when missing', () => {
-    const content = mergeLeveldataOverrides(null, { day: 'longer' }, 'master')
-    assert.match(content, /id="SURVIVAL_TOGETHER"/)
-    assert.match(content, /location="forest"/)
-    const overrides = parseLeveldataOverrides(content)
-    assert.equal(overrides.day, 'longer')
-    assert.ok(isValidLeveldataStructure(content))
+  it('carries overrides from a legacy file without preset metadata', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { instanceName: 'Test', gamePort: 10999 })
+    writeLegacyLeveldata(installPath, 'return {\n  overrides={\n    day="longer",\n  },\n  location="forest",\n  version=4,\n}\n')
+
+    assert.equal(migrateLegacyLeveldataOverrides(installPath), 1)
+    const parsed = parseWorldgenOverride(fs.readFileSync(resolveShardWorldgenPath(installPath, 'master'), 'utf8'))
+    assert.equal(parsed.preset, 'SURVIVAL_TOGETHER')
+    assert.deepEqual(parsed.overrides, { day: 'longer' })
   })
 
-  it('repairs legacy minimal leveldata file', () => {
-    const installPath = fs.mkdtempSync(path.join(fs.realpathSync('.'), 'gsh-leveldata-'))
-    try {
-      ensureDstClusterConfig(installPath, { gamePort: 10999 })
-      const luaPath = resolveShardLeveldataPath(installPath, 'master')
-      fs.writeFileSync(luaPath, [
-        'return {',
-        '  overrides={',
-        '    krampus="often",',
-        '  },',
-        '  location="forest",',
-        '  version=4,',
-        '}',
-        '',
-      ].join('\n'), 'utf8')
-      assert.equal(repairInvalidLeveldataOverrideFile(installPath, 'master'), true)
-      const repaired = fs.readFileSync(luaPath, 'utf8')
-      assert.ok(isValidLeveldataStructure(repaired))
-      assert.equal(parseLeveldataOverrides(repaired).krampus, 'often')
-    }
-    finally {
-      fs.rmSync(installPath, { recursive: true, force: true })
-    }
+  it('uses the legacy settings_id as preset when worldgenoverride.lua is missing', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { instanceName: 'Test', gamePort: 10999 })
+    const worldgenPath = resolveShardWorldgenPath(installPath, 'master')
+    fs.rmSync(worldgenPath, { force: true })
+    writeLegacyLeveldata(installPath, 'return {\n  id="SURVIVAL_TOGETHER",\n  settings_id="SURVIVAL_TOGETHER",\n  overrides={\n    day="longer",\n  },\n}\n')
+
+    assert.equal(migrateLegacyLeveldataOverride(installPath, 'master'), true)
+    const parsed = parseWorldgenOverride(fs.readFileSync(worldgenPath, 'utf8'))
+    assert.equal(parsed.preset, 'SURVIVAL_TOGETHER')
+    assert.equal(parsed.overrides.day, 'longer')
   })
 
-  it('validateWorldRuleOverrides rejects invalid keys', () => {
-    assert.match(
-      validateWorldRuleOverrides({ 'bad-key': 'default' }) ?? '',
-      /键名无效/,
-    )
+  it('leaves a legacy-only caves shard alone until caves is configured', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { instanceName: 'Test', gamePort: 10999 })
+    assert.equal(isCavesShardConfigured(installPath), false)
+    const cavesLegacy = resolveShardLeveldataPath(installPath, 'caves')
+    fs.mkdirSync(path.dirname(cavesLegacy), { recursive: true })
+    fs.writeFileSync(cavesLegacy, 'return {\n  overrides={\n    day="longer",\n  },\n}\n', 'utf8')
+
+    assert.equal(migrateLegacyLeveldataOverrides(installPath), 0)
+    assert.equal(fs.existsSync(cavesLegacy), true)
+  })
+
+  it('parseLeveldataOverrides still reads plain override blocks', () => {
+    assert.deepEqual(parseLeveldataOverrides('return {\n  overrides={\n    krampus="often",\n  },\n}\n'), { krampus: 'often' })
+    assert.deepEqual(parseLeveldataOverrides('return { }'), {})
   })
 })

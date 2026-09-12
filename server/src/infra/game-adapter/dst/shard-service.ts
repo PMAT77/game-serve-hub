@@ -35,10 +35,10 @@ import {
   resolveShardWorldgenPath,
 } from './shard-layout'
 import {
-  mergeLeveldataOverrides,
+  migrateLegacyLeveldataOverride,
   parseLeveldataOverrides,
-  validateWorldRuleOverrides,
 } from './leveldata-override'
+import { validateWorldRuleOverrides } from './lua-overrides'
 import {
   buildWorldgenOverride,
   defaultWorldgenPreset,
@@ -76,14 +76,25 @@ function readShardIniFields(installPath: string, shardId: ShardId): ServerIniFie
   return parseServerIni(content, shardId).fields
 }
 
-function readShardLeveldataOverrides(installPath: string, shardId: ShardId): Record<string, string> | null {
-  const luaPath = resolveShardLeveldataPath(installPath, shardId)
-  if (!fs.existsSync(luaPath)) {
-    return null
+/**
+ * 已保存的世界配置覆盖项。
+ * 真源是 worldgenoverride.lua（面板写入预设 + 全部覆盖项）；为空时回退读历史
+ * leveldataoverride.lua，保证升级后的面板显示不倒退（迁移在启动/保存时执行）。
+ */
+function readShardSavedOverrides(installPath: string, shardId: ShardId): Record<string, string> | null {
+  const worldgenPath = resolveShardWorldgenPath(installPath, shardId)
+  if (fs.existsSync(worldgenPath)) {
+    const content = fs.readFileSync(worldgenPath, 'utf8')
+    const { overrides } = parseWorldgenOverride(content)
+    if (Object.keys(overrides).length > 0) {
+      return overrides
+    }
   }
-  const content = fs.readFileSync(luaPath, 'utf8')
-  const overrides = parseLeveldataOverrides(content)
-  return Object.keys(overrides).length > 0 ? overrides : {}
+  const legacyPath = resolveShardLeveldataPath(installPath, shardId)
+  if (fs.existsSync(legacyPath)) {
+    return parseLeveldataOverrides(fs.readFileSync(legacyPath, 'utf8'))
+  }
+  return fs.existsSync(worldgenPath) ? {} : null
 }
 
 function readShardWorldgenPreset(installPath: string, shardId: ShardId): ShardWorldgenPreset | null {
@@ -134,7 +145,7 @@ function buildShardSummary(
   let steamAuthPort: number | null = null
   let steamMasterPort: number | null = null
   let worldgenPreset: ShardWorldgenPreset | null = null
-  let leveldataOverrides: Record<string, string> | null = null
+  let savedOverrides: Record<string, string> | null = null
   let worldGenerated = false
   if (shardId === 'caves' && !clusterShardEnabled) {
     warnings.push('洞穴未开启，请在房间设置中打开「启用洞穴」并保存')
@@ -147,7 +158,7 @@ function buildShardSummary(
       steamMasterPort = fields.steamMasterPort
     }
     worldgenPreset = readShardWorldgenPreset(installPath, shardId)
-    leveldataOverrides = readShardLeveldataOverrides(installPath, shardId)
+    savedOverrides = readShardSavedOverrides(installPath, shardId)
     worldGenerated = isShardWorldGenerated(installPath, shardId)
   }
   else if (shardId === 'caves' && clusterShardEnabled) {
@@ -162,7 +173,7 @@ function buildShardSummary(
     steamAuthPort,
     steamMasterPort,
     worldgenPreset,
-    leveldataOverrides,
+    overrides: savedOverrides,
     worldGenerated,
     isMaster: shardId === 'master',
     panelSaved: shardId === 'master' && isPanelMasterWorldSaved(panelMeta),
@@ -175,10 +186,14 @@ function buildEffectiveHints(
   clusterShardEnabled: boolean,
   instanceStatus: DbGameInstance['status'],
   cavesConfigured: boolean,
+  masterWorldGenerated: boolean,
 ): string[] {
   const hints: string[] = []
   if (instanceStatus === 'running') {
     hints.push('实例运行中，世界配置变更需重启实例后生效')
+  }
+  if (masterWorldGenerated) {
+    hints.push('地上世界已生成：世界规则的改动会在该分片重新生成地图时生效，不会改变现有存档')
   }
   if (clusterShardEnabled) {
     hints.push('公网游玩时，请在防火墙或云安全组放行地上与洞穴的游戏端口')
@@ -219,6 +234,7 @@ export async function getShardList(instance: DbGameInstance): Promise<ShardListD
       clusterShardEnabled,
       instance.status,
       isCavesShardConfigured(installPath),
+      isShardWorldGenerated(installPath, 'master'),
     ),
     warnings,
   }
@@ -282,41 +298,33 @@ export function saveShardConfig(instance: DbGameInstance, payload: ShardSavePayl
       throw new Error('该分片世界已生成，无法修改世界生成预设')
     }
   }
-  const iniPath = resolveShardServerIniPath(installPath, shardId)
-  const worldgenPath = resolveShardWorldgenPath(installPath, shardId)
-  const leveldataPath = resolveShardLeveldataPath(installPath, shardId)
-  backupFile(iniPath)
-  if (!isShardWorldGenerated(installPath, shardId)) {
-    backupFile(worldgenPath)
-    writeFileAtomic(worldgenPath, buildWorldgenOverride(payload.worldgenPreset))
-  }
-  writeFileAtomic(iniPath, buildServerIni(fields))
-  const leveldataPatch: Record<string, string> = {}
+  const overridePatch: Record<string, string> = {}
   if (payload.worldRuleOverrides) {
-    Object.assign(leveldataPatch, payload.worldRuleOverrides)
+    Object.assign(overridePatch, payload.worldRuleOverrides)
   }
   if (payload.worldgenOverrides) {
     if (isShardWorldGenerated(installPath, shardId)) {
       throw new Error('该分片世界已生成，无法修改地图生成详细参数')
     }
-    Object.assign(leveldataPatch, payload.worldgenOverrides)
+    Object.assign(overridePatch, payload.worldgenOverrides)
   }
-  if (Object.keys(leveldataPatch).length > 0) {
-    const patchError = validateWorldRuleOverrides(leveldataPatch)
-    if (patchError) {
-      throw new Error(patchError)
-    }
-    if (fs.existsSync(leveldataPath)) {
-      backupFile(leveldataPath)
-    }
-    const existing = fs.existsSync(leveldataPath)
-      ? fs.readFileSync(leveldataPath, 'utf8')
-      : null
-    writeFileAtomic(
-      leveldataPath,
-      mergeLeveldataOverrides(existing, leveldataPatch, shardId),
-    )
+  const patchError = validateWorldRuleOverrides(overridePatch)
+  if (patchError) {
+    throw new Error(patchError)
   }
+  const iniPath = resolveShardServerIniPath(installPath, shardId)
+  const worldgenPath = resolveShardWorldgenPath(installPath, shardId)
+  backupFile(iniPath)
+  writeFileAtomic(iniPath, buildServerIni(fields))
+  // 历史版本把覆盖项写在 leveldataoverride.lua，DST 侧会被本文件的预设整份覆盖：
+  // 先把旧文件迁移进 worldgenoverride.lua，再在其上叠加本次改动（单一真源）。
+  migrateLegacyLeveldataOverride(installPath, shardId)
+  const existingOverrides = readShardSavedOverrides(installPath, shardId) ?? {}
+  backupFile(worldgenPath)
+  writeFileAtomic(
+    worldgenPath,
+    buildWorldgenOverride(payload.worldgenPreset, { ...existingOverrides, ...overridePatch }),
+  )
   if (shardId === 'master') {
     markPanelMasterWorldSaved(installPath)
   }

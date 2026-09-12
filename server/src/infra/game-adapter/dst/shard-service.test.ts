@@ -6,9 +6,15 @@ import { afterEach, describe, it } from 'node:test'
 import type { DbGameInstance } from '../../../shared/db/index'
 import { ensureDstClusterConfig } from './cluster-config'
 import { resolveClusterPaths, saveClusterConfig } from './cluster-service'
-import { parseLeveldataOverrides } from './leveldata-override'
 import { initCavesShard, saveShardConfig } from './shard-service'
-import { isCavesShardConfigured, isShardWorldGenerated, resolveShardLeveldataPath, resolveShardSaveDir } from './shard-layout'
+import {
+  isCavesShardConfigured,
+  isShardWorldGenerated,
+  resolveShardLeveldataPath,
+  resolveShardSaveDir,
+  resolveShardWorldgenPath,
+} from './shard-layout'
+import { parseWorldgenOverride } from './worldgen-override'
 const tempDirs: string[] = []
 
 function makeTempInstall(): string {
@@ -129,7 +135,7 @@ describe('shard-service', () => {
     assert.match(ini, /server_port = 11001/)
   })
 
-  it('saveShardConfig writes master world rules to leveldataoverride.lua', () => {
+  it('saveShardConfig writes preset and world rules into worldgenoverride.lua', () => {
     const installPath = makeTempInstall()
     ensureDstClusterConfig(installPath, { gamePort: 10999 })
     const instance = makeInstance(installPath)
@@ -143,12 +149,44 @@ describe('shard-service', () => {
       worldRuleOverrides: { krampus: 'often', day: 'longer' },
       worldgenOverrides: { branching: 'most' },
     })
-    const luaPath = resolveShardLeveldataPath(installPath, 'master')
+    const luaPath = resolveShardWorldgenPath(installPath, 'master')
     assert.ok(fs.existsSync(luaPath))
-    const overrides = parseLeveldataOverrides(fs.readFileSync(luaPath, 'utf8'))
-    assert.equal(overrides.krampus, 'often')
-    assert.equal(overrides.day, 'longer')
-    assert.equal(overrides.branching, 'most')
+    const parsed = parseWorldgenOverride(fs.readFileSync(luaPath, 'utf8'))
+    // 预设与覆盖项必须写在同一个文件：DST 会用它整份替换 world.options
+    assert.equal(parsed.preset, 'SURVIVAL_TOGETHER')
+    assert.equal(parsed.overrides.krampus, 'often')
+    assert.equal(parsed.overrides.day, 'longer')
+    assert.equal(parsed.overrides.branching, 'most')
+    // 面板不再写 leveldataoverride.lua（会被上面的文件整份覆盖）
+    assert.equal(fs.existsSync(resolveShardLeveldataPath(installPath, 'master')), false)
+  })
+
+  it('saveShardConfig migrates a legacy leveldataoverride.lua before applying the patch', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { gamePort: 10999 })
+    const instance = makeInstance(installPath)
+    const legacyPath = resolveShardLeveldataPath(installPath, 'master')
+    fs.writeFileSync(legacyPath, [
+      'return {',
+      '  overrides={',
+      '    world_size="small",',
+      '  },',
+      '}',
+      '',
+    ].join('\n'), 'utf8')
+    saveShardConfig(instance, {
+      instanceId: instance.id,
+      shard: 'master',
+      serverPort: 10999,
+      steamAuthPort: 8766,
+      steamMasterPort: 12346,
+      worldgenPreset: 'SURVIVAL_TOGETHER',
+      worldRuleOverrides: { krampus: 'often' },
+    })
+    assert.equal(fs.existsSync(legacyPath), false)
+    const parsed = parseWorldgenOverride(fs.readFileSync(resolveShardWorldgenPath(installPath, 'master'), 'utf8'))
+    assert.equal(parsed.overrides.world_size, 'small')
+    assert.equal(parsed.overrides.krampus, 'often')
   })
 
   it('rejects worldgen overrides after world is generated', () => {

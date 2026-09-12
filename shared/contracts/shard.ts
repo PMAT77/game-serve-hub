@@ -53,7 +53,8 @@ export const shardSummarySchema = z.object({
   steamAuthPort: portSchema.nullable(),
   steamMasterPort: portSchema.nullable(),
   worldgenPreset: shardWorldgenPresetSchema.nullable(),
-  leveldataOverrides: z.record(z.string(), z.string()).nullable(),
+  /** 本分片已保存的世界配置覆盖项（真源：worldgenoverride.lua 的 overrides） */
+  overrides: z.record(z.string(), z.string()).nullable(),
   worldGenerated: z.boolean(),
   isMaster: z.boolean(),
   panelSaved: z.boolean(),

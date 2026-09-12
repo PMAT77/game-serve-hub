@@ -183,16 +183,16 @@ function resetLocalWorldRules() {
 }
 
 function applyShardToForm(shard: ShardSummaryDto) {
-  const persisted = { ...shard.leveldataOverrides }
+  const persisted = { ...shard.overrides }
   if (shard.id === 'master') {
     persistedMasterOverrides.value = persisted
-    applyLeveldataOverridesFromServer(masterWorldRules.value, 'rules', 'master', shard.leveldataOverrides)
-    applyLeveldataOverridesFromServer(masterWorldgenConfig.value, 'worldgen', 'master', shard.leveldataOverrides)
+    applyLeveldataOverridesFromServer(masterWorldRules.value, 'rules', 'master', shard.overrides)
+    applyLeveldataOverridesFromServer(masterWorldgenConfig.value, 'worldgen', 'master', shard.overrides)
   }
   else {
     persistedCavesOverrides.value = persisted
-    applyLeveldataOverridesFromServer(cavesWorldRules.value, 'rules', 'caves', shard.leveldataOverrides)
-    applyLeveldataOverridesFromServer(cavesWorldgenConfig.value, 'worldgen', 'caves', shard.leveldataOverrides)
+    applyLeveldataOverridesFromServer(cavesWorldRules.value, 'rules', 'caves', shard.overrides)
+    applyLeveldataOverridesFromServer(cavesWorldgenConfig.value, 'worldgen', 'caves', shard.overrides)
   }
   if (shard.serverPort != null) {
     if (shard.id === 'master') {

@@ -15,7 +15,7 @@ import {
   parseServerIni,
 } from './server-ini'
 import { buildWorldgenOverride, defaultWorldgenPreset } from './worldgen-override'
-import { repairInvalidLeveldataOverrides } from './leveldata-override'
+import { migrateLegacyLeveldataOverrides } from './leveldata-override'
 import { resolveMasterServerIniPath } from './shard-layout'
 
 export interface DstServerBinary {
@@ -160,7 +160,8 @@ export function ensureDstLayout(installPath: string, input: EnsureDstClusterInpu
   }
   ensureDstSteamAppId(installPath, binary)
   ensureDstClusterConfig(installPath, input)
-  repairInvalidLeveldataOverrides(installPath)
+  // 历史版本的 leveldataoverride.lua 会被 worldgenoverride 的预设整份覆盖，逐次迁移到单一真源
+  migrateLegacyLeveldataOverrides(installPath)
   ensureDstServerBinaryExecutable(installPath)
   return { ok: true }
 }

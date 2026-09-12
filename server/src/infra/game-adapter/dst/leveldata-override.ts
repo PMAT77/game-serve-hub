@@ -1,181 +1,90 @@
 import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import type { ShardId } from '../../../../../shared/contracts/shard'
-import { isCavesShardConfigured, resolveShardLeveldataPath } from './shard-layout'
-import { writeFileAtomic } from './atomic-write'
-import { resolveFirstExisting, resolveRepoRoot } from '../../../shared/repo-root'
+import type { ShardId, ShardWorldgenPreset } from '../../../../../shared/contracts/shard'
+import { parseOverridesBlock } from './lua-overrides'
+import { backupFile, writeFileAtomic } from './atomic-write'
+import {
+  isCavesShardConfigured,
+  resolveShardLeveldataPath,
+  resolveShardWorldgenPath,
+} from './shard-layout'
+import {
+  buildWorldgenOverride,
+  defaultWorldgenPreset,
+  isValidWorldgenPreset,
+  parseWorldgenOverride,
+} from './worldgen-override'
 
-const OVERRIDE_ENTRY_RE = /^\s*([a-zA-Z0-9_]+)\s*=\s*["']([^"']*)["']\s*,?\s*$/
-const OVERRIDE_KEY_RE = /^[a-z][a-z0-9_]*$/
-// 与 shared/contracts/shard.ts overrideValueSchema 保持一致（允许空格：'highly random'）
-const OVERRIDE_VALUE_RE = /^[a-zA-Z0-9_.+ -]+$/
-
-const templateCache = new Map<ShardId, string>()
-
-export function isValidOverrideKey(key: string): boolean {
-  return OVERRIDE_KEY_RE.test(key) && key.length <= 64
-}
-
-export function isValidOverrideValue(value: string): boolean {
-  return OVERRIDE_VALUE_RE.test(value) && value.length <= 64
-}
-
-export function validateWorldRuleOverrides(overrides: Record<string, string>): string | null {
-  for (const [key, value] of Object.entries(overrides)) {
-    if (!isValidOverrideKey(key)) {
-      return `世界规则键名无效：${key}`
-    }
-    if (!isValidOverrideValue(value)) {
-      return `世界规则值无效：${key}=${value}`
-    }
-  }
-  return null
-}
-
-/** Klei 官方 leveldata 须含 id/settings_id；面板旧版极简文件会导致启动崩溃 */
-export function isValidLeveldataStructure(content: string): boolean {
-  const text = content.trim()
-  if (!text) {
-    return false
-  }
-  return /\bid\s*=\s*["']/.test(text) && /\bsettings_id\s*=\s*["']/.test(text)
-}
-
-function resolveLeveldataTemplatePath(shardId: ShardId): string {
-  const fileName = shardId === 'master' ? 'master-leveldataoverride.lua' : 'caves-leveldataoverride.lua'
-  // tsx 直跑源码时模板与模块同目录；esbuild 打包后 build 脚本把 templates 拷到 dist-server/
-  return resolveFirstExisting(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), 'templates', fileName),
-    path.join(resolveRepoRoot(), 'dist-server', 'templates', fileName),
-  )
-}
-
-export function loadLeveldataTemplate(shardId: ShardId): string {
-  const cached = templateCache.get(shardId)
-  if (cached) {
-    return cached
-  }
-  const content = fs.readFileSync(resolveLeveldataTemplatePath(shardId), 'utf8')
-  templateCache.set(shardId, content)
-  return content
-}
-
-function findOverridesBlockBounds(content: string): { start: number, end: number } | null {
-  const marker = content.match(/\boverrides\s*=\s*\{/)
-  if (!marker || marker.index === undefined) {
-    return null
-  }
-  const openBrace = content.indexOf('{', marker.index)
-  if (openBrace < 0) {
-    return null
-  }
-  let depth = 0
-  for (let i = openBrace; i < content.length; i++) {
-    const ch = content[i]
-    if (ch === '{') {
-      depth++
-    }
-    else if (ch === '}') {
-      depth--
-      if (depth === 0) {
-        return { start: openBrace + 1, end: i }
-      }
-    }
-  }
-  return null
-}
-
+/**
+ * 历史版本的 leveldataoverride.lua：面板曾把世界规则写在这里。
+ * 该文件在 DST 侧会被 worldgenoverride.lua 的预设整份覆盖（见 worldgen-override.ts 注释），
+ * 现已不再写入，只保留解析入口供迁移与历史数据读取使用。
+ */
 export function parseLeveldataOverrides(content: string): Record<string, string> {
-  const bounds = findOverridesBlockBounds(content)
-  if (!bounds) {
-    return {}
-  }
-  const block = content.slice(bounds.start, bounds.end)
-  const overrides: Record<string, string> = {}
-  for (const line of block.split('\n')) {
-    const match = line.match(OVERRIDE_ENTRY_RE)
-    if (match) {
-      overrides[match[1]!] = match[2]!
-    }
-  }
-  return overrides
+  return parseOverridesBlock(content)
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+function resolveDeclaredPreset(content: string): string | null {
+  const settingsId = content.match(/settings_id\s*=\s*["']([^"']+)["']/)?.[1]
+  const id = content.match(/\bid\s*=\s*["']([^"']+)["']/)?.[1]
+  return settingsId?.trim() || id?.trim() || null
 }
 
-function patchOverrideKeyInLeveldata(content: string, key: string, value: string): string {
-  const bounds = findOverridesBlockBounds(content)
-  if (!bounds) {
-    return content
-  }
-  const before = content.slice(0, bounds.start)
-  const block = content.slice(bounds.start, bounds.end)
-  const after = content.slice(bounds.end)
-  const keyRe = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`, 'm')
-  let found = false
-  const newLines = block.split('\n').map((line) => {
-    if (keyRe.test(line)) {
-      found = true
-      return `    ${key}="${value}",`
-    }
-    return line
-  })
-  if (!found) {
-    newLines.push(`    ${key}="${value}",`)
-  }
-  return `${before}${newLines.join('\n')}${after}`
-}
-
-export function mergeLeveldataOverrides(
-  existingContent: string | null,
-  patch: Record<string, string>,
+/** 迁移时的预设：已有 worldgenoverride 的预设优先，其次 leveldata 自带的预设标识，最后分片默认 */
+function resolveMigrationPreset(
   shardId: ShardId,
-): string {
-  const template = loadLeveldataTemplate(shardId)
-  let base = template
-  if (existingContent?.trim() && isValidLeveldataStructure(existingContent)) {
-    base = existingContent
+  worldgenContent: string,
+  leveldataContent: string,
+): ShardWorldgenPreset {
+  if (worldgenContent.trim()) {
+    const { preset } = parseWorldgenOverride(worldgenContent)
+    if (preset && isValidWorldgenPreset(shardId, preset)) {
+      return preset
+    }
   }
-  const carryOver = existingContent?.trim() && !isValidLeveldataStructure(existingContent)
-    ? parseLeveldataOverrides(existingContent)
-    : {}
-  const allPatches = { ...carryOver, ...patch }
-  let result = base
-  for (const [key, value] of Object.entries(allPatches)) {
-    result = patchOverrideKeyInLeveldata(result, key, value)
+  const declared = resolveDeclaredPreset(leveldataContent)
+  if (declared && isValidWorldgenPreset(shardId, declared)) {
+    return declared
   }
-  return result
+  return defaultWorldgenPreset(shardId)
 }
 
-/** 启动/安装前修复旧版极简 leveldataoverride.lua，避免 DST 反复崩溃重启 */
-export function repairInvalidLeveldataOverrideFile(installPath: string, shardId: ShardId): boolean {
-  const luaPath = resolveShardLeveldataPath(installPath, shardId)
-  if (!fs.existsSync(luaPath)) {
+/**
+ * 把历史 leveldataoverride.lua 里的覆盖项搬进 worldgenoverride.lua 并删除旧文件。
+ *
+ * - 旧的 leveldata 只带覆盖项，没有预设，因此合并时保留 worldgen 文件已有的值；
+ * - 删除旧文件前先备份（\`.bak.<时间戳>\`）；
+ * - 幂等：文件不存在时什么都不做。
+ */
+export function migrateLegacyLeveldataOverride(installPath: string, shardId: ShardId): boolean {
+  const leveldataPath = resolveShardLeveldataPath(installPath, shardId)
+  if (!fs.existsSync(leveldataPath)) {
     return false
   }
-  const content = fs.readFileSync(luaPath, 'utf8')
-  if (isValidLeveldataStructure(content)) {
-    return false
+  const leveldataContent = fs.readFileSync(leveldataPath, 'utf8')
+  const worldgenPath = resolveShardWorldgenPath(installPath, shardId)
+  const worldgenContent = fs.existsSync(worldgenPath)
+    ? fs.readFileSync(worldgenPath, 'utf8')
+    : ''
+  const preset = resolveMigrationPreset(shardId, worldgenContent, leveldataContent)
+  const merged: Record<string, string> = {
+    ...parseLeveldataOverrides(leveldataContent),
+    ...(worldgenContent ? parseWorldgenOverride(worldgenContent).overrides : {}),
   }
-  const preserved = parseLeveldataOverrides(content)
-  if (Object.keys(preserved).length === 0) {
-    fs.rmSync(luaPath, { force: true })
-    return true
-  }
-  writeFileAtomic(luaPath, mergeLeveldataOverrides(null, preserved, shardId))
+  backupFile(leveldataPath)
+  backupFile(worldgenPath)
+  writeFileAtomic(worldgenPath, buildWorldgenOverride(preset, merged))
+  fs.rmSync(leveldataPath, { force: true })
   return true
 }
 
-export function repairInvalidLeveldataOverrides(installPath: string): number {
-  let repaired = 0
-  if (repairInvalidLeveldataOverrideFile(installPath, 'master')) {
-    repaired++
+/** 迁移全部已配置分片，返回迁移数量 */
+export function migrateLegacyLeveldataOverrides(installPath: string): number {
+  let migrated = 0
+  if (migrateLegacyLeveldataOverride(installPath, 'master')) {
+    migrated++
   }
-  if (isCavesShardConfigured(installPath) && repairInvalidLeveldataOverrideFile(installPath, 'caves')) {
-    repaired++
+  if (isCavesShardConfigured(installPath) && migrateLegacyLeveldataOverride(installPath, 'caves')) {
+    migrated++
   }
-  return repaired
+  return migrated
 }

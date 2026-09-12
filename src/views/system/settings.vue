@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PanelSettingsPayload } from '@/api/modules/system'
+import type { PanelSettingsPayload, PanelUpdateStatus } from '@/api/modules/system'
 import { NAlert, NCollapse, NCollapseItem, NInputNumber, NSelect, NSpin, useDialog } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
@@ -18,7 +18,8 @@ const settingsLoaded = ref(false)
 const settingsLoadError = ref<string | null>(null)
 const saveLoading = ref(false)
 const updateStatusLoading = ref(false)
-const applyLoading = ref(false)
+const downloadLoading = ref(false)
+const installLoading = ref(false)
 const updateStatus = ref<Awaited<ReturnType<typeof apiSystem.getPanelUpdateStatus>>['data'] | null>(null)
 
 function resolveBrowserAccessPort(): number {
@@ -42,6 +43,7 @@ const form = reactive<PanelSettingsPayload>({
   autoUpdate: true,
   checkUpdateBeforeStart: false,
   updateCheckIntervalHours: 3,
+  updateSource: 'auto',
 })
 
 const themeOptions = [
@@ -50,25 +52,28 @@ const themeOptions = [
   { label: '深色', value: 'dark' },
 ]
 
+const updateSourceOptions = [
+  { label: '自动（推荐）', value: 'auto' },
+  { label: '仅离线镜像包', value: 'offline' },
+  { label: '仅镜像仓库', value: 'pull' },
+]
+
+const updateSourceHint = computed(() => {
+  switch (form.updateSource) {
+    case 'offline':
+      return '只从 GitHub Release 下载离线镜像包（可用 GSH_GITHUB_PROXY 换加速代理），失败即报错。'
+    case 'pull':
+      return '直接从 GHCR / 配置的镜像源拉取镜像，不下载离线包。'
+    default:
+      return '优先下载 Release 离线镜像包，失败时自动回退镜像仓库拉取。保存后对下一次下载生效。'
+  }
+})
+
 /** 远端快照：加载/保存成功后更新，用于脏状态判定 */
 const savedSnapshot = ref('')
 const settingsDirty = computed(() =>
   savedSnapshot.value !== '' && JSON.stringify({ ...form }) !== savedSnapshot.value,
 )
-
-const canApplyImageUpdate = computed(() => {
-  if (!updateStatus.value) {
-    return false
-  }
-  return updateStatus.value.image.updateAvailable && updateStatus.value.imageApplySupported
-})
-
-const canApplyUpdate = computed(() => {
-  if (!updateStatus.value || updateStatus.value.updating) {
-    return false
-  }
-  return canApplyImageUpdate.value
-})
 
 const formattedLastCheckedAt = computed(() => formatDisplayDateTime(updateStatus.value?.lastCheckedAt ?? null))
 const normalizedCheckError = computed(() => normalizeCheckError(updateStatus.value?.checkError ?? null))
@@ -76,8 +81,22 @@ const normalizedCheckError = computed(() => normalizeCheckError(updateStatus.val
 const updateView = computed(() => buildPanelUpdatePresentation(updateStatus.value))
 const releaseUrl = computed(() => updateStatus.value?.release?.htmlUrl?.trim() || null)
 const manualUpdateCommand = computed(() => updateStatus.value?.manualUpdateCommand?.trim() || null)
-const applyButtonLabel = computed(() => updateStatus.value?.updating ? '更新中…' : '应用更新')
 const needsManualUpdate = computed(() => updateView.value.needsManualCommand)
+const updateButtonLoading = computed(() => downloadLoading.value || installLoading.value)
+const updateButtonDisabled = computed(() => {
+  const action = updateView.value.action
+  return action === 'none' || action === 'busy' || updateButtonLoading.value
+})
+
+/** 同一个按钮承担两段：镜像没下完就下载，下完了就安装 */
+function handleUpdateAction() {
+  if (updateView.value.action === 'install') {
+    confirmInstallUpdate()
+    return
+  }
+  void downloadUpdate()
+}
+
 const releaseMetaLine = computed(() => {
   const checkedAt = formattedLastCheckedAt.value
   return checkedAt ? `上次检查：${checkedAt}` : null
@@ -142,6 +161,7 @@ async function loadSettings(options?: { silent?: boolean }) {
     form.autoUpdate = data.autoUpdate
     form.checkUpdateBeforeStart = data.checkUpdateBeforeStart ?? false
     form.updateCheckIntervalHours = data.updateCheckIntervalHours ?? 3
+    form.updateSource = data.updateSource ?? 'auto'
     savedSnapshot.value = JSON.stringify({ ...form })
     settingsLoaded.value = true
     settingsLoadError.value = null
@@ -182,9 +202,12 @@ let updatePollFailures = 0
 const UPDATE_POLL_INTERVAL_MS = 3000
 const UPDATE_POLL_MAX_FAILURES = 60
 
+/** 上一次轮询到的阶段，用于在「下载完成」这一刻提示用户去点安装 */
+let previousUpdatePhase: PanelUpdateStatus['updatePhase'] | null = null
+
 /**
- * 更新进度轮询：「应用更新」现在立即返回，真正的下载与重建在后台跑，
- * 界面靠这里拿到 preparing / pulling / recreating / failed 各阶段。
+ * 更新进度轮询：下载与安装接口都是立即返回，真正的镜像拉取与重建在后台跑，
+ * 界面靠这里拿到 preparing / downloading / downloaded / installing / recreating / failed 各阶段。
  */
 const updatePoller = usePollingTask(async () => {
   const reachable = await loadUpdateStatus({ silent: true })
@@ -201,7 +224,12 @@ const updatePoller = usePollingTask(async () => {
   }
   updatePollFailures = 0
   const phase = updateStatus.value?.updatePhase
-  if (!phase || phase === 'idle' || phase === 'failed') {
+  if (phase === 'downloaded' && previousUpdatePhase === 'downloading') {
+    faToast.success('更新已下载完成，点击「立即安装」重建面板。')
+  }
+  previousUpdatePhase = phase ?? null
+  // downloaded 是等用户点「立即安装」的静默态，不必继续轮询
+  if (!phase || phase === 'idle' || phase === 'failed' || phase === 'downloaded') {
     updatePoller.stop()
     if (phase === 'failed') {
       faToast.error('更新失败，请查看「面板与游戏版本」区块中的提示')
@@ -213,10 +241,11 @@ const offlineUpdateCommand = computed(() => updateStatus.value?.offlineImageComm
 
 const targetImageHint = computed(() => {
   const status = updateStatus.value
-  if (!status?.targetImageReady || !status.targetImage) {
+  // 下载完成时阶段说明已经说了「点击立即安装」，这里不再重复
+  if (!status?.targetImageReady || !status.targetImage || status.updatePhase === 'downloaded') {
     return null
   }
-  return `检测到本地已有 ${status.targetImage}，将直接重建面板，不再下载。`
+  return `检测到本地已有 ${status.targetImage}，安装时将直接使用，不再下载。`
 })
 
 onBeforeUnmount(() => {
@@ -243,39 +272,55 @@ async function checkHubUpdate() {
   }
 }
 
-function confirmApplyHubUpdate() {
-  dialog.warning({
-    title: '确认应用更新',
-    content: '更新过程中面板会短暂无法访问，游戏服务器不受影响。是否继续？',
-    positiveText: '立即更新',
-    negativeText: '取消',
-    onPositiveClick: () => applyHubUpdate(),
-  })
-}
-
-async function applyHubUpdate() {
-  if (!canApplyUpdate.value) {
-    return
-  }
-  applyLoading.value = true
+/** 下载段：只把镜像拉到本地，不打断面板，因此不需要二次确认 */
+async function downloadUpdate() {
+  downloadLoading.value = true
   try {
-    const res = await apiSystem.applyPanelUpdate()
+    const res = await apiSystem.applyPanelUpdate({ action: 'download' })
     faToast.success(res.data.message)
+    await loadUpdateStatus({ silent: true })
+    updatePollFailures = 0
     if (res.data.status === 'updating') {
-      await loadUpdateStatus({ silent: true })
-      updatePollFailures = 0
       updatePoller.start()
-    }
-    else {
-      await loadUpdateStatus()
     }
   }
   catch (error) {
-    const message = error instanceof Error ? error.message : '更新失败'
-    faToast.error(message)
+    faToast.error(error instanceof Error ? error.message : '启动下载失败')
   }
   finally {
-    applyLoading.value = false
+    downloadLoading.value = false
+  }
+}
+
+function confirmInstallUpdate() {
+  dialog.warning({
+    title: '确认安装更新',
+    content: '安装会重建面板容器，页面短暂无法访问，游戏服务器不受影响。是否继续？',
+    positiveText: '立即安装',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      void installUpdate()
+    },
+  })
+}
+
+/** 安装段：重建面板容器，面板会用刚下载的镜像重新启动 */
+async function installUpdate() {
+  installLoading.value = true
+  try {
+    const res = await apiSystem.applyPanelUpdate({ action: 'install' })
+    faToast.success(res.data.message)
+    await loadUpdateStatus({ silent: true })
+    updatePollFailures = 0
+    if (res.data.status === 'updating') {
+      updatePoller.start()
+    }
+  }
+  catch (error) {
+    faToast.error(error instanceof Error ? error.message : '安装更新失败')
+  }
+  finally {
+    installLoading.value = false
   }
 }
 
@@ -300,6 +345,7 @@ async function saveSettings() {
       autoUpdate: form.autoUpdate,
       checkUpdateBeforeStart: form.checkUpdateBeforeStart,
       updateCheckIntervalHours: form.updateCheckIntervalHours,
+      updateSource: form.updateSource,
     })
     appSettingsStore.setColorScheme(form.theme === 'system' ? '' : form.theme)
     faToast.success('系统设置已保存')
@@ -359,6 +405,9 @@ onActivated(async () => {
           <p class="font-medium">
             {{ updateView.versionLine }}
           </p>
+          <p v-if="updateView.progressText" class="text-xs text-muted-foreground tabular-nums">
+            {{ updateView.progressText }}
+          </p>
           <p
             v-if="updateView.phaseLine"
             class="text-xs whitespace-pre-wrap"
@@ -392,11 +441,11 @@ onActivated(async () => {
         <div class="space-y-2 pt-1">
           <div class="flex flex-wrap gap-2">
             <FaButton
-              :loading="applyLoading"
-              :disabled="!canApplyUpdate"
-              @click="confirmApplyHubUpdate"
+              :loading="updateButtonLoading"
+              :disabled="updateButtonDisabled"
+              @click="handleUpdateAction"
             >
-              {{ applyButtonLabel }}
+              {{ updateView.actionLabel }}
             </FaButton>
             <FaButton variant="outline" :loading="updateStatusLoading" @click="checkHubUpdate">
               检查更新
@@ -415,11 +464,19 @@ onActivated(async () => {
           </div>
         </div>
 
+        <div class="space-y-2 max-w-80 pt-1">
+          <label class="text-sm text-muted-foreground">更新下载源</label>
+          <NSelect v-model:value="form.updateSource" :options="updateSourceOptions" />
+          <p class="text-xs text-muted-foreground">
+            {{ updateSourceHint }}
+          </p>
+        </div>
+
         <NCollapse v-if="offlineUpdateCommand" class="pt-1">
-          <NCollapseItem title="下载慢或失败？改用离线镜像包" name="offline-update">
+          <NCollapseItem title="面板下载失败？手动导入离线镜像包" name="offline-update">
             <div class="space-y-2 text-sm">
               <p class="text-xs text-muted-foreground">
-                在无法稳定访问 GHCR 的服务器上，可在能访问 GitHub 的机器或服务器上下载离线镜像包并导入：
+                「下载更新」默认先从 GitHub Release 下载离线镜像包（可用 GSH_GITHUB_PROXY 换加速代理）。若面板所在网络连它也拿不到，就在能访问 GitHub 的机器上下载并导入：
               </p>
               <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ offlineUpdateCommand }}</pre>
               <div class="flex flex-wrap gap-2 items-center">
@@ -431,7 +488,7 @@ onActivated(async () => {
                   复制
                 </FaButton>
                 <span class="text-xs text-muted-foreground">
-                  导入后回到本页再次点击「应用更新」，面板会检测到本地镜像并直接重建。
+                  导入后回到本页点击「下载更新」，面板会检测到本地镜像并直接进入安装，不再下载。
                 </span>
               </div>
             </div>

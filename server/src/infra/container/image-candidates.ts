@@ -61,7 +61,73 @@ export async function tagImageAlias(docker: DockerClient, sourceRef: string, tar
   await docker.getImage(sourceRef).tag({ repo, tag: parsed.tag })
 }
 
-export function pullImageOnce(docker: DockerClient, image: string): Promise<void> {
+export interface PullProgressSnapshot {
+  /** 本次需要下载的层已下载字节之和 */
+  downloadedBytes: number
+  /** 本次需要下载的总字节；registry 未给出总量时为 0 */
+  totalBytes: number
+}
+
+/**
+ * 聚合 docker pull 的进度事件（followProgress 的第三个回调）。
+ * 按层 id 取最大值：Extracting 阶段 current 会跳到解压进度，取最大值数字才不会倒退；
+ * total 取该层最近一次非零值，「Download complete」表示该层已下满。
+ * 跨候选镜像重试时沿用同一份聚合，因此重试不会把字节数重复累加。
+ */
+export function createPullProgressAggregator() {
+  const layers = new Map<string, { current: number, total: number }>()
+
+  function readBytes(value: unknown): number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+  }
+
+  return {
+    handle(event: unknown): void {
+      if (!event || typeof event !== 'object') {
+        return
+      }
+      const { id, status, progressDetail } = event as {
+        id?: unknown
+        status?: unknown
+        progressDetail?: unknown
+      }
+      if (typeof id !== 'string' || !id) {
+        return
+      }
+      const layer = layers.get(id) ?? { current: 0, total: 0 }
+      const detail = progressDetail && typeof progressDetail === 'object'
+        ? progressDetail as { current?: unknown, total?: unknown }
+        : null
+      const current = readBytes(detail?.current)
+      const total = readBytes(detail?.total)
+      if (current > layer.current) {
+        layer.current = current
+      }
+      if (total > 0) {
+        layer.total = total
+      }
+      if (status === 'Download complete' && layer.total > 0) {
+        layer.current = layer.total
+      }
+      layers.set(id, layer)
+    },
+    snapshot(): PullProgressSnapshot {
+      let downloadedBytes = 0
+      let totalBytes = 0
+      for (const layer of layers.values()) {
+        downloadedBytes += layer.current
+        totalBytes += layer.total
+      }
+      return { downloadedBytes, totalBytes }
+    },
+  }
+}
+
+export function pullImageOnce(
+  docker: DockerClient,
+  image: string,
+  onProgress?: (event: unknown) => void,
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     docker.pull(image, (pullError: Error | null, stream: NodeJS.ReadableStream) => {
       if (pullError) {
@@ -75,7 +141,7 @@ export function pullImageOnce(docker: DockerClient, image: string): Promise<void
         else {
           resolve()
         }
-      })
+      }, onProgress)
     })
   })
 }
@@ -84,6 +150,8 @@ export interface PullCandidatesOptions {
   maxAttempts?: number
   retryBaseMs?: number
   sleep?: (ms: number) => Promise<void>
+  /** docker pull 的原始进度事件，用于向界面回报下载量 */
+  onProgress?: (event: unknown) => void
 }
 
 export type PullCandidatesResult
@@ -114,7 +182,7 @@ export async function pullImageWithCandidates(
     tried.push(candidate)
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        await pullImageOnce(docker, candidate)
+        await pullImageOnce(docker, candidate, options.onProgress)
         await tagImageAlias(docker, candidate, targetRef)
         return { ok: true, image: candidate }
       }

@@ -7,12 +7,15 @@ const successResultSchema = z.object({
 })
 
 export const panelThemeSchema = z.enum(['light', 'dark', 'system'])
+/** 面板更新下载源：auto=优先 Release 离线镜像包、失败回退镜像仓库；offline=只用离线包；pull=只用镜像仓库 */
+export const panelUpdateSourceSchema = z.enum(['auto', 'offline', 'pull'])
 export const panelSettingsPayloadSchema = z.object({
   panelPort: portSchema,
   theme: panelThemeSchema,
   autoUpdate: z.boolean(),
   checkUpdateBeforeStart: z.boolean(),
   updateCheckIntervalHours: z.number().int().min(1).max(168),
+  updateSource: panelUpdateSourceSchema,
 })
 export type PanelSettingsPayload = z.infer<typeof panelSettingsPayloadSchema>
 
@@ -145,23 +148,36 @@ export const panelUpdateStatusSchema = z.object({
   offlineImageCommand: z.string().nullable(),
   checkError: z.string().nullable(),
   /** 一键更新的实时阶段：界面据此显示进度，而不是笼统的「更新中」 */
-  updatePhase: z.enum(['idle', 'preparing', 'pulling', 'recreating', 'failed']),
+  updatePhase: z.enum(['idle', 'preparing', 'downloading', 'downloaded', 'installing', 'recreating', 'failed']),
   /** 当前阶段的用户可读说明 */
   updateMessage: z.string().nullable(),
   /** 上一次更新的失败原因（未开始或已成功时为 null） */
   updateError: z.string().nullable(),
   /** 本次更新的目标镜像引用：跨版本升级时指向 Release tag 对应的镜像 */
   targetImage: z.string().nullable(),
-  /** 目标镜像是否已在本地（离线镜像包导入后为 true，可直接重建） */
+  /** 目标镜像是否已在本地（离线镜像包导入、或下载完成后为 true，可直接重建） */
   targetImageReady: z.boolean(),
+  /** 下载阶段已下载字节；未开始下载或拿不到进度时为 null */
+  downloadBytes: z.number().nonnegative().nullable(),
+  /** 下载阶段本次需要下载的总字节；registry 未给出总量时为 null */
+  downloadTotalBytes: z.number().nonnegative().nullable(),
 })
 export type PanelUpdateStatus = z.infer<typeof panelUpdateStatusSchema>
 
-export const panelUpdateApplyRequestSchema = z.object({}).strict()
+/**
+ * 面板更新动作：
+ * - 省略（旧前端）：下载并立即安装，保持一次点击完成更新；
+ * - download：只把目标镜像拉到本地，完成后停在「等待安装」；
+ * - install：用已就绪的镜像重建面板。
+ */
+export const panelUpdateApplyRequestSchema = z.object({
+  action: z.enum(['download', 'install']).optional(),
+}).strict()
 export type PanelUpdateApplyRequest = z.infer<typeof panelUpdateApplyRequestSchema>
 
 export const panelUpdateApplyResponseSchema = z.object({
-  status: z.enum(['updating', 'completed']),
+  /** ready 表示镜像已在本地，无需下载，可直接点「立即安装」 */
+  status: z.enum(['updating', 'completed', 'ready']),
   message: z.string(),
 })
 export type PanelUpdateApplyResponse = z.infer<typeof panelUpdateApplyResponseSchema>

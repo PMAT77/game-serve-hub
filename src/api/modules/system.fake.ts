@@ -6,6 +6,7 @@ let panelSettings = {
   autoUpdate: true,
   checkUpdateBeforeStart: false,
   updateCheckIntervalHours: 3,
+  updateSource: 'auto' as const,
 }
 
 const panelUpdateStatus = {
@@ -45,6 +46,8 @@ const panelUpdateStatus = {
   updateError: null,
   targetImage: null,
   targetImageReady: false,
+  downloadBytes: null,
+  downloadTotalBytes: null,
 }
 
 let networkTick = 0
@@ -72,6 +75,7 @@ export default defineFakeRoute([
         autoUpdate: Boolean(body.autoUpdate),
         checkUpdateBeforeStart: Boolean(body.checkUpdateBeforeStart),
         updateCheckIntervalHours: Number(body.updateCheckIntervalHours) || 3,
+        updateSource: body.updateSource ?? 'auto',
       }
       return {
         error: '',
@@ -200,14 +204,19 @@ export default defineFakeRoute([
   {
     url: '/fake/app/system/panel-update/apply',
     method: 'post',
-    response: () => ({
-      error: '',
-      status: 1,
-      data: {
-        status: 'completed',
-        message: 'DST 运行镜像已更新，下次启动实例时将使用新环境。',
-        applied: [],
-      },
-    }),
+    response: ({ body }) => {
+      const action = (body as { action?: string } | undefined)?.action
+      return {
+        error: '',
+        status: 1,
+        data: {
+          // 开发环境不做真实下载：download 直接回报「已就绪」，install 进入进行中
+          status: action === 'download' ? 'ready' : 'updating',
+          message: action === 'download'
+            ? '开发环境：镜像视为已在本地，点击「立即安装」即可重建面板。'
+            : '开发环境：已开始处理，页面会自动显示进度。',
+        },
+      }
+    },
   },
 ])

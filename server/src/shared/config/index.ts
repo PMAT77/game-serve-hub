@@ -40,6 +40,10 @@ const envSchema = z.object({
   GSH_GITHUB_REPO: z.string().trim().optional(),
   /** 面板更新检查用的 GitHub API 基址；国内可指向兼容反代 */
   GSH_GITHUB_API_BASE: z.string().trim().optional(),
+  /** GitHub 资源（Release 资产）加速代理前缀，如 https://gh-proxy.com/；留空走内置代理池 + 直连 */
+  GSH_GITHUB_PROXY: z.string().trim().optional(),
+  /** 面板更新下载源：auto=优先下载 Release 离线镜像包、失败回退 registry 拉取；offline=只用离线包；pull=只用 registry */
+  GSH_PANEL_UPDATE_SOURCE: z.enum(['auto', 'offline', 'pull']).default('auto'),
   GSH_RELEASE_VERSION: z.string().trim().optional(),
   GSH_BUILD_SHA: z.string().trim().optional(),
   CORS_ORIGIN: z.string().trim().optional(),
@@ -98,6 +102,9 @@ export interface ServerConfig {
   githubRepo: string
   /** GitHub API 基址（检查面板更新）；默认 https://api.github.com */
   githubApiBase: string
+  /** GitHub 资源加速代理前缀；为空时按内置候选池依次尝试后回退直连 */
+  githubProxy: string
+  panelUpdateSource: 'auto' | 'offline' | 'pull'
   releaseVersion: string
   buildSha: string
   syncAdminPasswordFromEnv: boolean
@@ -143,6 +150,8 @@ export function loadServerConfig(): ServerConfig {
     GSH_PANEL_CONTAINER_NAME: process.env.GSH_PANEL_CONTAINER_NAME ?? env.GSH_PANEL_CONTAINER_NAME,
     GSH_GITHUB_REPO: process.env.GSH_GITHUB_REPO ?? env.GSH_GITHUB_REPO,
     GSH_GITHUB_API_BASE: process.env.GSH_GITHUB_API_BASE ?? env.GSH_GITHUB_API_BASE,
+    GSH_GITHUB_PROXY: process.env.GSH_GITHUB_PROXY ?? env.GSH_GITHUB_PROXY,
+    GSH_PANEL_UPDATE_SOURCE: process.env.GSH_PANEL_UPDATE_SOURCE ?? env.GSH_PANEL_UPDATE_SOURCE,
     GSH_RELEASE_VERSION: process.env.GSH_RELEASE_VERSION ?? env.GSH_RELEASE_VERSION,
     GSH_BUILD_SHA: process.env.GSH_BUILD_SHA ?? env.GSH_BUILD_SHA,
     CORS_ORIGIN: process.env.CORS_ORIGIN ?? env.CORS_ORIGIN,
@@ -198,6 +207,8 @@ export function loadServerConfig(): ServerConfig {
     panelContainerName: parsed.GSH_PANEL_CONTAINER_NAME?.trim() || 'game-server-hub-panel',
     githubRepo: parsed.GSH_GITHUB_REPO?.trim() || 'PMAT77/game-serve-hub',
     githubApiBase: parsed.GSH_GITHUB_API_BASE?.trim() || 'https://api.github.com',
+    githubProxy: parsed.GSH_GITHUB_PROXY?.trim() || '',
+    panelUpdateSource: parsed.GSH_PANEL_UPDATE_SOURCE,
     releaseVersion: parsed.GSH_RELEASE_VERSION?.trim() || '',
     buildSha: parsed.GSH_BUILD_SHA?.trim() || '',
     syncAdminPasswordFromEnv: isTruthyEnv(parsed.GSH_SYNC_ADMIN_PASSWORD_FROM_ENV),

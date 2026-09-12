@@ -5,9 +5,11 @@ import path from 'node:path'
 import {
   buildImageCandidates,
   buildImageRef,
+  createPullProgressAggregator,
   formatPullError,
   isImagePresentByRef,
   pullImageWithCandidates,
+  tagImageAlias,
 } from '../../infra/container/image-candidates'
 import {
   normalizeDigest,
@@ -20,15 +22,34 @@ import type { ServerConfig } from '../../shared/config'
 import { loadServerConfig } from '../../shared/config'
 import { getSystemPanelSettings } from '../../shared/db/index'
 import { getDefaultPanelSettings } from './defaults'
+import {
+  buildOfflineArchiveName,
+  buildOfflineArchiveUrls,
+  downloadOfflineImageArchive,
+  formatBytes,
+  listImageRepoTags,
+  loadOfflineImageArchive,
+} from './panel-update-offline'
 
 /** 更新语义分类，用于把"同版本号但镜像变了"与"版本更高"区分展示 */
 export type UpdateKind = 'none' | 'newer' | 'same-version-changed' | 'unknown'
 
 /**
  * 一键更新的执行阶段。
- * idle 之外的状态都意味着有一个更新任务正在进行（failed 是终态，需用户处理后再试）。
+ * 下载（preparing/downloading）与安装（installing/recreating）是两段：downloaded 表示镜像已就绪、
+ * 正等用户点「立即安装」，此时没有任务在跑。failed 是终态，需用户处理后再试。
  */
-export type PanelUpdatePhase = 'idle' | 'preparing' | 'pulling' | 'recreating' | 'failed'
+export type PanelUpdatePhase =
+  | 'idle'
+  | 'preparing'
+  | 'downloading'
+  | 'downloaded'
+  | 'installing'
+  | 'recreating'
+  | 'failed'
+
+/** 更新动作：auto 为下载后立即安装（旧前端不带参数时走这里） */
+export type PanelUpdateAction = 'auto' | 'download' | 'install'
 
 export interface HubImageUpdateInfo {
   image: string
@@ -77,8 +98,12 @@ export interface PanelUpdateStatus {
   updateError: string | null
   /** 本次更新的目标镜像引用：跨版本升级时指向 Release tag 对应的镜像 */
   targetImage: string | null
-  /** 目标镜像是否已在本地（离线镜像包导入后为 true，可直接重建、无需下载） */
+  /** 目标镜像是否已在本地（离线镜像包导入、或下载完成后为 true，可直接重建、无需下载） */
   targetImageReady: boolean
+  /** 下载阶段已下载字节；未开始下载或拿不到进度时为 null */
+  downloadBytes: number | null
+  /** 下载阶段本次需要下载的总字节；registry 未给出总量时为 null */
+  downloadTotalBytes: number | null
 }
 
 export const STACK_CONTAINER_MOUNT = '/stack'
@@ -111,6 +136,9 @@ const TARGET_PULL_MAX_ATTEMPTS = 3
 const TARGET_PULL_RETRY_BASE_MS = 2_000
 /** 更新任务的最长容忍时间；超时即判定失败并复位状态，避免界面永久停在"更新中" */
 const UPDATE_WATCHDOG_MS = 30 * 60 * 1000
+/** 下载进度上报节流：docker pull 每层每块都会回调一次，全量写状态会刷爆缓存与页面轮询 */
+const PROGRESS_REPORT_INTERVAL_MS = 500
+const PROGRESS_REPORT_MIN_BYTES = 5 * 1024 * 1024
 
 let cachedStatus: PanelUpdateStatus | null = null
 let checkInFlight: Promise<PanelUpdateStatus> | null = null
@@ -126,6 +154,8 @@ interface PanelUpdateRuntime {
   startedAt: number | null
   targetImage: string | null
   targetImageReady: boolean
+  downloadBytes: number | null
+  downloadTotalBytes: number | null
 }
 
 function createIdleRuntime(): PanelUpdateRuntime {
@@ -136,18 +166,31 @@ function createIdleRuntime(): PanelUpdateRuntime {
     startedAt: null,
     targetImage: null,
     targetImageReady: false,
+    downloadBytes: null,
+    downloadTotalBytes: null,
   }
 }
 
 let runtime: PanelUpdateRuntime = createIdleRuntime()
 
+/** downloaded 是等待用户点「立即安装」的静默态，不算任务进行中 */
 function isUpdating(): boolean {
-  return runtime.phase === 'preparing' || runtime.phase === 'pulling' || runtime.phase === 'recreating'
+  return runtime.phase === 'preparing'
+    || runtime.phase === 'downloading'
+    || runtime.phase === 'installing'
+    || runtime.phase === 'recreating'
 }
 
 function buildRuntimeFields(): Pick<
   PanelUpdateStatus,
-  'updating' | 'updatePhase' | 'updateMessage' | 'updateError' | 'targetImage' | 'targetImageReady'
+  | 'updating'
+  | 'updatePhase'
+  | 'updateMessage'
+  | 'updateError'
+  | 'targetImage'
+  | 'targetImageReady'
+  | 'downloadBytes'
+  | 'downloadTotalBytes'
 > {
   return {
     updating: isUpdating(),
@@ -156,6 +199,8 @@ function buildRuntimeFields(): Pick<
     updateError: runtime.error,
     targetImage: runtime.targetImage,
     targetImageReady: runtime.targetImageReady,
+    downloadBytes: runtime.downloadBytes,
+    downloadTotalBytes: runtime.downloadTotalBytes,
   }
 }
 
@@ -172,6 +217,30 @@ function updateRuntime(patch: Partial<PanelUpdateRuntime>): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * 下载进度上报节流器：docker pull 的事件与 HTTP 下载的数据块都很密集，
+ * 全量写状态会刷爆缓存与页面轮询。
+ */
+function createProgressReporter(): (downloadedBytes: number, totalBytes: number | null) => void {
+  let lastReportAt = 0
+  let lastReportedBytes = 0
+  return (downloadedBytes, totalBytes) => {
+    const now = Date.now()
+    if (
+      now - lastReportAt < PROGRESS_REPORT_INTERVAL_MS
+      && downloadedBytes - lastReportedBytes < PROGRESS_REPORT_MIN_BYTES
+    ) {
+      return
+    }
+    lastReportAt = now
+    lastReportedBytes = downloadedBytes
+    updateRuntime({
+      downloadBytes: downloadedBytes,
+      downloadTotalBytes: totalBytes && totalBytes > 0 ? totalBytes : null,
+    })
+  }
 }
 
 function resolveImageMirrorsRaw(): string | null {
@@ -953,47 +1022,87 @@ function watchUpdaterContainer(containerId: string): void {
 }
 
 export interface PanelUpdateApplyResult {
-  status: 'updating' | 'completed'
+  status: 'updating' | 'completed' | 'ready'
   message: string
 }
 
 /**
- * 触发一键更新。
+ * 触发面板更新。
  * 这里只做校验与状态登记，真正的下载与重建交给后台任务 —— 拉取动辄数分钟，
  * 同步等待会让前端请求超时，界面就会看到「更新失败」而服务端其实还在跑。
+ * download 只把镜像拉到本地并停在「等待安装」，install 才重建面板。
  */
-export async function applyPanelUpdate(): Promise<PanelUpdateApplyResult> {
+export async function applyPanelUpdate(action: PanelUpdateAction = 'auto'): Promise<PanelUpdateApplyResult> {
   if (isUpdating()) {
     throw new Error('更新正在进行中，请稍后再试')
   }
 
   const status = cachedStatus ?? await refreshPanelUpdateStatus()
+  const config = loadServerConfig()
+  const applySupport = resolveApplySupport(config)
+  const rawReleaseTag = status.release?.tagName?.trim() || null
+  /**
+   * 规范化后再往下传：镜像引用、离线包文件名与 updater 写回 panel.env 的值必须来自同一个 tag，
+   * 否则自建/fork 的 release 命名会让离线包地址与镜像引用对不上。读不到 Release 时保持 null。
+   */
+  const releaseTag = rawReleaseTag
+    ? normalizeReleaseTag(rawReleaseTag, parseImageRef(config.panelImage).tag)
+    : null
+
+  // 镜像已下载完成：跳过下载，直接进入安装（用户可能在别的标签页完成了下载）
+  if (runtime.phase === 'downloaded' && runtime.targetImageReady && runtime.targetImage) {
+    if (action === 'download') {
+      return { status: 'ready', message: '更新镜像已在本地，点击「立即安装」即可重建面板。' }
+    }
+    return startPanelUpdateInstall({
+      applySupport,
+      targetImage: runtime.targetImage,
+      releaseTag,
+    })
+  }
+
   if (!status.image.updateAvailable) {
     return { status: 'completed', message: '当前已是最新版本' }
   }
 
-  const config = loadServerConfig()
-  const applySupport = resolveApplySupport(config)
-  const releaseTag = status.release?.tagName ?? null
   const targetImage = resolveTargetImageRef(releaseTag, config.panelImage)
 
   ensureUpdateWatchdog()
   runtime = {
+    ...createIdleRuntime(),
     phase: 'preparing',
     message: '正在检查本地镜像…',
-    error: null,
     startedAt: Date.now(),
     targetImage,
-    targetImageReady: false,
   }
   syncRuntimeToCachedStatus()
 
-  void runPanelUpdate({ applySupport, targetImage, releaseTag })
+  void runPanelUpdate({ mode: action, applySupport, targetImage, releaseTag })
 
   return {
     status: 'updating',
-    message: '更新已开始，页面会自动显示进度。',
+    message: action === 'download'
+      ? '正在下载更新镜像，页面会显示下载进度。'
+      : '更新已开始，页面会自动显示进度。',
   }
+}
+
+/** 安装段入口：登记状态后由后台重建面板（重建会重启面板，不能同步等待） */
+function startPanelUpdateInstall(input: {
+  applySupport: ApplySupport
+  targetImage: string
+  releaseTag: string | null
+}): PanelUpdateApplyResult {
+  ensureUpdateWatchdog()
+  updateRuntime({
+    phase: 'installing',
+    message: '正在准备更新容器…',
+    error: null,
+    startedAt: Date.now(),
+    targetImage: input.targetImage,
+  })
+  void runPanelUpdate({ mode: 'install', ...input })
+  return { status: 'updating', message: '正在安装更新，面板稍后会自动重启。' }
 }
 
 function buildPullFailureMessage(
@@ -1008,36 +1117,267 @@ function buildPullFailureMessage(
   }
   return [
     detail,
-    '也可以改用离线镜像包（国内推荐）：',
+    '也可以在能访问 GitHub 的机器上下载离线镜像包后导入：',
     offlineCommand,
-    '导入后回到本页再次点击「应用更新」，面板会检测到本地镜像并直接重建，不再下载。',
+    '导入后回到本页点击「下载更新」，面板会检测到本地镜像并直接进入安装，不再下载。',
   ].join('\n')
 }
 
+/** 一次更新任务的调度：download 只下载，install 只安装，auto 为下载完成后立即安装 */
 async function runPanelUpdate(input: {
+  mode: PanelUpdateAction
+  applySupport: ApplySupport
+  targetImage: string
+  releaseTag: string | null
+}): Promise<void> {
+  if (input.mode !== 'install') {
+    const downloaded = await downloadTargetImage(input)
+    if (!downloaded || input.mode === 'download') {
+      return
+    }
+  }
+  await installPanelUpdate(input)
+}
+
+/**
+ * 下载段：只把目标镜像拉到本地，完成后停在 downloaded 等用户点「立即安装」。
+ * 返回 false 表示下载失败（状态已写成 failed）。
+ */
+async function downloadTargetImage(input: {
+  applySupport: ApplySupport
+  targetImage: string
+  releaseTag: string | null
+}): Promise<boolean> {
+  try {
+    // 重建都不支持时不要白下几百 MB
+    if (!input.applySupport.imageSupported) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: `${input.applySupport.hint || '当前部署方式不支持面板内重建。'}请使用下方手动命令，或重跑安装脚本后重试。`,
+      })
+      return false
+    }
+
+    const docker = resolveDocker()
+    if (await isImagePresentByRef(docker, input.targetImage)) {
+      updateRuntime({
+        phase: 'downloaded',
+        targetImageReady: true,
+        message: '检测到本地已有目标镜像，可直接安装。',
+      })
+      return true
+    }
+
+    // 默认先取 Release 离线镜像包：GHCR 的镜像层域名在国内基本不可达，而离线包能走
+    // GitHub 加速代理，且 HTTP 带 Content-Length，进度也准。
+    const source = await resolvePanelUpdateSource()
+    let offlineError: string | null = null
+    if (source !== 'pull') {
+      if (!input.releaseTag) {
+        // 用户明确要求只用离线包，但没有 Release tag 就拼不出资产地址，不能偷偷改走 registry
+        if (source === 'offline') {
+          updateRuntime({
+            phase: 'failed',
+            message: null,
+            error: '未能读取最新 Release 信息，无法拼出离线镜像包地址。请点击「检查更新」后重试，或把「更新下载源」改为自动 / 仅镜像仓库。',
+          })
+          return false
+        }
+      }
+      else {
+        const offline = await downloadTargetImageFromRelease({
+          docker,
+          releaseTag: input.releaseTag,
+          targetImage: input.targetImage,
+        })
+        if (offline.ok) {
+          updateRuntime({
+            phase: 'downloaded',
+            targetImageReady: true,
+            message: '镜像已下载完成，点击「立即安装」完成更新。',
+          })
+          return true
+        }
+        offlineError = offline.error
+        if (source === 'offline') {
+          updateRuntime({ phase: 'failed', message: null, error: offlineError })
+          return false
+        }
+      }
+    }
+
+    updateRuntime({
+      phase: 'downloading',
+      message: offlineError
+        ? '离线镜像包不可用，改用镜像仓库拉取'
+        : '正在下载更新镜像，请勿关闭面板',
+      downloadBytes: 0,
+      downloadTotalBytes: null,
+    })
+
+    const progress = createPullProgressAggregator()
+    const report = createProgressReporter()
+    const result = await pullImageWithCandidates(
+      docker,
+      buildImageCandidates(input.targetImage, resolveImageMirrorsRaw()),
+      input.targetImage,
+      {
+        maxAttempts: TARGET_PULL_MAX_ATTEMPTS,
+        retryBaseMs: TARGET_PULL_RETRY_BASE_MS,
+        sleep,
+        onProgress: (event) => {
+          progress.handle(event)
+          const snapshot = progress.snapshot()
+          report(snapshot.downloadedBytes, snapshot.totalBytes)
+        },
+      },
+    )
+    if (!result.ok) {
+      throw new Error([
+        offlineError ? `离线镜像包下载失败：${offlineError}` : null,
+        buildPullFailureMessage(result, input.targetImage, input.releaseTag),
+      ].filter(Boolean).join('\n'))
+    }
+
+    updateRuntime({
+      phase: 'downloaded',
+      targetImageReady: true,
+      message: '镜像已下载完成，点击「立即安装」完成更新。',
+    })
+    return true
+  }
+  catch (error) {
+    updateRuntime({
+      phase: 'failed',
+      message: null,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return false
+  }
+}
+
+/** 面板里的选择（数据库）优先于环境变量 GSH_PANEL_UPDATE_SOURCE；两者都不可用时用 auto */
+export function pickPanelUpdateSource(
+  dbValue: string | null | undefined,
+  envValue: 'auto' | 'offline' | 'pull',
+): 'auto' | 'offline' | 'pull' {
+  return dbValue === 'auto' || dbValue === 'offline' || dbValue === 'pull' ? dbValue : envValue
+}
+
+async function resolvePanelUpdateSource(): Promise<'auto' | 'offline' | 'pull'> {
+  let dbValue: string | undefined
+  try {
+    dbValue = (await getSystemPanelSettings())?.updateSource
+  }
+  catch {
+    // 读设置失败就退回环境变量
+  }
+  return pickPanelUpdateSource(dbValue, loadServerConfig().panelUpdateSource)
+}
+
+/** 离线镜像包落盘目录：与数据库同卷（容器内 /app/data），宿主机上也看得见 */
+function resolveOfflineArchiveDir(): string {
+  return path.join(path.dirname(loadServerConfig().dbPath), 'panel-update')
+}
+
+/**
+ * 离线包下载段：Release 资产 → 流式校验 → docker load。
+ * 成功即认为镜像就绪；失败把原因带回去，由调用方决定是否回退 registry 拉取。
+ */
+async function downloadTargetImageFromRelease(input: {
+  docker: DockerClient
+  releaseTag: string
+  targetImage: string
+}): Promise<{ ok: true } | { ok: false, error: string }> {
+  const config = loadServerConfig()
+  const report = createProgressReporter()
+  updateRuntime({
+    phase: 'downloading',
+    message: '正在下载离线更新包（GitHub Release）',
+    downloadBytes: 0,
+    downloadTotalBytes: null,
+  })
+
+  const result = await downloadOfflineImageArchive({
+    urls: buildOfflineArchiveUrls({
+      githubRepo: config.githubRepo,
+      releaseTag: input.releaseTag,
+      githubProxy: config.githubProxy,
+    }),
+    destinationDir: resolveOfflineArchiveDir(),
+    fileName: buildOfflineArchiveName(input.releaseTag),
+    onProgress: progress => report(progress.downloadedBytes, progress.totalBytes),
+  })
+
+  if (!result.ok) {
+    const triedHint = result.tried.length > 0 ? `（已尝试 ${result.tried.length} 个下载来源）` : ''
+    // 分片留着：下一次点击「下载更新」会从断点继续，不必重头再下几百 MB
+    const resumeHint = result.partialBytes > 0
+      ? `（已保留已下载的 ${formatBytes(result.partialBytes)}，重试会从断点继续）`
+      : ''
+    return { ok: false, error: `${result.error}${triedHint}${resumeHint}` }
+  }
+
+  // 记下导入前的镜像引用，用于确定这次 load 进来的是哪个 tag（拿不到就跳过别名，宁可不补也不猜）
+  const tagsBefore = await listImageRepoTags(input.docker).catch(() => null)
+
+  try {
+    updateRuntime({ message: result.checksumVerified ? '正在校验并导入镜像，约需 1 分钟…' : '正在导入镜像，约需 1 分钟…' })
+    await loadOfflineImageArchive(input.docker, result.filePath)
+  }
+  catch (error) {
+    return { ok: false, error: `离线镜像包导入失败：${error instanceof Error ? error.message : String(error)}` }
+  }
+  finally {
+    // 压缩包通常几百 MB，导入完立刻删掉
+    fs.rmSync(result.filePath, { force: true })
+  }
+
+  if (tagsBefore) {
+    await adoptImportedImage(input.docker, tagsBefore, input.targetImage)
+  }
+  if (!(await isImagePresentByRef(input.docker, input.targetImage))) {
+    return {
+      ok: false,
+      error: `离线包已导入，但镜像 ${input.targetImage} 仍不可用，请检查 PANEL_IMAGE 是否与该版本 tag 一致`,
+    }
+  }
+  return { ok: true }
+}
+
+/**
+ * 离线包里的镜像引用由发布流程决定，可能与 PANEL_IMAGE 不同（自建仓库、自定义 tag）。
+ * 用 load 前后本地镜像引用的差集确定这次导入了什么，再补一个指向目标引用的别名；
+ * 不按仓库名去猜镜像引用 —— 仓库是 game-serve-hub，镜像却是 game-server-hub。
+ */
+async function adoptImportedImage(
+  docker: DockerClient,
+  tagsBefore: Set<string>,
+  targetImage: string,
+): Promise<void> {
+  if (await isImagePresentByRef(docker, targetImage)) {
+    return
+  }
+  try {
+    const tagsAfter = await listImageRepoTags(docker)
+    const imported = [...tagsAfter].find(tag => !tagsBefore.has(tag) && tag !== targetImage)
+    if (imported) {
+      await tagImageAlias(docker, imported, targetImage)
+    }
+  }
+  catch {
+    // 打不上别名就由调用方回退 registry 拉取
+  }
+}
+
+/** 安装段：用已就绪的镜像跑 updater 容器重建面板 */
+async function installPanelUpdate(input: {
   applySupport: ApplySupport
   targetImage: string
   releaseTag: string | null
 }): Promise<void> {
   try {
-    const docker = resolveDocker()
-    if (await isImagePresentByRef(docker, input.targetImage)) {
-      updateRuntime({ targetImageReady: true, message: '检测到本地已有目标镜像，跳过下载' })
-    }
-    else {
-      updateRuntime({ phase: 'pulling', message: '正在下载镜像，请勿关闭面板' })
-      const candidates = buildImageCandidates(input.targetImage, resolveImageMirrorsRaw())
-      const result = await pullImageWithCandidates(docker, candidates, input.targetImage, {
-        maxAttempts: TARGET_PULL_MAX_ATTEMPTS,
-        retryBaseMs: TARGET_PULL_RETRY_BASE_MS,
-        sleep,
-      })
-      if (!result.ok) {
-        throw new Error(buildPullFailureMessage(result, input.targetImage, input.releaseTag))
-      }
-      updateRuntime({ targetImageReady: true, message: '镜像已就绪，准备重建面板' })
-    }
-
     if (!input.applySupport.imageSupported || !input.applySupport.stackPaths) {
       updateRuntime({
         phase: 'failed',
@@ -1047,7 +1387,24 @@ async function runPanelUpdate(input: {
       return
     }
 
-    updateRuntime({ phase: 'recreating', message: '正在准备更新容器…' })
+    const docker = resolveDocker()
+    if (!runtime.targetImageReady && !(await isImagePresentByRef(docker, input.targetImage))) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: '更新镜像尚未下载完成，请先点击「下载更新」。',
+      })
+      return
+    }
+
+    // 安装段重新计时：下载可能已跑掉很久，但看门狗只该盯住接下来的重建
+    updateRuntime({
+      phase: 'installing',
+      targetImageReady: true,
+      startedAt: Date.now(),
+      message: '正在准备更新容器…',
+    })
+
     const config = loadServerConfig()
     const resolution = await resolveUpdaterImage(
       buildUpdaterImageCandidates({

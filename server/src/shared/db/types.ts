@@ -25,6 +25,8 @@ export interface DbSystemPanelSettings {
   checkUpdateBeforeStart: boolean
   /** Hub 镜像自动检查间隔（小时） */
   updateCheckIntervalHours: number
+  /** 面板更新下载源：auto=优先 Release 离线镜像包、失败回退镜像仓库；offline=只用离线包；pull=只用镜像仓库 */
+  updateSource: 'auto' | 'offline' | 'pull'
 }
 
 export interface DbSystemSteamcmdConfig {

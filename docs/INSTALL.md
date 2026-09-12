@@ -165,9 +165,9 @@ docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
 
 ### 升级（面板内一键更新）
 
-「系统设置 → 面板与游戏版本」→「应用更新」：检查本地镜像 → 下载镜像（本地已有则跳过）→ 写入 panel.env → 重建面板容器。
+「系统设置 → 面板与游戏版本」分两步走：先点「下载更新」把新镜像拉到本地（版本行下方会实时显示 `已下载 512 MB / 1.2 GB`，本地已有镜像时直接就绪），下载完成后按钮变为「立即安装」，点击后写入 panel.env 并重建面板容器。
 
-国内先 `docker load` 离线镜像包（命令同[阶段二](#阶段二导入离线镜像包)）再点「应用更新」，秒级完成。按钮置灰时用面板给出的 `sudo gsh update`。
+下载段默认优先下载 Release 离线镜像包（`game-server-hub-<tag>-docker-image.tar.gz`，经 GitHub 加速代理 + 同名 `.sha256` 校验后 `docker load` 导入），失败才回退 GHCR 拉取；可用 `GSH_GITHUB_PROXY` 换加速代理；下载源在「系统设置 → 面板与游戏版本 → 更新下载源」里切换（自动 / 仅离线镜像包 / 仅镜像仓库），也可用 `GSH_PANEL_UPDATE_SOURCE=offline|pull` 设默认值（面板里的选择优先）。下载中断会保留分片、下次从断点续传；开始前会先检查目标目录的剩余空间。下载不中断面板，可以提前挑个空闲时段下载、之后再安装。也可以按[阶段二](#阶段二导入离线镜像包)先手动 `docker load`，回到本页点「下载更新」会跳过下载直接进入「立即安装」。按钮置灰时用面板给出的 `sudo gsh update`。
 
 重建动作由一个临时的 updater 容器完成，它需要镜像里有 `docker` CLI 与 compose 插件。v0.3.10 起统一镜像自带这两样，面板会优先用**本地已有的目标镜像 / 当前面板镜像**当 updater 运行时，因此离线环境也能完成更新，不再去 Docker Hub 拉 `docker:27-cli`。若你所在网络要求固定某个 updater 镜像（例如内网制品库里的同等镜像），在 `panel.env` 里设置 `GSH_PANEL_UPDATER_IMAGE` 即可。
 

@@ -12,6 +12,7 @@ import {
   hasStackRequiredFiles,
   isImageOutdated,
   isReleaseNewer,
+  pickPanelUpdateSource,
   resolveApplySupport,
   resolveStackPaths,
   resolveTargetImageRef,
@@ -65,6 +66,8 @@ function buildConfig(partial: Partial<ServerConfig>): ServerConfig {
     installPathPolicy: 'instances-root',
     githubRepo: 'PMAT77/game-serve-hub',
     githubApiBase: 'https://api.github.com',
+    githubProxy: '',
+    panelUpdateSource: 'auto',
     releaseVersion: '',
     buildSha: '',
     syncAdminPasswordFromEnv: false,
@@ -260,6 +263,20 @@ describe('isImageOutdated', () => {
       local: { digests: [indexDigest], layers },
       remote: { digests: [], layers: [] },
     }), false)
+  })
+})
+
+describe('pickPanelUpdateSource', () => {
+  it('prefers the panel setting over the environment default', () => {
+    assert.equal(pickPanelUpdateSource('pull', 'auto'), 'pull')
+    assert.equal(pickPanelUpdateSource('offline', 'auto'), 'offline')
+    assert.equal(pickPanelUpdateSource('auto', 'pull'), 'auto')
+  })
+
+  it('falls back to the environment value when the setting is missing or bogus', () => {
+    assert.equal(pickPanelUpdateSource(undefined, 'offline'), 'offline')
+    assert.equal(pickPanelUpdateSource(null, 'pull'), 'pull')
+    assert.equal(pickPanelUpdateSource('nonsense', 'auto'), 'auto')
   })
 })
 

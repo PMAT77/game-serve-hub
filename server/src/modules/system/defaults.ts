@@ -26,6 +26,7 @@ export function getDefaultPanelSettings(): DbSystemPanelSettings {
     autoUpdate: true,
     checkUpdateBeforeStart: false,
     updateCheckIntervalHours: 3,
+    updateSource: 'auto',
   }
 }
 

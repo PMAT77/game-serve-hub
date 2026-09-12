@@ -421,6 +421,7 @@ function normalizePanelSettings(raw: unknown): DbSystemPanelSettings {
       autoUpdate: true,
       checkUpdateBeforeStart: false,
       updateCheckIntervalHours: 3,
+      updateSource: 'auto',
     }
   }
   const value = raw as Partial<DbSystemPanelSettings>
@@ -439,6 +440,9 @@ function normalizePanelSettings(raw: unknown): DbSystemPanelSettings {
       && (value.updateCheckIntervalHours as number) > 0
       ? Math.min(168, Math.max(1, Math.trunc(value.updateCheckIntervalHours as number)))
       : 1,
+    updateSource: value.updateSource === 'offline' || value.updateSource === 'pull'
+      ? value.updateSource
+      : 'auto',
   }
 }
 

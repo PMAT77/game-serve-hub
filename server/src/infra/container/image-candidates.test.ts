@@ -5,6 +5,7 @@ import { describe, it } from 'node:test'
 import {
   buildImageCandidates,
   buildImageRef,
+  createPullProgressAggregator,
   normalizeMirrorRegistries,
   OFFICIAL_UNIFIED_IMAGE_REPOSITORY,
 } from './image-candidates.ts'
@@ -92,5 +93,45 @@ describe('steamcmd pull ref helpers', () => {
         process.env.GSH_STEAMCMD_IMAGE_MIRRORS = previous
       }
     }
+  })
+})
+
+describe('createPullProgressAggregator', () => {
+  it('sums the layers that still need downloading', () => {
+    const aggregator = createPullProgressAggregator()
+    aggregator.handle({ status: 'Pulling fs layer', id: 'a' })
+    aggregator.handle({ status: 'Downloading', id: 'a', progressDetail: { current: 100, total: 1_000 } })
+    aggregator.handle({ status: 'Downloading', id: 'b', progressDetail: { current: 50, total: 500 } })
+    assert.deepEqual(aggregator.snapshot(), { downloadedBytes: 150, totalBytes: 1_500 })
+  })
+
+  it('never lets the byte count go backwards while docker extracts a layer', () => {
+    const aggregator = createPullProgressAggregator()
+    aggregator.handle({ status: 'Downloading', id: 'a', progressDetail: { current: 900, total: 1_000 } })
+    aggregator.handle({ status: 'Extracting', id: 'a', progressDetail: { current: 10, total: 2_000 } })
+    assert.equal(aggregator.snapshot().downloadedBytes, 900)
+  })
+
+  it('counts a completed layer as fully downloaded', () => {
+    const aggregator = createPullProgressAggregator()
+    aggregator.handle({ status: 'Downloading', id: 'a', progressDetail: { current: 400, total: 1_000 } })
+    aggregator.handle({ status: 'Download complete', id: 'a' })
+    assert.deepEqual(aggregator.snapshot(), { downloadedBytes: 1_000, totalBytes: 1_000 })
+  })
+
+  it('keeps the largest value per layer when a pull is retried', () => {
+    const aggregator = createPullProgressAggregator()
+    aggregator.handle({ status: 'Downloading', id: 'a', progressDetail: { current: 700, total: 1_000 } })
+    aggregator.handle({ status: 'Downloading', id: 'a', progressDetail: { current: 200, total: 1_000 } })
+    assert.deepEqual(aggregator.snapshot(), { downloadedBytes: 700, totalBytes: 1_000 })
+  })
+
+  it('reports a partial total without throwing on malformed events', () => {
+    const aggregator = createPullProgressAggregator()
+    aggregator.handle({ status: 'Pulling from pmat77/game-server-hub', id: 'latest' })
+    aggregator.handle({ status: 'Downloading', id: 'a', progressDetail: { current: 2_048 } })
+    aggregator.handle({ status: 'Digest: sha256:abc', id: 'b', progressDetail: { current: 'n/a', total: null } })
+    aggregator.handle(null)
+    assert.deepEqual(aggregator.snapshot(), { downloadedBytes: 2_048, totalBytes: 0 })
   })
 })

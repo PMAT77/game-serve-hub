@@ -65,6 +65,10 @@ services:
       GSH_STACK_DIR: ${GSH_STACK_DIR:-/opt/game-server-hub}
       GSH_COMPOSE_FILES: ${GSH_COMPOSE_FILES:-docker-compose.yml:docker-compose.bind.yml}
       GSH_GITHUB_REPO: ${GSH_GITHUB_REPO:-PMAT77/game-serve-hub}
+      # 面板更新下载源：auto=优先 Release 离线镜像包、失败回退 GHCR；offline=只用离线包；pull=只用 GHCR
+      GSH_PANEL_UPDATE_SOURCE: ${GSH_PANEL_UPDATE_SOURCE:-auto}
+      # Release 离线镜像包的 GitHub 加速代理前缀；留空走内置代理池 + 直连
+      GSH_GITHUB_PROXY: ${GSH_GITHUB_PROXY:-}
       # 初始管理员凭证与首登策略：docker compose --env-file panel.env 只做 compose 文件插值，
       # panel.env 里的值必须在这里显式映射才会进入容器，否则容器会以为没配密码而随机生成一个。
       ADMIN_USERNAME: ${ADMIN_USERNAME:-superadmin}

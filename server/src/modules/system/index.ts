@@ -131,6 +131,7 @@ export function registerSystemModule(app: FastifyInstance) {
     const autoUpdate = body.autoUpdate ?? true
     const checkUpdateBeforeStart = body.checkUpdateBeforeStart ?? false
     const updateCheckIntervalHours = body.updateCheckIntervalHours ?? 3
+    const updateSource = body.updateSource ?? 'auto'
     if (!Number.isInteger(panelPort) || panelPort <= 0 || panelPort > 65535) {
       return businessError('面板端口不合法', request)
     }
@@ -140,12 +141,16 @@ export function registerSystemModule(app: FastifyInstance) {
     if (!['light', 'dark', 'system'].includes(theme)) {
       return businessError('主题配置不合法', request)
     }
+    if (!['auto', 'offline', 'pull'].includes(updateSource)) {
+      return businessError('更新下载源不合法', request)
+    }
     await saveSystemPanelSettings({
       panelPort,
       theme,
       autoUpdate,
       checkUpdateBeforeStart,
       updateCheckIntervalHours,
+      updateSource,
     })
     try {
       syncDevComposeWebPort(panelPort)
@@ -410,7 +415,7 @@ export function registerSystemModule(app: FastifyInstance) {
   })
 
   app.post('/app/system/panel-update/apply', async (request): Promise<ApiSuccessResponse<{
-    status: 'updating' | 'completed'
+    status: 'updating' | 'completed' | 'ready'
     message: string
   }> | ApiErrorResponse> => {
     const authError = await requirePermission(request, SYSTEM_MANAGE_PERMISSION)
@@ -428,7 +433,8 @@ export function registerSystemModule(app: FastifyInstance) {
       return businessError('请求参数无效', request)
     }
     try {
-      const result = await applyPanelUpdate()
+      // download 只下载镜像，install 只重建面板；不带 action 为旧前端的「下载并安装」
+      const result = await applyPanelUpdate(parsedBody.data.action ?? 'auto')
       return success(result, request)
     }
     catch (error) {

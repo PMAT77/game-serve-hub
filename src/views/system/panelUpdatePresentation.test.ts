@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import type { PanelUpdateStatus } from '../../../shared/contracts/system.ts'
 import {
   buildPanelUpdatePresentation,
+  formatByteSize,
   MANUAL_UPDATE_NOTE,
 } from './panelUpdatePresentation.ts'
 
@@ -52,6 +53,8 @@ function buildStatus(overrides: StatusOverrides = {}): PanelUpdateStatus {
     updateError: null,
     targetImage: null,
     targetImageReady: false,
+    downloadBytes: null,
+    downloadTotalBytes: null,
     ...rest,
   }
 }
@@ -94,11 +97,67 @@ describe('buildPanelUpdatePresentation', () => {
   })
 
   it('prioritises the in-progress state and shows the running phase', () => {
-    const view = buildPanelUpdatePresentation(buildStatus({ updating: true, updatePhase: 'pulling' }))
-    assert.equal(view.versionLine, '当前版本：v0.2.2 · 更新进行中')
+    const view = buildPanelUpdatePresentation(buildStatus({ updating: true, updatePhase: 'downloading' }))
+    assert.equal(view.versionLine, '当前版本：v0.2.2 · 正在下载更新')
     assert.equal(view.needsManualCommand, false)
-    assert.match(view.phaseLine ?? '', /下载镜像/)
+    assert.match(view.phaseLine ?? '', /下载更新镜像/)
     assert.equal(view.updateFailed, false)
+  })
+
+  it('shows the downloaded amount while downloading', () => {
+    const view = buildPanelUpdatePresentation(buildStatus({
+      updating: true,
+      updatePhase: 'downloading',
+      downloadBytes: 536_870_912,
+      downloadTotalBytes: 1_288_490_189,
+    }))
+    assert.equal(view.progressText, '已下载 512 MB / 1.2 GB')
+    assert.equal(view.action, 'busy')
+    assert.equal(view.actionLabel, '下载中…')
+  })
+
+  it('omits the total when the registry reports no sizes', () => {
+    const view = buildPanelUpdatePresentation(buildStatus({
+      updating: true,
+      updatePhase: 'downloading',
+      downloadBytes: 1_048_576,
+      downloadTotalBytes: null,
+    }))
+    assert.equal(view.progressText, '已下载 1 MB')
+  })
+
+  it('offers the install action once the image is downloaded', () => {
+    const view = buildPanelUpdatePresentation(buildStatus({
+      updatePhase: 'downloaded',
+      targetImageReady: true,
+      imageApplySupported: true,
+    }))
+    assert.equal(view.action, 'install')
+    assert.equal(view.actionLabel, '立即安装')
+    assert.equal(view.progressText, null)
+    assert.match(view.phaseLine ?? '', /立即安装/)
+  })
+
+  it('asks for a download first and a re-download after a failure', () => {
+    assert.equal(buildPanelUpdatePresentation(buildStatus({ imageApplySupported: true })).actionLabel, '下载更新')
+    const failed = buildPanelUpdatePresentation(buildStatus({
+      imageApplySupported: true,
+      updatePhase: 'failed',
+      updateError: '网络超时',
+    }))
+    assert.equal(failed.actionLabel, '重新下载')
+    assert.equal(failed.progressText, null)
+  })
+
+  it('keeps the button inert when the panel cannot apply the update here', () => {
+    assert.equal(buildPanelUpdatePresentation(buildStatus()).action, 'none')
+  })
+
+  it('formats byte sizes for the progress line', () => {
+    assert.equal(formatByteSize(0), '0 B')
+    assert.equal(formatByteSize(2_048), '2 KB')
+    assert.equal(formatByteSize(536_870_912), '512 MB')
+    assert.equal(formatByteSize(1_288_490_189), '1.2 GB')
   })
 
   it('prefers the backend message over the generic phase text', () => {

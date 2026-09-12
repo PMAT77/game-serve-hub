@@ -29,12 +29,25 @@ export function getStartGuideSkipStorageKey(instanceId: string) {
   return `${SKIP_GUIDE_STORAGE_PREFIX}${instanceId}`
 }
 
+/** 跳过引导跨会话记忆（localStorage）：文案承诺的是「下次启动」，会话级存储关掉浏览器就失效 */
 export function isStartGuideSkipped(instanceId: string) {
-  return sessionStorage.getItem(getStartGuideSkipStorageKey(instanceId)) === '1'
+  const key = getStartGuideSkipStorageKey(instanceId)
+  if (localStorage.getItem(key) === '1') {
+    return true
+  }
+  // 旧版本写在 sessionStorage 里，读到即迁移到 localStorage
+  if (sessionStorage.getItem(key) === '1') {
+    localStorage.setItem(key, '1')
+    sessionStorage.removeItem(key)
+    return true
+  }
+  return false
 }
 
 export function setStartGuideSkipped(instanceId: string) {
-  sessionStorage.setItem(getStartGuideSkipStorageKey(instanceId), '1')
+  const key = getStartGuideSkipStorageKey(instanceId)
+  localStorage.setItem(key, '1')
+  sessionStorage.removeItem(key)
 }
 
 export function shouldOfferStartGuide(
@@ -83,7 +96,7 @@ export function isWorldSettingsCustomized(shardList: ShardListDto): boolean {
   if (master.panelSaved) {
     return true
   }
-  const overrides = master.leveldataOverrides
+  const overrides = master.overrides
   if (overrides && Object.keys(overrides).length > 0) {
     return true
   }
@@ -140,8 +153,7 @@ export function buildStartGuideParagraphs(ctx: InstanceStartGuideContext): strin
 
   if (ctx.roomCustomized && ctx.worldCustomized) {
     lines.push(
-      `实例「${ctx.instanceName}」已保存房间与地上世界设置，但地图尚未生成。`,
-      '现在启动将按当前房间与世界配置生成地图。',
+      `实例「${ctx.instanceName}」已保存房间与地上世界设置但地图尚未生成，现在启动将按当前配置生成地图。`,
     )
   }
   else if (!ctx.roomCustomized && ctx.worldCustomized) {

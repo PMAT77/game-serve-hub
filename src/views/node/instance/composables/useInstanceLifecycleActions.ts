@@ -1,5 +1,6 @@
 import type { InstanceItem } from '@/api/modules/instance'
 import { NButton, NCheckbox, useDialog, useNotification } from 'naive-ui'
+import type { Ref } from 'vue'
 import { h, ref } from 'vue'
 import apiCluster from '@/api/modules/cluster'
 import apiInstance from '@/api/modules/instance'
@@ -168,7 +169,7 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
   function renderStartGuideContent(
     ctx: InstanceStartGuideContext,
     instanceId: string,
-    dontShowAgainRef: { value: boolean },
+    dontShowAgainRef: Ref<boolean>,
   ) {
     const paragraphs = buildStartGuideParagraphs(ctx)
     const children: ReturnType<typeof h>[] = paragraphs.map(text =>
@@ -245,7 +246,9 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
       return
     }
 
-    const dontShowAgain = { value: false }
+    // 必须是响应式 ref：naive-ui 的 NCheckbox 在传入 checked 时按受控处理，
+    // 普通对象不会触发重渲染，复选框会永远停在未勾选状态。
+    const dontShowAgain = ref(false)
     const publicBlocked = blocksDefaultStart(guideContext)
 
     dialog.warning({

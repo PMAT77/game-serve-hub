@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import type { ClusterConfigDto } from '../../../../shared/contracts/cluster.ts'
 import type { ShardListDto } from '../../../../shared/contracts/shard.ts'
 import {
@@ -8,8 +8,11 @@ import {
   buildStartGuidePositiveText,
   INSTALL_DEFAULT_CLUSTER_DESCRIPTION,
   INSTALL_DEFAULT_MASTER_WORLDGEN_PRESET,
+  getStartGuideSkipStorageKey,
   isRoomSettingsCustomized,
+  isStartGuideSkipped,
   isWorldSettingsCustomized,
+  setStartGuideSkipped,
 } from './instanceStartGuide.ts'
 import {
   buildInstallResultNotification,
@@ -67,7 +70,7 @@ function baseShardList(overrides: Partial<ShardListDto> = {}): ShardListDto {
         steamAuthPort: 8766,
         steamMasterPort: 12346,
         worldgenPreset: INSTALL_DEFAULT_MASTER_WORLDGEN_PRESET,
-        leveldataOverrides: null,
+        overrides: null,
         worldGenerated: false,
         isMaster: true,
         panelSaved: false,
@@ -87,7 +90,7 @@ describe('instanceStartGuide', () => {
       shards: [
         {
           ...baseShardList().shards[0]!,
-          leveldataOverrides: { world_size: 'medium' },
+          overrides: { world_size: 'medium' },
         },
       ],
     })
@@ -101,7 +104,7 @@ describe('instanceStartGuide', () => {
       shards: [
         {
           ...baseShardList().shards[0]!,
-          leveldataOverrides: { day: 'longer' },
+          overrides: { day: 'longer' },
         },
       ],
     })
@@ -155,6 +158,96 @@ describe('instanceStartGuide', () => {
     const paragraphs = buildStartGuideParagraphs(ctx)
     assert.ok(paragraphs.some(p => p.includes('已保存房间与地上世界设置')))
     assert.ok(!paragraphs.some(p => p.includes('还没在面板里设置过「房间」和「地上世界」')))
+  })
+
+  it('room + world customized is one merged sentence', () => {
+    const ctx = buildInstanceStartGuideContext(
+      { id: 'inst-1', name: '饥荒联机#1' },
+      baseCluster({ instanceName: '饥荒联机#1', panelRoomSaved: true }),
+      baseShardList({
+        shards: [
+          {
+            ...baseShardList().shards[0]!,
+            panelSaved: true,
+          },
+        ],
+      }),
+    )
+    const paragraphs = buildStartGuideParagraphs(ctx)
+    const merged = paragraphs.filter(p => p.includes('已保存房间与地上世界设置'))
+    assert.equal(merged.length, 1)
+    const sentence = merged[0]!
+    assert.ok(sentence.includes('地图尚未生成'))
+    assert.ok(sentence.includes('现在启动将按当前配置生成地图'))
+    // 一句话：只有一个句末标点
+    assert.equal(sentence.match(/。/g)?.length, 1)
+    assert.ok(sentence.endsWith('。'))
+  })
+})
+
+/** 内存版 Storage，供跳过标记用例注入（Node 默认没有 Web Storage） */
+function createMemoryStorage(): Storage {
+  const map = new Map<string, string>()
+  return {
+    get length() {
+      return map.size
+    },
+    clear: () => map.clear(),
+    getItem: (key: string) => map.get(key) ?? null,
+    key: (index: number) => [...map.keys()][index] ?? null,
+    removeItem: (key: string) => {
+      map.delete(key)
+    },
+    setItem: (key: string, value: string) => {
+      map.set(key, value)
+    },
+  } as Storage
+}
+
+describe('start guide skip storage', () => {
+  const originalLocal = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const originalSession = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+
+  function installStorage() {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: createMemoryStorage(),
+      configurable: true,
+      writable: true,
+    })
+    Object.defineProperty(globalThis, 'sessionStorage', {
+      value: createMemoryStorage(),
+      configurable: true,
+      writable: true,
+    })
+  }
+
+  afterEach(() => {
+    for (const [name, descriptor] of [['localStorage', originalLocal], ['sessionStorage', originalSession]] as const) {
+      if (descriptor) {
+        Object.defineProperty(globalThis, name, descriptor)
+      }
+      else {
+        delete (globalThis as Record<string, unknown>)[name]
+      }
+    }
+  })
+
+  it('remembers the skip across browser sessions (localStorage)', () => {
+    installStorage()
+    const key = getStartGuideSkipStorageKey('inst-skip')
+    assert.equal(isStartGuideSkipped('inst-skip'), false)
+    setStartGuideSkipped('inst-skip')
+    assert.equal(localStorage.getItem(key), '1')
+    assert.equal(isStartGuideSkipped('inst-skip'), true)
+  })
+
+  it('migrates the legacy sessionStorage flag', () => {
+    installStorage()
+    const key = getStartGuideSkipStorageKey('inst-skip')
+    sessionStorage.setItem(key, '1')
+    assert.equal(isStartGuideSkipped('inst-skip'), true)
+    assert.equal(localStorage.getItem(key), '1')
+    assert.equal(sessionStorage.getItem(key), null)
   })
 })
 

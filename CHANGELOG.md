@@ -2,7 +2,7 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.4.1] - 2026-09-12
 
 ### Fixed
 
@@ -338,7 +338,8 @@
 - DST 房间 / 世界 / Mod 管理
 - 面板与 DST 镜像 GHCR 发布（`v*` tag）
 
-[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/PMAT77/game-serve-hub/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/PMAT77/game-serve-hub/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.10...v0.4.0
 [0.3.10]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.9...v0.3.10
 [0.3.9]: https://github.com/PMAT77/game-serve-hub/compare/v0.3.8...v0.3.9

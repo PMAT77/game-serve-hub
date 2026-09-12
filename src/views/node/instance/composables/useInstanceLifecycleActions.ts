@@ -86,7 +86,10 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
       ]),
       positiveText: labels.positiveText,
       negativeText: '自行配置',
-      onPositiveClick: () => onAutoResolve?.(),
+      onPositiveClick: () => {
+        // 自动换端口后会重新走完整启动流程，同样不能让冲突框被启动耗时绑住
+        void onAutoResolve?.()
+      },
       onNegativeClick: () => {
         router.push(routeToDstWorldSettings(instanceId, { tab: 'network' }))
       },
@@ -104,6 +107,8 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
       : () => apiInstance.startInstance(instanceId, { autoAllocatePorts: lifecycleOptions?.autoAllocatePorts })
 
     try {
+      // 弹窗（若有）已经关闭，这里先给一条即时反馈，避免用户面对一段没有任何提示的等待
+      faToast.info(action === 'restart' ? '正在重启实例，请稍候…' : '正在启动实例，请稍候…')
       await apiCall()
       faToast.success(labels.successToast)
       await options.refresh()
@@ -264,7 +269,11 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
           router.push(routeToDstRoomSettings(row.id))
           return
         }
-        return quickStart()
+        // 刻意不返回 Promise：naive-ui 会等到 onPositiveClick 的返回值 resolve 后才关闭弹窗
+        // （DialogEnvironment: Promise.resolve(...).then(() => hide())），而启动请求可能包含
+        // 镜像准备等耗时步骤，弹窗就会一直卡在「等待实例启动」。这里立即关闭，
+        // 进度交给按钮 loading 与 toast 反馈，失败仍会弹端口冲突框或错误提示。
+        void quickStart()
       },
     })
   }
@@ -282,7 +291,10 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
       positiveButtonProps: {
         type: 'warning',
       },
-      onPositiveClick: () => runUpdateInstance(row),
+      onPositiveClick: () => {
+        // 更新请求本身是后台受理，不阻塞弹窗：先关闭确认框，安装日志弹窗按自己的节奏打开
+        void runUpdateInstance(row)
+      },
     })
   }
 
@@ -351,7 +363,9 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
         type: actionConfig.type,
       },
       onPositiveClick: () => {
-        return runInstanceAction(row.id, action === 'cancel_install' ? 'stop' : action)
+        // 同启动引导：不返回 Promise，否则弹窗要等停止/删除跑完才关闭；
+        // 进度由按钮 loading 承载，失败仍有 toast 反馈。
+        void runInstanceAction(row.id, action === 'cancel_install' ? 'stop' : action)
       },
     })
   }

@@ -18,6 +18,7 @@ const requiredReferences = new Map([
   ['server/src/shared/config/index.ts', [unifiedImage]],
   ['README.md', [tag]],
   ['docs/INSTALL.md', [tag]],
+  ['docs/DST_TUTORIAL.md', [tag]],
   ['CHANGELOG.md', [`## [${version}]`]],
 ])
 

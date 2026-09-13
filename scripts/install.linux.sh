@@ -14,7 +14,7 @@ GSH_GITHUB_PROXY="${GSH_GITHUB_PROXY:-}" # 强制指定 GitHub 加速代理（�
 INSTALLER_REPO_MIRRORS="${INSTALLER_REPO_MIRRORS:-}" # 安装资源镜像池；为空时由 init_installer_repo_pool 按代理清单生成。
 # 校验对象是镜像源提供的 git blob 原始字节（LF）；改动 compose 后必须同步更新此处。
 # 历史 pin eb30aeae... 与 v0.1.4 tag 内 compose blob（a34665e2...）不匹配，导致严格校验必然失败。
-INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-55730a38e730f666338a80ea6c0ab438f0ea5f154187a73aeb709ff99d049042}"
+INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML:-43562174bb4fcc3dc4448f17c3b3632dfaf653e1bb18143c0f93ee0206e85741}"
 INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML="${INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML:-525eaf74e17df33887fe47248f414c0de3e6cd94a8d20e072ab5d66284c760ae}"
 # Debian 12 等发行版源不含 Compose v2 时，从 docker/compose GitHub Release 自动补装 CLI 插件。
 # 摘要与官方 .sha256 / checksums.txt 资产双源核对；升级插件版本时需同步替换版本号与两个摘要。
@@ -1836,7 +1836,7 @@ pull_runtime_images() {
     log_error "GHCR 的镜像层域名（pkg-containers.githubusercontent.com）在国内常不可达，表现为 TLS handshake timeout。"
     log_error "请改用 Release 离线镜像包：下载 game-server-hub-${GSH_RELEASE_TAG}-docker-image.tar.gz（同目录有 .sha256），再用 docker load -i 导入，然后重跑本安装器（镜像已在本地，会自动跳过拉取）。"
     log_error "离线包下载页：https://github.com/PMAT77/game-serve-hub/releases/tag/${GSH_RELEASE_TAG}"
-    log_error "完整步骤见仓库 docs/INSTALL.md 第 3.3 节「离线镜像包完整步骤」，README 快速开始中也有入口。"
+    log_error "完整步骤见仓库 docs/INSTALL.md「路线 B：国内服务器（Debian 12 离线镜像包全程）」，README 快速开始中也有入口。"
     log_error "如需强制重新拉取，可设置 GSH_FORCE_IMAGE_PULL=1。"
     return 1
   fi

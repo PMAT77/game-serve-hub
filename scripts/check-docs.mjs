@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // 文档一致性校验：相对链接、锚点、版本 tag 与文档索引同步。
 // 用法：node scripts/check-docs.mjs（也通过 pnpm run docs:check 调用）
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
@@ -15,6 +17,82 @@ const failures = []
 
 // GitHub 风格的标题锚点：小写、去掉标点、空格转连字符。
 const slugify = heading => heading.trim().replace(/`/g, '').toLowerCase().replace(/[^\p{L}\p{N}\-_ ]/gu, '').replace(/ /g, '-')
+
+/**
+ * 版本控制中被跟踪的文件清单。
+ *
+ * 为什么需要它：文档校验读的是工作区文件，本地存在即通过。但 docs/ 下有一批文件被
+ * .gitignore 排除（API.md、DATABASE.md、GLOSSARY.md 曾长期如此），公开仓库里根本没有，
+ * 用户点进去全是 404，而本地怎么跑都发现不了。
+ *
+ * 判定口径是「能否进入公开仓库」，而不是「此刻是否已提交」：已跟踪 + 未跟踪但未被忽略
+ * 都算可发布（后者是待提交的新文件），只有被 .gitignore 命中的才是必然的死链。
+ * git 不可用时返回 null，跳过该项检查而不是误报。
+ */
+/** 执行一次 git 并把输出写入临时文件：不接 stdout 管道，与仓库其它脚本保持同一执行方式 */
+function runGitToFile(args) {
+  const listPath = path.join(os.tmpdir(), `gsh-docs-git-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const fd = fs.openSync(listPath, 'w')
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      try {
+        fs.closeSync(fd)
+      }
+      catch {
+        // 已关闭
+      }
+      fs.rmSync(listPath, { force: true })
+    }
+    const child = spawn('git', args, { cwd: repoRoot, stdio: ['ignore', fd, 'ignore'], windowsHide: true })
+    child.on('error', () => {
+      cleanup()
+      resolve(null)
+    })
+    child.on('close', (code) => {
+      try {
+        if (code !== 0) {
+          resolve(null)
+          return
+        }
+        resolve(new Set(fs.readFileSync(listPath, 'utf8').split('\0').filter(Boolean)))
+      }
+      catch {
+        resolve(null)
+      }
+      finally {
+        cleanup()
+      }
+    })
+  })
+}
+
+function isPublishableTarget(publishable, relativePath) {
+  if (publishable.has(relativePath)) {
+    return true
+  }
+  const prefix = relativePath.endsWith('/') ? relativePath : `${relativePath}/`
+  for (const item of publishable) {
+    if (item.startsWith(prefix)) {
+      return true
+    }
+  }
+  return false
+}
+
+async function listPublishableFiles() {
+  const tracked = await runGitToFile(['ls-files', '-z'])
+  const untracked = await runGitToFile(['ls-files', '-z', '--others', '--exclude-standard'])
+  if (!tracked || !untracked) {
+    return null
+  }
+  return new Set([...tracked, ...untracked])
+}
+
+const publishableFiles = await listPublishableFiles()
+if (!publishableFiles) {
+  // 静默跳过会让这类死链重新溜进公开仓库，必须让跳过本身可见
+  console.warn('提示：无法读取 git 文件清单，已跳过「链接目标是否会随仓库发布」检查')
+}
 
 const anchorCache = new Map()
 function anchorsFor(file) {
@@ -50,6 +128,9 @@ for (const file of targets) {
       if (!fs.existsSync(path.join(repoRoot, rel))) {
         failures.push(`${file}:${i + 1} 链接目标不存在：${raw}`)
         continue
+      }
+      if (publishableFiles && publishableFiles.has(file) && !isPublishableTarget(publishableFiles, rel)) {
+        failures.push(`${file}:${i + 1} 链接目标被 .gitignore 排除（公开仓库中会是死链）：${raw}`)
       }
       if (anchor && rel.endsWith('.md') && !anchorsFor(rel).has(anchor)) {
         failures.push(`${file}:${i + 1} 锚点不存在：${raw}`)

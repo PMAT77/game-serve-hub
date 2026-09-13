@@ -11,14 +11,21 @@ const tag = `v${version}`
 const unifiedImage = `ghcr.io/pmat77/game-server-hub:${tag}`
 
 const requiredReferences = new Map([
+  ['package.json', [`"version": "${version}"`]],
   ['scripts/install.linux.sh', [`PANEL_IMAGE_TAG:-${tag}`]],
   ['docker-compose.yml', [unifiedImage]],
   ['docker-compose.dev.yml', [unifiedImage]],
   ['panel.env.example', [unifiedImage]],
   ['server/src/shared/config/index.ts', [unifiedImage]],
+  ['scripts/dev-compose.ts', [`:${tag}'`]],
+  ['scripts/install-linux-smoke.sh', [tag]],
+  // 开发栈准备脚本的镜像兜底默认值：曾停在 v0.2.0 却不在本清单里，无人发现
+  ['server/scripts/ensure-steamcmd-image.ts', [unifiedImage]],
   ['README.md', [tag]],
   ['docs/INSTALL.md', [tag]],
   ['docs/DST_TUTORIAL.md', [tag]],
+  // RELEASE.md 自称「四者必须一致」，却不在校验范围内，上一版就是它把版本号写错还一路放行
+  ['docs/RELEASE.md', [`"version": "${version}"`, tag]],
   ['CHANGELOG.md', [`## [${version}]`]],
 ])
 
@@ -36,6 +43,33 @@ for (const [relativePath, expectedValues] of requiredReferences) {
 // 改过 compose 却忘了同步 pin 时，发布门禁的「Installer syntax and smoke test」
 // 会在 verify_installer_asset_checksum 处失败并阻断整条 Container Pipeline
 // （v0.3.9、v0.3.10 都踩过）。这里提前到 release:verify 阶段拦住，并直接给出新值。
+// 子串包含只能证明「出现过一次正确值」：同一文件里残留的旧镜像 tag 照样能过闸。
+// 这里把所有镜像引用逐个取出来比对，任何一处不是当前版本都算失败。
+const imageTagPattern = /ghcr\.io\/pmat77\/game-server-hub:(v\d+\.\d+\.\d+)/g
+const imageTagScanTargets = [
+  ...new Set([
+    ...requiredReferences.keys(),
+    'scripts/install-linux-smoke.sh',
+    'README.md',
+    'docs/INSTALL.md',
+    'docs/DST_TUTORIAL.md',
+  ]),
+]
+for (const relativePath of imageTagScanTargets) {
+  let content
+  try {
+    content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8')
+  }
+  catch {
+    continue
+  }
+  for (const match of content.matchAll(imageTagPattern)) {
+    if (match[1] !== tag) {
+      failures.push(`${relativePath} 的镜像引用 ${match[0]} 与当前版本 ${tag} 不一致`)
+    }
+  }
+}
+
 const installerComposePins = [
   { asset: 'docker-compose.yml', envKey: 'INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML' },
   { asset: 'docker-compose.bind.yml', envKey: 'INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_BIND_YML' },

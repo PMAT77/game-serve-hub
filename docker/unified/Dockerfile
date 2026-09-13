@@ -37,6 +37,11 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
+# 前端构建期变量：.env.production 被 .dockerignore 的 .env* 规则排除，
+# 必须在构建阶段显式注入，否则 import.meta.env.VITE_APP_API_BASEURL 为 undefined，
+# 控制台 SSE 的地址构造会抛异常、实时日志只剩轮询兜底。
+ARG VITE_APP_API_BASEURL=/
+ENV VITE_APP_API_BASEURL=${VITE_APP_API_BASEURL}
 RUN pnpm run build && pnpm run build:server
 
 # 运行时基础：Debian 12 + DST 32 位运行库 + SteamCMD（构建期 SHA256 强校验与自检）。

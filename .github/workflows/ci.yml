@@ -43,6 +43,17 @@ jobs:
       - name: Lint (oxlint)
         run: pnpm run lint:ox
 
+      # 这三项此前只在本地 release:check 里跑，CI 不跑等于没有门禁：
+      # 文档死链、界面文案泄露实现细节、gsh CLI 的转义笔误都能一路进 main。
+      - name: Lint (UI copy)
+        run: pnpm run lint:copy
+
+      - name: Docs consistency
+        run: pnpm run docs:check
+
+      - name: gsh CLI checks
+        run: pnpm run check:gsh
+
       - name: Unit tests
         env:
           GSH_UNIT_TEST: '1'

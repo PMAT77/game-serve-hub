@@ -44,6 +44,15 @@ jobs:
       - name: Type check
         run: pnpm run lint
 
+      - name: Lint (UI copy)
+        run: pnpm run lint:copy
+
+      - name: Docs consistency
+        run: pnpm run docs:check
+
+      - name: gsh CLI checks
+        run: pnpm run check:gsh
+
       - name: Release consistency
         run: pnpm run release:verify
 

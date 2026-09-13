@@ -1080,7 +1080,10 @@ install_native_dependencies() {
     run_as_root dpkg --add-architecture i386
     run_as_root apt-get update -y
   fi
-  apt_install tar gzip xz-utils lib32gcc-s1 libstdc++6:i386 libc6:i386
+  # 与统一镜像使用同一套 32 位运行库（见 docker/unified/Dockerfile）：Docker 分支已实测，
+  # Native 分支此前缺 libcurl4:i386、lib32stdc++6、libcurl3-gnutls，干净系统上 DST 与
+  # SteamCMD 可能起不来。
+  apt_install tar gzip xz-utils ca-certificates lib32gcc-s1 lib32stdc++6 libc6-i386 libcurl3-gnutls libcurl4 libcurl4:i386 libgcc-s1 libstdc++6 libstdc++6:i386
 }
 
 ensure_native_service_user() {
@@ -1095,6 +1098,15 @@ ensure_native_service_user() {
       --create-home \
       --shell /usr/sbin/nologin \
       "${NATIVE_SERVICE_USER}"
+  else
+    # 用户已存在但 home 与本次预期不一致时以系统登记的为准：
+    # systemd --user 只读取 $HOME/.config/systemd/user，写错目录会导致开服报 unit not found。
+    local existing_home
+    existing_home="$(getent passwd "${NATIVE_SERVICE_USER}" | cut -d: -f6)"
+    if [[ -n "${existing_home}" && "${existing_home}" != "${NATIVE_USER_HOME}" ]]; then
+      log_warn "User ${NATIVE_SERVICE_USER} already exists with home ${existing_home}; using it instead of ${NATIVE_USER_HOME}."
+      NATIVE_USER_HOME="${existing_home}"
+    fi
   fi
   run_as_root mkdir -p \
     "${NATIVE_USER_HOME}/.config/systemd/user" \
@@ -1208,8 +1220,15 @@ install_native_release() {
     NATIVE_PREVIOUS_RELEASE="$(readlink -f "${NATIVE_CURRENT_LINK}" || true)"
   fi
   if run_as_root test -e "${target_dir}"; then
+    # 只保留最近一份让位副本，反复重装不至于把磁盘堆满
+    run_as_root find "${NATIVE_RELEASE_ROOT}" -maxdepth 1 -type d -name "${GSH_RELEASE_TAG}.replaced.*" -exec rm -rf {} + 2>/dev/null || true
     replaced_dir="${target_dir}.replaced.$(date +%Y%m%d%H%M%S)"
     run_as_root mv "${target_dir}" "${replaced_dir}"
+    # 同版本重装时 previous 与 target 是同一个路径，而该路径的内容刚被挪到 replaced_dir。
+    # 不把它改指 replaced_dir 的话，健康检查失败时的「切回旧版本」会切回本次的新内容。
+    if [[ "${NATIVE_PREVIOUS_RELEASE}" == "${target_dir}" ]]; then
+      NATIVE_PREVIOUS_RELEASE="${replaced_dir}"
+    fi
   fi
   run_as_root mv "${extracted_root}" "${target_dir}"
   run_as_root chown -R root:"${NATIVE_SERVICE_GROUP}" "${target_dir}"
@@ -1307,6 +1326,15 @@ prepare_native_panel_env() {
     } > "${panel_env_tmp}"
     run_as_root install -m 0640 -o root -g "${NATIVE_SERVICE_GROUP}" "${panel_env_tmp}" "${PANEL_ENV_FILE}"
     rm -f "${panel_env_tmp}"
+  fi
+
+  # 内存档位预设此前只在 Docker 分支合并，Native 于是开箱没有任何 DST 内存上限，
+  # 与「资源限制交给 systemd」的承诺不符。两种模式的档位口径必须一致。
+  if [[ "${is_upgrade}" -eq 0 ]]; then
+    local host_mem_total_mb preset_name
+    host_mem_total_mb="$(read_host_mem_total_mb)"
+    preset_name="$(resolve_panel_env_preset_name "${host_mem_total_mb}")"
+    append_panel_env_preset "${preset_name}"
   fi
 
   run_as_root bash -c "cat > \"${NATIVE_SYSTEMD_UNIT}\" <<EOF
@@ -1848,7 +1876,11 @@ wait_for_panel_health() {
   while (( SECONDS < deadline )); do
     if response="$(curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${PANEL_PORT}/health" 2>/dev/null)"; then
       if [[ "${RESOLVED_INSTALL_MODE}" == "native" && "${response}" == *'"mode":"native"'* ]]; then
-        return 0
+        # 只看 mode 会把「systemd --user 不可用」也判成安装成功：面板虽然起来了，
+        # 却管理不了任何分片，故障要等用户第一次开服才暴露。runtime.status 才代表运行时可用。
+        if [[ "${response}" == *'"status":"running"'* ]]; then
+          return 0
+        fi
       fi
       if [[ "${RESOLVED_INSTALL_MODE}" == "docker" && "${response}" == *'"docker"'* ]]; then
         return 0

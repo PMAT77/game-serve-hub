@@ -18,6 +18,7 @@ const appSettingsStore = useAppSettingsStore()
 
 const rows = ref<BackupItem[]>([])
 const instances = ref<InstanceItem[]>([])
+const dbRows = ref<BackupItem[]>([])
 const selectedInstanceId = ref<string | null>(null)
 const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
 
@@ -27,6 +28,17 @@ const {
   showError,
   runLoad,
 } = useAdminPageState(rows)
+
+/**
+ * 面板数据库快照（instanceId 为哨兵值 'panel-db'）不属于任何游戏实例，
+ * 不会被上面的实例存档列表带出来，因此单独持有数据与加载/错误状态。
+ */
+const {
+  loading: dbLoading,
+  error: dbError,
+  showError: showDbError,
+  runLoad: runDbLoad,
+} = useAdminPageState(dbRows)
 
 const kindMeta: Record<BackupItem['kind'], { label: string, type: 'default' | 'info' | 'warning' | 'error' | 'success' }> = {
   manual: { label: '手动', type: 'info' },
@@ -86,6 +98,14 @@ const instanceOptions = computed<SelectOption[]>(() => {
   }))
 })
 
+function loadDbBackups() {
+  runDbLoad(async () => {
+    const response = await apiBackup.getDbBackupList()
+    dbRows.value = response.data ?? []
+  })
+}
+
+// 「刷新」与「备份面板数据」都走这里，因此两个列表区块会一起刷新。
 function triggerLoad() {
   runLoad(async () => {
     const [backupResponse, instanceResponse] = await Promise.all([
@@ -95,6 +115,7 @@ function triggerLoad() {
     rows.value = backupResponse.data ?? []
     instances.value = instanceResponse.data ?? []
   })
+  loadDbBackups()
 }
 
 function saveBlob(blob: Blob, fileName: string) {
@@ -301,6 +322,51 @@ const columns = computed<DataTableColumns<BackupItem>>(() => [
   },
 ])
 
+const dbColumns = computed<DataTableColumns<BackupItem>>(() => [
+  {
+    title: '快照文件',
+    key: 'fileName',
+    minWidth: 260,
+    ellipsis: { tooltip: true },
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 100,
+    render: row => h(
+      NTag,
+      { size: 'small', bordered: false, type: statusMeta[row.status].type },
+      { default: () => statusMeta[row.status].label },
+    ),
+  },
+  {
+    title: '大小',
+    key: 'sizeBytes',
+    width: 100,
+    align: 'right',
+    render: row => formatSize(row.sizeBytes),
+  },
+  {
+    title: '备注',
+    key: 'note',
+    minWidth: 180,
+    ellipsis: { tooltip: true },
+    render: row => row.note || '—',
+  },
+  {
+    title: '创建者',
+    key: 'createdBy',
+    width: 120,
+    render: row => formatCreator(row.createdBy),
+  },
+  {
+    title: '创建时间',
+    key: 'createdAt',
+    width: 180,
+    render: row => formatTime(row.createdAt),
+  },
+])
+
 onMounted(() => {
   triggerLoad()
 })
@@ -373,6 +439,36 @@ onMounted(() => {
       </template>
     </NDataTable>
 
+    <section class="db-snapshot-section">
+      <div class="section-header">
+        <h3>面板数据库快照</h3>
+        <p class="section-description">
+          由「备份面板数据」创建，包含面板账号与设置，不属于任何游戏实例。
+        </p>
+      </div>
+
+      <div v-if="showDbError" class="space-y-3" role="alert">
+        <NAlert type="error" title="面板快照加载失败">
+          {{ dbError }}
+        </NAlert>
+        <NButton size="small" @click="loadDbBackups">
+          重试
+        </NButton>
+      </div>
+      <NDataTable
+        v-else
+        :columns="dbColumns"
+        :data="dbRows"
+        :loading="dbLoading"
+        :scroll-x="940"
+        :row-key="(row: BackupItem) => row.id"
+      >
+        <template #empty>
+          <NEmpty size="large" description="还没有面板数据快照，点击上方「备份面板数据」创建" />
+        </template>
+      </NDataTable>
+    </section>
+
     <NModal
       v-model:show="createDialogVisible"
       preset="dialog"
@@ -423,6 +519,23 @@ onMounted(() => {
 }
 
 .page-description {
+  margin: 4px 0 0;
+  color: var(--custom-text-color-secondary, #909090);
+  font-size: 13px;
+}
+
+.db-snapshot-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.section-description {
   margin: 4px 0 0;
   color: var(--custom-text-color-secondary, #909090);
   font-size: 13px;

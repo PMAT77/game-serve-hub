@@ -1,5 +1,6 @@
 import axios from 'axios'
 import router from '@/router'
+import { resolveApiBaseUrl } from './base-url'
 
 // 请求重试配置
 const MAX_RETRY_COUNT = 3 // 最大重试次数
@@ -33,7 +34,11 @@ function toastBusinessErrorOnce(message: string) {
 }
 
 const api = axios.create({
-  baseURL: (import.meta.env.DEV && import.meta.env.VITE_ENABLE_PROXY) ? '/proxy/' : import.meta.env.VITE_APP_API_BASEURL,
+  baseURL: resolveApiBaseUrl({
+    dev: import.meta.env.DEV,
+    proxyEnabled: import.meta.env.VITE_ENABLE_PROXY,
+    configured: import.meta.env.VITE_APP_API_BASEURL,
+  }),
   timeout: 1000 * 60,
   responseType: 'json',
 })

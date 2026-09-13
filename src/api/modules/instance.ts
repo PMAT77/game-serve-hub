@@ -1,3 +1,4 @@
+import { resolveApiBaseUrl, withTrailingSlash } from '../base-url'
 import api from '../index'
 import type {
   InstanceConnectInfoDto,
@@ -124,10 +125,11 @@ export default {
     ...(message !== undefined ? { message } : {}),
   }) as Promise<{ data: InstanceMaintenancePushResult }>,
   buildInstanceConsoleStreamUrl(instanceId: string, streamTicket: string) {
-    const prefix = (import.meta.env.DEV && import.meta.env.VITE_ENABLE_PROXY)
-      ? '/proxy/'
-      : import.meta.env.VITE_APP_API_BASEURL
-    const base = prefix.endsWith('/') ? prefix : `${prefix}/`
+    const base = withTrailingSlash(resolveApiBaseUrl({
+      dev: import.meta.env.DEV,
+      proxyEnabled: import.meta.env.VITE_ENABLE_PROXY,
+      configured: import.meta.env.VITE_APP_API_BASEURL,
+    }))
     const params = new URLSearchParams({ instanceId, streamTicket })
     return `${base}app/instance/console/stream?${params.toString()}`
   },

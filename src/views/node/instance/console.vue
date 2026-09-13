@@ -336,8 +336,16 @@ async function connectStream() {
   if (requestVersion !== streamRequestVersion || instanceId.value !== targetInstanceId) {
     return
   }
-  const url = apiInstance.buildInstanceConsoleStreamUrl(targetInstanceId, streamTicket)
-  const source = new EventSource(url)
+  let source: EventSource
+  try {
+    source = new EventSource(apiInstance.buildInstanceConsoleStreamUrl(targetInstanceId, streamTicket))
+  }
+  catch {
+    // 地址构造失败（例如构建期未注入接口前缀）不能让实时日志静默消失：
+    // 退回轮询并安排重连，用户至少能看到日志在刷新
+    scheduleStreamReconnect()
+    return
+  }
   eventSource = source
   source.addEventListener('ready', (event) => {
     clearStreamReconnect()

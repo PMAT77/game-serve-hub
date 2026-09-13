@@ -353,7 +353,7 @@ describe('save import execution', () => {
       sourceClusterPath: instance.installPath!,
     })
     assert.equal(result.ok, false)
-    assert.match(result.message ?? '', /不能包含实例安装目录|缺少 cluster\.ini/)
+    assert.match(result.message ?? '', /不能包含实例安装目录|缺少房间配置文件/)
   })
 
   it('rejects concurrent import while the instance archive lock is held', async () => {

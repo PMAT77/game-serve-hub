@@ -25,6 +25,7 @@ import { getDefaultPanelSettings } from './defaults'
 import {
   buildOfflineArchiveName,
   buildOfflineArchiveUrls,
+  GITHUB_PROXY_SITES,
   downloadOfflineImageArchive,
   formatBytes,
   listImageRepoTags,
@@ -487,7 +488,15 @@ function buildManualUpdateCommand(stackPaths: StackPaths | null, releaseTag?: st
   if (config.runtimeMode === 'native') {
     const currentTag = normalizeReleaseTag(config.releaseVersion, 'v0.3.10')
     const targetTag = normalizeReleaseTag(releaseTag, currentTag)
-    return `curl -fsSL https://raw.githubusercontent.com/${config.githubRepo}/${targetTag}/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=${targetTag} bash -s -- --mode native`
+    const directUrl = `https://raw.githubusercontent.com/${config.githubRepo}/${targetTag}/scripts/install.linux.sh`
+    // 国内部署直连 raw.githubusercontent.com 基本不可达，而这是 Native 唯一的面板升级路径。
+    // 与安装器、离线包下载保持一致：优先用加速代理，直连地址写在注释里备查。
+    const proxy = config.githubProxy?.trim()
+    const prefix = (proxy ? [proxy] : GITHUB_PROXY_SITES)[0].replace(/\/+$/, '')
+    return [
+      `# 下载不通时把下面 URL 换成直连：${directUrl}`,
+      `curl -fsSL "${prefix}/${directUrl}" | sudo env GSH_RELEASE_TAG=${targetTag} bash -s -- --mode native`,
+    ].join('\n')
   }
   const hostDir = stackPaths?.hostDir || config.stackDir || '/opt/game-server-hub'
   const composeArgs = config.composeFiles.map(file => `-f ${file}`).join(' ')

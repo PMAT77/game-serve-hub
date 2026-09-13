@@ -35,6 +35,16 @@ export function normalizeDirectoryPath(rawPath: string): string {
   return path.resolve(rawPath.trim())
 }
 
+/** 解析符号链接后的真实路径；路径不存在（例如待新建目录）时退回字面路径 */
+function resolveRealPath(targetPath: string): string {
+  try {
+    return fs.realpathSync(targetPath)
+  }
+  catch {
+    return targetPath
+  }
+}
+
 function isPathInsideBase(targetPath: string, basePath: string): boolean {
   const relativePath = path.relative(basePath, targetPath)
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath))
@@ -49,8 +59,16 @@ export function getAllowedBrowseRoots(): string[] {
     .filter(root => isReadableDirectory(root))
 }
 
+/**
+ * 判断路径是否允许浏览。
+ *
+ * 字面路径与解析符号链接后的真实路径都必须落在允许根内。只校验字面路径时，
+ * 允许列表里的一个符号链接（例如 /opt/xxx → /etc）就能把浏览引到任意目录：
+ * path.resolve 不解析符号链接。搜索路径本来就显式跳过符号链接，这里补齐同一策略。
+ */
 export function isAllowedBrowsePath(targetPath: string, allowedRoots: string[] = getAllowedBrowseRoots()): boolean {
-  return allowedRoots.some(root => isPathInsideBase(targetPath, root))
+  const realTarget = resolveRealPath(targetPath)
+  return allowedRoots.some(root => isPathInsideBase(targetPath, root) && isPathInsideBase(realTarget, resolveRealPath(root)))
 }
 
 export function listRootDirectories(): DirectoryItem[] {
@@ -61,8 +79,7 @@ export function listRootDirectories(): DirectoryItem[] {
   }))
 }
 
-export function listChildEntries(parentPath: string): DirectoryItem[] {
-  const allowedRoots = getAllowedBrowseRoots()
+export function listChildEntries(parentPath: string, allowedRoots: string[] = getAllowedBrowseRoots()): DirectoryItem[] {
   return fs
     .readdirSync(parentPath, { withFileTypes: true })
     .map((entry) => {

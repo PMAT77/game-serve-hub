@@ -17,6 +17,14 @@ import type {
 
 const execFileAsync = promisify(execFile)
 const SAFE_SERVICE_NAME = /^[A-Za-z0-9_.-]+$/
+/**
+ * unit 的停机预算：DST 收到 SIGTERM 后需要落盘存档，大洞穴存档常见数十秒。
+ * 与之配套的客户端等待上限必须严格大于该值，否则 systemd 还在收尾就被判失败。
+ */
+const NATIVE_UNIT_STOP_TIMEOUT_SEC = 30
+const NATIVE_STOP_CLIENT_TIMEOUT_MS = (NATIVE_UNIT_STOP_TIMEOUT_SEC + 15) * 1000
+/** 打开文件数上限：多 Mod 大存档下用户级 systemd 默认值偏小，与容器模式对齐 */
+const NATIVE_UNIT_NOFILE_LIMIT = 65_535
 
 export interface NativeSystemdRuntimeOptions {
   runtimeDir: string
@@ -96,7 +104,8 @@ ExecStart=${systemdQuote(launcherPath)}
 Restart=on-failure
 RestartSec=5
 KillMode=control-group
-TimeoutStopSec=30
+TimeoutStopSec=${NATIVE_UNIT_STOP_TIMEOUT_SEC}
+LimitNOFILE=${NATIVE_UNIT_NOFILE_LIMIT}
 StandardOutput=journal
 StandardError=journal
 ${environment.join('\n')}
@@ -172,9 +181,12 @@ export class NativeSystemdRuntime implements ContainerRuntime {
   }
 
   async stop(ref: ContainerRef, timeoutSec = 10): Promise<void> {
+    // 等待上限取「调用方预算 + 5 秒」与「unit 停机预算 + 15 秒」的较大者：
+    // 后者保证 systemd 有完整时间收尾，不会在存档落盘途中被判成失败。
+    const clientTimeoutMs = Math.max(((timeoutSec ?? 10) + 5) * 1000, NATIVE_STOP_CLIENT_TIMEOUT_MS)
     try {
       await execFileAsync('systemctl', ['--user', 'stop', this.unitName(ref)], {
-        timeout: Math.max(5, timeoutSec + 5) * 1000,
+        timeout: clientTimeoutMs,
         windowsHide: true,
       })
     }
@@ -187,7 +199,15 @@ export class NativeSystemdRuntime implements ContainerRuntime {
   }
 
   async remove(ref: ContainerRef): Promise<void> {
-    await this.stop(ref)
+    // 停止失败不能中断清理：单元若仍处于 enabled，宿主重启时该分片会被 systemd 自动拉起，
+    // 与「实例已停止/已删除」的状态完全相反。这里先记下错误，做完清理再抛出。
+    let stopError: unknown
+    try {
+      await this.stop(ref)
+    }
+    catch (error) {
+      stopError = error
+    }
     try {
       await this.systemctl(['disable', this.unitName(ref)])
     }
@@ -216,6 +236,9 @@ export class NativeSystemdRuntime implements ContainerRuntime {
       }
     }
     await this.systemctl(['daemon-reload'])
+    if (stopError) {
+      throw stopError
+    }
   }
 
   async *logs(ref: ContainerRef, opts: LogOpts = {}): AsyncIterable<LogLine> {
@@ -288,6 +311,21 @@ export class NativeSystemdRuntime implements ContainerRuntime {
       done = true
       wake()
     })
+    // 与 Docker 运行时对齐：消费方 abort 后立即结束循环并回收 journalctl 子进程。
+    // 缺了这段，实例无日志输出时 journalctl --follow 会永久挂起，每次开停泄漏一个进程。
+    if (opts.signal) {
+      const signal = opts.signal
+      const abort = () => {
+        done = true
+        wake()
+      }
+      if (signal.aborted) {
+        abort()
+      }
+      else {
+        signal.addEventListener('abort', abort, { once: true })
+      }
+    }
     try {
       while (!done || queue.length > 0) {
         if (failure) {

@@ -99,6 +99,13 @@ import { requirePermission } from '../system/auth'
 import { loadServerConfig } from '../../shared/config'
 
 const LOCAL_NODE_ID = 'local-node'
+
+/**
+ * 实例级启动锁：同一实例的启动必须串行。
+ * 并发调用（双击、多标签页、前端重试）会同时读到「容器未运行」，随后各自创建同名容器，
+ * 第二个因重名失败并把实例误标成 error，而实例其实已在运行。
+ */
+const instanceStartLocks = new Set<string>()
 const DANGEROUS_WINDOWS_PATHS = [
   'Windows',
   'Program Files',
@@ -549,6 +556,12 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       gamePort,
       steamcmdCommand,
     }, '实例已创建，后台开始执行 SteamCMD 安装')
+    // 内存检查必须在写库之前：先创建记录再失败会留下一条 pending_install 的孤儿实例，
+    // 它没有对应的安装任务，也不在 reconcileStaleInstallingInstances 的处理范围内（只认 installing）。
+    const memoryPressure = getInstallHostMemoryPressure()
+    if (memoryPressure) {
+      return hostMemoryPressureError(memoryPressure, request)
+    }
     const instance = await createGameInstance({
       id: instanceId,
       nodeId,
@@ -564,10 +577,6 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       lastCommand: '等待安装任务启动',
       lastError: null,
     })
-    const memoryPressure = getInstallHostMemoryPressure()
-    if (memoryPressure) {
-      return hostMemoryPressureError(memoryPressure, request)
-    }
     const started = startInstallJob(app, {
       instanceId,
       appId: gameCode,
@@ -577,10 +586,13 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       steamcmdCommand,
       steamcmdCredentials,
     })
-    if (started === 'busy') {
-      return businessError('该实例已有安装任务进行中', request)
-    }
-    if (started === 'blocked') {
+    if (started !== 'started') {
+      // 兜底回收：安装任务没能起来就不要留下这条记录，
+      // 否则用户看到「创建成功」而实例永远停在等待安装。
+      await deleteGameInstanceById(instanceId)
+      if (started === 'busy') {
+        return businessError('该实例已有安装任务进行中', request)
+      }
       const blockedPressure = getInstallHostMemoryPressure()
       if (blockedPressure) {
         return hostMemoryPressureError(blockedPressure, request)
@@ -737,6 +749,15 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       steamcmdCommand,
       steamcmdCredentials,
     })
+    if (started === 'busy' || started === 'blocked') {
+      // 状态已经写成 installing 而任务没起来：必须写回原状态，否则实例卡在「安装中」，
+      // 启动与再次更新都会被拒绝，只能等刷新列表时由 reconcile 改成 error。
+      await updateGameInstanceRuntime(id, {
+        status: current.status,
+        installLogStatus: null,
+        installPercent: null,
+      })
+    }
     if (started === 'busy') {
       return businessError('该实例已有安装任务进行中', request)
     }
@@ -984,58 +1005,67 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
     if (updateBlockMessage) {
       return businessError(updateBlockMessage, request)
     }
-    if (await isInstanceContainerRunning(id)) {
-      if (current.status !== 'running') {
-        const ref = await resolveInstanceContainerRef(id)
+    if (instanceStartLocks.has(id)) {
+      return businessError('该实例正在启动中，请稍后再试', request)
+    }
+    instanceStartLocks.add(id)
+    try {
+      if (await isInstanceContainerRunning(id)) {
+        if (current.status !== 'running') {
+          const ref = await resolveInstanceContainerRef(id)
+          await updateGameInstanceRuntime(id, {
+            status: 'running',
+            containerId: ref?.id ?? current.containerId,
+            runtimeStartedAt: current.runtimeStartedAt ?? new Date().toISOString(),
+            lastError: null,
+          })
+        }
+        return success({ isSuccess: true }, request)
+      }
+      if (current.status === 'running') {
         await updateGameInstanceRuntime(id, {
-          status: 'running',
-          containerId: ref?.id ?? current.containerId,
-          runtimeStartedAt: current.runtimeStartedAt ?? new Date().toISOString(),
-          lastError: null,
+          status: 'stopped',
+          containerId: null,
+          runtimePid: null,
+          runtimeStartedAt: null,
         })
       }
+      await updateGameInstanceRuntime(id, {
+        lastCommand: '正在准备 DST 运行镜像（若本地缺失将自动拉取）…',
+        lastError: null,
+      })
+      const started = await startInstanceContainer(app, {
+        instanceId: id,
+        gameCode: current.gameCode,
+        installPath,
+        instanceName: current.name,
+        gamePort,
+      })
+      if (!started.ok) {
+        await updateGameInstanceRuntime(id, {
+          status: 'error',
+          lastError: started.message,
+        })
+        if (started.hostMemoryPressure) {
+          return hostMemoryPressureError(started.hostMemoryPressure, request)
+        }
+        return businessError(started.message, request)
+      }
+      await updateGameInstanceRuntime(id, {
+        status: 'running',
+        containerId: started.ref.id,
+        runtimePid: null,
+        runtimeStartedAt: new Date().toISOString(),
+        lastCommand: started.displayCommand,
+        lastExitCode: null,
+        lastError: null,
+        unexpectedExitAt: null,
+      })
       return success({ isSuccess: true }, request)
     }
-    if (current.status === 'running') {
-      await updateGameInstanceRuntime(id, {
-        status: 'stopped',
-        containerId: null,
-        runtimePid: null,
-        runtimeStartedAt: null,
-      })
+    finally {
+      instanceStartLocks.delete(id)
     }
-    await updateGameInstanceRuntime(id, {
-      lastCommand: '正在准备 DST 运行镜像（若本地缺失将自动拉取）…',
-      lastError: null,
-    })
-    const started = await startInstanceContainer(app, {
-      instanceId: id,
-      gameCode: current.gameCode,
-      installPath,
-      instanceName: current.name,
-      gamePort,
-    })
-    if (!started.ok) {
-      await updateGameInstanceRuntime(id, {
-        status: 'error',
-        lastError: started.message,
-      })
-      if (started.hostMemoryPressure) {
-        return hostMemoryPressureError(started.hostMemoryPressure, request)
-      }
-      return businessError(started.message, request)
-    }
-    await updateGameInstanceRuntime(id, {
-      status: 'running',
-      containerId: started.ref.id,
-      runtimePid: null,
-      runtimeStartedAt: new Date().toISOString(),
-      lastCommand: started.displayCommand,
-      lastExitCode: null,
-      lastError: null,
-      unexpectedExitAt: null,
-    })
-    return success({ isSuccess: true }, request)
   }
 
   app.post('/app/instance/stop', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {
@@ -1067,6 +1097,17 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
     }
     if (current.status === 'pending_install' || current.status === 'installing') {
       await cancelInstallJob(id)
+      // cancelInstallJob 内部按「安装意外中断」语义写成 error，但用户是主动停止，
+      // 不该看到异常态：这里按停止结果落状态。
+      await updateGameInstanceRuntime(id, {
+        status: 'stopped',
+        containerId: null,
+        runtimePid: null,
+        runtimeStartedAt: null,
+        installLogStatus: null,
+        installPercent: null,
+        lastError: null,
+      })
       app.log.info({ instanceId: id }, '实例安装已取消')
       return success({ isSuccess: true }, request)
     }

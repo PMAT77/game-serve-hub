@@ -664,25 +664,9 @@ export function registerSystemModule(app: FastifyInstance) {
     }, request)
   })
 
-  app.post('/app/system/network/apply', async (request): Promise<ApiSuccessResponse<{
-    isSuccess: boolean
-    message: string
-  }> | ApiErrorResponse> => {
-    const authError = await requirePermission(request, SYSTEM_MANAGE_PERMISSION)
-    if (authError) {
-      return authError
-    }
-
-    const config = await getSystemNetworkConfig()
-    if (!config) {
-      return businessError('请先保存网络配置', request)
-    }
-
-    return success({
-      isSuccess: true,
-      message: '配置已受理，等待网关编排模块接入',
-    }, request)
-  })
-
+  // 这里原本有一个 POST /app/system/network/apply：它不产生任何副作用，
+  // 只回一句「配置已受理，等待网关编排模块接入」。对外暴露一个自称没实现的接口，
+  // 比不提供它更容易误导集成方，因此移除；网络暴露方式（反向代理、TLS）
+  // 在文档中给出，面板自身不做网关编排。
   registerDatabaseBackupRoutes(app)
 }

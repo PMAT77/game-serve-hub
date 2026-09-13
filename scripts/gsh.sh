@@ -12,15 +12,15 @@ COMPOSE_FILES="docker-compose.yml:docker-compose.bind.yml"
 PANEL_PORT="8888"
 RUNTIME_MODE=""
 NATIVE_SERVICE="game-server-hub.service"
-DIAGNOSTICS_LOG="/opt/game-server-hub/install.diagnostics.log"
+DIAGNOSTICS_LOG="" # 由 load_config 依 panel.env 的日志目录解析
 SWAP_SIZE="${GSH_SWAP_SIZE:-2G}"
 SWAP_FILE="${GSH_SWAP_FILE:-/swapfile-gsh}"
 
 # ---------- 基础输出 ----------
 
-log_info() { printf '[gsh] %s$n' "$*"; }
-log_warn() { printf '[gsh] WARN: %s$n' "$*" >&2; }
-log_error() { printf '[gsh] ERROR: %s$n' "$*" >&2; }
+log_info() { printf '[gsh] %s\n' "$*"; }
+log_warn() { printf '[gsh] WARN: %s\n' "$*" >&2; }
+log_error() { printf '[gsh] ERROR: %s\n' "$*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -45,6 +45,13 @@ load_config() {
     STACK_DIR="$(read_env_value "${PANEL_ENV_FILE}" "GSH_STACK_DIR")"
     COMPOSE_FILES="$(read_env_value "${PANEL_ENV_FILE}" "GSH_COMPOSE_FILES")"
     PANEL_PORT="$(read_env_value "${PANEL_ENV_FILE}" "PANEL_PORT")"
+    # Native 安装器写入的是 SERVER_PORT（后端直接监听该端口），Docker 分支才写 PANEL_PORT。
+    # 只读 PANEL_PORT 会让 Native 下的探活固定落到默认端口，把正常安装判成故障。
+    [[ -n "${PANEL_PORT}" ]] || PANEL_PORT="$(read_env_value "${PANEL_ENV_FILE}" "SERVER_PORT")"
+    local panel_log_dir
+    panel_log_dir="$(read_env_value "${PANEL_ENV_FILE}" "SERVER_LOG_DIR")"
+    [[ -n "${panel_log_dir}" ]] || panel_log_dir="$(read_env_value "${PANEL_ENV_FILE}" "PANEL_LOG_DIR")"
+    [[ -n "${panel_log_dir}" ]] && DIAGNOSTICS_LOG="${panel_log_dir}/install.diagnostics.log"
     RUNTIME_MODE="$(read_env_value "${PANEL_ENV_FILE}" "GSH_RUNTIME_MODE")"
     local service
     service="$(read_env_value "${PANEL_ENV_FILE}" "GSH_NATIVE_SERVICE")"
@@ -52,7 +59,7 @@ load_config() {
   fi
   STACK_DIR="${STACK_DIR:-/opt/game-server-hub}"
   COMPOSE_FILES="${COMPOSE_FILES:-docker-compose.yml:docker-compose.bind.yml}"
-  PANEL_PORT="${PANEL_PORT:-8888}"
+  PANEL_PORT="${PANEL_PORT:-9527}"
   case "${RUNTIME_MODE}" in
     docker|native) ;;
     *)
@@ -179,7 +186,7 @@ cmd_doctor() {
     fi
   else
     if have docker; then
-      docker ps --format '{{.Names}}$t{{.Status}}$t{{.Image}}' | grep -Ei 'game-server-hub|steamcmd|dst' || log_info "(no game-server-hub containers running)"
+      docker ps --format '{{.Names}}\t{{.Status}}\t{{.Image}}' | grep -Ei 'game-server-hub|steamcmd|dst' || log_info "(no game-server-hub containers running)"
     else
       log_warn "docker not found"
       exit_code=1
@@ -190,9 +197,9 @@ cmd_doctor() {
   df -h / | sed -n '1,2p'
   free -h | sed -n '1,2p'
   if have ss; then
-    ss -ltnp 2>/dev/null | grep -E "(:${PANEL_PORT}$b)" || log_info "(panel port ${PANEL_PORT} not listening)"
+    ss -ltnp 2>/dev/null | grep -E "(:${PANEL_PORT})\\b" || log_info "(panel port ${PANEL_PORT} not listening)"
   elif have netstat; then
-    netstat -ltnp 2>/dev/null | grep -E "(:${PANEL_PORT}$b)" || log_info "(panel port ${PANEL_PORT} not listening)"
+    netstat -ltnp 2>/dev/null | grep -E "(:${PANEL_PORT})\\b" || log_info "(panel port ${PANEL_PORT} not listening)"
   fi
 
   log_info "-- panel.env summary (secrets redacted) --"
@@ -217,13 +224,15 @@ cmd_doctor() {
   log_info "Release version: ${release_version:-unknown}"
   log_info "Unified image: $(read_env_value "${PANEL_ENV_FILE}" "PANEL_IMAGE" || echo unknown)"
   if [[ "${RUNTIME_MODE}" == "native" ]]; then
+    local repo
+    repo="$(read_env_value "${PANEL_ENV_FILE}" "GSH_GITHUB_REPO")"
+    repo="${repo:-PMAT77/game-serve-hub}"
     log_info "Native upgrade (pinned, checksum-verified):"
-    # 固定用已安装版本，不用 main 分支：main 的默认 tag 可能指向尚未发布的版本。
-    if [[ -n "${release_version}" ]]; then
-      log_info "  curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/${release_version}/scripts/install.linux.sh | sudo bash -s -- --mode native"
-    else
-      log_info "  从 Release 页下载对应版本的 install.linux.sh，再执行 sudo bash install.linux.sh --mode native"
-    fi
+    log_info "  # 目标版本填 Release 页上的版本号（例如 v0.4.3），必须高于当前已安装版本；"
+    log_info "  # 填成当前版本只会原地重装，不会升级。"
+    log_info "  curl -fsSL https://raw.githubusercontent.com/${repo}/<目标版本>/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=<目标版本> bash -s -- --mode native"
+    log_info "  # 已安装版本：${release_version:-未知}；国内直连 GitHub Raw 不通时，可先下载 install-<目标版本>.sh 再执行："
+    log_info "  # sudo env GSH_RELEASE_TAG=<目标版本> bash install-<目标版本>.sh --mode native"
   fi
 
   if [[ "$exit_code" -eq 0 ]]; then
@@ -252,7 +261,12 @@ cmd_setup_swap() {
   mkswap "${SWAP_FILE}"
   swapon "${SWAP_FILE}"
   if ! grep -qE "^${SWAP_FILE}[[:space:]]" /etc/fstab; then
-    printf '%s none swap sw 0 0$n' "${SWAP_FILE}" >> /etc/fstab
+    # 追加前补齐文件行尾：若 /etc/fstab 最后一行没有换行，新条目会与它拼成一行，
+    # 第 6 个字段随之变成非法值，mount -a 与开机挂载都会解析失败。
+    if [[ -s /etc/fstab && -n "$(tail -c 1 /etc/fstab)" ]]; then
+      printf '\n' >> /etc/fstab
+    fi
+    printf '%s none swap sw 0 0\n' "${SWAP_FILE}" >> /etc/fstab
     log_info "Added ${SWAP_FILE} to /etc/fstab."
   fi
   local sysctl_dir="/etc/sysctl.d"

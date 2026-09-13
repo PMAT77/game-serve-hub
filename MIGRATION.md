@@ -25,7 +25,7 @@
 
 ## Git 分支
 
-- **`develop`**：日常开发、Drizzle 迁移；默认 push 目标。
+- **`develop`**：历史记录中的日常开发分支。注意当前 CI（`.github/workflows/ci.yml`）只在 PR 与推送到 `main` 时触发，推送到 `develop` 不会产生任何检查结果。
 - **`main`**：可部署基线；里程碑验证后从 `develop` 合并并打 tag。
 - **`feature/*`**：可选，大改动隔离后合并回 `develop`。
 - 数据库：改 schema 后 `pnpm db:generate`，同 commit 提交 `server/drizzle/`；不提交 `*.sqlite`。

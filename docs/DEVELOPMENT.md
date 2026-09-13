@@ -36,8 +36,9 @@ c_connect("127.0.0.1", 10999, "<房间密码>")
 ## 克隆与依赖
 
 ```bash
+# 仓库名是 game-serve-hub，而镜像名与服务和目录名是 game-server-hub，克隆后的目录名取自仓库名
 git clone https://github.com/PMAT77/game-serve-hub.git
-cd game-server-hub
+cd game-serve-hub
 corepack enable
 pnpm install
 ```
@@ -159,10 +160,24 @@ STEAMCMD_ARCHIVE_URL=https://media.steampowered.com/client/installer/steamcmd_li
 
 ## 测试与代码检查
 
+提 PR 前直接跑与 CI 等价的检查（覆盖版本一致性、文档校验、类型检查、lint、UI 文案、单测与生产构建）：
+
 ```bash
-pnpm test:server
-pnpm run lint
+pnpm run release:check
 ```
+
+按需单独执行：
+
+| 命令 | 作用 |
+| --- | --- |
+| `pnpm run release:verify` | 版本引用一致性（tag、compose、安装器默认 tag、CHANGELOG） |
+| `pnpm run docs:check` | 文档链接、锚点、版本 tag 与索引校验 |
+| `pnpm run lint` | vue-tsc 类型检查 |
+| `pnpm run lint:ox` | oxlint 静态检查（`--deny-warnings`） |
+| `pnpm run lint:copy` | UI 文案检查 |
+| `pnpm test:unit` | 单元测试（前端与脚本用例） |
+| `pnpm test:server` | 后端测试 |
+| `pnpm run build` | 生产构建（前端 `dist/` 与服务端 `dist-server/`） |
 
 ### 面板后端环境变量（`server/.env.*`）
 
@@ -214,7 +229,7 @@ cp panel.env.example panel.env
 docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d
 ```
 
-官方镜像由 GitHub Actions 在推送 `main` 或 `v*` tag 时发布至 GHCR：
+官方镜像由 GitHub Actions 在推送 `v*` tag 时发布至 GHCR（推送 `main` 只运行质量门禁，不发布镜像）：
 
 - `ghcr.io/pmat77/game-server-hub:<tag>`（统一镜像，v0.2.0 起三合一）
 
@@ -237,6 +252,24 @@ game-server-hub/
 ├── .env.*.example          # 前端 Vite 环境变量模板
 └── server/.env.*.example   # 后端环境变量模板
 ```
+
+### 模块与目录导航
+
+仓库里已有若干模块级 README，改代码前先读对应的一份：
+
+| 路径 | 内容 | 说明文档 |
+| --- | --- | --- |
+| `src/views/` | 前端页面：`console/monitor`（监控台）、`node/instance`（实例列表 / 详情 / 控制台）、`games/dst`（房间 / 世界 / Mod）、`ops`（备份 / 计划任务）、`system`（系统设置 / 通知） | — |
+| `src/api/` | 前端请求层与接口封装 | — |
+| `shared/contracts/` | 前后端共享契约与校验规则 | [shared/README.md](../shared/README.md) |
+| `shared/constants/` | 共享常量与错误码 | 同上 |
+| `server/src/modules/` | 后端业务模块（auth、instance、cluster、shard、console、mod、backup、schedule、notify、node、system） | [server/src/modules/README.md](../server/src/modules/README.md) |
+| `server/src/infra/` | 容器 / 运行时 / 游戏适配器 / 备份等外部系统适配层 | [server/src/infra/README.md](../server/src/infra/README.md) |
+| `server/src/shared/` | config、db（schema 与连接）、dst、http 等后端共享能力 | [server/src/shared/README.md](../server/src/shared/README.md) |
+| `server/drizzle/` | Drizzle 迁移文件 | [DATABASE.md](DATABASE.md) |
+| `packages/` | 工作区内的 UI 组件与框架包（含各组件 README） | — |
+
+后端整体目录与分层约定见 [server/src/README.md](../server/src/README.md)。
 
 Standalone 副本与上游 fantastic-admin 母仓的同步说明见根目录 [MIGRATION.md](../MIGRATION.md)。
 

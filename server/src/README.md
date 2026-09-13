@@ -1,70 +1,46 @@
 # Server 目录说明
 
-Node.js 后端代码放在该目录。
+Node.js 后端代码位于本目录。前端在 `../src/`，前后端共享契约在 `../shared/`，公开文档在 `../docs/`。
 
 ## 环境变量
 
-后端独立使用 `server/.env.*`（如 `server/.env.development`）读取配置，启动时由 `zod` 统一校验。当前支持：
+后端独立读取 `server/.env.*`（例如 `server/.env.development`），启动时由 zod 统一校验；完整清单、默认值与解析逻辑见 `shared/config/index.ts`。常用键：
 
-- `SERVER_HOST`
-- `SERVER_PORT`
-- `DB_PATH`
-- `SERVER_LOG_DIR`
-- `LOG_LEVEL`
+- `SERVER_HOST`、`SERVER_PORT`
+- `DB_PATH`、`SERVER_LOG_DIR`、`LOG_LEVEL`
+
+生产部署时，面板进程的配置来自 `panel.env`（Docker 模式由 compose 注入，Native 模式由 systemd `EnvironmentFile` 注入），模板见仓库根目录 `panel.env.example`。
 
 ## 顶层结构
 
-- `modules/`：业务模块（`auth`、`node`、`instance`、`console`、`mod`、`config`、`backup`、`file`）
-- `shared/`：后端跨模块共享能力
-- `infra/`：外部系统适配层
-- `../drizzle/`：Drizzle 迁移文件（由 `drizzle-kit generate` 生成）
+- `modules/`：业务模块，见 [modules/README.md](modules/README.md)
+- `shared/`：后端跨模块共享能力，见 [shared/README.md](shared/README.md)
+- `infra/`：外部系统适配层，见 [infra/README.md](infra/README.md)
+- `../server/drizzle/`：Drizzle 迁移文件（由 `drizzle-kit generate` 生成）
 
 ## 数据库迁移
 
-在 `apps/game-server-hub` 目录下执行：
+在**仓库根目录**执行：
 
 - `pnpm run db:generate`：基于 `server/src/shared/db/schema/index.ts` 生成迁移
 - `pnpm run db:migrate`：执行迁移
 - `pnpm run db:studio`：打开 Drizzle Studio
 
-## 本地开发启动
+改 schema 后，请在同一次提交里包含 `server/drizzle/` 下的迁移文件；CI 会做 schema 漂移检查。
 
-- `pnpm run dev:prepare`：初始化数据库目录与日志目录，并打印当前加载的环境文件。
-- `pnpm run dev`：一键启动前端 + 后端（包含 `dev:prepare` 预处理）。
+## 本地开发
 
-## Linux 依赖一键安装（Ubuntu/Debian）
+- `pnpm run dev:prepare`：初始化数据库目录、日志目录与工作区组件
+- `pnpm run dev`：同时启动前端与后端（内部会先跑 `dev:prepare`）
 
-在 `apps/game-server-hub` 目录下执行：
+## Linux 生产安装
 
-- `chmod +x ./scripts/install.linux.sh`
-- `./scripts/install.linux.sh`
-
-或直接执行：
-
-- `pnpm run install:linux`
-
-脚本会自动安装/检查：
-
-- Docker（`docker-ce`、`docker-compose-plugin`）
-- Node.js（满足项目要求：`>=20`，默认安装 Node 22 LTS）
-- SteamCMD（优先 apt，失败时回退官方 tarball）
-- 主机预检（系统版本、CPU 架构、磁盘剩余空间、网络连通性）
-- 端口占用检测与防火墙放行（默认 `80`）
-- 拉取并启动面板镜像（默认使用当前 Release tag，不使用滚动的 `latest`）
-- 自动生成管理员账号与随机密码（首次登录强制改密）
-- 安装状态日志与失败回滚（状态文件默认在 `/var/log/game-server-hub/install.status`）
-
-可选环境变量（执行脚本前设置）：
-
-- `PANEL_PORT`：面板端口（默认 `80`）
-- `PANEL_IMAGE_REPOSITORY` / `PANEL_IMAGE_TAG`：镜像仓库与 tag
-- `PANEL_HOST`：安装完成后展示的访问域名/IP（默认自动探测）
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD`：初始化管理员凭证（未提供时自动生成随机密码）
+- `sudo bash ./scripts/install.linux.sh --mode docker|native`，或 `pnpm run install:linux`
+- 参数与行为以 `sudo bash ./scripts/install.linux.sh --help` 为准；面板默认端口 `9527`
+- 安装、升级、回滚、卸载与排错见 [docs/INSTALL.md](../docs/INSTALL.md)
 
 ## 分层约定
 
-每个模块内部建议保持清晰调用链：
-
-`controller -> service/usecase -> domain -> repository/infra adapter`
-
-避免跨模块深层引用；公共能力统一沉淀到 `server/src/shared/*`。
+- 调用链：`controller -> service/usecase -> domain -> repository/infra adapter`
+- 业务模块不得直接调用 `dockerode`、执行 `docker` 命令或拼接 systemd 单元，基础设施细节只存在于 `infra/` 的对应 Adapter 中（见 [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)）
+- 避免跨模块深层引用；公共能力统一沉淀到 `server/src/shared/*`

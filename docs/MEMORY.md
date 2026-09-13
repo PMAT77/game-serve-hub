@@ -1,6 +1,6 @@
 # 宿主机内存与 DST 部署档位
 
-Game Server Hub 生产环境为 **全 Docker**：面板容器 + 每实例 DST 容器（开启洞穴时为 **地上 + 洞穴两个容器**）+ 安装时的 **SteamCMD 临时容器**。  
+Game Server Hub 支持 **Docker 与 Native systemd 双运行时**。下文的档位与预算按 **Docker 模式** 给出：面板容器 + 每实例 DST 容器（开启洞穴时为 **地上 + 洞穴两个容器**）+ 安装时的 **SteamCMD 临时容器**；Native 模式没有容器与 SteamCMD 子容器开销，但游戏进程本身的内存占用相近。  
 任务管理器里单个进程只显示几十 MiB 属正常现象，**总占用请看「可用内存」与 `docker stats`**。
 
 ---
@@ -68,7 +68,10 @@ sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose
 | 变量 | 含义 |
 |------|------|
 | `GSH_STEAMCMD_CONTAINER_MEMORY_MB` | SteamCMD 子容器内存硬上限（MiB），不设则不限制 |
+| `GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB` | SteamCMD 子容器 swap 上限（MiB），预设中与内存上限同值 |
 | `GSH_DST_CONTAINER_MEMORY_MB` | 每个 DST 分片容器上限（MiB） |
+| `GSH_HOST_STEAMCMD_PLANNING_MB` | 安装 / 更新前的内存规划预留（MiB），参与守卫判断 |
+| `GSH_HOST_DST_PLANNING_MB` | 单个 DST 分片启动前的内存规划预留（MiB） |
 | `GSH_HOST_MEMORY_HEADROOM_MB` | 安装/启动守卫保留空闲（默认 512） |
 | `GSH_HOST_MIN_AVAILABLE_MB` | 设为 `0` 可关闭守卫（小内存慎用） |
 | `GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS` | 单次 app_update 超时（毫秒，默认 3600000 = 60 分钟），超时终止后重试断点续传 |
@@ -103,13 +106,19 @@ sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose
 
 ```bash
 free -h
+
+# Docker 模式
 docker stats --no-stream
 docker logs --tail 100 game-server-hub-panel
+
+# Native 模式（没有容器，游戏分片是 gsh 用户的 systemd 服务）
+sudo systemctl status game-server-hub.service --no-pager
+sudo journalctl -u game-server-hub.service -n 100 --no-pager
 ```
 
-SteamCMD 容器 exit 137 有两种来源：
+Docker 模式下 SteamCMD 容器 exit 137 有两种来源（Native 模式无容器，对应的是安装任务超时与宿主机 OOM）：
 
-- **面板超时终止**：单次 app_update 超过 `GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS`（默认 60 分钟）后由面板 SIGKILL，日志含 `GSH-APP-UPDATE-TIMEOUT`。此时与内存无关，调大该值即可；已下载内容保留，重试会自动断点续传。
+- **面板超时终止**：单次 app_update 超过 `GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS`（默认 60 分钟）后由面板 SIGKILL，日志含 `GSH-STEAMCMD-TIMEOUT`。此时与内存无关，调大该值即可；已下载内容保留，重试会自动断点续传。
 - **内存不足**：容器硬上限或宿主机 OOM。可调高预设或升级规格，并避免安装与多实例同时运行。
 
 更多安装步骤见 [INSTALL.md](INSTALL.md)。

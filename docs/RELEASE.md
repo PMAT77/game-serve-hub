@@ -16,13 +16,13 @@
 **单一事实来源：**
 
 1. Git tag：`v0.4.1`
-2. `package.json` → `"version": "0.4.0"`
+2. `package.json` → `"version": "0.4.1"`
 3. `CHANGELOG.md` → 对应章节
 4. GitHub Release 说明（镜像 tag 与升级指引）
 
 四者必须一致。**开发期间 `package.json` 的 version 应与最新已发布 tag 保持一致**——不要在功能提交里顺手 bump 版本号，也不要预写带日期的 CHANGELOG 发布章节。
 
-原因：镜像引用（`docker-compose.yml`、`panel.env.example`、`install.linux.sh` 等 6 处）指向的是**已发布**版本，一旦 `package.json` 提前 bump，`pnpm run release:verify` 就会失败，而它在每次推送到 `main` 时都会执行 —— CI 会从那一刻起持续变红，掩盖这期间真正的回归。
+原因：镜像与版本引用共 8 处（见下方检查清单）指向的是**已发布**版本。一旦 `package.json` 提前 bump，`pnpm run release:verify` 就会失败；而它在每次推送到 `main` 时都会执行，CI 会从那一刻起持续变红，掩盖这期间真正的回归。
 
 版本号、CHANGELOG 发布章节与全部镜像引用应在**发布日一次性更新**，见下方检查清单。
 
@@ -35,8 +35,9 @@
 [ ] package.json version 与 tag 一致（不含 v 前缀）
 [ ] 同步 install.linux.sh 内置的 compose 校验和（INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML / _BIND_YML）
       —— 已由 `pnpm run release:verify`（scripts/check-release-consistency.mjs）强制校验，失配会直接给出新摘要
-[ ] 同步 7 处版本引用（两份 compose、panel.env.example、server/src/shared/config/index.ts、README、docs/INSTALL.md）
-[ ] pnpm run release:check 本地通过（lint + test:unit + build）
+[ ] 同步 8 处版本引用（scripts/install.linux.sh 默认 tag、docker-compose.yml、docker-compose.dev.yml、panel.env.example、server/src/shared/config/index.ts、README.md、docs/INSTALL.md、CHANGELOG.md 章节标题）
+[ ] pnpm run release:check 本地通过（release:verify + docs:check + lint + lint:ox + lint:copy + test:unit + build）
+[ ] 文档：新增 / 改名文档已同步 docs/README.md 索引；界面相关改动同步更新 docs/images 截图
 [ ] PR 合并后 CI 绿色
 [ ] git tag v0.x.y && git push origin v0.x.y
 [ ] 首次发布后：在 GHCR Package settings 的 Manage Actions access 授予本仓库写权限（否则 candidate 清理会 403）

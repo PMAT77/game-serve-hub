@@ -6,12 +6,25 @@
 
 面向 Steam 专用服务器的开源运维面板。当前以《饥荒联机版》（DST）为首个完整适配游戏，提供安装、更新、启停、监控、日志、控制台、世界和 Mod 管理。
 
-![Game Server Hub 首页](https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/game-server-hub/GameServer_B.png)
+![Game Server Hub 首页：面板仪表盘](docs/images/home.jpg)
+
+## 目录
+
+- [适合谁](#适合谁)
+- [它能做什么](#它能做什么)
+- [快速开始](#快速开始)
+- [开源与规划](#开源与规划)
+- [常见问题](#常见问题)
+- [交流与反馈](#交流与反馈)
+- [文档](#文档)
+- [参与贡献](#参与贡献)
+- [赞助与商业合作](#赞助与商业合作)
+- [许可证](#许可证)
 
 ## 适合谁
 
 - **个人服主** —— 不想再开一堆 SSH 窗口改 ini、手动重启世界；想在浏览器里管世界、Mod、存档和定时备份。
-- **小团队 / 游戏社区** —— 需要成员账号与权限、多实例并存、操作可追溯。
+- **小团队 / 游戏社区** —— 需要多实例并存与操作可追溯；面板已内置账号认证与权限点，成员管理界面仍在开发中。
 - **托管商 / 集成方** —— 多节点统一管理属于规划中的 Pro 插件；也可直接联系做定制集成（见文末）。
 
 ## 它能做什么
@@ -25,14 +38,14 @@
 
 ## 快速开始
 
-当前为 `v0.4.1` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
+当前为 `v0.4.1` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
 
 | 模式 | 适合谁 | 面板 | SteamCMD / 游戏进程 | 进程管理 |
 | --- | --- | --- | --- | --- |
 | Docker | 小型游戏社区、托管商 | Docker Compose | Docker | Docker Engine |
 | Native | 个人服主 | 裸机 | 裸机 | 仅 systemd |
 
-建议明确指定模式，避免自动判断与你的隔离预期不一致。Native 模式完全不依赖 Docker，也不使用 tmux、screen 或 PM2：面板由系统级 `game-server-hub.service` 管理，游戏分片由 `gsh` 用户的 systemd 服务管理，重启、自恢复、journald 日志和资源限制均由 systemd 接管。**裸机模式属于首期预览能力，建议先在非关键服务器验证。**
+建议明确指定模式，避免自动判断与你的隔离预期不一致。Native 模式完全不依赖 Docker，也不使用 tmux、screen 或 PM2：面板由系统级 `game-server-hub.service` 管理，游戏分片由 `gsh` 用户的 systemd 服务管理。重启、自恢复、journald 日志和资源限制都交给 systemd。**裸机模式属于首期预览能力，建议先在非关键服务器验证。**
 
 > **平台支持**：两种模式都以 Linux 为目标平台。**Windows 不是部署目标，也不提供安装脚本**——它只用于本机开发调试，见[开发指南 · 平台定位](docs/DEVELOPMENT.md#平台定位)。
 
@@ -79,7 +92,7 @@ docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
 
 首次登录必须修改密码（`FORCE_PASSWORD_CHANGE=1` 时面板会拦截至改密页，改密成功后上述凭据文件自动删除）。
 
-> **国内网络**：若你跳过了上面的离线镜像包步骤、结果卡在镜像下载（`TLS handshake timeout`），那正是 GHCR 镜像层域名不可达 —— `docker load` 导入 Release 离线镜像包后重跑安装器即可，步骤见[安装与运维指南 · 离线镜像包完整步骤](docs/INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)。
+> **卡在镜像下载**（`TLS handshake timeout`）说明跳过了上面的离线镜像包步骤：按同一链接完成 `docker load` 后重跑安装器即可。
 
 镜像分发与代理、端口、升级、回滚和完整排错说明见 [安装与运维指南](docs/INSTALL.md)。
 
@@ -121,7 +134,9 @@ sudo loginctl show-user gsh -p Linger
 
 ### 玩家无法连接
 
-同时检查本机防火墙和云厂商安全组。默认需放行面板 `9527/tcp`，以及 DST 的 `10999/udp`、`8766/udp`、`12346/udp`（开启洞穴还需 `11000`、`8768`、`12348`）。安装器只有在传入 `--open-panel-port` / `--open-dst-ports` 时才修改本机防火墙（后者覆盖主世界与洞穴共 6 个 UDP 端口）。完整端口清单见 [DST 开服教程](docs/DST_TUTORIAL.md#4-开放端口安全组与防火墙)。若宿主服务器在 NAT 转发（云平台端口映射 / 路由器映射）后面，安全组之外还要为主世界与洞穴的 6 个 UDP 各加一条转发规则，且外部端口要与内部端口一致（见 [DST 开服教程](docs/DST_TUTORIAL.md) 5.4 节）。
+同时检查本机防火墙和云厂商安全组。默认需放行面板 `9527/tcp`，以及 DST 的 `10999/udp`、`8766/udp`、`12346/udp`（开启洞穴还需 `11000`、`8768`、`12348`）。安装器只有在传入 `--open-panel-port` / `--open-dst-ports` 时才修改本机防火墙，后者覆盖主世界与洞穴共 6 个 UDP 端口。完整端口清单见 [DST 开服教程](docs/DST_TUTORIAL.md#4-开放端口安全组与防火墙)。
+
+若宿主服务器位于 NAT 转发（云平台端口映射 / 路由器映射）之后，情况不同：6 个 UDP 各需一条转发规则，且外部端口必须与内部端口一致。详见 [DST 开服教程 5.4 节](docs/DST_TUTORIAL.md#54-宿主服务器在-nat-转发后面)。
 
 先确认控制台显示的直连地址是否可用：地址来源见命令下方提示，来自"出站 IP 探测"的地址在本机 / 家用 NAT / 容器环境下往往不可直连（开着系统代理时还可能返回代理出口地址）；本机游玩请用「本机」档。Windows 环境的注意事项见 [DST 开服教程第 5 章](docs/DST_TUTORIAL.md#5-需要配置-ip-转发吗)。
 
@@ -142,19 +157,39 @@ sudo loginctl show-user gsh -p Linger
 
 ## 文档
 
+完整索引与阅读路径见 [docs/README.md](docs/README.md)。
+
 **给服主**
 
 | 文档 | 内容 |
 | --- | --- |
-| [安装与运维](docs/INSTALL.md) | 两种模式从零安装、升级、回滚、日志与 FAQ |
+| [安装与运维](docs/INSTALL.md) | 两种模式的选型、安装、升级、回滚、卸载、日志与按关键词排错 |
 | [DST 开服教程](docs/DST_TUTORIAL.md) | 端口放行、面板操作、房间世界、控制台、备份与计划任务 |
-| [内存建议](docs/MEMORY.md) | 4/6/8 GiB 档位、洞穴与 Mod 建议 |
+| [内存建议](docs/MEMORY.md) | 4 / 6 / 8 GiB 档位、洞穴与 Mod 建议、`panel.env` 预设 |
 
 **给开发者**
 
-本地环境搭建、测试与构建见 [开发指南](docs/DEVELOPMENT.md)；版本策略与发布检查清单见 [发布流程](docs/RELEASE.md)；运行时分层与 Open-Core 边界见 [架构与产品边界](docs/ARCHITECTURE.md)。
+| 文档 | 内容 |
+| --- | --- |
+| [开发指南](docs/DEVELOPMENT.md) | 本地环境、代码地图、测试与构建 |
+| [架构与产品边界](docs/ARCHITECTURE.md) | 运行时分层、Open-Core 边界与代码地图 |
+| [发布流程](docs/RELEASE.md) | 版本策略与发布检查清单 |
+| [镜像发布与副本校验](docs/IMAGE_DISTRIBUTION.md) | 统一镜像产物、digest 与离线镜像包 |
 
-版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+**其他**
+
+| 文档 | 内容 |
+| --- | --- |
+| [术语表](docs/GLOSSARY.md) | 实例、分片、集群、统一镜像等名词解释 |
+| [贡献流程](CONTRIBUTING.md) | Issue / PR 与提交规范 |
+| [安全策略](SECURITY.md) | 漏洞报告方式与自托管安全实践 |
+| [版本变更](CHANGELOG.md) | 每个版本的用户可见变更 |
+
+## 参与贡献
+
+欢迎提交 [Issue](https://github.com/PMAT77/game-serve-hub/issues) 与 [Pull Request](https://github.com/PMAT77/game-serve-hub/pulls)；流程与规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，本地开发见 [开发指南](docs/DEVELOPMENT.md)，安全问题见 [SECURITY.md](SECURITY.md)。
+
+后端基于 Fastify 与 Drizzle ORM，前端基于 Vue 3、Vite 与 Fantastic-admin。感谢这些项目及所有贡献者。
 
 ## 赞助与商业合作
 
@@ -182,12 +217,6 @@ sudo loginctl show-user gsh -p Linger
 - 功能问题与 Bug 见[交流与反馈](#交流与反馈)。项目由我利用业余时间维护、平日有主业在身，回复可能不够及时，但看到都会回
 
 <img src="https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/imgs/common/WeChat.jpg" alt="微信联系：PMAT77" width="200" />
-
-## 参与贡献
-
-欢迎提交 [Issue](https://github.com/PMAT77/game-serve-hub/issues) 与 [Pull Request](https://github.com/PMAT77/game-serve-hub/pulls)；流程与规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，本地开发见 [开发指南](docs/DEVELOPMENT.md)，安全问题见 [SECURITY.md](SECURITY.md)。
-
-后端基于 Fastify 与 Drizzle ORM，前端基于 Vue 3、Vite 与 Fantastic-admin。感谢这些项目及所有贡献者。
 
 ## 许可证
 

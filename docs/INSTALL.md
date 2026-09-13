@@ -3,9 +3,18 @@
 - **海外，或网络可直达 GitHub 与 GHCR** → [路线 A](#路线-a海外机器一个命令装完)，一个命令装完。
 - **国内服务器** → [路线 B](#路线-b国内服务器debian-12-离线镜像包全程)，离线镜像包全程，按 Debian 12 验证。
 
-**环境要求**：Debian 12 或 Ubuntu 22.04 / 24.04（只支持 apt 系列）；内存最低约 4 GiB，洞穴与中等 Mod 建议 6 GiB+（档位与预设见 [MEMORY.md](MEMORY.md)，安装器默认自动选档）；根分区至少 4 GiB 空闲；root 或 sudo。
+**环境要求**：Debian 12 或 Ubuntu 22.04 / 24.04（只支持 apt 系列）；内存最低约 4 GiB，洞穴与中等 Mod 建议 6 GiB+（档位与预设见 [MEMORY.md](MEMORY.md)，安装器默认自动选档）；根分区至少 4 GiB 空闲，另外要为离线镜像包（约 227 MB）与导入后的本地镜像（约 560 MB，导入完成后包可删除）、游戏本体（数 GB）与存档备份预留空间；root 或 sudo。
 
 > Windows 不受支持；本地开发见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+
+### 两种模式怎么选
+
+| 模式 | 适合谁 | 面板运行方式 | 游戏进程 | 进程管理 |
+| --- | --- | --- | --- | --- |
+| Docker | 小型游戏社区、游戏托管商 | Docker Compose | Docker 容器 | Docker Engine |
+| Native systemd | 个人服主 | 系统级 systemd 服务 | `gsh` 用户的 systemd 服务 | systemd（不使用 tmux / screen / PM2） |
+
+两种模式的面板功能一致，都属于首期正式支持；Native 完全不依赖 Docker，但作为首期能力，仍建议先在非关键服务器验证。**选型与差异以本节为准**，其他文档只做引用。
 
 ---
 
@@ -70,7 +79,7 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 tag=v0.4.1
 base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
 
-# 下载镜像包与校验文件（v0.4.1 约 200 MB；v0.3.5 是 420 MB，体积对不上说明下错了版本）
+# 下载镜像包与校验文件（v0.4.1 约 227 MB；差得离谱说明下错了版本）
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz"        "${base}/game-server-hub-${tag}-docker-image.tar.gz"
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz.sha256" "${base}/game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
@@ -80,7 +89,7 @@ sha256sum -c "game-server-hub-${tag}-docker-image.tar.gz.sha256"
 # 核对包内镜像 tag 与目标版本一致（RepoTags 应为 ghcr.io/pmat77/game-server-hub:v0.4.1）
 tar -xOzf "game-server-hub-${tag}-docker-image.tar.gz" manifest.json | head -c 200; echo
 
-# 导入镜像（解压约 3.2 GB，预留 4 GB 磁盘；-i 带进度条，不要用 gunzip 管道；
+# 导入镜像（v0.4.1 下载包约 227 MB，导入后本地镜像约 560 MB，预留 4 GB 磁盘；-i 带进度条，不要用 gunzip 管道；
 # 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.4.1 即成功）
 docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
 
@@ -108,6 +117,10 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 
 ## 装好之后
 
+### 配置入口
+
+面板的环境变量集中在 `/opt/game-server-hub/panel.env`，全部键名与注释见仓库根目录的 [panel.env.example](../panel.env.example)；安装器会按检测到的内存档位自动追加预设片段（见 [MEMORY.md](MEMORY.md)）。改完执行 `gsh restart` 生效。
+
 ### 端口与防火墙
 
 | 用途 | 协议 | 默认端口 |
@@ -124,22 +137,32 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 
 安装器默认不改防火墙；需要时加 `--open-panel-port` / `--open-dst-ports`（后者放行主世界与洞穴共 6 个 UDP 端口），云服务器安全组单独放行。宿主服务器本身在 NAT 转发（云平台端口映射 / 路由器映射）后面时，还要在那边按**与内部相同的端口**逐条添加转发规则，见 [DST 开服教程](DST_TUTORIAL.md) 5.4 节。
 
-### 常用命令
+### 常用命令（宿主机 `gsh` CLI）
+
+安装器会在宿主机装好 `gsh`。它只管理面板栈，不碰游戏实例——实例的启停与安装始终在面板里操作。
+
+| 命令 | 作用 |
+| --- | --- |
+| `gsh status` | 面板栈状态与健康检查 |
+| `gsh logs` | 跟随面板日志（从最近 200 行起） |
+| `gsh restart` / `gsh stop` / `gsh start` | 重启 / 停止 / 启动面板栈，不影响游戏容器 |
+| `gsh update` | 拉取统一镜像并重建面板栈 |
+| `gsh doctor` | 体检：健康、运行时、资源、脱敏配置、日志与版本 |
+| `gsh setup-swap` | 小内存机器创建 2 GB swap，并设置 OOM 相关内核参数 |
+
+不带参数运行 `gsh` 会进入交互菜单，`gsh --help` 查看完整用法。面板栈配置文件路径可用 `GSH_PANEL_ENV_FILE` 覆盖（默认 `/opt/game-server-hub/panel.env`）。
 
 ```bash
 # 健康检查（runtime.status 应为 running）
 curl -fsS http://127.0.0.1:9527/health
-
-# 面板容器：状态 / 日志 / 重启
-cd /opt/game-server-hub
-sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml ps
-sudo docker logs -f game-server-hub-panel
-sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml restart panel
 ```
+
+> 直接操作 Docker 的等价命令（需在 `/opt/game-server-hub` 目录下执行）：
+> `sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml ps`
 
 ### 镜像运行层说明
 
-统一镜像的运行层只包含面板产物（前端 dist + 服务端 bundle + 数据库迁移），**不带 node_modules，也没有 pnpm / npm / tsx**：服务端依赖已在构建期全部打进 bundle，因此不要 `docker exec` 进容器执行包管理或 Node 工具链命令（会提示命令不存在）。排障走 `docker logs`、面板 API 与宿主机 `gsh` CLI。
+统一镜像的运行层只包含面板产物（前端 dist + 服务端 bundle + 数据库迁移），**不带 node_modules**：服务端依赖已在构建期全部打进 bundle。镜像基于官方 `node:22-bookworm-slim`（`node`、`npm` 自带，`pnpm` 由 corepack 提供），但容器内没有依赖与构建工具链，因此不要 `docker exec` 进容器执行包管理或构建命令。排障走 `docker logs`、面板 API 与宿主机 `gsh` CLI。
 
 ### 登录与安全
 
@@ -165,9 +188,13 @@ docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
 
 ### 升级（面板内一键更新）
 
-「系统设置 → 面板与游戏版本」分两步走：先点「下载更新」把新镜像拉到本地（版本行下方会实时显示 `已下载 512 MB / 1.2 GB`，本地已有镜像时直接就绪），下载完成后按钮变为「立即安装」，点击后写入 panel.env 并重建面板容器。
+「系统设置 → 面板与游戏版本」分两步走。先点「下载更新」把新镜像拉到本地：版本行下方会实时显示 `已下载 512 MB / 1.2 GB`，本地已有镜像时直接就绪。下载完成后按钮变为「立即安装」，点击后会写入 panel.env 并重建面板容器。
 
-下载段默认优先下载 Release 离线镜像包（`game-server-hub-<tag>-docker-image.tar.gz`，经 GitHub 加速代理 + 同名 `.sha256` 校验后 `docker load` 导入），失败才回退 GHCR 拉取；可用 `GSH_GITHUB_PROXY` 换加速代理；下载源在「系统设置 → 面板与游戏版本 → 更新下载源」里切换（自动 / 仅离线镜像包 / 仅镜像仓库），也可用 `GSH_PANEL_UPDATE_SOURCE=offline|pull` 设默认值（面板里的选择优先）。下载中断会保留分片、下次从断点续传；开始前会先检查目标目录的剩余空间。下载不中断面板，可以提前挑个空闲时段下载、之后再安装。也可以按[阶段二](#阶段二导入离线镜像包)先手动 `docker load`，回到本页点「下载更新」会跳过下载直接进入「立即安装」。按钮置灰时用面板给出的 `sudo gsh update`。
+下载段默认优先下载 Release 离线镜像包（`game-server-hub-<tag>-docker-image.tar.gz`，经 GitHub 加速代理 + 同名 `.sha256` 校验后 `docker load` 导入），失败才回退 GHCR 拉取；可用 `GSH_GITHUB_PROXY` 更换加速代理。
+
+下载源在「系统设置 → 面板与游戏版本 → 更新下载源」里切换（自动 / 仅离线镜像包 / 仅镜像仓库），也可用 `GSH_PANEL_UPDATE_SOURCE=offline|pull` 设默认值，面板里的选择优先。下载中断会保留分片、下次从断点续传，开始前也会检查目标目录的剩余空间。
+
+下载不中断面板，可以提前挑个空闲时段下载、之后再安装。也可以按[阶段二](#阶段二导入离线镜像包)先手动 `docker load`，回到本页点「下载更新」会跳过下载直接进入「立即安装」。按钮置灰时用面板给出的 `sudo gsh update`。
 
 重建动作由一个临时的 updater 容器完成，它需要镜像里有 `docker` CLI 与 compose 插件。v0.3.10 起统一镜像自带这两样，面板会优先用**本地已有的目标镜像 / 当前面板镜像**当 updater 运行时，因此离线环境也能完成更新，不再去 Docker Hub 拉 `docker:27-cli`。若你所在网络要求固定某个 updater 镜像（例如内网制品库里的同等镜像），在 `panel.env` 里设置 `GSH_PANEL_UPDATER_IMAGE` 即可。
 
@@ -176,6 +203,55 @@ docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
 ### 备份与恢复（v0.2.0 起）
 
 面板「备份与恢复」页：实例存档备份/恢复（运行中自动 `c_save()`，恢复要求实例停止），更新与删实例前自动备份；每实例保留 10 份、SQLite 快照 5 份；备份包可直接下载，落在 `/var/lib/game-server-hub/backups/`。重要服自行异地留存。
+
+---
+
+## 卸载与清理
+
+卸载不会删除存档，除非你显式删除数据目录。**动手前先下载备份**（面板「备份与恢复」页可直接下载，重要存档请异地留存）。安装器没有 `--uninstall` 参数，按下面的命令路径执行即可。
+
+### Docker 模式
+
+```bash
+cd /opt/game-server-hub
+# 停止并移除面板栈（游戏实例容器不受影响）
+sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml down
+
+# 游戏实例：建议先在面板里逐个删除实例，再确认没有遗留容器
+sudo docker ps -a | grep -i gsh
+sudo docker ps -a --filter "name=gsh-" -q | xargs -r sudo docker rm -f
+
+# 确认已备份后再删除数据目录（存档、备份与数据库都在这里）
+sudo ls /var/lib/game-server-hub        # game-server-hub.sqlite、instances/、backups/
+sudo rm -rf /var/lib/game-server-hub /opt/game-server-hub
+
+sudo docker image prune -f              # 可选：清理统一镜像
+```
+
+### Native 模式
+
+```bash
+sudo systemctl stop game-server-hub.service
+sudo systemctl disable game-server-hub.service
+GSH_UID="$(id -u gsh)"
+# 停止全部分片服务（与附录 A 的用法一致）
+sudo -u gsh XDG_RUNTIME_DIR="/run/user/${GSH_UID}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${GSH_UID}/bus" \
+  systemctl --user stop 'gsh-instance-*'
+sudo loginctl disable-linger gsh        # 关闭无人登录时的常驻
+sudo rm -f /etc/systemd/system/game-server-hub.service && sudo systemctl daemon-reload
+
+# 确认已备份后再删除数据目录
+sudo ls /var/lib/game-server-hub
+sudo rm -rf /opt/game-server-hub /var/lib/game-server-hub /var/log/game-server-hub
+sudo userdel -r gsh                     # 确认不再需要 gsh 用户时执行
+```
+
+### 回滚到旧版本
+
+- **Docker 模式**：面板栈可以换回任意已发布 tag —— 用旧 tag 重跑安装器（`GSH_RELEASE_TAG=v0.4.0`），或把 `panel.env` 的 `PANEL_IMAGE` 指向旧 tag 后执行 `gsh update`。
+- **Native 模式**：按[附录 A](#附录-a-native-systemd-部署个人服主) 的 `current` 符号链接步骤切回旧 Release。
+
+> 回滚面板本身不会改动游戏存档，但**旧版本可能不认识新版本迁移过的数据库**。跨版本回滚前先做一次数据库快照（面板「备份与恢复」页），并确认目标 tag 是正式发布版本。
 
 ---
 
@@ -281,9 +357,21 @@ sudo systemctl start game-server-hub.service
 --network auto|cn|global       网络档位（影响镜像源与代理选择）
 --open-panel-port              自动放行面板端口
 --open-dst-ports               自动放行 DST 端口
+
+PANEL_PORT=9527                面板对外端口
+PANEL_IMAGE=REF                统一镜像完整引用（tag 或 digest），自建仓库时使用
+GSH_RELEASE_TAG=vX.Y.Z         安装的版本，默认取脚本内置 tag
+GSH_INSTALL_MODE / GSH_NETWORK_PROFILE   非交互安装时的模式与网络档位
 GSH_FORCE_IMAGE_PULL=1         强制重新拉取镜像（默认本地已有即跳过）
-GSH_PANEL_ENV_PRESET=auto      内存预设档位：auto|small|medium|large
+GSH_PANEL_ENV_PRESET=auto      内存预设档位：auto|small|medium|large|none
+EXPOSE_ADMIN_PASSWORD=1        在安装摘要中明文打印初始密码（默认不打印）
+STRICT_INSTALLER_ASSET_CHECKSUM=0   关闭安装资源校验和强校验（默认 1，失配即中止）
+DST_GAME_PORT / DST_AUTH_PORT / DST_MASTER_PORT / DST_CAVES_*   覆盖默认 DST 端口
+GSH_NATIVE_RELEASE_ARCHIVE=…   Native 离线安装包路径
+GSH_NATIVE_RELEASE_MIRRORS=…   Native Release 下载源
 ```
+
+完整参数与当前默认值以 `sudo bash ./scripts/install.linux.sh --help` 的输出为准。
 
 自建仓库（先 `docker load` 离线包，再 `docker tag`/`push` 到内网）：
 

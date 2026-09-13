@@ -47,9 +47,17 @@
 部署到公网或多人可访问环境时：
 
 1. **立即修改默认密码**；启用 `FORCE_PASSWORD_CHANGE=1`
-2. 生产环境显式设置 `ADMIN_PASSWORD`，勿依赖默认 `123456`
+2. 生产环境不要沿用模板里的示例密码：不设置 `ADMIN_PASSWORD` 时面板会随机生成强密码（读取方式见 [INSTALL.md](docs/INSTALL.md)）；`123456` 只是开发环境默认值
 3. 面板不要直接裸露在公网；使用反向代理、防火墙或 VPN
 4. 定期拉取新版本镜像并阅读 [CHANGELOG.md](CHANGELOG.md)
 5. 勿将 `panel.env`、SQLite 数据库提交到公开仓库
+
+### 反向代理与 HTTPS
+
+面板默认只提供 HTTP。放到公网时建议用 Nginx / Caddy 终止 TLS 并反向代理到面板端口，注意三点：
+
+1. 必须转发长连接：控制台日志与实时状态依赖 SSE，Nginx 需要 `proxy_buffering off;` 与 `proxy_read_timeout` 放宽，并转发 `Upgrade` / `Connection` 头。
+2. 在 `panel.env` 设置 `GSH_TRUST_PROXY`（可信代理地址）。不设置时面板只能看到代理的 IP，登录限流与日志来源都会失真。
+3. 代理层再加一层访问控制（IP 白名单、Basic Auth 或 VPN），比只依赖面板登录更稳妥。
 
 更多安装安全提示见 [docs/INSTALL.md](docs/INSTALL.md)。

@@ -64,6 +64,8 @@ const loadingInstalled = ref(false)
 const unsubscribingWorkshopIds = ref<Set<string>>(new Set())
 const checkedRowKeys = ref<Array<string | number>>([])
 const batchUpdating = ref(false)
+/** 加载顺序调整中：期间禁用全部上移/下移按钮，避免并发提交 */
+const reorderingMods = ref(false)
 const configModalShow = ref(false)
 const configTarget = ref<{ workshopId: string, name: string } | null>(null)
 const instances = ref<InstanceItem[]>([])
@@ -654,8 +656,8 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
   {
     title: '操作',
     key: 'actions',
-    width: 310,
-    render: row => h('div', { class: 'flex items-center gap-3' }, [
+    width: 400,
+    render: (row, index) => h('div', { class: 'flex items-center gap-3' }, [
       ...(row.installStatus === 'ready'
         ? [h(
             NButton,
@@ -708,6 +710,26 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
           onClick: () => goToModDetail(row.workshopId),
         },
         { default: () => '详情' },
+      ),
+      h(
+        NButton,
+        {
+          size: 'tiny',
+          text: true,
+          disabled: !canMoveInstalledMod(row, index, -1),
+          onClick: () => void moveInstalledMod(index, -1),
+        },
+        { default: () => '上移' },
+      ),
+      h(
+        NButton,
+        {
+          size: 'tiny',
+          text: true,
+          disabled: !canMoveInstalledMod(row, index, 1),
+          onClick: () => void moveInstalledMod(index, 1),
+        },
+        { default: () => '下移' },
       ),
     ]),
   },
@@ -948,6 +970,72 @@ async function batchUpdateSelectedMods() {
   }
   finally {
     batchUpdating.value = false
+  }
+}
+
+/** 可参与排序的 Mod：服务端只对「已就绪」的 Mod 落库加载顺序，其余行禁用上移/下移 */
+function isReorderableInstalledMod(row: ModItemDto): boolean {
+  return row.installStatus === 'ready' && !isPendingWorkshop(row.workshopId)
+}
+
+/**
+ * 上移/下移按钮可用性：首行不能上移、末行不能下移、单个 Mod 全部禁用、请求进行中全部禁用；
+ * 目标位置本身不可排序时同样禁用，避免出现「提示成功但顺序没变」。
+ */
+function canMoveInstalledMod(row: ModItemDto, index: number, offset: number): boolean {
+  if (reorderingMods.value || !hasSelectedInstance.value || installedMods.value.length < 2) {
+    return false
+  }
+  if (!isReorderableInstalledMod(row)) {
+    return false
+  }
+  const target = index + offset
+  if (target < 0 || target >= installedMods.value.length) {
+    return false
+  }
+  return isReorderableInstalledMod(installedMods.value[target])
+}
+
+/** 上移/下移一位：提交调整后的完整顺序，成功后以服务端返回的列表为准 */
+async function moveInstalledMod(index: number, offset: number) {
+  const current = installedMods.value
+  const target = index + offset
+  const instanceId = selectedInstanceId.value
+  if (
+    !instanceId
+    || reorderingMods.value
+    || index < 0
+    || index >= current.length
+    || target < 0
+    || target >= current.length
+    || !isReorderableInstalledMod(current[index])
+    || !isReorderableInstalledMod(current[target])
+  ) {
+    return
+  }
+  const reordered = [...current]
+  const moved = reordered.splice(index, 1)
+  reordered.splice(target, 0, ...moved)
+  reorderingMods.value = true
+  try {
+    const response = await apiMod.reorderMods(instanceId, {
+      workshopIds: reordered.filter(mod => isReorderableInstalledMod(mod)).map(mod => mod.workshopId),
+    })
+    installedMods.value = response.data.mods
+    const riskTip = response.data.riskTip?.trim()
+    if (riskTip) {
+      riskTipBanner.value = riskTip
+    }
+    message.success('已调整 Mod 加载顺序，重启实例后生效（可在实例管理执行重启）')
+  }
+  catch (error: unknown) {
+    if (isAuthUnauthorizedError(error)) {
+      return
+    }
+    message.error(getErrorMessage(error, '调整 Mod 加载顺序失败，请稍后重试'))
+  }
+  finally {
+    reorderingMods.value = false
   }
 }
 
@@ -1527,7 +1615,7 @@ onMounted(async () => {
                 :checked-row-keys="checkedRowKeys"
                 class="dst-mod-table min-h-0 flex-1"
                 flex-height
-                :scroll-x="1090"
+                :scroll-x="1180"
                 @update:checked-row-keys="(keys: Array<string | number>) => checkedRowKeys = keys"
               >
                 <template #empty>
@@ -1539,7 +1627,7 @@ onMounted(async () => {
               <div v-else class="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1" :aria-busy="loadingInstalled">
                 <NEmpty v-if="!loadingInstalled && installedMods.length === 0" size="small" :description="subscribedEmptyDescription" />
                 <article
-                  v-for="mod in installedMods"
+                  v-for="(mod, modIndex) in installedMods"
                   :key="mod.workshopId"
                   class="rounded-lg border border-border bg-card p-3 space-y-3"
                 >
@@ -1589,6 +1677,25 @@ onMounted(async () => {
                     </NButton>
                     <NButton :disabled="!hasSelectedInstance" @click="goToModDetail(mod.workshopId)">
                       详情
+                    </NButton>
+                  </div>
+                  <div v-if="installedMods.length > 1" class="flex items-center justify-end gap-2">
+                    <span class="text-xs text-muted-foreground">加载顺序</span>
+                    <NButton
+                      size="small"
+                      secondary
+                      :disabled="!canMoveInstalledMod(mod, modIndex, -1)"
+                      @click="moveInstalledMod(modIndex, -1)"
+                    >
+                      上移
+                    </NButton>
+                    <NButton
+                      size="small"
+                      secondary
+                      :disabled="!canMoveInstalledMod(mod, modIndex, 1)"
+                      @click="moveInstalledMod(modIndex, 1)"
+                    >
+                      下移
                     </NButton>
                   </div>
                 </article>

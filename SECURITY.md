@@ -42,15 +42,37 @@
 
 ---
 
+## 部署模型的权限边界
+
+开始之前的两个前提，请在部署前明确接受。
+
+**面板容器拥有宿主机 root 等价权限。** Docker 模式下面板挂载 `/var/run/docker.sock` 以管理游戏容器，而 Docker 守护进程的 API 等价于宿主机 root：能通过它挂载宿主机文件系统、读取任意文件。因此**面板的一次有效登录就等于宿主机 root**，面板自身的登录、会话与权限点不构成额外的隔离层。相应地：
+
+- 账号与会话的保管优先于一切：长期不用的账号应删除，密码不要复用；
+- 拥有 `system:manage` 权限的账号（可以触发面板更新与 SteamCMD 安装）等同于宿主机管理员；
+- 真正需要隔离时，把面板放在专用主机或虚拟机里，不要与其它业务共用宿主机。
+
+**安装脚本以 root 执行。** 文档给出的一行式安装是 `curl … | sudo bash`。发布流水线同时产出 `install-<tag>.sh` 与同名 `.sha256`，条件允许时请走「下载 → 校验 → 执行」三步，而不是管道直执行：
+
+```bash
+curl -fL -o install.sh https://github.com/PMAT77/game-serve-hub/releases/download/v0.4.2/install-v0.4.2.sh
+curl -fL -o install.sh.sha256 https://github.com/PMAT77/game-serve-hub/releases/download/v0.4.2/install-v0.4.2.sh.sha256
+sha256sum -c install.sh.sha256
+sudo bash install.sh --mode docker
+```
+
+脚本内部会校验它下载的 compose 资源摘要，但那只保护脚本之后的下游，保护不了脚本自身。
+
 ## 安全最佳实践（自托管）
 
 部署到公网或多人可访问环境时：
 
-1. **立即修改默认密码**；启用 `FORCE_PASSWORD_CHANGE=1`
+1. **立即修改默认密码**；`FORCE_PASSWORD_CHANGE` 默认为 `1`，首次登录会拦截至改密页
 2. 生产环境不要沿用模板里的示例密码：不设置 `ADMIN_PASSWORD` 时面板会随机生成强密码（读取方式见 [INSTALL.md](docs/INSTALL.md)）；`123456` 只是开发环境默认值
 3. 面板不要直接裸露在公网；使用反向代理、防火墙或 VPN
 4. 定期拉取新版本镜像并阅读 [CHANGELOG.md](CHANGELOG.md)
 5. 勿将 `panel.env`、SQLite 数据库提交到公开仓库
+6. 改密成功后确认 `data/admin-credentials.txt` 已被删除；该文件只在改密成功时自动清理，长期保留等于把管理员口令留在磁盘上
 
 ### 反向代理与 HTTPS
 

@@ -74,8 +74,9 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-superadmin}
       # 留空即回退「自动生成随机密码并写凭据文件」；非空时该密码即为初始密码
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      # 为空/0 时不强制改密；安装器写入的 1 会经此进入容器，首次登录拦截至 /force-change-password
-      FORCE_PASSWORD_CHANGE: ${FORCE_PASSWORD_CHANGE:-0}
+      # 默认强制改密，与安装器写入的值保持一致。为 0 且未设置 ADMIN_PASSWORD 时，
+      # 自动生成的初始密码会以明文长期留在 data/admin-credentials.txt（只有改密成功才会删除）。
+      FORCE_PASSWORD_CHANGE: ${FORCE_PASSWORD_CHANGE:-1}
       # 紧急同步：为 1 时每次启动用 ADMIN_PASSWORD 覆盖数据库中的管理员密码（用完后改回 0）
       GSH_SYNC_ADMIN_PASSWORD_FROM_ENV: ${GSH_SYNC_ADMIN_PASSWORD_FROM_ENV:-0}
       # 在线找回密码：至少 16 位才在登录页启用「忘记密码」

@@ -21,12 +21,12 @@
 ## 路线 A：海外机器（一个命令装完）
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.1/scripts/install.linux.sh" \
+curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.2/scripts/install.linux.sh" \
   | sudo bash -s -- --mode docker
 ```
 
 > 管道方式锁定的是当次下载内容，不会误用磁盘上的旧脚本。若想先确认拿到的是目标版本：
-> `curl -fsSL "<上面的 URL>" | sed -n '9p'`，第 9 行应输出 `...:-v0.4.1}}` —— 这一行的默认 tag 决定安装器要装的镜像版本。
+> `curl -fsSL "<上面的 URL>" | sed -n '9p'`，第 9 行应输出 `...:-v0.4.2}}` —— 这一行的默认 tag 决定安装器要装的镜像版本。
 
 ```bash
 # 初始密码：安装器默认不打印，从 panel.env 读取（管理员名 superadmin，首登强制改密）
@@ -51,11 +51,11 @@ gsh doctor
 ```bash
 # 下载安装器（gh-proxy 加速；不可用时换 https://ghfast.top/ 前缀）
 # 用 curl -o 指定带版本号的文件名：wget 遇到同名文件不会覆盖而是另存为 .1，容易继续跑上一次的旧脚本
-tag=v0.4.1
+tag=v0.4.2
 curl -fL --retry 3 -o "install-${tag}.sh" \
   "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
 
-# 自证版本：必须输出 ...:-v0.4.1}}，对不上就停下排查（这行的默认 tag 决定安装器要装的镜像版本）
+# 自证版本：必须输出 ...:-v0.4.2}}，对不上就停下排查（这行的默认 tag 决定安装器要装的镜像版本）
 sed -n '9p' "install-${tag}.sh"
 
 # 第一次运行：自动装好 Docker 与 Compose 插件。
@@ -76,21 +76,21 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 ### 阶段二：导入离线镜像包
 
 ```bash
-tag=v0.4.1
+tag=v0.4.2
 base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
 
-# 下载镜像包与校验文件（v0.4.1 约 227 MB；差得离谱说明下错了版本）
+# 下载镜像包与校验文件（约 227 MB，以 Release 页面显示为准；差得离谱说明下错了版本）
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz"        "${base}/game-server-hub-${tag}-docker-image.tar.gz"
 curl -fL --retry 3 -o "game-server-hub-${tag}-docker-image.tar.gz.sha256" "${base}/game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
 # 校验完整性（期望输出末尾 OK）。.sha256 记录原始文件名，改过名需先改回
 sha256sum -c "game-server-hub-${tag}-docker-image.tar.gz.sha256"
 
-# 核对包内镜像 tag 与目标版本一致（RepoTags 应为 ghcr.io/pmat77/game-server-hub:v0.4.1）
+# 核对包内镜像 tag 与目标版本一致（RepoTags 应为 ghcr.io/pmat77/game-server-hub:v0.4.2）
 tar -xOzf "game-server-hub-${tag}-docker-image.tar.gz" manifest.json | head -c 200; echo
 
-# 导入镜像（v0.4.1 下载包约 227 MB，导入后本地镜像约 560 MB，预留 4 GB 磁盘；-i 带进度条，不要用 gunzip 管道；
-# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.4.1 即成功）
+# 导入镜像（v0.4.2 下载包约 227 MB，导入后本地镜像约 560 MB，预留 4 GB 磁盘；-i 带进度条，不要用 gunzip 管道；
+# 输出 Loaded image: ghcr.io/pmat77/game-server-hub:v0.4.2 即成功）
 docker load -i "game-server-hub-${tag}-docker-image.tar.gz"
 
 # 断言本地 tag 与目标版本一致：安装器只认完整引用字符串，tag 对不上即使内容相同也会重新拉取
@@ -325,12 +325,12 @@ Docker 与 Native 之间不自动迁移。保留数据目录后按目标模式�
 
 ```bash
 # 安装
-git clone --branch v0.4.1 --depth 1 https://github.com/PMAT77/game-serve-hub.git
+git clone --branch v0.4.2 --depth 1 https://github.com/PMAT77/game-serve-hub.git
 cd game-serve-hub          # 目录名取自仓库名（game-serve-hub），镜像名才是 game-server-hub
 sudo bash ./scripts/install.linux.sh --mode native --network auto
 
 # 离线安装：指定本地 Native Release 包（旁须有同名 .sha256）
-sudo GSH_RELEASE_TAG=v0.4.1 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.4.1-linux-x64.tar.gz \
+sudo GSH_RELEASE_TAG=v0.4.2 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.4.2-linux-x64.tar.gz \
   bash ./scripts/install.linux.sh --mode native
 ```
 
@@ -378,8 +378,8 @@ GSH_NATIVE_RELEASE_MIRRORS=…   Native Release 下载源
 ```bash
 sudo docker login registry.example.com
 # 版本三方必须一致：脚本默认 tag（sed -n '9p' 可查）= 本地镜像 tag = 这里 PANEL_IMAGE 的 tag
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.1/scripts/install.linux.sh \
-  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.4.1 bash -s -- --mode docker --network cn
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.2/scripts/install.linux.sh \
+  | sudo env PANEL_IMAGE=registry.example.com/gsh/game-server-hub:v0.4.2 bash -s -- --mode docker --network cn
 ```
 
 镜像引用与 Release tag 一致，按 Release 的 `release-images.json` 核对 digest。

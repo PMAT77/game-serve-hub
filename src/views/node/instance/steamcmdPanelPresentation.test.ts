@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import type { RuntimeEnvironmentInput } from './steamcmdPanelPresentation.ts'
 import { resolveRuntimeEnvironmentView } from './steamcmdPanelPresentation.ts'
 
-const UNIFIED_REF = 'ghcr.io/pmat77/game-server-hub:v0.4.1'
+const UNIFIED_REF = 'ghcr.io/pmat77/game-server-hub:v0.4.2'
 
 function baseInput(overrides: Partial<RuntimeEnvironmentInput> = {}): RuntimeEnvironmentInput {
   return {

@@ -38,7 +38,7 @@
 
 ## 快速开始
 
-当前为 `v0.4.1` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
+当前为 `v0.4.2` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
 
 | 模式 | 适合谁 | 面板 | SteamCMD / 游戏进程 | 进程管理 |
 | --- | --- | --- | --- | --- |
@@ -56,14 +56,14 @@
 > Native 模式不拉取任何容器镜像，不需要这一步。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.1/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.2/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 ### Native systemd 模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.1/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.2/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -72,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.1/script
 若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.4.1/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.4.2/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 

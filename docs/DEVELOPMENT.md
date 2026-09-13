@@ -186,6 +186,9 @@ pnpm run release:check
 | `CORS_ORIGIN` | 跨域：`true`/`false` 或逗号分隔白名单；开发默认可跨域，生产默认同源 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 初始化管理员；未设密码且管理员尚不存在时自动生成强随机密码并写入 `data/admin-credentials.txt`（0600，不写日志）；管理员已存在时不覆盖，除非 `GSH_SYNC_ADMIN_PASSWORD_FROM_ENV=1` |
 | `FORCE_PASSWORD_CHANGE` | `1` 时首次登录进入强制改密页 |
+| `GSH_TRUST_PROXY` | 部署在 Nginx / Caddy 等反向代理后面时填可信代理地址；不设则按 TCP 对端取来源 IP，登录限流与日志记到的都是代理地址 |
+| `GSH_INSTALL_PATH_POLICY` | 实例安装路径策略；默认要求位于 `GSH_INSTANCES_ROOT` 之下，设 `any` 允许任意绝对路径（自行承担隔离风险） |
+| `GSH_SAVE_IMPORT_ROOT` | 存档导入上传包的临时根目录，默认系统临时目录 |
 
 ### Steam / Mod 相关环境变量（开发排查）
 

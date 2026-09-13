@@ -1,0 +1,60 @@
+# 术语表
+
+本文解释文档与面板里反复出现、但容易混淆的名词。首次阅读其他文档时遇到不认识的词，可回到这里查。
+
+## 运行与部署
+
+| 术语 | 含义 |
+| --- | --- |
+| **面板（Panel）** | 本项目提供的 Web 管理界面与后端服务，浏览器打开 `http://<服务器IP>:9527` 使用的就是它 |
+| **实例（Instance）** | 一套独立的 DST 服务器（一个集群），包含配置、存档与运行中的游戏进程。可以创建多个实例开多个服 |
+| **分片（Shard）** | 实例内部的独立世界进程。DST 有 **地上（Master）** 与 **洞穴（Caves）** 两个分片，各占一组 UDP 端口与一份内存 |
+| **集群（Cluster）** | DST 对"一个服务器的全部世界"的称呼，对应面板里的一个实例；集群配置指 `cluster.ini` 中的房间与网络设置 |
+| **Docker 模式** | 面板与游戏都跑在容器里，由 Docker Compose 编排 |
+| **Native systemd 模式** | 不依赖 Docker：面板是系统级 systemd 服务，游戏分片是 `gsh` 用户的 systemd 用户服务 |
+| **`gsh` CLI** | 安装在宿主机的命令行工具，只管面板栈（`status` / `logs` / `restart` / `update` / `doctor` / `setup-swap`），不管理游戏实例 |
+| **`panel.env`** | 面板的环境变量文件，生产安装后在 `/opt/game-server-hub/panel.env`；模板见仓库根目录 `panel.env.example` |
+| **linger** | systemd 特性：`loginctl enable-linger gsh` 让 `gsh` 的用户服务在无人登录时继续运行 |
+| **运行时（Runtime）/ 适配器（Adapter）** | 代码分层概念：运行时指管理游戏进程的抽象接口，适配器是它的具体实现（Docker、systemd），见[架构文档](ARCHITECTURE.md) |
+
+## 镜像与分发
+
+| 术语 | 含义 |
+| --- | --- |
+| **统一镜像** | v0.2.0 起把面板、DST 运行库与 SteamCMD 合并成的单个镜像 `ghcr.io/pmat77/game-server-hub` |
+| **tag 与 digest** | tag（如 `v0.4.2`）是可读的版本标签，digest 是镜像内容的不可变指纹；部署与排查以 digest 为准，见 [IMAGE_DISTRIBUTION.md](IMAGE_DISTRIBUTION.md) |
+| **离线镜像包** | 每个 Release 附带的 `game-server-hub-<tag>-docker-image.tar.gz`（含同名 `.sha256`），用 `docker load -i` 导入，供 GHCR 不可达时使用 |
+| **安装器** | `scripts/install.linux.sh`，负责系统预检、装 Docker/SteamCMD、写入 `panel.env`、拉取镜像并启动面板 |
+| **网络档位** | 安装器的 `--network auto\|cn\|global`，决定软件源与下载加速策略；`cn` 会临时切换国内软件源并在失败时还原 |
+
+## 游戏与运维
+
+| 术语 | 含义 |
+| --- | --- |
+| **SteamCMD** | Valve 的命令行工具，面板用它下载 DST 服务端与创意工坊 Mod |
+| **Klei 集群令牌** | `pds-` 开头的长字符串，公网联机必需；在 <https://accounts.klei.com/> 生成 |
+| **世界生成 vs 世界规则** | 世界生成是地图参数（生成后多数不能再改），世界规则是玩法开关（改后重进世界生效）。两者都写入 `worldgenoverride.lua` |
+| **Mod 订阅 vs 启用** | 订阅只是用 SteamCMD 把 Mod 下载到服务器；还要在世界设置里**启用**到地上或洞穴世界才会生效 |
+| **控制台（游戏控制台）** | 面板中向游戏进程下发 DST 控制台命令的入口，常用 `c_save()`、`c_rollback(n)`、`c_reset()` |
+| **监控台** | 面板首页的资源总览页：主机与实例的 CPU、内存、磁盘、网络 |
+| **直连地址档位** | 控制台给出的连接命令有三种来源：**本机**（`127.0.0.1`）、**局域网**（内网网卡）、**公网**（出站 IP 探测）。本机或容器环境下"公网"档通常不可直连 |
+| **备份类型** | 手动备份，以及系统在**更新前**、**删除前**、**恢复前**、**导入前**自动创建的安全备份；**数据库快照**是对面板自身 SQLite 的一致性备份，不含游戏存档 |
+| **计划任务** | 面板的定时器：定时备份、定时重启、更新检查、数据库快照 |
+| **`HOST_MEMORY_PRESSURE`** | 可用内存不足时安装 / 启动接口返回的错误码，可通过 `panel.env` 的内存守卫参数调整，见 [MEMORY.md](MEMORY.md) |
+
+## 网络
+
+| 术语 | 含义 |
+| --- | --- |
+| **安全组** | 云厂商在虚拟机之外的一层入站规则，必须手动放行面板 TCP 与游戏 UDP 端口 |
+| **本机防火墙** | 服务器内部的 ufw / firewalld；安装器的 `--open-panel-port` / `--open-dst-ports` 只影响它 |
+| **NAT 转发** | 宿主服务器没有直连公网 IP 时，需要在云平台"端口转发"或路由器上按**与内部相同的端口**再加一层映射，见 [DST 开服教程 5.4](DST_TUTORIAL.md#54-宿主服务器在-nat-转发后面) |
+| **CGNAT** | 运营商级 NAT：路由器 WAN 口是 `10.` / `100.64.` / `172.16-31.` 开头时，端口映射不会生效 |
+
+## 项目治理
+
+| 术语 | 含义 |
+| --- | --- |
+| **Open-Core** | 核心功能永久开源（MIT），商业能力以独立插件形式提供，边界见 [ARCHITECTURE.md](ARCHITECTURE.md) |
+| **Community / Pro** | Community 指当前免费开源的核心；Pro 指规划中的商业插件（多节点管理等），**尚未开发** |
+| **Release 资产** | 每个 tag 附带的 `release-images.json`（镜像 digest）、离线镜像包及其校验和、provenance 与 SBOM |

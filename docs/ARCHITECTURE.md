@@ -97,8 +97,11 @@ Docker Adapter 可以继续用容器 ID 作为运行时引用；Native Adapter �
 ### 服务模型
 
 - `game-server-hub.service`：系统级面板服务，以专用 `gsh` 用户运行。
-- `gsh-instance-<id>-master.service`：DST 地上世界用户服务。
-- `gsh-instance-<id>-caves.service`：DST 洞穴世界用户服务。
+- `gsh-<实例 ID>-master.service`：DST 地上世界用户服务。
+- `gsh-<实例 ID>-caves.service`：DST 洞穴世界用户服务。
+
+  实例 ID 是创建实例时生成的 UUID，因此单元名形如 `gsh-3f2a8c1e-…-master.service`；
+  运维命令请用 `gsh-*.service` 通配，不要写成 `gsh-instance-*`——那样匹配不到任何单元。
 - 使用 `loginctl enable-linger gsh` 保证用户服务在无人登录时仍可运行。
 - 用户服务文件存放在 `~gsh/.config/systemd/user/`，实例配置和 FIFO 存放在受控的数据目录。
 

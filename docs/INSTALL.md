@@ -236,7 +236,7 @@ sudo systemctl disable game-server-hub.service
 GSH_UID="$(id -u gsh)"
 # 停止全部分片服务（与附录 A 的用法一致）
 sudo -u gsh XDG_RUNTIME_DIR="/run/user/${GSH_UID}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${GSH_UID}/bus" \
-  systemctl --user stop 'gsh-instance-*'
+  systemctl --user stop 'gsh-*.service'   # 分片单元名为 gsh-<实例UUID>-<master|caves>.service
 sudo loginctl disable-linger gsh        # 关闭无人登录时的常驻
 sudo rm -f /etc/systemd/system/game-server-hub.service && sudo systemctl daemon-reload
 
@@ -340,7 +340,7 @@ sudo systemctl status game-server-hub.service --no-pager
 sudo journalctl -u game-server-hub.service -f
 GSH_UID="$(id -u gsh)"
 sudo -u gsh XDG_RUNTIME_DIR="/run/user/${GSH_UID}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${GSH_UID}/bus" \
-  systemctl --user list-units 'gsh-instance-*'
+  systemctl --user list-units 'gsh-*.service'
 
 # 回滚到旧版本
 sudo systemctl stop game-server-hub.service

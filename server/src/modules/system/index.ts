@@ -4,6 +4,7 @@ import type {
   DirectoryItem,
   NetworkConfigRequest,
   PanelSettingsRequest,
+  PanelSettingsSaveResponse,
   SteamcmdConfigRequest,
 } from '../../../../shared/contracts/system'
 import {
@@ -84,8 +85,9 @@ import {
   refreshPanelUpdateStatus,
   schedulePanelUpdateChecks,
 } from './panel-update'
-import { resolveActualPanelPortFromRequest } from './panel-port'
+import { applyPanelPortToDeployment, resolveActualPanelPortFromRequest } from './panel-port'
 import { syncDevComposeWebPort } from './dev-compose-env'
+import type { PanelPortSyncResult } from './panel-port-deploy'
 import { registerDatabaseBackupRoutes } from './db-backup-routes'
 
 /**
@@ -100,6 +102,7 @@ export function registerSystemModule(app: FastifyInstance) {
 
   app.get('/app/system/settings', async (request): Promise<ApiSuccessResponse<ReturnType<typeof getDefaultPanelSettings> & {
     apiPort: number
+    isProduction: boolean
   }> | ApiErrorResponse> => {
     const authError = await requirePermission(request, SYSTEM_READ_PERMISSION)
     if (authError) {
@@ -111,12 +114,11 @@ export function registerSystemModule(app: FastifyInstance) {
     return success({
       ...settings,
       apiPort: actualPanelPort,
+      isProduction: config.mode === 'production',
     }, request)
   })
 
-  app.post('/app/system/settings', async (request): Promise<ApiSuccessResponse<{
-    isSuccess: boolean
-  }> | ApiErrorResponse> => {
+  app.post('/app/system/settings', async (request): Promise<ApiSuccessResponse<PanelSettingsSaveResponse> | ApiErrorResponse> => {
     const authError = await requirePermission(request, SYSTEM_MANAGE_PERMISSION)
     if (authError) {
       return authError
@@ -158,8 +160,26 @@ export function registerSystemModule(app: FastifyInstance) {
     catch (error) {
       app.log.warn({ error }, '同步开发环境前端端口到 panel.env 失败')
     }
+
+    // 把端口真正写进部署配置：数据库里的 panelPort 只是记录，实际端口由部署配置决定，
+    // 不写文件的话「重启后生效」永远不会发生。任何失败都不影响设置保存本身。
+    let portSync: PanelPortSyncResult | null = null
+    try {
+      portSync = await applyPanelPortToDeployment({ port: panelPort, request })
+    }
+    catch (error) {
+      app.log.warn({ error }, '同步面板端口到部署配置失败')
+      portSync = {
+        status: 'manual',
+        envKey: null,
+        port: panelPort,
+        message: '自动同步端口配置失败，请在服务器上手动修改后重启面板，并放行新端口。',
+        manualCommand: null,
+      }
+    }
     return success({
       isSuccess: true,
+      portSync,
     }, request)
   })
 

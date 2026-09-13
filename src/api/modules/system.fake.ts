@@ -62,6 +62,7 @@ export default defineFakeRoute([
       data: {
         ...panelSettings,
         apiPort: 8888,
+        isProduction: false,
       },
     }),
   },
@@ -82,6 +83,7 @@ export default defineFakeRoute([
         status: 1,
         data: {
           isSuccess: true,
+          portSync: null,
         },
       }
     },

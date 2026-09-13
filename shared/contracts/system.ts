@@ -22,8 +22,31 @@ export type PanelSettingsPayload = z.infer<typeof panelSettingsPayloadSchema>
 export const panelSettingsRequestSchema = panelSettingsPayloadSchema.partial()
 export type PanelSettingsRequest = z.infer<typeof panelSettingsRequestSchema>
 
+/** 保存设置时把端口写进部署配置的结果：written=已写入；unchanged=与当前一致；skipped=该环境无需处理；manual=需用户手动执行命令 */
+export const panelPortSyncStatusSchema = z.enum(['written', 'unchanged', 'skipped', 'manual'])
+export const panelPortEnvKeySchema = z.enum(['PANEL_PORT', 'SERVER_PORT'])
+export const panelPortSyncSchema = z.object({
+  status: panelPortSyncStatusSchema,
+  envKey: panelPortEnvKeySchema.nullable(),
+  port: portSchema,
+  message: z.string(),
+  manualCommand: z.string().nullable(),
+})
+export type PanelPortSync = z.infer<typeof panelPortSyncSchema>
+
+export const panelSettingsSaveResponseSchema = successResultSchema.extend({
+  portSync: panelPortSyncSchema.nullable(),
+})
+export type PanelSettingsSaveResponse = z.infer<typeof panelSettingsSaveResponseSchema>
+
 export const panelSettingsResponseSchema = panelSettingsPayloadSchema.extend({
+  /** 面板实际监听的端口（服务端按 GSH_PANEL_PUBLISHED_PORT / X-Forwarded-* / Host 头判定） */
   apiPort: portSchema,
+  /**
+   * 是否为生产部署。开发环境下前端（Vite）与后端各占一个端口，「面板端口」没有单一含义，
+   * 设置页据此隐藏该区块，避免出现「设置里一个端口、浏览器地址栏另一个端口」的误导。
+   */
+  isProduction: z.boolean(),
 })
 export type PanelSettingsResponse = z.infer<typeof panelSettingsResponseSchema>
 

@@ -23,7 +23,10 @@ services:
       GSH_PANEL_CONTAINER_NAME: game-server-hub-panel
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "8888"
-      GSH_PANEL_PUBLISHED_PORT: ${PANEL_PORT:-8888}
+      # PANEL_PORT 故意不给兜底值：兜底值会被面板当成「用户显式声明的对外发布端口」，
+      # 启动时把数据库里的「面板端口」设置改写成它（本地裸跑生产 compose 就会把 9527 改成 8888）。
+      # 留空 = 未声明 = 启动同步跳过；实际对外端口由 --env-file panel.env 的 PANEL_PORT 决定。
+      GSH_PANEL_PUBLISHED_PORT: ${PANEL_PORT:-}
       DB_PATH: /app/data/game-server-hub.sqlite
       SERVER_LOG_DIR: /app/logs
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { PanelSettingsPayload, PanelUpdateStatus } from '@/api/modules/system'
+import type { PanelPortSync, PanelSettingsPayload, PanelUpdateStatus } from '@/api/modules/system'
+import { h } from 'vue'
 import { NAlert, NCollapse, NCollapseItem, NInputNumber, NSelect, NSpin, useDialog } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
@@ -13,6 +14,15 @@ defineOptions({
 
 const loading = ref(false)
 const dialog = useDialog()
+const router = useRouter()
+
+/**
+ * 通知渠道是独立页面：后端菜单把它标为隐藏（menu: false），此前没有任何界面入口，
+ * 用户只能手输 URL 才能打开，而文档还在指引「系统设置 → 通知」。这里给出明确入口。
+ */
+function openNotifyChannels() {
+  void router.push('/system/notify')
+}
 const appSettingsStore = useAppSettingsStore()
 const settingsLoaded = ref(false)
 const settingsLoadError = ref<string | null>(null)
@@ -22,20 +32,42 @@ const downloadLoading = ref(false)
 const installLoading = ref(false)
 const updateStatus = ref<Awaited<ReturnType<typeof apiSystem.getPanelUpdateStatus>>['data'] | null>(null)
 
+/**
+ * 同一个输入框在不同部署形态下管的其实是两个东西，文案必须跟着变，否则就是自相矛盾：
+ * - 生产部署：面板对外提供服务的端口（实际值由服务端按发布端口 / 代理头 / Host 判定）；
+ * - 本地开发：前端开发服务器（Vite）的端口——保存后由后端写进 panel.env 的 VITE_DEV_WEB_PORT，
+ *   此时浏览器地址栏的端口就是它，两者本就该一致。
+ * 此前两种情况共用生产文案，于是出现「输入框 8888、旁边却写着当前访问端口 9527」这种
+ * 看起来像有两个面板端口的画面。
+ */
+const isProductionDeployment = ref(true)
+
+/** 面板实际监听的端口（仅生产部署下有唯一含义），由服务端给出 */
+const actualPanelPort = ref<number | null>(null)
+
+/** 本地开发时浏览器地址栏的端口就是 Vite 端口，直接读它比猜更准 */
 function resolveBrowserAccessPort(): number {
   if (typeof window === 'undefined') {
     return 80
   }
-  if (window.location.port) {
-    const parsed = Number.parseInt(window.location.port, 10)
-    if (!Number.isNaN(parsed)) {
-      return parsed
-    }
+  const parsed = Number.parseInt(window.location.port, 10)
+  if (!Number.isNaN(parsed)) {
+    return parsed
   }
   return window.location.protocol === 'https:' ? 443 : 80
 }
 
-const browserAccessPort = computed(() => resolveBrowserAccessPort())
+const portFieldTitle = computed(() => (isProductionDeployment.value ? '面板端口' : '前端开发服务器端口'))
+/** 只有服务器部署才需要解释这是什么端口；本地开发看标题「前端开发服务器端口」已经足够 */
+const portFieldDescription = computed(() => (isProductionDeployment.value ? '面板对外提供服务的端口。' : undefined))
+
+/** 服务器上保存会真的写进部署配置，本地则由重启开发服务器决定 */
+const portRestartHint = computed(() => (isProductionDeployment.value
+  ? '保存后会写入服务器配置，重启面板后生效；请记得在安全组或防火墙放行新端口。'
+  : '修改端口保存后，需重启面板才能生效。'))
+
+/** 正在生效的端口：生产看服务端判定值，本地开发就是浏览器所在的 Vite 端口 */
+const activePort = computed(() => (isProductionDeployment.value ? actualPanelPort.value : resolveBrowserAccessPort()))
 
 const form = reactive<PanelSettingsPayload>({
   panelPort: 9527,
@@ -157,6 +189,8 @@ async function loadSettings(options?: { silent?: boolean }) {
     const res = await apiSystem.getSettings()
     const data = res.data
     form.panelPort = data.panelPort
+    actualPanelPort.value = data.apiPort
+    isProductionDeployment.value = data.isProduction
     form.theme = data.theme
     form.autoUpdate = data.autoUpdate
     form.checkUpdateBeforeStart = data.checkUpdateBeforeStart ?? false
@@ -324,6 +358,29 @@ async function installUpdate() {
   }
 }
 
+/**
+ * 端口保存后，把「部署配置到底改没改」如实告诉用户：
+ * 写进去了就提醒放行新端口，写不进去就把命令摊开；无需处理的情况不打扰。
+ */
+function notifyPortSyncResult(result: PanelPortSync | null) {
+  if (!result || result.status === 'unchanged' || result.status === 'skipped') {
+    return
+  }
+  if (result.status === 'written') {
+    faToast.info(`面板将在下次重启后使用 ${result.port} 端口，请先在安全组或防火墙放行`)
+    return
+  }
+  const children = [h('p', { class: 'text-sm' }, result.message)]
+  if (result.manualCommand) {
+    children.push(h('pre', { class: 'rounded bg-black/5 p-2 text-xs whitespace-pre-wrap break-all' }, result.manualCommand))
+  }
+  dialog.warning({
+    title: '端口配置需要手动修改',
+    content: () => h('div', { class: 'space-y-2' }, children),
+    positiveText: '知道了',
+  })
+}
+
 async function saveSettings() {
   if (!settingsLoaded.value || loading.value) {
     faToast.warning('设置尚未加载完成，请稍后重试。')
@@ -339,7 +396,7 @@ async function saveSettings() {
   }
   saveLoading.value = true
   try {
-    await apiSystem.saveSettings({
+    const res = await apiSystem.saveSettings({
       panelPort: form.panelPort,
       theme: form.theme,
       autoUpdate: form.autoUpdate,
@@ -349,6 +406,7 @@ async function saveSettings() {
     })
     appSettingsStore.setColorScheme(form.theme === 'system' ? '' : form.theme)
     faToast.success('系统设置已保存')
+    notifyPortSyncResult(res.data.portSync)
     await loadSettings({ silent: true })
   }
   finally {
@@ -378,14 +436,19 @@ onActivated(async () => {
     </div>
     <div v-else class="space-y-6">
       <AdminSettingsSection
-        title="面板端口"
+        :title="portFieldTitle"
+        :description="portFieldDescription"
       >
-        <p class="text-sm text-muted-foreground">
-          当前访问端口：{{ browserAccessPort }}
+        <!-- 只在「保存的端口还没生效」时提示；两者一致时不必多言 -->
+        <p
+          v-if="activePort !== null && activePort !== form.panelPort"
+          class="text-sm text-muted-foreground"
+        >
+          当前实际端口：{{ activePort }}
         </p>
         <NInputNumber v-model:value="form.panelPort" :min="1" :max="65535" class="max-w-80 mt-3" placeholder="请输入端口号" />
         <p class="text-xs text-muted-foreground mt-2">
-          修改端口保存后，需重启面板才能生效。
+          {{ portRestartHint }}
         </p>
       </AdminSettingsSection>
 
@@ -528,6 +591,19 @@ onActivated(async () => {
       >
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.checkUpdateBeforeStart" />
+        </div>
+      </AdminSettingsSection>
+
+      <AdminSettingsSection
+        title="通知渠道"
+      >
+        <div class="space-y-2">
+          <div class="text-sm text-muted-foreground">
+            配置实例异常退出、内存阈值等事件的推送渠道。
+          </div>
+          <FaButton variant="outline" @click="openNotifyChannels">
+            打开通知渠道设置
+          </FaButton>
         </div>
       </AdminSettingsSection>
 

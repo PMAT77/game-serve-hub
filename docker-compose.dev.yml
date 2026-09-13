@@ -20,7 +20,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "8888"
-      GSH_PANEL_PUBLISHED_PORT: ${PANEL_PORT:-8888}
+      # 与生产 compose 一致：不给兜底值，避免被当成显式声明的发布端口写进系统设置。
+      GSH_PANEL_PUBLISHED_PORT: ${PANEL_PORT:-}
       DB_PATH: /app/data/game-server-hub.sqlite
       SERVER_LOG_DIR: /app/logs
       GSH_INSTANCES_ROOT: /var/lib/game-server-hub/instances

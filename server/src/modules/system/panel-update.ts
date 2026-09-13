@@ -22,10 +22,12 @@ import type { ServerConfig } from '../../shared/config'
 import { loadServerConfig } from '../../shared/config'
 import { getSystemPanelSettings } from '../../shared/db/index'
 import { getDefaultPanelSettings } from './defaults'
+import type { PanelPortEnvKey } from './panel-port-deploy'
+import { buildPanelPortWriteScript } from './panel-port-deploy'
 import {
+  GITHUB_PROXY_SITES,
   buildOfflineArchiveName,
   buildOfflineArchiveUrls,
-  GITHUB_PROXY_SITES,
   downloadOfflineImageArchive,
   formatBytes,
   listImageRepoTags,
@@ -1010,6 +1012,96 @@ async function startPanelComposeUpdater(input: {
   })
   await container.start()
   return container.id
+}
+
+const PORT_SYNC_CONTAINER_NAME = 'game-server-hub-port-sync'
+
+async function removeContainerIfExists(docker: DockerClient, name: string): Promise<void> {
+  try {
+    const container = docker.getContainer(name)
+    await container.inspect()
+    await container.remove({ force: true })
+  }
+  catch {
+    // 没有残留容器
+  }
+}
+
+/**
+ * 用一次性容器把面板端口写进部署目录的 panel.env。
+ *
+ * 面板容器对该目录是只读挂载（`/stack:ro`），改不了自己的部署配置——一键更新同样因此需要临时容器。
+ * 这里与一键更新共用镜像解析，但刻意不执行 compose up：端口在用户下次重启面板时生效。
+ */
+export async function writePanelPortViaStackContainer(input: {
+  stackPaths: StackPaths
+  envKey: PanelPortEnvKey
+  port: number
+}): Promise<{ ok: true } | { ok: false, error: string }> {
+  const config = loadServerConfig()
+  const docker = resolveDocker()
+  await removeContainerIfExists(docker, PORT_SYNC_CONTAINER_NAME)
+
+  const resolution = await resolveUpdaterImage(
+    buildUpdaterImageCandidates({
+      configuredUpdaterImage: config.panelUpdaterImage,
+      targetImage: config.panelImage,
+      panelImage: config.panelImage,
+    }),
+    {
+      isPresent: image => isImagePresentByRef(docker, image),
+      probe: image => probeUpdaterImage(docker, image),
+      pull: async (image) => {
+        const result = await pullImageWithCandidates(
+          docker,
+          buildImageCandidates(image, resolveImageMirrorsRaw()),
+          image,
+          { maxAttempts: TARGET_PULL_MAX_ATTEMPTS, retryBaseMs: TARGET_PULL_RETRY_BASE_MS, sleep },
+        )
+        return result.ok ? { ok: true as const } : result
+      },
+    },
+  )
+  if (!resolution.image) {
+    return {
+      ok: false,
+      error: `没有可用的写入容器：${resolution.failures.join('；') || resolution.tried.join('、')}`,
+    }
+  }
+
+  try {
+    const container = await docker.createContainer({
+      name: PORT_SYNC_CONTAINER_NAME,
+      Image: resolution.image,
+      Cmd: ['sh', '-c', buildPanelPortWriteScript(input.envKey, input.port)],
+      HostConfig: {
+        // 只挂部署目录并保持可写；脚本只做备份与替换，不碰容器
+        Binds: [`${input.stackPaths.hostDir}:/stack`],
+      },
+    })
+    await container.start()
+    const result = await container.wait() as { StatusCode?: number } | null
+    const exitCode = result?.StatusCode ?? 0
+    if (exitCode !== 0) {
+      let detail = ''
+      try {
+        const raw = await container.logs({ stdout: true, stderr: true, tail: 5 })
+        const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw)
+        detail = text.trim().split(/\r?\n/).slice(-2).join(' ').slice(0, 300)
+      }
+      catch {
+        detail = ''
+      }
+      return { ok: false, error: `写入端口失败（退出码 ${exitCode}）${detail ? `：${detail}` : ''}` }
+    }
+    return { ok: true }
+  }
+  catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  finally {
+    await removeContainerIfExists(docker, PORT_SYNC_CONTAINER_NAME)
+  }
 }
 
 /** updater 失败（面板没被换掉）时必须复位状态，否则界面会永久停在「更新中」 */

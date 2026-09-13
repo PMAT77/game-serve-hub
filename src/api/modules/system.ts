@@ -2,8 +2,10 @@ import type {
   DirectoryItem,
   NetworkConfigPayload,
   NetworkRealtime,
+  PanelPortSync,
   PanelSettingsPayload,
   PanelSettingsResponse,
+  PanelSettingsSaveResponse,
   PanelUpdateApplyRequest,
   PanelUpdateApplyResponse,
   PanelUpdateStatus,
@@ -17,8 +19,10 @@ export type {
   DirectoryItem,
   NetworkConfigPayload,
   NetworkRealtime,
+  PanelPortSync,
   PanelSettingsPayload,
   PanelSettingsResponse,
+  PanelSettingsSaveResponse,
   PanelUpdateApplyRequest,
   PanelUpdateApplyResponse,
   PanelUpdateStatus,
@@ -29,7 +33,7 @@ export type {
 export default {
   getSettings: () => api.get('app/system/settings') as Promise<{ data: PanelSettingsResponse }>,
   saveSettings: (data: PanelSettingsPayload) => api.post('app/system/settings', data) as Promise<{
-    data: SystemSuccessResponse
+    data: PanelSettingsSaveResponse
   }>,
   getSystemInfo: () => api.get('app/system/info'),
   getNetworkRealtime: () => api.get('app/system/network/realtime') as Promise<{ data: NetworkRealtime }>,

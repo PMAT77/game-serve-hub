@@ -91,17 +91,24 @@ function getLoginGuardKey(request: FastifyRequest, account: string): string {
   return `${ip}:${normalizedAccount}`
 }
 
-function getLoginGuardKeys(request: FastifyRequest, account: string): string[] {
+/**
+ * 登录限流维度，按用途分成两组。
+ *
+ * - blocking：用于封锁，每一项都带 IP 或连接维度。旧实现把跨 IP 的 `account:` 也算进封锁，
+ *   未认证者每 15 分钟发 5 次错密码就能让管理员账号持续处于「登录过于频繁」，
+ *   合法用户换 IP 也没用（该维度本就是全局的）。
+ * - escalation：只用于升级到验证码。账号维度仍然生效，分布式撞库依旧会被要求验证码，
+ *   但不会把账号本身锁死。
+ */
+function getLoginGuardKeys(request: FastifyRequest, account: string) {
   const ip = getClientIp(request)
   // request.ip 是 TCP 对端地址，无法通过请求头伪造，作为兜底限流维度。
   const socketIp = request.ip || 'unknown'
   const normalizedAccount = account.trim().toLowerCase()
-  return [
-    `${ip}:${normalizedAccount}`,
-    `ip:${ip}`,
-    `socket:${socketIp}`,
-    `account:${normalizedAccount}`,
-  ]
+  return {
+    blocking: [`${ip}:${normalizedAccount}`, `ip:${ip}`, `socket:${socketIp}`],
+    escalation: [`account:${normalizedAccount}`],
+  }
 }
 
 function buildCaptchaRequiredResponse(
@@ -229,11 +236,13 @@ export function registerAuthModule(app: FastifyInstance) {
       return businessError('账号和密码不能为空', request)
     }
     const loginGuardKey = getLoginGuardKey(request, account)
-    const loginGuardKeys = getLoginGuardKeys(request, account)
-    const loginGuardStates = loginGuardKeys.map(key => getLoginGuardState(key, LOGIN_GUARD_OPTIONS))
+    const guardKeys = getLoginGuardKeys(request, account)
+    const allGuardKeys = [...guardKeys.blocking, ...guardKeys.escalation]
+    const allGuardStates = allGuardKeys.map(key => getLoginGuardState(key, LOGIN_GUARD_OPTIONS))
 
-    if (loginGuardStates.some(isBlocked)) {
-      const retryAfterSec = Math.max(...loginGuardStates.map(getBlockRemainingSeconds))
+    const blockedResponse = () => {
+      const blockingStates = guardKeys.blocking.map(key => getLoginGuardState(key, LOGIN_GUARD_OPTIONS))
+      const retryAfterSec = Math.max(...blockingStates.map(getBlockRemainingSeconds))
       return businessError(
         `登录尝试过于频繁，请 ${Math.max(1, Math.ceil(retryAfterSec / 60))} 分钟后再试`,
         request,
@@ -241,32 +250,39 @@ export function registerAuthModule(app: FastifyInstance) {
         { retryAfterSec },
       )
     }
+    const isBlockingNow = () => guardKeys.blocking
+      .map(key => getLoginGuardState(key, LOGIN_GUARD_OPTIONS))
+      .some(isBlocked)
 
-    if (loginGuardStates.some(state => shouldRequireCaptcha(state, LOGIN_GUARD_OPTIONS))) {
+    if (isBlockingNow()) {
+      return blockedResponse()
+    }
+
+    if (allGuardStates.some(state => shouldRequireCaptcha(state, LOGIN_GUARD_OPTIONS))) {
       const captchaOk = verifyCaptchaChallenge(loginGuardKey, body.challengeToken, body.challengeAnswer)
       if (!captchaOk) {
-        return buildCaptchaRequiredResponse(request, loginGuardKey)
+        // 验证码答错必须计入失败次数：旧实现直接补发新挑战，既不消耗次数也不消耗封锁额度，
+        // 挑战可以无限续领，而题目答案空间只有 19 种，等于没有节流。
+        allGuardKeys.forEach(key => recordLoginFailure(key, LOGIN_GUARD_OPTIONS))
+        if (isBlockingNow()) {
+          return blockedResponse()
+        }
+        return buildCaptchaRequiredResponse(request, loginGuardKey, '验证码不正确，请重新验证')
       }
     }
 
     const user = await findUserByAccount(account)
     if (!user || !verifyPassword(password, user.password_hash)) {
-      const nextStates = loginGuardKeys.map(key => recordLoginFailure(key, LOGIN_GUARD_OPTIONS))
-      if (nextStates.some(isBlocked)) {
-        const retryAfterSec = Math.max(...nextStates.map(getBlockRemainingSeconds))
-        return businessError(
-          `登录尝试过于频繁，请 ${Math.max(1, Math.ceil(retryAfterSec / 60))} 分钟后再试`,
-          request,
-          ErrorCode.LOGIN_RATE_LIMITED,
-          { retryAfterSec },
-        )
+      const nextStates = allGuardKeys.map(key => recordLoginFailure(key, LOGIN_GUARD_OPTIONS))
+      if (isBlockingNow()) {
+        return blockedResponse()
       }
       if (nextStates.some(state => shouldRequireCaptcha(state, LOGIN_GUARD_OPTIONS))) {
         return buildCaptchaRequiredResponse(request, loginGuardKey, '账号或密码错误，请完成验证码后再试')
       }
       return businessError('账号或密码错误', request)
     }
-    loginGuardKeys.forEach(clearLoginGuardState)
+    allGuardKeys.forEach(clearLoginGuardState)
 
     const remember = body.remember === true
     const tokens = await createSessionTokens(user.id, {

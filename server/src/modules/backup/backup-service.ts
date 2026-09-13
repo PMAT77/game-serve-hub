@@ -75,7 +75,29 @@ export interface CreateInstanceBackupResult {
   backup?: DbBackup
 }
 
+/**
+ * 创建实例存档备份。
+ *
+ * 打包要遍历整个存档目录，必须与存档导入、恢复互斥：恢复会先把目录改名让位再重建，
+ * 此时并发打包会读到半删除的目录，产出不完整的 tar 包却仍被记为成功。
+ */
 export async function createInstanceBackup(options: CreateInstanceBackupOptions): Promise<CreateInstanceBackupResult> {
+  try {
+    return await withInstanceArchiveOperationLock(options.instanceId, () => createInstanceBackupUnlocked(options))
+  }
+  catch (error) {
+    if (error instanceof InstanceArchiveBusyError) {
+      return { ok: false, message: error.message }
+    }
+    throw error
+  }
+}
+
+/**
+ * 备份主体，不含存档文件锁。
+ * 只供已经在锁内的流程调用（恢复与存档导入的安全备份）；锁不可重入，直接调外层会自锁。
+ */
+export async function createInstanceBackupUnlocked(options: CreateInstanceBackupOptions): Promise<CreateInstanceBackupResult> {
   const {
     app,
     instanceId,
@@ -237,7 +259,7 @@ async function restoreInstanceBackupLocked(
   // 恢复前先给当前存档做一次安全备份（当前无存档则跳过）
   let safetyBackup: DbBackup | undefined
   if (fs.existsSync(storageRoot)) {
-    const safety = await createInstanceBackup({
+    const safety = await createInstanceBackupUnlocked({
       app,
       instanceId,
       kind: 'pre_restore',

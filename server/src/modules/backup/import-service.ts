@@ -46,7 +46,7 @@ import {
   upsertInstanceMod,
 } from '../../shared/db/index'
 import type { DbGameInstance } from '../../shared/db/index'
-import { createInstanceBackup } from './backup-service'
+import { createInstanceBackupUnlocked } from './backup-service'
 import { InstanceArchiveBusyError, withInstanceArchiveOperationLock } from './archive-lock'
 
 /** 目录大小扫描上限：超出后停止累计（session 小文件可达数十万，防 probe/导入卡死） */
@@ -577,7 +577,7 @@ async function importSaveToInstanceLocked(options: ImportSaveToInstanceOptions):
   // 导入前安全备份：实例已有存档才创建
   let safetyBackupId: string | undefined
   if (fs.existsSync(path.join(installPath, DST_STORAGE_DIR))) {
-    const safety = await createInstanceBackup({
+    const safety = await createInstanceBackupUnlocked({
       app,
       instanceId,
       kind: 'pre_import',

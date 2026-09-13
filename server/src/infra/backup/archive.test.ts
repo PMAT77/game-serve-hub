@@ -4,9 +4,40 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { after, before, describe, it } from 'node:test'
-import { createDirectoryArchive, extractArchive, getDirectorySizeBytes, replaceDirectory } from './archive'
+import { gzipSync } from 'node:zlib'
+import { DEFAULT_TAR_EXTRACT_LIMITS, createDirectoryArchive, extractArchive, getDirectorySizeBytes, replaceDirectory } from './archive'
 
 let workDir: string
+
+/** 手工构造 tar.gz：需要精确控制条目名（如路径逃逸样本），系统 tar 不便生成 */
+function buildTarGz(entries: Array<{ name: string; content: string }>): Buffer {
+  const blocks: Buffer[] = []
+  for (const entry of entries) {
+    const content = Buffer.from(entry.content, 'utf8')
+    const header = Buffer.alloc(512)
+    header.write(entry.name, 0, 100, 'utf8')
+    header.write('0000644\0', 100, 8, 'utf8')
+    header.write('0000000\0', 108, 8, 'utf8')
+    header.write('0000000\0', 116, 8, 'utf8')
+    header.write(`${content.length.toString(8).padStart(11, '0')}\0`, 124, 12, 'utf8')
+    header.write('00000000000\0', 136, 12, 'utf8')
+    header.write('        ', 148, 8, 'utf8')
+    header.write('0', 156, 1, 'utf8')
+    header.write('ustar\0', 257, 6, 'utf8')
+    header.write('00', 263, 2, 'utf8')
+    let sum = 0
+    for (const byte of header) {
+      sum += byte
+    }
+    header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 8, 'utf8')
+    blocks.push(header)
+    const padded = Buffer.alloc(Math.ceil(content.length / 512) * 512)
+    content.copy(padded)
+    blocks.push(padded)
+  }
+  blocks.push(Buffer.alloc(1024))
+  return gzipSync(Buffer.concat(blocks))
+}
 
 function writeTree(root: string) {
   const saveDir = path.join(root, 'DoNotStarveTogether', 'Cluster_1', 'Master', 'save')
@@ -79,6 +110,45 @@ describe('backup archive infra', () => {
       () => replaceDirectory(live, path.join(workDir, `missing-${randomUUID()}`)),
     )
     assert.ok(fs.existsSync(path.join(live, 'keep.txt')))
+  })
+
+
+  // 回归：tar.gz 分支曾经完全绕过解压上限，认证用户上传高压缩比包即可写满宿主机磁盘
+  it('rejects a tar.gz whose entry count exceeds the limit', async () => {
+    const archivePath = path.join(workDir, 'many-entries.tar.gz')
+    fs.writeFileSync(archivePath, buildTarGz([
+      { name: 'a.txt', content: 'a' },
+      { name: 'b.txt', content: 'b' },
+      { name: 'c.txt', content: 'c' },
+    ]))
+
+    await assert.rejects(
+      () => extractArchive(archivePath, path.join(workDir, 'entries-target'), { maxEntries: 2, maxTotalUncompressedBytes: 1024 * 1024 }),
+      /条目数超过上限/,
+    )
+  })
+
+  it('rejects a tar.gz that expands beyond the size limit without writing anything', async () => {
+    const archivePath = path.join(workDir, 'oversized.tar.gz')
+    fs.writeFileSync(archivePath, buildTarGz([{ name: 'big.txt', content: 'x'.repeat(8192) }]))
+    const target = path.join(workDir, 'oversized-target')
+
+    await assert.rejects(
+      () => extractArchive(archivePath, target, { maxEntries: 100, maxTotalUncompressedBytes: 1024 }),
+      /解压后总大小超过上限/,
+    )
+    // 大小校验在落盘之前完成，目标目录不应被创建
+    assert.equal(fs.existsSync(target), false)
+  })
+
+  it('rejects a tar.gz containing a path escape entry', async () => {
+    const archivePath = path.join(workDir, 'escape.tar.gz')
+    fs.writeFileSync(archivePath, buildTarGz([{ name: '../escaped.txt', content: 'boom' }]))
+
+    await assert.rejects(
+      () => extractArchive(archivePath, path.join(workDir, 'escape-target'), DEFAULT_TAR_EXTRACT_LIMITS),
+      /非法路径条目/,
+    )
   })
 
   it('computes directory size in bytes', () => {

@@ -15,6 +15,7 @@ import {
   updateGameInstanceRuntime,
 } from '../../shared/db/index'
 import type { DbGameInstance } from '../../shared/db/index'
+import { withInstanceArchiveOperationLock } from './archive-lock'
 import { createInstanceBackup, restoreInstanceBackup } from './backup-service'
 
 let workDir: string
@@ -77,6 +78,47 @@ describe('backup service', () => {
     assert.equal(fetched.kind, 'manual')
     assert.equal(fetched.createdBy, 'tester')
     assert.equal(fetched.shards, '["master"]')
+  })
+
+  // 回归：恢复流程会先把存档目录改名让位再重建，此时并发打包会读到半删除的目录，
+  // 产出不完整的 tar 包却被记为 completed —— 用户以为有备份，实际没有。
+  it('refuses to create a backup while another archive operation holds the instance lock', async () => {
+    const locked = await createGameInstance({
+      nodeId: 'local-node',
+      name: '锁占用实例',
+      gameCode: 'dst',
+    })
+    buildFakeStorageRoot(locked.id)
+
+    let release: () => void = () => {}
+    const holder = withInstanceArchiveOperationLock(locked.id, () => new Promise<void>((resolve) => {
+      release = resolve
+    }))
+
+    const refused = await createInstanceBackup({
+      instanceId: locked.id,
+      kind: 'manual',
+      saveBeforeArchive: false,
+      hotSaveDelayMs: 0,
+    })
+    assert.equal(refused.ok, false)
+    assert.match(refused.message ?? '', /存档导入或恢复/)
+    assert.equal(refused.backup, undefined)
+
+    release()
+    await holder
+
+    // 锁释放后同一实例的备份必须恢复正常，且不残留失败的记录
+    const accepted = await createInstanceBackup({
+      instanceId: locked.id,
+      kind: 'manual',
+      saveBeforeArchive: false,
+      hotSaveDelayMs: 0,
+    })
+    assert.equal(accepted.ok, true)
+    assert.ok(accepted.backup)
+    assert.ok(fs.existsSync(accepted.backup.filePath))
+    assert.ok(fs.statSync(accepted.backup.filePath).size > 0)
   })
 
   it('fails when the instance has no storage directory yet', async () => {

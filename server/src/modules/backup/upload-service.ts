@@ -161,7 +161,11 @@ export async function unpackSaveImportArchive(archivePath: string, extractDir: s
     return format
   }
   if (format === 'targz') {
-    await extractArchive(archivePath, extractDir)
+    // 与 zip 分支共用同一套上限：此前 tar.gz 分支丢弃 limits，解压炸弹可写满宿主机磁盘
+    await extractArchive(archivePath, extractDir, {
+      maxEntries: limits.maxEntries,
+      maxTotalUncompressedBytes: limits.maxTotalUncompressedBytes,
+    })
     return format
   }
   throw new Error('存档包格式无法识别，仅支持 zip 压缩包或面板备份包')

@@ -12,8 +12,8 @@ export class InstanceArchiveBusyError extends Error {
 
 /**
  * 在实例级存档文件锁内执行 fn；同实例并发时抛 InstanceArchiveBusyError。
- * 锁不可重入：锁内不得再次调用包裹了同一把锁的入口（导入内部的安全备份走
- * createInstanceBackup，不经过锁，因此安全）。
+ * 锁不可重入：锁内不得再次调用包裹了同一把锁的入口。备份、导入与恢复共用这把锁，
+ * 因此导入与恢复内部的安全备份必须调用 createInstanceBackupUnlocked，而不是外层入口。
  */
 export async function withInstanceArchiveOperationLock<T>(
   instanceId: string,

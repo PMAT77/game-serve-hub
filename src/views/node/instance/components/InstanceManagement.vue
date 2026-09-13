@@ -4,11 +4,13 @@ import type { CreateInstancePayload, InstallableGameItem, InstanceItem, Instance
 import type { NodeListItem } from '@/api/modules/node'
 import type { NotificationReactive } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
+import type { DirectoryItem } from '@/api/modules/system'
 import { NButton, NDropdown, NProgress, NStatistic, NTag, NTooltip, useNotification } from 'naive-ui'
 import AdminListToolbar from '@/components/AdminListToolbar.vue'
 import { statusBadgeClass } from '@/constants/statusDictionary'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
+import apiSystem from '@/api/modules/system'
 import {
   routeToDstRoomSettings,
   routeToDstWorldSettings,
@@ -708,6 +710,97 @@ function closeCreateModal() {
   createFormRef.value?.restoreValidation()
 }
 
+// --- 安装目录选择 ---
+const dirBrowseVisible = ref(false)
+const dirBrowseLoading = ref(false)
+/** 当前列出的目录；空串表示最外层的位置列表 */
+const dirBrowsePath = ref('')
+const dirBrowseItems = ref<DirectoryItem[]>([])
+/** 上一级目录；null 表示已在最外层，再往上就回到位置列表 */
+const dirBrowseParentPath = ref<string | null>(null)
+const dirBrowseError = ref('')
+/** 磁盘根（如 D:\ 或 /）：实例不能直接装在根上，这里提前挡掉 */
+const isRootBrowsePath = computed(() => /^([a-z]:[\\/]|[\\/])$/i.test(dirBrowsePath.value.trim()))
+/** 读取失败或停在根位置时，不允许把当前路径写回表单 */
+const canApplyBrowseDirectory = computed(() => (
+  Boolean(dirBrowsePath.value) && !dirBrowseError.value && !isRootBrowsePath.value
+))
+
+/** 计算上一级目录；已到根（如 / 或 D:\）时返回空串，表示回到根目录列表 */
+function resolveParentDirectory(targetPath: string): string {
+  const trimmed = targetPath.replace(/[\\/]+$/, '')
+  const separatorIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  if (!trimmed || separatorIndex < 0) {
+    return ''
+  }
+  const parent = trimmed.slice(0, separatorIndex)
+  // 'D:' 这类盘符本身不是可列出的目录，同样回到根目录列表
+  if (!parent || /^[a-z]:$/i.test(parent)) {
+    return ''
+  }
+  return parent
+}
+
+/** 列出目标目录下的子目录：返回 false 表示这次没读到，调用方可以退回根目录列表 */
+async function loadBrowseDirectories(targetPath?: string): Promise<boolean> {
+  dirBrowseLoading.value = true
+  dirBrowseError.value = ''
+  try {
+    const res = await apiSystem.getDirectoryList(targetPath)
+    dirBrowseItems.value = (res.data ?? []).filter(item => item.type === 'directory')
+    dirBrowsePath.value = targetPath?.trim() ?? ''
+    dirBrowseParentPath.value = dirBrowsePath.value ? resolveParentDirectory(dirBrowsePath.value) : null
+    return true
+  }
+  catch {
+    // 具体原因（目录不存在、没有读取权限等）由请求层统一提示，这里只补一句可操作的说明
+    dirBrowseItems.value = []
+    dirBrowsePath.value = targetPath?.trim() ?? ''
+    dirBrowseParentPath.value = dirBrowsePath.value ? resolveParentDirectory(dirBrowsePath.value) : null
+    dirBrowseError.value = '这个目录打不开，可以返回上一级或换一个目录再试'
+    return false
+  }
+  finally {
+    dirBrowseLoading.value = false
+  }
+}
+
+async function openDirectoryBrowser() {
+  blurFocusedElement()
+  dirBrowseVisible.value = true
+  const preferredPath = createForm.installPath?.trim()
+  // 已填写安装目录时优先定位到它；打不开就退回根目录列表，不把用户留在空列表里
+  if (!preferredPath || !(await loadBrowseDirectories(preferredPath))) {
+    await loadBrowseDirectories()
+  }
+}
+
+function enterBrowseDirectory(item: DirectoryItem) {
+  if (item.type !== 'directory') {
+    return
+  }
+  void loadBrowseDirectories(item.path)
+}
+
+function goBrowseParentDirectory() {
+  if (dirBrowseParentPath.value === null) {
+    return
+  }
+  void loadBrowseDirectories(dirBrowseParentPath.value || undefined)
+}
+
+function applyBrowseDirectory() {
+  if (!canApplyBrowseDirectory.value) {
+    return
+  }
+  createForm.installPath = dirBrowsePath.value
+  dirBrowseVisible.value = false
+}
+
+function closeDirectoryBrowser() {
+  dirBrowseVisible.value = false
+}
+
 function closeCreateGuideModal() {
   createGuideVisible.value = false
 }
@@ -1284,7 +1377,12 @@ onBeforeUnmount(() => {
               保持默认即可；如需自定义安装目录再填写。
             </p>
             <NFormItem label="安装目录" path="installPath">
-              <NInput v-model:value="createForm.installPath" placeholder="默认自动分配" />
+              <div class="flex items-center gap-2 w-full">
+                <NInput v-model:value="createForm.installPath" class="flex-1" placeholder="默认自动分配" />
+                <NButton class="shrink-0" @click="openDirectoryBrowser">
+                  浏览
+                </NButton>
+              </div>
             </NFormItem>
           </NCollapseItem>
         </NCollapse>
@@ -1297,6 +1395,68 @@ onBeforeUnmount(() => {
           </NButton>
           <NButton type="primary" :loading="createLoading" @click="createInstance">
             确定
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <NModal
+      v-model:show="dirBrowseVisible"
+      preset="card"
+      title="选择安装目录"
+      :style="{ width: '560px' }"
+    >
+      <div class="space-y-3">
+        <div class="flex items-center gap-2">
+          <div class="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+            {{ dirBrowsePath || '选择要安装到的位置' }}
+          </div>
+          <NButton
+            size="small"
+            secondary
+            :disabled="dirBrowseParentPath === null"
+            @click="goBrowseParentDirectory"
+          >
+            返回上一级
+          </NButton>
+        </div>
+
+        <div class="h-64 overflow-auto border border-border/70 rounded-lg">
+          <div v-if="dirBrowseLoading" class="py-10 text-center text-sm text-muted-foreground">
+            正在读取…
+          </div>
+          <div v-else-if="dirBrowseError" class="p-4 text-center text-sm text-rose-600 dark:text-rose-400">
+            {{ dirBrowseError }}
+          </div>
+          <div v-else-if="dirBrowseItems.length === 0" class="py-10 text-center text-sm text-muted-foreground">
+            这个目录下没有子目录
+          </div>
+          <button
+            v-for="item in dirBrowseItems"
+            :key="item.path"
+            type="button"
+            class="flex items-center w-full px-3 py-2 text-sm text-left transition-colors hover:bg-muted/70 cursor-pointer"
+            @click="enterBrowseDirectory(item)"
+          >
+            <span class="truncate">{{ item.name }}</span>
+          </button>
+        </div>
+
+        <p v-if="isRootBrowsePath" class="text-xs text-amber-600 dark:text-amber-400">
+          磁盘根目录不能直接作为安装目录，请进入一个子目录后再选择。
+        </p>
+        <p v-else class="text-xs text-muted-foreground">
+          点开子目录后，可以用「选择当前目录」把所在位置填到安装目录里。
+        </p>
+      </div>
+
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="closeDirectoryBrowser">
+            取消
+          </NButton>
+          <NButton type="primary" :disabled="!canApplyBrowseDirectory" @click="applyBrowseDirectory">
+            选择当前目录
           </NButton>
         </NSpace>
       </template>

@@ -31,14 +31,14 @@
     "serve:test": "http-server ./dist-test -o",
     "svgo": "svgo -f src/assets/icons",
     "generate:icons": "tsx ./scripts/generate.icons.ts",
-    "webp:to-png": "tsx ./scripts/webp-to-png.ts",
     "lint": "vue-tsc -b",
     "lint:ox": "oxlint --deny-warnings .",
     "lint:copy": "node scripts/check-ui-copy.mjs",
     "test:server": "node scripts/run-server-tests.mjs",
     "test:unit": "node scripts/run-unit-tests.mjs",
     "release:verify": "node scripts/check-release-consistency.mjs",
-    "release:check": "pnpm run release:verify && pnpm run lint && pnpm run lint:ox && pnpm run lint:copy && pnpm test:unit && pnpm run build"
+    "docs:check": "node scripts/check-docs.mjs",
+    "release:check": "pnpm run release:verify && pnpm run docs:check && pnpm run lint && pnpm run lint:ox && pnpm run lint:copy && pnpm test:unit && pnpm run build"
   },
   "dependencies": {
     "@fantastic-admin/components": "workspace:*",

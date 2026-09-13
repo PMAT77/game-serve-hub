@@ -146,6 +146,10 @@ onMounted(() => {
         </div>
       </div>
 
+      <p class="text-xs text-muted-foreground">
+        以上运行环境由部署时写入的服务器配置决定，面板内不提供修改入口；需要变更请改服务器上的配置后重启面板。
+      </p>
+
       <p
         v-if="environmentView.hint"
         class="text-xs"

@@ -1,6 +1,6 @@
 # modules 目录说明
 
-后端业务模块目录。每个模块对外只暴露注册入口（路由挂在 `app/...` 前缀下），模块内部按 `controller -> service/usecase -> domain -> repository` 分层。
+后端业务模块目录。每个模块对外只暴露注册入口（路由挂在 `app/...` 前缀下）。模块内部的目标分层是 `controller -> service/usecase -> domain -> repository`；现状是多数模块已把用例拆到同目录的独立文件（如 `instance/install-service.ts`、`backup/backup-service.ts`），而路由与部分状态机仍写在 `index.ts` 内（`instance/index.ts`、`mod/index.ts` 偏大）。新增代码请按目标分层放置，不要继续往注册文件里堆业务逻辑。
 
 ## 当前模块
 
@@ -14,8 +14,8 @@
 | `mod` | 创意工坊 Mod 下载、文件落位与同步 |
 | `backup` | 实例存档备份与恢复、外部存档导入、数据库快照 |
 | `schedule` | 计划任务（定时备份 / 重启 / 更新检查 / 数据库快照） |
-| `notify` | 通知渠道（Webhook / Telegram）与阈值检查 |
-| `node` | 节点信息探测与节点控制 |
+| `notify` | 通知渠道（钉钉 / 企业微信 / 飞书 / Server 酱 / PushPlus）与阈值检查 |
+| `node` | 本地节点心跳与列表；远程节点管理属于规划中的能力，当前未实现 |
 | `system` | 系统设置、面板更新、面板端口与健康检查 |
 
 新增模块时同步更新本表；模块划分与边界变更请同时更新 [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)。

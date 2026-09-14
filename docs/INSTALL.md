@@ -109,7 +109,9 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 
 ### 阶段四：访问面板
 
-安装器结尾会打印一个边框摘要块，其中的`面板地址`是内网地址：公网访问改用公网 IP 并放行面板端口，初始密码的读取命令也写在同一块里。初始密码获取见[登录与安全](#登录与安全)。
+安装器结尾会打印一个边框摘要块。`面板地址`按「`PANEL_PUBLIC_URL`/`PANEL_HOST` 显式指定 → 网卡公网地址 → 云平台元数据 → 出站 IP 探测 → 本机地址」解析，并在括号里标注来源；NAT 机器上探测不到公网地址时，那里显示的是本机内网地址并注明「仅同一局域网可访问」，同时给出公网访问该做的事。标为「出站 IP 探测」的地址是出口地址，只在该公网 IP 已映射到本机端口时可用（运营商 CGNAT 场景见 [DST 教程 5.4](DST_TUTORIAL.md#54-宿主服务器在-nat-转发后面)）。初始密码的读取命令也写在同一块里。初始密码获取见[登录与安全](#登录与安全)。
+
+> 自动探测会请求云平台元数据端点与出站回显服务，总耗时上限由 `GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS` 控制（默认 3 秒）；不想要这些请求就设 `GSH_PANEL_AUTO_PUBLIC_IP=0`，或直接用 `PANEL_PUBLIC_URL=https://your.domain` 指定，后者同时跳过探测。
 
 浏览器 `http://<服务器公网IP>:<PANEL_PORT>` 登录，首登强制改密。若之后「检查更新」超时，panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
 
@@ -361,6 +363,10 @@ sudo systemctl start game-server-hub.service
 --open-dst-ports               自动放行 DST 端口
 
 PANEL_PORT=9527                面板对外端口
+PANEL_PUBLIC_URL=URL           显式对外访问地址（域名/反向代理/公网 IP）；设置后跳过一切地址探测
+PANEL_HOST=IP                  显式面板主机地址；同样跳过地址探测
+GSH_PANEL_AUTO_PUBLIC_IP=0     关闭对外 IP 自动探测（默认开启：云元数据 → 出站 IP 回显）
+GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS=3  对外 IP 探测的总耗时预算（秒）
 PANEL_IMAGE=REF                统一镜像完整引用（tag 或 digest），自建仓库时使用
 GSH_RELEASE_TAG=vX.Y.Z         安装的版本，默认取脚本内置 tag
 GSH_INSTALL_MODE / GSH_NETWORK_PROFILE   非交互安装时的模式与网络档位

@@ -154,6 +154,134 @@ for dst_port in "${DST_GAME_PORT}" "${DST_AUTH_PORT}" "${DST_MASTER_PORT}" \
   grep -Fq "ufw allow ${dst_port}/udp" "${UFW_LOG}"
 done
 
+# ---- 面板访问地址解析冒烟：判定、优先级、回退与「零探测」----
+# stub curl：记录被请求的 URL；只有回显端点按 STUB_PUBLIC_IP 返回内容，
+# 元数据端点一律返回空（非云主机上的真实表现就是取不到）。
+ADDRESS_PROBE_LOG="${COMPOSE_PLUGIN_TEST_DIR}/address-probe.log"
+: > "${ADDRESS_PROBE_LOG}"
+STUB_PUBLIC_IP=""
+STUB_METADATA_IP=""
+curl() {
+  local url="${!#}"
+  printf '%s\n' "${url}" >> "${ADDRESS_PROBE_LOG}"
+  if [[ -n "${STUB_METADATA_IP}" && "${url}" == *169.254.169.254* ]]; then
+    printf '%s' "${STUB_METADATA_IP}"
+    return 0
+  fi
+  if [[ -n "${STUB_PUBLIC_IP}" && "${url}" == *ipify* ]]; then
+    printf '%s' "${STUB_PUBLIC_IP}"
+  fi
+  return 0
+}
+
+# 1) 私有/公网 IPv4 判定（172.16/20 是真实存在的内网网段，不能被当成 docker 网桥排除）
+is_private_ipv4 '172.16.0.8'
+is_private_ipv4 '10.0.0.5'
+is_private_ipv4 '192.168.1.1'
+is_private_ipv4 '169.254.169.254'
+is_private_ipv4 '100.64.1.1'
+! is_private_ipv4 '111.170.172.120'
+! is_private_ipv4 'gsh.example.com'
+! is_private_ipv4 '999.1.1.1'
+is_public_ipv4 '111.170.172.120'
+! is_public_ipv4 '172.16.0.8'
+! is_public_ipv4 '999.1.1.1'
+! is_public_ipv4 'gsh.example.com'
+[[ "$(url_host 'http://172.16.0.8:9527')" == '172.16.0.8' ]]
+[[ "$(url_host 'https://gsh.example.com/panel')" == 'gsh.example.com' ]]
+is_private_host '172.16.0.8'
+is_private_host 'localhost'
+! is_private_host 'gsh.example.com'
+
+PANEL_PROTOCOL='http'
+PANEL_PORT='9527'
+
+# 2) 显式 PANEL_PUBLIC_URL：直接采用，且不发起任何探测请求
+PANEL_HOST='172.16.0.8'
+PANEL_HOST_SOURCE='interface'
+PANEL_PUBLIC_URL_OVERRIDE='https://gsh.example.com'
+: > "${ADDRESS_PROBE_LOG}"
+resolve_panel_access_urls
+[[ "${PANEL_ACCESS_URL}" == 'https://gsh.example.com' ]]
+[[ "${PANEL_PUBLIC_IP_SOURCE}" == 'user' ]]
+[[ ! -s "${ADDRESS_PROBE_LOG}" ]]
+
+# 3) 显式 PANEL_HOST：同样零探测（保持既有行为，域名/反代场景不受影响）
+PANEL_PUBLIC_URL_OVERRIDE=''
+PANEL_HOST='203.0.113.10'
+PANEL_HOST_SOURCE='user'
+: > "${ADDRESS_PROBE_LOG}"
+resolve_panel_access_urls
+[[ "${PANEL_ACCESS_URL}" == 'http://203.0.113.10:9527' ]]
+[[ ! -s "${ADDRESS_PROBE_LOG}" ]]
+
+# 4) 网卡上本来就是公网地址：直接用网卡地址，零探测
+PANEL_HOST='203.0.113.10'
+PANEL_HOST_SOURCE='interface'
+: > "${ADDRESS_PROBE_LOG}"
+resolve_panel_access_urls
+[[ "${PANEL_ACCESS_URL}" == 'http://203.0.113.10:9527' ]]
+[[ "${PANEL_PUBLIC_IP_SOURCE}" == 'interface' ]]
+[[ ! -s "${ADDRESS_PROBE_LOG}" ]]
+
+# 5) 内网地址 + 探测命中：对外用探测结果，内网地址仍然并列保留
+PANEL_HOST='172.16.0.8'
+PANEL_HOST_SOURCE='interface'
+GSH_PANEL_AUTO_PUBLIC_IP='1'
+GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS='3'
+STUB_PUBLIC_IP='111.170.172.120'
+: > "${ADDRESS_PROBE_LOG}"
+resolve_panel_access_urls
+[[ "${PANEL_ACCESS_URL}" == 'http://111.170.172.120:9527' ]]
+[[ "${PANEL_PUBLIC_IP_SOURCE}" == 'ip_echo' ]]
+[[ "${PANEL_LAN_URL}" == 'http://172.16.0.8:9527' ]]
+grep -Fq 'ipify' "${ADDRESS_PROBE_LOG}"
+
+# 6) 探测全失败：回退本机地址并标成内网（不再拿它冒充「面板地址」）
+STUB_PUBLIC_IP=''
+: > "${ADDRESS_PROBE_LOG}"
+resolve_panel_access_urls
+[[ "${PANEL_ACCESS_URL}" == 'http://172.16.0.8:9527' ]]
+[[ "${PANEL_PUBLIC_IP_SOURCE}" == 'lan' ]]
+[[ -s "${ADDRESS_PROBE_LOG}" ]]
+
+# 7) 关闭探测：零请求
+STUB_PUBLIC_IP='111.170.172.120'
+GSH_PANEL_AUTO_PUBLIC_IP='0'
+: > "${ADDRESS_PROBE_LOG}"
+resolve_panel_access_urls
+[[ "${PANEL_ACCESS_URL}" == 'http://172.16.0.8:9527' ]]
+[[ "${PANEL_PUBLIC_IP_SOURCE}" == 'lan' ]]
+[[ ! -s "${ADDRESS_PROBE_LOG}" ]]
+GSH_PANEL_AUTO_PUBLIC_IP='1'
+
+# 8) 云平台元数据命中：采信元数据结果，且不再请求出站回显端点
+STUB_PUBLIC_IP=''
+STUB_METADATA_IP='198.51.100.7'
+: > "${ADDRESS_PROBE_LOG}"
+resolve_panel_access_urls
+[[ "${PANEL_ACCESS_URL}" == 'http://198.51.100.7:9527' ]]
+[[ "${PANEL_PUBLIC_IP_SOURCE}" == 'cloud_metadata' ]]
+grep -Fq '169.254.169.254' "${ADDRESS_PROBE_LOG}"
+if grep -Fq 'ipify' "${ADDRESS_PROBE_LOG}"; then
+  printf 'metadata hit should not fall back to IP echo probing\n' >&2
+  exit 1
+fi
+STUB_METADATA_IP=''
+
+# 9) 升级保留策略：用户设置的对外地址保留；旧值只是内网地址且本次解析到对外地址才纠正
+PANEL_PUBLIC_IP_SOURCE='ip_echo'
+PANEL_ACCESS_URL='http://111.170.172.120:9527'
+reconcile_existing_public_url 'https://gsh.example.com'
+[[ "${PANEL_ACCESS_URL}" == 'https://gsh.example.com' ]]
+PANEL_ACCESS_URL='http://111.170.172.120:9527'
+reconcile_existing_public_url 'http://172.16.0.8:9527'
+[[ "${PANEL_ACCESS_URL}" == 'http://111.170.172.120:9527' ]]
+PANEL_PUBLIC_IP_SOURCE='lan'
+PANEL_ACCESS_URL='http://172.16.0.8:9527'
+reconcile_existing_public_url 'http://172.16.0.8:9527'
+[[ "${PANEL_ACCESS_URL}" == 'http://172.16.0.8:9527' ]]
+
 rm -rf "${COMPOSE_PLUGIN_TEST_DIR}"
 
 printf 'install-linux-smoke-ok\n'

@@ -9,7 +9,7 @@
 | 问题 | 结论 |
 | --- | --- |
 | 安全组要开放哪些端口？ | 面板 9527/tcp；主世界 10999/udp、8766/udp、12346/udp；**开启洞穴再加** 11000/udp、8768/udp、12348/udp |
-| 面板默认对外访问地址？ | http://<服务器公网 IP>:9527 |
+| 面板默认对外访问地址？ | http://<服务器公网 IP>:9527。安装器会自动解析并打印（显式 `PANEL_PUBLIC_URL`/`PANEL_HOST` → 网卡公网地址 → 云平台元数据 → 出站 IP 探测 → 本机地址）；NAT 机器上探测不到时会打印本机内网地址并提示公网访问怎么做 |
 | 需要配置 IP 转发吗？ | **不需要**。Docker 模式由 Docker 自动完成端口映射，Native 模式进程直接监听宿主机端口 |
 | 宿主机在 NAT 后面要额外加转发规则吗？ | **要**（云平台端口转发 / 路由器映射）：主世界 3 个 + 洞穴 3 个 UDP 各一条，外部端口与内部一致，见 5.4 节 |
 | 主世界/洞穴端口要手动开放吗？ | **要**。面板和安装器默认不碰云安全组，主世界与洞穴的全部 UDP 端口都需手动放行 |
@@ -112,6 +112,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.4.3/scripts/inst
 - 检查系统、磁盘、端口与网络连通性；
 - **Docker**：安装 Docker 与 Compose，下载 Compose 文件，生成 panel.env，拉取统一镜像（面板 + DST 运行库 + SteamCMD 三合一）并启动；
 - **Native**：安装 SteamCMD 及 i386 运行库，创建 gsh 系统用户，下载校验 Native Release，注册 game-server-hub.service 并启动；
+- 解析面板访问地址并按来源标注：显式 `PANEL_PUBLIC_URL`/`PANEL_HOST` → 网卡公网地址 → 云平台元数据 → 出站 IP 探测 → 本机地址，结果写进 `/opt/game-server-hub/panel.env` 的 `PANEL_PUBLIC_URL`（面板自身不读这个值，它只是记录，改域名/反代直接编辑该行即可）；
 - 生成随机初始密码写入权限受限的 /opt/game-server-hub/panel.env，安装摘要给出访问地址。
 
 安装完成后先验证健康状态：

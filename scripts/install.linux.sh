@@ -101,8 +101,30 @@ UPGRADE_DATABASE_BACKUP=""
 
 DISTRO_ID="" # 发行版 ID（如 ubuntu/debian）。
 DISTRO_CODENAME="" # 发行版代号（如 jammy/bookworm）。
-PANEL_HOST="${PANEL_HOST:-}" # 面板访问主机地址（为空时自动探测）。
-PANEL_ACCESS_URL="" # 最终拼装出的访问 URL。
+PANEL_HOST="${PANEL_HOST:-}" # 面板访问主机地址（显式指定时直接用；为空时按默认路由出口自动探测）。
+PANEL_HOST_SOURCE="" # 本机地址来源：user=环境变量显式指定；interface=自动探测。
+PANEL_PUBLIC_URL_OVERRIDE="${PANEL_PUBLIC_URL:-}" # 显式指定的对外访问 URL；设置后跳过一切自动探测。
+PANEL_ACCESS_URL="" # 最终写入 panel.env 的对外访问 URL（PANEL_PUBLIC_URL）。
+PANEL_LAN_URL="" # 本机地址对应的访问 URL（只在内网可达，摘要中与对外地址并列展示）。
+PANEL_PUBLIC_IP_SOURCE="" # 对外地址来源：user|interface|cloud_metadata|ip_echo|lan。
+PANEL_DETECTED_PUBLIC_IP="" # 自动探测到的对外 IPv4。
+GSH_PANEL_AUTO_PUBLIC_IP="${GSH_PANEL_AUTO_PUBLIC_IP:-1}" # 是否允许探测对外 IP（0/false/off/no 关闭）。
+GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS="${GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS:-3}" # 对外地址探测的总耗时预算（秒）。
+# 探测源与 server 侧 server/src/infra/game-adapter/dst/connect-host.ts 保持一致：
+# 云平台元数据可信度最高（云厂商的公网 IP 必然映射到本机），出站回显拿到的可能只是出口地址。
+# GCP/Azure 的元数据端点需要额外请求头，这里不纳入；那类环境用 PANEL_PUBLIC_URL 显式指定。
+PANEL_CLOUD_METADATA_URLS=(
+  "http://169.254.169.254/latest/meta-data/public-ipv4"
+  "http://100.100.100.200/latest/meta-data/eipv4"
+  "http://100.100.100.200/latest/meta-data/public-ipv4"
+  "http://metadata.tencentyun.com/latest/meta-data/public-ipv4"
+  "http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address"
+)
+PANEL_PUBLIC_IP_ECHO_URLS=(
+  "https://api.ipify.org?format=text"
+  "https://ifconfig.me/ip"
+  "https://icanhazip.com"
+)
 ADMIN_USERNAME="${ADMIN_USERNAME:-superadmin}" # 初始管理员用户名。
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" # 初始管理员密码（为空时自动生成随机密码）。
 EXPOSE_ADMIN_PASSWORD="${EXPOSE_ADMIN_PASSWORD:-0}" # 是否在安装摘要中明文输出管理员密码（1=输出，0=仅提示凭据文件）。
@@ -1262,7 +1284,7 @@ install_native_steamcmd() {
 }
 
 prepare_native_panel_env() {
-  local native_uid steamcmd_region steamcmd_attempts existing_port existing_public_url
+  local native_uid steamcmd_region steamcmd_attempts existing_port existing_public_url is_upgrade
   native_uid="$(id -u "${NATIVE_SERVICE_USER}")"
   steamcmd_region=""
   steamcmd_attempts=5
@@ -1271,14 +1293,20 @@ prepare_native_panel_env() {
     steamcmd_attempts=8
   fi
   run_as_root mkdir -p "${PANEL_INSTALL_DIR}"
+  # is_upgrade 只在 Docker 分支的 prepare_panel_files 里声明过，Native 分支漏了它；
+  # 而下面要用它决定「是否追加内存档位预设」。set -u 下引用未定义变量即致命退出，
+  # Native 安装会 100% 死在 configuration 阶段，必须显式初始化。
+  is_upgrade=0
   if try_as_root test -f "${PANEL_ENV_FILE}"; then
+    is_upgrade=1
     existing_port="$(read_env_value "${PANEL_ENV_FILE}" "SERVER_PORT")"
     existing_public_url="$(read_env_value "${PANEL_ENV_FILE}" "PANEL_PUBLIC_URL")"
     if [[ "${existing_port}" =~ ^[0-9]+$ ]]; then
       PANEL_PORT="${existing_port}"
     fi
     detect_host_ip
-    PANEL_ACCESS_URL="${existing_public_url:-${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}}"
+    resolve_panel_access_urls
+    reconcile_existing_public_url "${existing_public_url:-}"
     run_as_root cp -p "${PANEL_ENV_FILE}" "${PANEL_ENV_FILE}.backup.$(date +%Y%m%d%H%M%S)"
     upsert_env_values "${PANEL_ENV_FILE}" \
       "NODE_ENV=production" \
@@ -1294,7 +1322,7 @@ prepare_native_panel_env() {
     log_info "Preserved existing Native panel.env and updated release/runtime keys."
   else
     detect_host_ip
-    PANEL_ACCESS_URL="${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}"
+    resolve_panel_access_urls
     generate_admin_credentials
     # 用 printf 逐行写入再以 root 原子落盘：环境变量传入的凭证含 $、反引号、引号时
     # 不会被 shell 展开（旧无引号 heredoc 会破坏凭证甚至注入任意行）。
@@ -1307,6 +1335,7 @@ prepare_native_panel_env() {
         "SERVER_PORT=${PANEL_PORT}" \
         "DB_PATH=${PANEL_DATA_DIR}/game-server-hub.sqlite" \
         "SERVER_LOG_DIR=${PANEL_LOG_DIR}" \
+        "# PANEL_PUBLIC_URL：$(panel_public_ip_source_label "${PANEL_PUBLIC_IP_SOURCE}")；换域名/反向代理请直接编辑本行" \
         "PANEL_PUBLIC_URL=${PANEL_ACCESS_URL}" \
         "ADMIN_USERNAME=${ADMIN_USERNAME}" \
         "ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
@@ -1330,6 +1359,10 @@ prepare_native_panel_env() {
 
   # 内存档位预设此前只在 Docker 分支合并，Native 于是开箱没有任何 DST 内存上限，
   # 与「资源限制交给 systemd」的承诺不符。两种模式的档位口径必须一致。
+  # Docker 分支在 prepare_panel_files 里已经 sync 过，Native 此前没有：单文件安装器
+  # （Release 附件 / 管道执行）身边没有仓库副本，append_panel_env_preset 只会打一条
+  # "Preset file not found" 就跳过，4 GiB 机器于是拿不到任何内存档位。
+  sync_panel_env_presets
   if [[ "${is_upgrade}" -eq 0 ]]; then
     local host_mem_total_mb preset_name
     host_mem_total_mb="$(read_host_mem_total_mb)"
@@ -1480,6 +1513,10 @@ Options:
 Environment (optional):
   GSH_INSTALL_MODE=MODE          Same as --mode
   GSH_NETWORK_PROFILE=PROFILE    Same as --network
+  PANEL_PUBLIC_URL=URL          Explicit public panel URL (e.g. https://gsh.example.com); skips IP probing
+  PANEL_HOST=IP                 Explicit panel host/IP; also skips IP probing
+  GSH_PANEL_AUTO_PUBLIC_IP=0    Disable public IP probing (default: cloud metadata, then outbound IP echo)
+  GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS=3  Total budget for the public IP probing above
   INSTALL_STEAMCMD_IMAGE=0      Skip SteamCMD pre-pull (default: pre-pull so the panel is ready to create instances)
   PANEL_IMAGE=REF               Full unified image reference (tag or digest); overrides the GHCR default
   GSH_GAME_DST_IMAGE=REF        Kept for compatibility; defaults to PANEL_IMAGE (v0.2.0 unified image)
@@ -1494,16 +1531,256 @@ Environment (optional):
 EOF
 }
 
-# 未提供 PANEL_HOST 时，自动探测主机首个可用 IP。
+# 私有/不可对外使用的 IPv4 字面量（含回环、链路本地与 CGNAT 100.64/10）；非 IPv4 字面量返回 1。
+is_private_ipv4() {
+  local ip="$1" parts a b c d
+  if [[ ! "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    return 1
+  fi
+  local IFS='.'
+  read -r -a parts <<< "${ip}"
+  a="${parts[0]}"
+  b="${parts[1]}"
+  c="${parts[2]}"
+  d="${parts[3]}"
+  if (( a > 255 || b > 255 || c > 255 || d > 255 )); then
+    return 1
+  fi
+  if (( a == 0 || a == 10 || a == 127 )); then
+    return 0
+  fi
+  if (( a == 169 && b == 254 )); then
+    return 0
+  fi
+  if (( a == 172 && b >= 16 && b <= 31 )); then
+    return 0
+  fi
+  if (( a == 192 && b == 168 )); then
+    return 0
+  fi
+  if (( a == 100 && b >= 64 && b <= 127 )); then
+    return 0
+  fi
+  return 1
+}
+
+# 可直接对外使用的 IPv4 字面量：格式与各段合法，且不属于私有网段。
+is_public_ipv4() {
+  local ip="$1" parts a b c d
+  if [[ ! "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    return 1
+  fi
+  local IFS='.'
+  read -r -a parts <<< "${ip}"
+  a="${parts[0]}"
+  b="${parts[1]}"
+  c="${parts[2]}"
+  d="${parts[3]}"
+  if (( a > 255 || b > 255 || c > 255 || d > 255 )); then
+    return 1
+  fi
+  if is_private_ipv4 "${ip}"; then
+    return 1
+  fi
+  return 0
+}
+
+# 布尔环境变量是否为「关闭」；空值视为未设置，保持调用方默认行为。
+env_flag_is_off() {
+  local raw="${1:-}"
+  raw="${raw,,}"
+  case "${raw}" in
+    0|false|off|no) return 0 ;;
+  esac
+  return 1
+}
+
+# 从 URL 中取出主机名（只处理 IPv4 与域名，不支持 IPv6 字面量）。
+url_host() {
+  local url="$1" host
+  host="${url#*://}"
+  host="${host%%/*}"
+  host="${host%%:*}"
+  printf '%s' "${host}"
+}
+
+# 主机名是否只能在内网使用（空值、localhost、私有 IPv4 字面量）；域名按「对外」处理。
+is_private_host() {
+  local host="$1"
+  case "${host}" in
+    ''|localhost|localhost.*|127.0.0.1) return 0 ;;
+  esac
+  if is_private_ipv4 "${host}"; then
+    return 0
+  fi
+  return 1
+}
+
+# 对外地址来源的中文标签（摘要与 panel.env 注释共用）。
+panel_public_ip_source_label() {
+  case "$1" in
+    user) printf '%s' "按 PANEL_PUBLIC_URL/PANEL_HOST 指定" ;;
+    interface) printf '%s' "本机网卡公网地址" ;;
+    cloud_metadata) printf '%s' "云平台元数据探测" ;;
+    ip_echo) printf '%s' "出站 IP 探测" ;;
+    *) printf '%s' "本机内网地址（未能探测到公网地址）" ;;
+  esac
+}
+
+# 未提供 PANEL_HOST 时，自动探测主机地址。
+# 默认路由出口优先：多网卡/NAT 机器上 hostname -I 的第一项常属于 docker0 等虚拟网卡，
+# 直接取它会把面板地址写成容器网段地址，用户从任何地方都连不上。
 detect_host_ip() {
   if [[ -n "${PANEL_HOST}" ]]; then
+    PANEL_HOST_SOURCE="user"
     return
   fi
 
-  PANEL_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  if command -v ip >/dev/null 2>&1; then
+    PANEL_HOST="$(ip route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')" || true
+  fi
+  if [[ -z "${PANEL_HOST}" ]]; then
+    PANEL_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
   if [[ -z "${PANEL_HOST}" ]]; then
     PANEL_HOST="127.0.0.1"
   fi
+  PANEL_HOST_SOURCE="interface"
+}
+
+# 并发探测一组「返回纯文本 IPv4」的端点，按数组顺序返回第一个可用的公网地址。
+# 并发而非串行：最坏耗时等于单个端点超时，而不是各端点超时之和。
+probe_public_ipv4_from_urls() {
+  local timeout_seconds="$1"
+  shift
+  local urls=("$@")
+  local tmp_dir index url candidate
+  local -a pids=()
+
+  tmp_dir="$(mktemp -d)"
+  index=0
+  for url in "${urls[@]}"; do
+    index=$((index + 1))
+    # --noproxy '*'：元数据端点必须直连，走代理只会拿到代理的出口地址。
+    curl --noproxy '*' --silent --show-error --max-time "${timeout_seconds}" "${url}" \
+      > "${tmp_dir}/${index}" 2>/dev/null &
+    pids+=("$!")
+  done
+  # 只等自己拉起的探测：等待全部后台作业会把调用方的其它作业也一起拖住。
+  if (( ${#pids[@]} > 0 )); then
+    wait "${pids[@]}" || true
+  fi
+
+  for ((index = 1; index <= ${#urls[@]}; index++)); do
+    candidate="$(head -n 1 "${tmp_dir}/${index}" 2>/dev/null | tr -d '[:space:]')" || true
+    if is_public_ipv4 "${candidate}"; then
+      rm -rf "${tmp_dir}"
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
+
+  rm -rf "${tmp_dir}"
+  return 1
+}
+
+# 探测对外可用的 IPv4；命中时设置 PANEL_PUBLIC_IP_SOURCE 与 PANEL_DETECTED_PUBLIC_IP 并返回 0。
+detect_public_access_ip() {
+  local budget="${GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS}"
+  local metadata_timeout=1
+  local echo_timeout=2
+  local deadline detected
+
+  if [[ ! "${budget}" =~ ^[0-9]+$ ]] || (( budget <= 0 )); then
+    log_warn "Ignoring invalid GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS=${GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS}; using 3s."
+    budget=3
+  fi
+  if (( echo_timeout > budget )); then
+    echo_timeout="${budget}"
+  fi
+  deadline=$((SECONDS + budget))
+
+  if detected="$(probe_public_ipv4_from_urls "${metadata_timeout}" "${PANEL_CLOUD_METADATA_URLS[@]}")"; then
+    PANEL_PUBLIC_IP_SOURCE="cloud_metadata"
+    PANEL_DETECTED_PUBLIC_IP="${detected}"
+    return 0
+  fi
+  if (( SECONDS >= deadline )); then
+    return 1
+  fi
+  if detected="$(probe_public_ipv4_from_urls "${echo_timeout}" "${PANEL_PUBLIC_IP_ECHO_URLS[@]}")"; then
+    PANEL_PUBLIC_IP_SOURCE="ip_echo"
+    PANEL_DETECTED_PUBLIC_IP="${detected}"
+    return 0
+  fi
+  return 1
+}
+
+# 解析对外访问地址与本机地址。
+# 优先级：显式 PANEL_PUBLIC_URL/PANEL_HOST > 网卡公网地址 > 云元数据 > 出站回显 > 本机地址。
+# PANEL_ACCESS_URL 落进 panel.env；PANEL_LAN_URL 只用于摘要，让内网用户也知道怎么连。
+resolve_panel_access_urls() {
+  PANEL_LAN_URL="${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}"
+
+  if [[ -n "${PANEL_PUBLIC_URL_OVERRIDE}" ]]; then
+    PANEL_ACCESS_URL="${PANEL_PUBLIC_URL_OVERRIDE}"
+    PANEL_PUBLIC_IP_SOURCE="user"
+    return
+  fi
+  if [[ "${PANEL_HOST_SOURCE}" == "user" ]]; then
+    PANEL_ACCESS_URL="${PANEL_LAN_URL}"
+    PANEL_PUBLIC_IP_SOURCE="user"
+    return
+  fi
+  # 网卡上本来就是公网地址（直挂公网的云主机/独立服务器）：无需任何探测。
+  if is_public_ipv4 "${PANEL_HOST}"; then
+    PANEL_ACCESS_URL="${PANEL_LAN_URL}"
+    PANEL_PUBLIC_IP_SOURCE="interface"
+    return
+  fi
+  if env_flag_is_off "${GSH_PANEL_AUTO_PUBLIC_IP}"; then
+    PANEL_ACCESS_URL="${PANEL_LAN_URL}"
+    PANEL_PUBLIC_IP_SOURCE="lan"
+    return
+  fi
+
+  PANEL_DETECTED_PUBLIC_IP=""
+  if detect_public_access_ip; then
+    PANEL_ACCESS_URL="${PANEL_PROTOCOL}://${PANEL_DETECTED_PUBLIC_IP}:${PANEL_PORT}"
+    return
+  fi
+
+  # 探测不到就如实标成本机内网地址，由摘要给出公网访问指引，
+  # 不再打印一个裸地址冒充「面板地址」。
+  PANEL_ACCESS_URL="${PANEL_LAN_URL}"
+  PANEL_PUBLIC_IP_SOURCE="lan"
+}
+
+# 升级已有安装时决定 PANEL_PUBLIC_URL 保留旧值还是改用本次解析值。
+# 用户设置过的地址（域名/反代/公网 IP）一律保留；只有「旧值只是内网地址、本次又解析到对外地址」
+# 才纠正——否则那台机器的 panel.env 会永远停在会被误读成「面板不可访问」的内网地址上。
+# 注意：本函数直接更新 PANEL_ACCESS_URL 而不是用 printf 返回。它内部会打日志，
+# 若改用命令替换取值，日志会被一起捕获进 URL。
+reconcile_existing_public_url() {
+  local existing="${1:-}"
+  if [[ -z "${existing}" ]]; then
+    return
+  fi
+  case "${PANEL_PUBLIC_IP_SOURCE}" in
+    user)
+      # resolve_panel_access_urls 已按用户显式指定填好。
+      return
+      ;;
+    lan|interface)
+      PANEL_ACCESS_URL="${existing}"
+      return
+      ;;
+  esac
+  if is_private_host "$(url_host "${existing}")"; then
+    log_info "Recorded PANEL_PUBLIC_URL (${existing}) is a LAN-only address; updating it to ${PANEL_ACCESS_URL}."
+    return
+  fi
+  PANEL_ACCESS_URL="${existing}"
 }
 
 # 调用方未提供管理员密码时，自动生成一次性密码。
@@ -1696,7 +1973,8 @@ prepare_panel_files() {
     fi
   fi
   detect_host_ip
-  PANEL_ACCESS_URL="${existing_public_url:-${PANEL_PROTOCOL}://${PANEL_HOST}:${PANEL_PORT}}"
+  resolve_panel_access_urls
+  reconcile_existing_public_url "${existing_public_url:-}"
 
   if [[ -f "${compose_source}" ]]; then
     run_as_root cp "${compose_source}" "${PANEL_COMPOSE_FILE}"
@@ -1755,6 +2033,7 @@ prepare_panel_files() {
         "PANEL_INSTANCES_DIR=${PANEL_INSTANCES_DIR}" \
         "PANEL_BACKUPS_DIR=${PANEL_BACKUPS_DIR}" \
         "PANEL_IMAGE=${PANEL_IMAGE}" \
+        "# PANEL_PUBLIC_URL：$(panel_public_ip_source_label "${PANEL_PUBLIC_IP_SOURCE}")；换域名/反向代理请直接编辑本行" \
         "PANEL_PUBLIC_URL=${PANEL_ACCESS_URL}" \
         "ADMIN_USERNAME=${ADMIN_USERNAME}" \
         "ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
@@ -1964,7 +2243,10 @@ print_summary() {
   printf ' 安装完成：game-server-hub %s\n' "${GSH_RELEASE_TAG}"
   printf ' 部署模式：%s    网络档：%s\n' "${RESOLVED_INSTALL_MODE}" "${RESOLVED_NETWORK_PROFILE}"
   printf '%s\n' "${rule}"
-  printf ' 面板地址   %s\n' "${PANEL_ACCESS_URL}"
+  printf ' 面板地址   %s（%s）\n' "${PANEL_ACCESS_URL}" "$(panel_public_ip_source_label "${PANEL_PUBLIC_IP_SOURCE}")"
+  if [[ "${PANEL_LAN_URL}" != "${PANEL_ACCESS_URL}" ]]; then
+    printf ' 内网地址   %s（仅同一局域网可访问）\n' "${PANEL_LAN_URL}"
+  fi
   printf ' 管理员     %s\n' "${ADMIN_USERNAME}"
   if [[ "${EXPOSE_ADMIN_PASSWORD}" == "1" ]]; then
     printf ' 初始密码   %s\n' "${ADMIN_PASSWORD}"
@@ -1989,7 +2271,21 @@ print_summary() {
   printf '%s\n' "${rule}"
   printf ' 接下来\n'
   printf ' 1. 浏览器打开上面的面板地址登录；首次登录会强制修改初始密码\n'
-  printf ' 2. 该地址是内网 IP：公网访问换成公网 IP，并在安全组放行 TCP %s\n' "${PANEL_PORT}"
+  case "${PANEL_PUBLIC_IP_SOURCE}" in
+    lan)
+      printf ' 2. 没能自动探测到公网地址：上面是本机内网地址，只有同一内网可访问；\n'
+      printf '    公网访问请把主机名换成本机公网 IP 或域名，并在云安全组放行 TCP %s\n' "${PANEL_PORT}"
+      printf '    也可以指定地址后重跑安装：PANEL_PUBLIC_URL=http://<公网IP>:%s\n' "${PANEL_PORT}"
+      ;;
+    ip_echo)
+      printf ' 2. 上面的公网地址来自出站 IP 探测：仅当该公网 IP 已映射到本机端口时可用；\n'
+      printf '    服务器若在运营商 NAT（CGNAT）后面，请换成实际映射的地址，并放行 TCP %s\n' "${PANEL_PORT}"
+      ;;
+    *)
+      printf ' 2. 公网访问直接用上面的地址；用域名或反向代理时请在 panel.env 改 PANEL_PUBLIC_URL，\n'
+      printf '    并在云安全组放行 TCP %s\n' "${PANEL_PORT}"
+      ;;
+  esac
   printf ' 3. 内存偏小（≤ 6 GiB）建议执行 sudo gsh setup-swap，详见 docs/MEMORY.md\n'
   printf '%s\n\n' "${rule}"
 

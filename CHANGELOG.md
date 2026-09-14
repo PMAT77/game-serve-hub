@@ -2,6 +2,18 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Fixed
+
+- **安装摘要不再把内网地址当成「面板地址」打印**：此前主机地址取 `hostname -I` 的第一项，多网卡 / NAT 机器上常落到内网网段（云主机上即 `172.16.x.x` 这类地址），摘要却把它单行标成`面板地址`，用户会以为面板根本连不上。现在主机地址取默认路由出口（`ip route get`，回退 `hostname -I`），对外地址按「显式 `PANEL_PUBLIC_URL`/`PANEL_HOST` → 网卡公网地址 → 云平台元数据 → 出站 IP 探测 → 本机地址」解析，并在地址后标注来源；探测不到公网地址时如实标注「本机内网地址（仅同一局域网可访问）」并给出公网访问该做的事；来自出站探测的出口地址会额外提示「仅在该公网 IP 已映射到本机端口时可用」，避免 CGNAT 场景换一种方式误导。显式指定过地址的机器不发起任何探测请求，`GSH_PANEL_AUTO_PUBLIC_IP=0` 可关闭探测，`GSH_PANEL_PUBLIC_IP_BUDGET_SECONDS` 控制探测总预算（默认 3 秒）。
+
+- **升级时不再把内网地址长期留在配置里**：`panel.env` 的 `PANEL_PUBLIC_URL` 如果是内网地址、而本次解析到了对外地址，会被纠正并写日志说明；用户自己设置的域名 / 反向代理地址一律保留。
+
+- **Native 安装必定崩在 configuration 阶段**：`prepare_native_panel_env` 引用了只在 Docker 分支声明过的 `is_upgrade`，脚本是 `set -Eeuo pipefail`，未定义变量即致命退出——任何 `--mode native` 安装都会失败并触发回滚（v0.4.3 的 Release 附件 `install-v0.4.3.sh` 受影响）。
+
+- **Native 单文件安装拿不到内存档位预设**：Native 分支此前不同步 `config/panel.env.presets`，`append_panel_env_preset` 只会打一条 `Preset file not found` 就跳过，小内存机器于是完全没有 DST 内存上限。现在 Native 也会先同步预设资源（本地仓库 → 内置资产 → 镜像池）。
+
 ## [0.4.3] - 2026-09-13
 
 ### Fixed

@@ -228,7 +228,7 @@ cmd_doctor() {
     repo="$(read_env_value "${PANEL_ENV_FILE}" "GSH_GITHUB_REPO")"
     repo="${repo:-PMAT77/game-serve-hub}"
     log_info "Native upgrade (pinned, checksum-verified):"
-    log_info "  # 目标版本填 Release 页上的版本号（例如 v0.4.3），必须高于当前已安装版本；"
+    log_info "  # 目标版本填 Release 页上的版本号（例如 v0.4.4），必须高于当前已安装版本；"
     log_info "  # 填成当前版本只会原地重装，不会升级。"
     log_info "  curl -fsSL https://raw.githubusercontent.com/${repo}/<目标版本>/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=<目标版本> bash -s -- --mode native"
     log_info "  # 已安装版本：${release_version:-未知}；国内直连 GitHub Raw 不通时，可先下载 install-<目标版本>.sh 再执行："

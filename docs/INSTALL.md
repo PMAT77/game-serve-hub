@@ -1,7 +1,15 @@
 # 安装指南
 
-- **海外，或网络可直达 GitHub 与 GHCR** → [路线 A](#路线-a海外机器一个命令装完)，一个命令装完。
-- **国内服务器** → [路线 B](#路线-b国内服务器debian-12-离线镜像包全程)，离线镜像包全程，按 Debian 12 验证。
+按「部署模式 × 网络位置」分成四条路线。选好模式后直接跳到对应路线，四条路线的面板功能完全一致。
+
+| 模式 | 网络 | 路线 | 这条路线做什么 |
+| --- | --- | --- | --- |
+| Docker | 海外，或可直达 GitHub 与 GHCR | [路线 A](#路线-a海外机器一个命令装完) | 一条命令装完，安装器自装 Docker 并拉取统一镜像 |
+| Docker | 国内 | [路线 B](#路线-b国内服务器debian-12-离线镜像包全程) | 先导入离线镜像包，再跑同一条命令（GHCR 层域名国内不可达） |
+| Native systemd | 海外，或可直达 GitHub | [路线 C](#路线-cnative-海外机器一个命令装完) | 一条命令装完，安装器下载 Native Release 与 SteamCMD 并注册服务 |
+| Native systemd | 国内 | [路线 D](#路线-dnative-国内服务器加速代理与国内档位) | 用 jsDelivr 或加速代理取脚本与 Release 包，`--network cn` 走国内软件源 |
+
+Native 路线不安装、也不调用 Docker，与 Docker 路线不互相迁移，只支持 x86_64。
 
 **环境要求**：Debian 12 或 Ubuntu 22.04 / 24.04（只支持 apt 系列）；内存最低约 4 GiB，洞穴与中等 Mod 建议 6 GiB+（档位与预设见 [MEMORY.md](MEMORY.md)，安装器默认自动选档）；根分区至少 4 GiB 空闲，另外要为离线镜像包（约 227 MB）与导入后的本地镜像（约 560 MB，导入完成后包可删除）、游戏本体（数 GB）与存档备份预留空间；root 或 sudo。
 
@@ -19,6 +27,8 @@
 ---
 
 ## 路线 A：海外机器（一个命令装完）
+
+**模式：Docker。** 安装器自行安装 Docker 与 Compose 插件，再拉取统一镜像启动面板栈。
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.4/scripts/install.linux.sh" \
@@ -43,6 +53,8 @@ gsh doctor
 ---
 
 ## 路线 B：国内服务器（Debian 12 离线镜像包全程）
+
+**模式：Docker。** 四个阶段按顺序执行：先装 Docker 与 Compose 插件，再导入离线镜像包，最后重跑安装器完成部署。Native 模式的国内安装见[路线 D](#路线-dnative-国内服务器加速代理与国内档位)。
 
 > 安装器要从 GHCR 拉统一镜像，其镜像层域名国内基本不可达（症状：能见镜像清单、层下载 `TLS handshake timeout`，重试无用）。正确顺序：先导入离线镜像包，再跑安装器 —— 检测到本地镜像即跳过拉取。
 
@@ -117,6 +129,72 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 
 ---
 
+## 路线 C：Native 海外机器（一个命令装完）
+
+面板由系统级 `game-server-hub.service` 管理，游戏分片由 `gsh` 用户的 systemd 服务管理，日志进 journald。不安装 Docker，也不使用 tmux、screen 与 PM2。
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.4/scripts/install.linux.sh" \
+  | sudo bash -s -- --mode native
+```
+
+> 管道安装的默认模式是 Docker，Native 必须显式写 `--mode native`。脚本默认 tag 决定安装版本，确认方式与[路线 A](#路线-a海外机器一个命令装完)相同。
+
+安装器按顺序做这些事：装基础依赖与 32 位运行库（`libcurl4:i386` 等，DST 与 SteamCMD 需要）→ 创建 `gsh` 系统用户并开启 linger → 下载校验 Native Release（`game-server-hub-native-v0.4.4-linux-x64.tar.gz`，自带 Node 运行时）→ 解压到 `/opt/game-server-hub/releases/v0.4.4` 并原子切换 `current` 符号链接 → 装 SteamCMD → 写 `panel.env` → 启动面板并等待健康检查。
+
+```bash
+# 初始密码：与 Docker 模式同一个文件（管理员名 superadmin，首登强制改密）
+sudo sed -n 's/^ADMIN_PASSWORD=//p' /opt/game-server-hub/panel.env
+
+# 健康检查：服务应为 active，runtime.status 应为 running
+systemctl is-active game-server-hub.service
+curl -fsS http://127.0.0.1:9527/health
+gsh doctor
+```
+
+浏览器访问 `http://<服务器IP>:9527`（安装器结尾输出实际地址）。面板日志用 `sudo journalctl -u game-server-hub.service -f` 跟踪。端口、安全组与防火墙要求与 Docker 模式相同，见[端口与防火墙](#端口与防火墙)。
+
+---
+
+## 路线 D：Native 国内服务器（加速代理与国内档位）
+
+Native 模式不拉取容器镜像，境外依赖只有两处：GitHub Raw（安装器组件）与 GitHub Release（Native 包）。安装器自带加速代理池，顺序为 `gh-proxy.com`、`ghfast.top`、`ghproxy.com`，全部失败才走直连，因此国内一般可以直接安装。先把脚本下载到本地更稳妥。
+
+```bash
+tag=v0.4.4
+# 下载安装器（gh-proxy 加速；不可用时换 https://ghfast.top/ 前缀）
+curl -fL --retry 3 -o "install-${tag}.sh" \
+  "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/${tag}/scripts/install.linux.sh"
+
+# 自证版本：必须输出 ...:-v0.4.4}}，对不上就停下排查
+sed -n '9p' "install-${tag}.sh"
+
+# 安装：--network cn 把 apt 源临时切到国内镜像，SteamCMD 走 cn 区域并重试 8 次
+sudo env GSH_RELEASE_TAG="${tag}" bash "install-${tag}.sh" --mode native --network cn
+```
+
+- 安装器从 jsDelivr 与加速代理取 `scripts/gsh.sh`、`scripts/gsh-native-update.sh`，并从加速代理或直连取 Native 包与同名 `.sha256`。
+- 想固定单一代理，加 `GSH_GITHUB_PROXY=https://gh-proxy.com/`；想自己列镜像源，用 `GSH_NATIVE_RELEASE_MIRRORS=源1,源2`，每项是目录前缀，安装器会接上文件名。
+- apt 国内镜像连不上时，安装器自动还原系统默认源后重试，不需要手工改回。
+
+加速代理全部不可用时，改为手动下载 Native 包再安装。包旁必须放同名 `.sha256`，也可以用 `GSH_NATIVE_RELEASE_SHA256` 直接给出摘要。
+
+```bash
+tag=v0.4.4
+base="https://gh-proxy.com/https://github.com/PMAT77/game-serve-hub/releases/download/${tag}"
+curl -fL --retry 3 -o "game-server-hub-native-${tag}-linux-x64.tar.gz"        "${base}/game-server-hub-native-${tag}-linux-x64.tar.gz"
+curl -fL --retry 3 -o "game-server-hub-native-${tag}-linux-x64.tar.gz.sha256" "${base}/game-server-hub-native-${tag}-linux-x64.tar.gz.sha256"
+sha256sum -c "game-server-hub-native-${tag}-linux-x64.tar.gz.sha256"
+
+sudo env GSH_RELEASE_TAG="${tag}" \
+  GSH_NATIVE_RELEASE_ARCHIVE="$(pwd)/game-server-hub-native-${tag}-linux-x64.tar.gz" \
+  bash "install-${tag}.sh" --mode native --network cn
+```
+
+SteamCMD 从 `steamcdn-a.akamaihd.net` 下载，不通时用 `GSH_NATIVE_STEAMCMD_URL` 指向镜像。面板内的「下载更新」在 Native 下复用同一套代理池，网络受限时在 `panel.env` 写 `GSH_GITHUB_PROXY` 后执行 `gsh restart`。安装后的验证命令与[路线 C](#路线-cnative-海外机器一个命令装完)相同。
+
+---
+
 ## 装好之后
 
 ### 配置入口
@@ -150,7 +228,7 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 | `gsh status` | 面板栈状态与健康检查 |
 | `gsh logs` | 跟随面板日志（从最近 200 行起） |
 | `gsh restart` / `gsh stop` / `gsh start` | 重启 / 停止 / 启动面板栈，不影响游戏容器 |
-| `gsh update` | 拉取统一镜像并重建面板栈 |
+| `gsh update` | 拉取统一镜像并重建面板栈（只对 Docker 模式有效；Native 模式请用面板内更新或重跑安装脚本） |
 | `gsh doctor` | 体检：健康、运行时、资源、脱敏配置、日志与版本 |
 | `gsh setup-swap` | 小内存机器创建 2 GB swap，并设置 OOM 相关内核参数 |
 
@@ -178,19 +256,31 @@ sudo sed -n 's/^ADMIN_PASSWORD=//p' /opt/game-server-hub/panel.env
 
 面板首次启动时按 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 创建管理员：Docker 模式由 `docker-compose.yml` 的 `environment` 注入容器，Native 模式由 systemd `EnvironmentFile` 注入进程 —— 两条路径读的都是同一个 `panel.env`，改值后重启面板即生效。
 
-未设置 `ADMIN_PASSWORD`、或容器没收到该变量（旧版 compose、手动 `docker run` 漏了 `-e`）时，面板会随机生成密码并写入容器内数据目录：
+未设置 `ADMIN_PASSWORD`、或容器没收到该变量（旧版 compose、手动 `docker run` 漏了 `-e`）时，面板会随机生成密码，并把凭据写到数据库同目录：
 
 ```bash
+# Docker 模式：凭据在容器内的数据目录
 docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
+# Native 模式：凭据在数据目录，文件权限 0600，属 gsh 用户
+sudo cat /var/lib/game-server-hub/admin-credentials.txt
 ```
 
-该文件只在"生成的密码确实写入了数据库"时才会生成（或重写）：管理员已存在且未开启 `GSH_SYNC_ADMIN_PASSWORD_FROM_ENV` 时不会生成新密码，避免给出一个登录不上的值。
+该文件只在「生成的密码确实写入了数据库」时才会生成（或重写）：管理员已存在且未开启 `GSH_SYNC_ADMIN_PASSWORD_FROM_ENV` 时不会生成新密码，避免给出一个登录不上的值。
 
 `FORCE_PASSWORD_CHANGE=1`（安装器默认写入）时首次登录会拦截至 `/force-change-password`，改密成功后凭据文件自动删除。
 
 也可安装时显式指定：`sudo env ADMIN_USERNAME=admin ADMIN_PASSWORD='强密码' bash install.linux.sh --mode docker`。不要把 `panel.env` 或授权文件发到公开 Issue。
 
-### 升级（面板内一键更新）
+### 升级
+
+升级入口都在「系统设置 → 面板与游戏版本」。两种部署方式都能在面板里更新，但机制不同：
+
+| 部署方式 | 面板内更新 | 更新内容 |
+| --- | --- | --- |
+| Docker | 「下载更新」→「立即安装」（重建面板容器） | 统一镜像 |
+| Native（systemd） | 「下载更新」→「立即安装」（后台安装并重启面板） | Native Release 包 |
+
+#### Docker 模式
 
 「系统设置 → 面板与游戏版本」分两步走。先点「下载更新」把新镜像拉到本地：版本行下方会实时显示 `已下载 512 MB / 1.2 GB`，本地已有镜像时直接就绪。下载完成后按钮变为「立即安装」，点击后会写入 panel.env 并重建面板容器。
 
@@ -203,6 +293,27 @@ docker exec game-server-hub-panel cat /app/data/admin-credentials.txt
 重建动作由一个临时的 updater 容器完成，它需要镜像里有 `docker` CLI 与 compose 插件。v0.3.10 起统一镜像自带这两样，面板会优先用**本地已有的目标镜像 / 当前面板镜像**当 updater 运行时，因此离线环境也能完成更新，不再去 Docker Hub 拉 `docker:27-cli`。若你所在网络要求固定某个 updater 镜像（例如内网制品库里的同等镜像），在 `panel.env` 里设置 `GSH_PANEL_UPDATER_IMAGE` 即可。
 
 > 从 v0.3.9 及更早版本升到 v0.3.10：旧镜像不含 docker CLI，且本机也没有 `docker:27-cli` 时，面板内更新会失败并提示；按路线 B 用离线镜像包升到 v0.3.10 一次，之后面板内更新即可离线完成。
+
+#### Native 模式（systemd）
+
+面板进程本身拿不到 root，也写不了安装目录，所以面板内更新由两段配合完成：**面板负责下载并显示进度，后台更新程序以 root 执行官方安装器**完成安装、切换版本与重启。面板只写一个「目标版本号」的请求文件，不会把任何内容交给 root 执行。
+
+- 前置条件：本版本的安装器会安装这套更新组件（`game-server-hub-update.path` / `game-server-hub-update.service`）。从更早版本升上来的实例需要**重跑一次安装脚本**（命令见[路线 C](#路线-cnative-海外机器一个命令装完)与[路线 D](#路线-dnative-国内服务器加速代理与国内档位)）才会出现更新组件；没有组件时面板会明说，并给出可直接复制的安装命令。
+- 两步操作：先点「下载更新」把 Native Release 包（约几十 MB）下到服务器（断点续传、官方 `.sha256` 校验、本地已有则直接就绪），再点「立即安装」。
+- 安装阶段做的事：校验官方安装脚本与更新包的 `.sha256` → 解压到 `/opt/game-server-hub/releases/<版本>` → 原子切换 `current` 符号链接 → 更新 `panel.env` 的 `GSH_RELEASE_VERSION` → 重启面板服务 → 健康检查确认**新版本真的在运行**。
+- 只允许升级：目标版本必须高于当前版本，同版本重装与降级都会被拒绝（因此「同一个版本号重新发布了内容」这种情况在 Native 下请用安装脚本重装）。
+- 失败会自动回滚：`current` 切回上一个 release、`panel.env` 恢复更新前的副本、面板以旧版本重新提供服务，并在界面上给出失败原因；执行器被中断（重启、超时）也会留下明确的失败状态，不会让界面一直停在「更新中」。
+- 更新期间面板会短暂无法访问（通常 1-3 分钟，取决于服务器到 GitHub 的网速与系统包状态），游戏实例不受影响。
+- 排障：`sudo journalctl -u game-server-hub-update.service -n 100` 看后台程序日志；每次更新的完整安装日志在 `/var/lib/game-server-hub/panel-update/.root/update.log`（root 私有），更新状态在 `/var/lib/game-server-hub/panel-update/state.json`。
+
+不想走面板时，随时可以用目标版本重跑安装器，效果与面板内更新一致（安装器同样会校验、切换并回滚）：
+
+```bash
+curl -fsSL "https://gh-proxy.com/https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.4/scripts/install.linux.sh" \
+  | sudo env GSH_RELEASE_TAG=v0.4.4 bash -s -- --mode native
+```
+
+> `GSH_RELEASE_TAG` 必须填写**目标**版本号；填成当前版本只是原地重装，不会升级。国内直连 GitHub Raw 不通时，先把 `install-v0.4.4.sh` 下载到服务器，再执行 `sudo env GSH_RELEASE_TAG=v0.4.4 bash install-v0.4.4.sh --mode native`。
 
 ### 备份与恢复（v0.2.0 起）
 
@@ -244,6 +355,13 @@ sudo -u gsh XDG_RUNTIME_DIR="/run/user/${GSH_UID}" DBUS_SESSION_BUS_ADDRESS="uni
 sudo loginctl disable-linger gsh        # 关闭无人登录时的常驻
 sudo rm -f /etc/systemd/system/game-server-hub.service && sudo systemctl daemon-reload
 
+# 面板内更新的触发单元与后台更新程序（没装过可跳过）
+sudo systemctl disable --now game-server-hub-update.path 2>/dev/null || true
+sudo rm -f /etc/systemd/system/game-server-hub-update.path \
+  /etc/systemd/system/game-server-hub-update.service \
+  /usr/local/lib/game-server-hub/gsh-native-update
+sudo systemctl daemon-reload
+
 # 确认已备份后再删除数据目录
 sudo ls /var/lib/game-server-hub
 sudo rm -rf /opt/game-server-hub /var/lib/game-server-hub /var/log/game-server-hub
@@ -253,7 +371,7 @@ sudo userdel -r gsh                     # 确认不再需要 gsh 用户时执行
 ### 回滚到旧版本
 
 - **Docker 模式**：面板栈可以换回任意已发布 tag —— 用旧 tag 重跑安装器（`GSH_RELEASE_TAG=v0.4.0`），或把 `panel.env` 的 `PANEL_IMAGE` 指向旧 tag 后执行 `gsh update`。
-- **Native 模式**：按[附录 A](#附录-a-native-systemd-部署个人服主) 的 `current` 符号链接步骤切回旧 Release。
+- **Native 模式**：按[附录 A](#附录-a-native-systemd-常用命令与回滚) 的 `current` 符号链接步骤切回旧 Release。面板内更新失败时会自动回滚到上一个 Release 并恢复 `panel.env`，不需要手动干预；上面的步骤用于你主动降级。
 
 > 回滚面板本身不会改动游戏存档，但**旧版本可能不认识新版本迁移过的数据库**。跨版本回滚前先做一次数据库快照（面板「备份与恢复」页），并确认目标 tag 是正式发布版本。
 
@@ -303,7 +421,7 @@ sudo userdel -r gsh                     # 确认不再需要 gsh 用户时执行
 
 ### `Native Release ... missing`（Native 安装时）
 
-Release 未发布 `game-server-hub-native-<tag>-linux-x64.tar.gz` 及 `.sha256`。换已发布版本，或 `GSH_NATIVE_RELEASE_ARCHIVE` 指定本地包（见[附录 A](#附录-a-native-systemd-部署个人服主)）。
+Release 未发布 `game-server-hub-native-<tag>-linux-x64.tar.gz` 及 `.sha256`。换已发布版本，或用 `GSH_NATIVE_RELEASE_ARCHIVE` 指定本地包（见[路线 D](#路线-dnative-国内服务器加速代理与国内档位)）；加速代理不通时同样走这条路。
 
 ### `systemd user manager` / `Failed to connect to bus`（Native 运行时）
 
@@ -323,30 +441,21 @@ Docker 与 Native 之间不自动迁移。保留数据目录后按目标模式�
 
 ---
 
-## 附录 A Native systemd 部署（个人服主）
+## 附录 A Native systemd 常用命令与回滚
 
-不安装、不调用 Docker；游戏进程为 systemd 用户服务，日志进 journald。只支持 x86_64，与 Docker 模式不互相迁移。
-
-```bash
-# 安装
-git clone --branch v0.4.4 --depth 1 https://github.com/PMAT77/game-serve-hub.git
-cd game-serve-hub          # 目录名取自仓库名（game-serve-hub），镜像名才是 game-server-hub
-sudo bash ./scripts/install.linux.sh --mode native --network auto
-
-# 离线安装：指定本地 Native Release 包（旁须有同名 .sha256）
-sudo GSH_RELEASE_TAG=v0.4.4 GSH_NATIVE_RELEASE_ARCHIVE=/srv/packages/game-server-hub-native-v0.4.4-linux-x64.tar.gz \
-  bash ./scripts/install.linux.sh --mode native
-```
+安装命令见[路线 C](#路线-cnative-海外机器一个命令装完)（海外）与[路线 D](#路线-dnative-国内服务器加速代理与国内档位)（国内）。从早于本版本的安装升上来时，重跑一次对应路线的命令即可获得面板内更新能力。
 
 ```bash
 # 常用命令与回滚
 sudo systemctl status game-server-hub.service --no-pager
 sudo journalctl -u game-server-hub.service -f
+# 面板内更新的后台程序日志（每次从面板发起更新时才有内容）
+sudo journalctl -u game-server-hub-update.service -n 100 --no-pager
 GSH_UID="$(id -u gsh)"
 sudo -u gsh XDG_RUNTIME_DIR="/run/user/${GSH_UID}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${GSH_UID}/bus" \
   systemctl --user list-units 'gsh-*.service'
 
-# 回滚到旧版本
+# 回滚到旧版本（current 是指向 /opt/game-server-hub/releases/<版本> 的符号链接）
 sudo systemctl stop game-server-hub.service
 sudo ln -sfn /opt/game-server-hub/releases/v0.2.0 /opt/game-server-hub/current.rollback
 sudo mv -Tf /opt/game-server-hub/current.rollback /opt/game-server-hub/current
@@ -358,7 +467,7 @@ sudo systemctl start game-server-hub.service
 ```text
 --mode auto|docker|native      交互终端 auto 在未装 Docker 时询问；非交互管道默认 Docker。
                                任何 Docker 失败都不会静默改为 Native，生产建议显式写模式
---network auto|cn|global       网络档位（影响镜像源与代理选择）
+--network auto|cn|global       网络档位：cn 临时切换国内软件源并把 SteamCMD 重试提到 8 次，失败自动还原
 --open-panel-port              自动放行面板端口
 --open-dst-ports               自动放行 DST 端口
 
@@ -375,8 +484,12 @@ GSH_PANEL_ENV_PRESET=auto      内存预设档位：auto|small|medium|large|none
 EXPOSE_ADMIN_PASSWORD=1        在安装摘要中明文打印初始密码（默认不打印）
 STRICT_INSTALLER_ASSET_CHECKSUM=0   关闭安装资源校验和强校验（默认 1，失配即中止）
 DST_GAME_PORT / DST_AUTH_PORT / DST_MASTER_PORT / DST_CAVES_*   覆盖默认 DST 端口
+GSH_GITHUB_PROXY=URL           固定单一 GitHub 加速代理（如 https://gh-proxy.com/），安装与面板内更新共用
 GSH_NATIVE_RELEASE_ARCHIVE=…   Native 离线安装包路径
-GSH_NATIVE_RELEASE_MIRRORS=…   Native Release 下载源
+GSH_NATIVE_RELEASE_MIRRORS=…   Native Release 下载源（逗号分隔的目录前缀）
+GSH_NATIVE_RELEASE_SHA256=…    本地包旁没有同名 .sha256 时，手工给出摘要
+GSH_NATIVE_STEAMCMD_URL=URL    Native 模式 SteamCMD 下载地址（默认 steamcdn-a.akamaihd.net）
+GSH_NATIVE_UPDATE_DIR=PATH     Native 面板内更新的请求/状态交换目录（默认 <数据目录>/panel-update）
 ```
 
 完整参数与当前默认值以 `sudo bash ./scripts/install.linux.sh --help` 的输出为准。

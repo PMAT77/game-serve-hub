@@ -69,7 +69,9 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.4/script
 
 ### 国内网络
 
-若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位：
+国内的完整步骤按模式分成两条：Docker 走[离线镜像包完整步骤](docs/INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)，Native systemd 走[国内安装路线](docs/INSTALL.md#路线-dnative-国内服务器加速代理与国内档位)。
+
+若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位（`--mode` 按你选的模式改）：
 
 ```bash
 curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.4.4/scripts/install.linux.sh \

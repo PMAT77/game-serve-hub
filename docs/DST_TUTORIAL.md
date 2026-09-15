@@ -83,12 +83,14 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.4.4/script
   | sudo bash -s -- --mode native
 ```
 
-**国内网络**（GitHub Raw 不稳定时，换 jsDelivr 源并启用国内档位）：
+**国内网络**（GitHub Raw 不稳定时，换 jsDelivr 源并启用国内档位；下面的 `--mode` 按你要装的模式替换）：
 
 ```bash
 curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.4.4/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
+
+Docker 在国内还要先导入离线镜像包，完整步骤见 [INSTALL.md · 路线 B](INSTALL.md#路线-b国内服务器debian-12-离线镜像包全程)；Native 在国内的完整步骤与加速代理回退见 [INSTALL.md · 路线 D](INSTALL.md#路线-dnative-国内服务器加速代理与国内档位)。
 
 建议**明确指定 --mode**，避免自动判断与你的预期不一致。
 

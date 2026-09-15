@@ -31,6 +31,8 @@ const envSchema = z.object({
   GSH_NATIVE_RUNTIME_DIR: z.string().trim().optional(),
   GSH_NATIVE_STEAMCMD_PATH: z.string().trim().optional(),
   GSH_NATIVE_SYSTEMD_UNIT_DIR: z.string().trim().optional(),
+  /** Native 面板内更新的请求/状态交换目录；由安装器写入 panel.env，Docker 模式不使用 */
+  GSH_NATIVE_UPDATE_DIR: z.string().trim().optional(),
   PANEL_IMAGE: z.string().trim().optional(),
   /** 面板内一键更新时用的 updater 容器镜像（需自带 docker CLI + compose 插件）；留空自动挑选 */
   GSH_PANEL_UPDATER_IMAGE: z.string().trim().optional(),
@@ -93,6 +95,8 @@ export interface ServerConfig {
   nativeRuntimeDir: string
   nativeSteamcmdPath: string
   nativeSystemdUnitDir: string
+  /** Native 面板内更新：面板在此目录写请求、读状态；Docker 模式为空目录占位 */
+  nativeUpdateDir: string
   panelImage: string
   /** updater 容器镜像覆盖；空字符串表示自动挑选（目标镜像 → 当前面板镜像 → 官方 CLI 镜像） */
   panelUpdaterImage: string
@@ -143,6 +147,7 @@ export function loadServerConfig(): ServerConfig {
     GSH_NATIVE_RUNTIME_DIR: process.env.GSH_NATIVE_RUNTIME_DIR ?? env.GSH_NATIVE_RUNTIME_DIR,
     GSH_NATIVE_STEAMCMD_PATH: process.env.GSH_NATIVE_STEAMCMD_PATH ?? env.GSH_NATIVE_STEAMCMD_PATH,
     GSH_NATIVE_SYSTEMD_UNIT_DIR: process.env.GSH_NATIVE_SYSTEMD_UNIT_DIR ?? env.GSH_NATIVE_SYSTEMD_UNIT_DIR,
+    GSH_NATIVE_UPDATE_DIR: process.env.GSH_NATIVE_UPDATE_DIR ?? env.GSH_NATIVE_UPDATE_DIR,
     PANEL_IMAGE: process.env.PANEL_IMAGE ?? env.PANEL_IMAGE,
     GSH_PANEL_UPDATER_IMAGE: process.env.GSH_PANEL_UPDATER_IMAGE ?? env.GSH_PANEL_UPDATER_IMAGE,
     GSH_STACK_DIR: process.env.GSH_STACK_DIR ?? env.GSH_STACK_DIR,
@@ -197,6 +202,7 @@ export function loadServerConfig(): ServerConfig {
     nativeRuntimeDir: path.resolve(parsed.GSH_NATIVE_RUNTIME_DIR || path.join(defaultInstancesRoot, '..', 'runtime')),
     nativeSteamcmdPath: path.resolve(parsed.GSH_NATIVE_STEAMCMD_PATH || '/opt/game-server-hub/runtime/steamcmd/steamcmd.sh'),
     nativeSystemdUnitDir: path.resolve(parsed.GSH_NATIVE_SYSTEMD_UNIT_DIR || path.join(os.homedir(), '.config/systemd/user')),
+    nativeUpdateDir: path.resolve(parsed.GSH_NATIVE_UPDATE_DIR || path.join(defaultInstancesRoot, '..', 'panel-update')),
     panelImage: parsed.PANEL_IMAGE || UNIFIED_IMAGE_REF,
     panelUpdaterImage: parsed.GSH_PANEL_UPDATER_IMAGE?.trim() || '',
     stackDir: parsed.GSH_STACK_DIR?.trim() || '',

@@ -57,6 +57,7 @@ function buildConfig(partial: Partial<ServerConfig>): ServerConfig {
     nativeRuntimeDir: '/tmp/runtime',
     nativeSteamcmdPath: '/opt/game-server-hub/runtime/steamcmd/steamcmd.sh',
     nativeSystemdUnitDir: '/tmp/systemd',
+    nativeUpdateDir: '/tmp/panel-update',
     panelImage: 'ghcr.io/pmat77/game-server-hub:latest',
     panelUpdaterImage: '',
     stackDir: '',
@@ -119,15 +120,44 @@ describe('resolveApplySupport', () => {
   it('still supports image pull when stack dir is missing', () => {
     const support = resolveApplySupport(buildConfig({ stackDir: '' }))
     assert.equal(support.imageSupported, false)
+    assert.equal(support.nativeSupported, false)
     assert.equal(support.supported, true)
     assert.match(support.hint ?? '', /目录配置/)
   })
 
-  it('uses the verified installer path for Native upgrades', () => {
-    const support = resolveApplySupport(buildConfig({ runtimeMode: 'native' }))
+  it('asks for one installer rerun when the Native update helper is missing', () => {
+    // 老安装（未重跑过安装脚本）没有更新组件：面板内更新不可用，但要说清怎么恢复。
+    // 注入口让这条断言不再依赖「本机恰好没装过 Native」。
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-native-support-'))
+    tempDirs.push(dir)
+    const support = resolveApplySupport(
+      buildConfig({ runtimeMode: 'native', nativeUpdateDir: dir }),
+      {
+        nativePathUnitFile: path.join(dir, 'missing.path'),
+        nativeHelperFile: path.join(dir, 'missing-helper'),
+      },
+    )
     assert.equal(support.imageSupported, false)
+    assert.equal(support.nativeSupported, false)
     assert.equal(support.supported, false)
-    assert.match(support.hint ?? '', /服务器上更新/)
+    assert.match(support.hint ?? '', /重跑一次安装脚本/)
+  })
+
+  it('enables in-panel updates once the installer has deployed the update components', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-native-support-'))
+    tempDirs.push(dir)
+    const unitFile = path.join(dir, 'game-server-hub-update.path')
+    const helperFile = path.join(dir, 'gsh-native-update')
+    fs.writeFileSync(unitFile, '[Path]\n', 'utf8')
+    fs.writeFileSync(helperFile, '#!/usr/bin/env bash\n', 'utf8')
+    const support = resolveApplySupport(
+      buildConfig({ runtimeMode: 'native', nativeUpdateDir: dir }),
+      { nativePathUnitFile: unitFile, nativeHelperFile: helperFile },
+    )
+    assert.equal(support.nativeSupported, true)
+    assert.equal(support.imageSupported, false)
+    assert.equal(support.supported, true)
+    assert.equal(support.hint, null)
   })
 
   it('enables image apply when stack files are reachable', () => {

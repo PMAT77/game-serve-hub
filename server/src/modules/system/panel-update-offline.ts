@@ -275,16 +275,23 @@ async function fetchExpectedSha256(url: string): Promise<string | null> {
   }
 }
 
-/**
- * 按候选地址依次下载离线镜像包，流式校验 sha256；成功后 `.part` 改名为最终文件。
- * 失败时保留分片，下一次调用会从断点继续。
- */
-export async function downloadOfflineImageArchive(input: {
+/** 通用 Release 资产下载参数：离线镜像包与 Native 更新包共用同一套断点续传 + 校验逻辑 */
+export interface ReleaseArchiveDownloadInput {
   urls: string[]
   destinationDir: string
   fileName: string
+  /** 文案主体名（「镜像包」/「更新包」）；只影响用户可见的错误说明 */
+  subjectLabel: string
+  /** 磁盘不足时的补充建议（例如导入镜像还要占用的空间） */
+  diskHint?: string
   onProgress?: (progress: OfflineArchiveProgress) => void
-}): Promise<OfflineArchiveDownloadResult> {
+}
+
+/**
+ * 按候选地址依次下载 Release 资产，流式校验 sha256；成功后 `.part` 改名为最终文件。
+ * 失败时保留分片，下一次调用会从断点继续。
+ */
+export async function downloadReleaseArchive(input: ReleaseArchiveDownloadInput): Promise<OfflineArchiveDownloadResult> {
   fs.mkdirSync(input.destinationDir, { recursive: true })
   cleanupStaleParts(input.destinationDir, input.fileName)
   const filePath = path.join(input.destinationDir, input.fileName)
@@ -303,9 +310,9 @@ export async function downloadOfflineImageArchive(input: {
         tried,
         partialBytes,
         error: [
-          `磁盘空间不足：镜像包约 ${formatBytes(knownTotal)}，`,
+          `磁盘空间不足：${input.subjectLabel}约 ${formatBytes(knownTotal)}，`,
           `${input.destinationDir} 可用 ${space.availableBytes === null ? '未知' : formatBytes(space.availableBytes)}。`,
-          '请清理磁盘后重试（导入镜像还需要 docker 数据目录同等大小的空间）。',
+          `请清理磁盘后重试${input.diskHint ? `（${input.diskHint}）` : ''}。`,
         ].join(''),
       }
     }
@@ -319,7 +326,7 @@ export async function downloadOfflineImageArchive(input: {
       if (expected && expected !== archive.sha256) {
         // 分片内容已不可信，删掉重下
         fs.rmSync(partPath, { force: true })
-        throw new Error(`镜像包校验失败（期望 ${expected.slice(0, 12)}…，实际 ${archive.sha256.slice(0, 12)}…）`)
+        throw new Error(`${input.subjectLabel}校验失败（期望 ${expected.slice(0, 12)}…，实际 ${archive.sha256.slice(0, 12)}…）`)
       }
       fs.renameSync(partPath, filePath)
       return {
@@ -343,6 +350,20 @@ export async function downloadOfflineImageArchive(input: {
     tried,
     partialBytes: readPartSize(partPath),
   }
+}
+
+/** 离线镜像包入口：国内推荐路径，文案面向镜像导入 */
+export async function downloadOfflineImageArchive(input: {
+  urls: string[]
+  destinationDir: string
+  fileName: string
+  onProgress?: (progress: OfflineArchiveProgress) => void
+}): Promise<OfflineArchiveDownloadResult> {
+  return downloadReleaseArchive({
+    ...input,
+    subjectLabel: '镜像包',
+    diskHint: '导入镜像还需要 docker 数据目录同等大小的空间',
+  })
 }
 
 /** 本地已有的镜像引用集合；用于对比 `docker load` 前后确定这次导入进来的 tag */

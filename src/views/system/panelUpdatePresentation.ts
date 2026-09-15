@@ -27,8 +27,6 @@ export interface PanelUpdatePresentation {
 /** 四种环境原因的解决办法完全一样，对用户只说一句 */
 export const MANUAL_UPDATE_NOTE = '这种安装方式无法在面板里更新，请在服务器上执行'
 
-export const MANUAL_UPDATE_COMMAND = 'sudo gsh update'
-
 const PHASE_LINES: Record<UpdatePhase, string> = {
   idle: '',
   preparing: '正在准备…',
@@ -37,6 +35,24 @@ const PHASE_LINES: Record<UpdatePhase, string> = {
   installing: '正在准备安装…',
   recreating: '正在安装，约 30 秒后自动返回…',
   failed: '',
+}
+
+/**
+ * Native 的更新物件是「更新包」，安装动作还会重启面板服务，
+ * 所以文案不能复用镜像那套（说「镜像」「30 秒」都会误导）。
+ */
+const NATIVE_PHASE_LINES: Record<UpdatePhase, string> = {
+  idle: '',
+  preparing: '正在检查磁盘空间…',
+  downloading: '正在下载更新包，请勿关闭页面…',
+  downloaded: '更新包已就绪，点「立即安装」完成更新。',
+  installing: '正在准备安装…',
+  recreating: '正在安装并重启面板，约 1-3 分钟后自动重连…',
+  failed: '',
+}
+
+function phaseLines(status: PanelUpdateStatus): Record<UpdatePhase, string> {
+  return status.runtimeMode === 'native' ? NATIVE_PHASE_LINES : PHASE_LINES
 }
 
 /** 版本主行的进行中后缀：下载与安装是两段，分开说清楚 */
@@ -123,7 +139,7 @@ function resolvePhaseLine(status: PanelUpdateStatus): string | null {
   if (!status.updatePhase || status.updatePhase === 'idle') {
     return status.updating ? '正在更新，稍后自动返回…' : null
   }
-  return status.updateMessage?.trim() || PHASE_LINES[status.updatePhase] || null
+  return status.updateMessage?.trim() || phaseLines(status)[status.updatePhase] || null
 }
 
 /** 主按钮：下载 → 立即安装两段，能安装就不再让人重新下载 */
@@ -132,8 +148,10 @@ function resolveAction(status: PanelUpdateStatus): Pick<PanelUpdatePresentation,
   if (busyLabel) {
     return { action: 'busy', actionLabel: busyLabel }
   }
-  const installable = status.image.updateAvailable && status.imageApplySupported
-  // 镜像已在本地（离线包导入、或下载完成后安装失败）：下一步只剩安装
+  // Native（systemd）与 Docker 的安装机制不同，但对用户都是「下载 → 立即安装」两段
+  const installable = status.image.updateAvailable
+    && (status.imageApplySupported || status.nativeUpdateSupported === true)
+  // 更新内容已就绪（离线导入、面板预下载完成、或安装失败但包还在）：下一步只剩安装
   if (installable && status.targetImageReady) {
     return { action: 'install', actionLabel: '立即安装' }
   }
@@ -199,7 +217,9 @@ export function buildPanelUpdatePresentation(status: PanelUpdateStatus | null): 
 
   return {
     versionLine: buildVersionLine(version, suffix),
-    needsManualCommand: image.updateAvailable && !status.imageApplySupported,
+    needsManualCommand: image.updateAvailable
+      && !status.imageApplySupported
+      && status.nativeUpdateSupported !== true,
     phaseLine,
     updateFailed,
     progressText,

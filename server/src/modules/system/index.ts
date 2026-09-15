@@ -83,6 +83,7 @@ import {
   applyPanelUpdate,
   getCachedPanelUpdateStatus,
   refreshPanelUpdateStatus,
+  resolveApplySupport,
   schedulePanelUpdateChecks,
 } from './panel-update'
 import { applyPanelPortToDeployment, resolveActualPanelPortFromRequest } from './panel-port'
@@ -442,10 +443,18 @@ export function registerSystemModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    if (loadServerConfig().runtimeMode === 'native') {
-      return businessError('裸机模式请使用版本状态中提供的安装命令原地升级，以保留校验和自动回滚能力。', request)
+    const runtimeConfig = loadServerConfig()
+    if (runtimeConfig.runtimeMode === 'native') {
+      // Native 不用容器镜像：只有安装器布置过特权更新组件时才能在面板内更新。
+      // 老安装（未重跑过安装脚本）退回「去服务器执行命令」，而不是假装按钮能用。
+      if (!resolveApplySupport(runtimeConfig).nativeSupported) {
+        return businessError(
+          '当前安装还没有面板内更新组件，请在服务器上执行版本状态中给出的安装命令；重跑一次安装脚本后即可在面板里一键更新。',
+          request,
+        )
+      }
     }
-    if ((await resolveDockerStatus(true)) !== 'running') {
+    else if ((await resolveDockerStatus(true)) !== 'running') {
       return businessError('无法连接 Docker，暂不能更新 Hub 镜像', request)
     }
     const parsedBody = panelUpdateApplyRequestSchema.safeParse(request.body ?? {})
@@ -453,7 +462,8 @@ export function registerSystemModule(app: FastifyInstance) {
       return businessError('请求参数无效', request)
     }
     try {
-      // download 只下载镜像，install 只重建面板；不带 action 为旧前端的「下载并安装」
+      // download 只下载更新内容（镜像 / Native 更新包），install 才真正安装；
+      // 不带 action 为旧前端的「下载并安装」
       const result = await applyPanelUpdate(parsedBody.data.action ?? 'auto')
       return success(result, request)
     }

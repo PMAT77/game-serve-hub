@@ -25,7 +25,7 @@ import { resolveRepoRoot } from './shared/repo-root'
  * 创建 Fastify 服务实例。
  * 当前只提供最小可运行能力，后续在此处扩展模块注册与插件。
  */
-export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLevel' | 'port' | 'corsOrigin' | 'runtimeMode'>): Promise<FastifyInstance> {
+export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLevel' | 'port' | 'corsOrigin' | 'runtimeMode' | 'releaseVersion' | 'buildSha'>): Promise<FastifyInstance> {
   const logHttpRequests = config.logLevel === 'debug' || config.logLevel === 'trace'
 
   const app = Fastify({
@@ -59,6 +59,11 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
       runtime: {
         mode: config.runtimeMode,
         status: runtimeStatus,
+      },
+      // release.version 供 Native 更新执行器确认「新版本真的起来了」，而不是只看进程活着。
+      release: {
+        version: config.releaseVersion || '',
+        buildSha: config.buildSha || '',
       },
       // 保留旧字段，避免 v0.1.4 监控与安装脚本在升级时失效。
       docker: dockerStatus,

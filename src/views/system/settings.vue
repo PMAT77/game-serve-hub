@@ -6,7 +6,7 @@ import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
 import apiSystem from '@/api/modules/system'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
-import { buildPanelUpdatePresentation, MANUAL_UPDATE_COMMAND, MANUAL_UPDATE_NOTE } from './panelUpdatePresentation'
+import { buildPanelUpdatePresentation, MANUAL_UPDATE_NOTE } from './panelUpdatePresentation'
 
 defineOptions({
   name: 'SystemSettings',
@@ -231,10 +231,12 @@ async function loadUpdateStatus(options?: { silent?: boolean }): Promise<boolean
   }
 }
 
-/** 连续轮询失败次数：面板重建期间会持续失败，超过上限就停止并提示手动刷新 */
+/** 连续轮询失败次数：面板重建/重启期间会持续失败，超过上限就停止并提示手动刷新 */
 let updatePollFailures = 0
 const UPDATE_POLL_INTERVAL_MS = 3000
-const UPDATE_POLL_MAX_FAILURES = 60
+// 6 分钟：容器重建通常几秒就绪，而 Native 更新要下载、安装并重启面板服务，
+// 上限太紧会在更新尚未结束时停掉轮询，让用户以为卡住了。
+const UPDATE_POLL_MAX_FAILURES = 120
 
 /** 上一次轮询到的阶段，用于在「下载完成」这一刻提示用户去点安装 */
 let previousUpdatePhase: PanelUpdateStatus['updatePhase'] | null = null
@@ -414,12 +416,25 @@ async function saveSettings() {
   }
 }
 
+/**
+ * 更新进行中的状态可能是上一次会话留下的（刷新页面、面板刚重启完）：
+ * 只加载一次状态而不恢复轮询，界面会一直停在「更新中」直到用户手动再点一次。
+ */
+async function resumeUpdatePollingIfNeeded() {
+  if (updateStatus.value?.updating) {
+    updatePollFailures = 0
+    updatePoller.start()
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadSettings(), loadUpdateStatus()])
+  await resumeUpdatePollingIfNeeded()
 })
 
 onActivated(async () => {
   await Promise.all([loadSettings({ silent: true }), loadUpdateStatus()])
+  await resumeUpdatePollingIfNeeded()
 })
 </script>
 
@@ -512,20 +527,22 @@ onActivated(async () => {
               检查更新
             </FaButton>
           </div>
-          <div v-if="needsManualUpdate" class="flex flex-wrap gap-2 items-center text-xs">
-            <span class="text-amber-600 dark:text-amber-400">{{ MANUAL_UPDATE_NOTE }}</span>
-            <code class="bg-muted px-2 py-1 rounded-md">{{ MANUAL_UPDATE_COMMAND }}</code>
-            <FaButton
-              variant="outline"
-              size="sm"
-              @click="copyUpdateCommand(MANUAL_UPDATE_COMMAND, '更新命令')"
-            >
-              复制
-            </FaButton>
+          <div v-if="needsManualUpdate" class="space-y-2 text-xs">
+            <p class="text-amber-600 dark:text-amber-400">{{ MANUAL_UPDATE_NOTE }}</p>
+            <div v-if="manualUpdateCommand" class="flex flex-wrap gap-2 items-start">
+              <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ manualUpdateCommand }}</pre>
+              <FaButton
+                variant="outline"
+                size="sm"
+                @click="copyUpdateCommand(manualUpdateCommand ?? '', '更新命令')"
+              >
+                复制
+              </FaButton>
+            </div>
           </div>
         </div>
 
-        <div class="space-y-2 max-w-80 pt-1">
+        <div v-if="updateStatus?.runtimeMode !== 'native'" class="space-y-2 max-w-80 pt-1">
           <label class="text-sm text-muted-foreground">更新下载源</label>
           <NSelect v-model:value="form.updateSource" :options="updateSourceOptions" />
           <p class="text-xs text-muted-foreground">
@@ -551,23 +568,6 @@ onActivated(async () => {
                 <span class="text-xs text-muted-foreground">
                   导入后点「下载更新」即可安装。
                 </span>
-              </div>
-            </div>
-          </NCollapseItem>
-        </NCollapse>
-
-        <NCollapse v-if="needsManualUpdate && manualUpdateCommand" class="pt-1">
-          <NCollapseItem title="其他更新方式" name="manual-update">
-            <div class="space-y-2 text-sm">
-              <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ manualUpdateCommand }}</pre>
-              <div class="flex flex-wrap gap-2 items-center">
-                <FaButton
-                  variant="outline"
-                  size="sm"
-                  @click="copyUpdateCommand(manualUpdateCommand ?? '', '备用命令')"
-                >
-                  复制
-                </FaButton>
               </div>
             </div>
           </NCollapseItem>
@@ -609,6 +609,7 @@ onActivated(async () => {
 
         <ConfigActionBar
           :dirty="settingsDirty"
+          :busy="saveLoading"
           :saving="saveLoading"
           :show-restart="false"
           save-label="保存设置"

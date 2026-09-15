@@ -43,6 +43,7 @@ function buildStatus(overrides: StatusOverrides = {}): PanelUpdateStatus {
     updating: false,
     applySupported: true,
     imageApplySupported: false,
+    nativeUpdateSupported: false,
     applyHint: '未配置 GSH_STACK_DIR，无法一键更新面板。',
     updateKind: 'same-version-changed',
     manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env pull',
@@ -151,6 +152,43 @@ describe('buildPanelUpdatePresentation', () => {
 
   it('keeps the button inert when the panel cannot apply the update here', () => {
     assert.equal(buildPanelUpdatePresentation(buildStatus()).action, 'none')
+  })
+
+  it('uses the Native update channel once the installer has set it up', () => {
+    const downloadable = buildPanelUpdatePresentation(buildStatus({
+      runtimeMode: 'native',
+      nativeUpdateSupported: true,
+    }))
+    assert.equal(downloadable.action, 'download')
+    assert.equal(downloadable.actionLabel, '下载更新')
+    assert.equal(downloadable.needsManualCommand, false)
+
+    const ready = buildPanelUpdatePresentation(buildStatus({
+      runtimeMode: 'native',
+      nativeUpdateSupported: true,
+      updatePhase: 'downloaded',
+      targetImage: 'v0.3.0',
+      targetImageReady: true,
+    }))
+    assert.equal(ready.action, 'install')
+    assert.equal(ready.actionLabel, '立即安装')
+
+    const running = buildPanelUpdatePresentation(buildStatus({
+      runtimeMode: 'native',
+      nativeUpdateSupported: true,
+      updating: true,
+      updatePhase: 'recreating',
+      targetImage: 'v0.3.0',
+      targetImageReady: true,
+    }))
+    assert.equal(running.action, 'busy')
+    assert.match(running.phaseLine ?? '', /重启面板/)
+  })
+
+  it('keeps asking for a manual command on Native installs without the update helper', () => {
+    const view = buildPanelUpdatePresentation(buildStatus({ runtimeMode: 'native' }))
+    assert.equal(view.needsManualCommand, true)
+    assert.equal(view.action, 'none')
   })
 
   it('formats byte sizes for the progress line', () => {

@@ -33,6 +33,16 @@ import {
   listImageRepoTags,
   loadOfflineImageArchive,
 } from './panel-update-offline'
+import {
+  NATIVE_UPDATE_INSTALLER_HINT,
+  cleanupStalePrefetchedArchives,
+  downloadNativeReleaseArchive,
+  mergeNativeUpdateRuntime,
+  readNativeUpdateState,
+  resolveNativeUpdateSupport,
+  resolvePrefetchedArchive,
+  writeNativeUpdateRequest,
+} from './panel-update-native'
 
 /** 更新语义分类，用于把"同版本号但镜像变了"与"版本更高"区分展示 */
 export type UpdateKind = 'none' | 'newer' | 'same-version-changed' | 'unknown'
@@ -86,6 +96,8 @@ export interface PanelUpdateStatus {
   /** 统一镜像是否支持一键更新（docker 模式且 stack 可达时为真） */
   applySupported: boolean
   imageApplySupported: boolean
+  /** Native/systemd 部署是否支持面板内一键更新（安装器已布置特权更新组件时为真） */
+  nativeUpdateSupported: boolean
   applyHint: string | null
   /** 更新语义分类：区分"版本更高"与"同版本号但镜像内容变了" */
   updateKind: UpdateKind
@@ -120,6 +132,8 @@ export interface StackPaths {
 
 export interface ApplySupport {
   imageSupported: boolean
+  /** Native/systemd 部署：安装器是否已布置特权更新组件（面板内更新可用） */
+  nativeSupported: boolean
   supported: boolean
   hint: string | null
   stackPaths: StackPaths | null
@@ -139,6 +153,12 @@ const TARGET_PULL_MAX_ATTEMPTS = 3
 const TARGET_PULL_RETRY_BASE_MS = 2_000
 /** 更新任务的最长容忍时间；超时即判定失败并复位状态，避免界面永久停在"更新中" */
 const UPDATE_WATCHDOG_MS = 30 * 60 * 1000
+/**
+ * Native 安装段的等待上限与轮询间隔：执行器要下载、校验、解压并重启，比容器重建慢得多；
+ * 面板本身会在安装中途被重启，所以这条轮询只是"本进程还活着时"的加速通道。
+ */
+const NATIVE_INSTALL_WATCH_MS = 30 * 60 * 1000
+const NATIVE_INSTALL_POLL_MS = 3_000
 /** 下载进度上报节流：docker pull 每层每块都会回调一次，全量写状态会刷爆缓存与页面轮询 */
 const PROGRESS_REPORT_INTERVAL_MS = 500
 const PROGRESS_REPORT_MIN_BYTES = 5 * 1024 * 1024
@@ -508,18 +528,28 @@ function buildManualUpdateCommand(stackPaths: StackPaths | null, releaseTag?: st
   ].join(' && ')
 }
 
-export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
+export function resolveApplySupport(
+  config = loadServerConfig(),
+  options: { nativePathUnitFile?: string, nativeHelperFile?: string } = {},
+): ApplySupport {
   if (config.runtimeMode === 'native') {
+    // Native 不用容器镜像：面板内更新由安装器布置的特权执行器完成（写请求文件 + systemd 触发）。
+    const nativeSupport = resolveNativeUpdateSupport(config, {
+      pathUnitFile: options.nativePathUnitFile,
+      helperFile: options.nativeHelperFile,
+    })
     return {
       imageSupported: false,
-      supported: false,
-      hint: '这种安装方式需要在服务器上更新，请执行下方命令。',
+      nativeSupported: nativeSupport.supported,
+      supported: nativeSupport.supported,
+      hint: nativeSupport.supported ? null : (nativeSupport.hint ?? NATIVE_UPDATE_INSTALLER_HINT),
       stackPaths: null,
     }
   }
   if (!config.stackDir) {
     return {
       imageSupported: false,
+      nativeSupported: false,
       supported: true,
       hint: '缺少更新所需的目录配置，无法一键更新面板。请使用下方手动命令。',
       stackPaths: null,
@@ -528,6 +558,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   if (!path.isAbsolute(config.stackDir)) {
     return {
       imageSupported: false,
+      nativeSupported: false,
       supported: true,
       hint: '更新目录必须填绝对路径。',
       stackPaths: null,
@@ -537,6 +568,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   if (!stackPaths) {
     return {
       imageSupported: false,
+      nativeSupported: false,
       supported: true,
       hint: '面板无法访问更新所需的目录，请使用下方手动命令。',
       stackPaths: null,
@@ -544,6 +576,7 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
   }
   return {
     imageSupported: true,
+    nativeSupported: false,
     supported: true,
     hint: null,
     stackPaths,
@@ -551,12 +584,17 @@ export function resolveApplySupport(config = loadServerConfig()): ApplySupport {
 }
 
 function buildApplyFields(applySupport: ApplySupport, releaseTag?: string | null) {
+  const config = loadServerConfig()
   return {
     applySupported: applySupport.supported,
     imageApplySupported: applySupport.imageSupported,
+    nativeUpdateSupported: applySupport.nativeSupported,
     applyHint: applySupport.hint,
     manualUpdateCommand: buildManualUpdateCommand(applySupport.stackPaths, releaseTag),
-    offlineImageCommand: buildOfflineImageCommand(loadServerConfig().githubRepo, releaseTag ?? null),
+    // 离线镜像包命令只对 Docker 有意义：Native 不用镜像，给一段 docker load 只会误导
+    offlineImageCommand: config.runtimeMode === 'native'
+      ? null
+      : buildOfflineImageCommand(config.githubRepo, releaseTag ?? null),
   }
 }
 
@@ -706,6 +744,36 @@ export async function refreshPanelUpdateStatus(): Promise<PanelUpdateStatus> {
       const currentVersion = envReleaseVersion || null
       const latestVersion = release?.tagName ?? null
       const nativeUpdateAvailable = isReleaseNewer(currentVersion, latestVersion)
+      // Native 的状态有两个来源：本进程刚发起的下载/安装（内存态），以及 root 执行器写的
+      // state.json（跨面板重启存活）。合并规则见 mergeNativeUpdateRuntime。
+      const nativeSupport = resolveNativeUpdateSupport(config)
+      const targetTag = nativeUpdateAvailable ? latestVersion : null
+      const nativeState = nativeSupport.supported ? readNativeUpdateState(nativeSupport.dir) : null
+      const prefetchedReady = nativeSupport.supported && targetTag
+        ? resolvePrefetchedArchive(nativeSupport.dir, targetTag) !== null
+        : false
+      const merged = mergeNativeUpdateRuntime({
+        runtimePhase: runtime.phase,
+        runtimeMessage: runtime.message,
+        runtimeError: runtime.error,
+        runtimeTargetTag: runtime.targetImage,
+        runtimeTargetReady: runtime.targetImageReady,
+        state: nativeState,
+        targetTag,
+        prefetchedReady,
+        updateAvailable: nativeUpdateAvailable,
+      })
+      // 合并结果回写内存态：字段语义与 Docker 分支保持一致，前端无需分模式处理进度
+      runtime = {
+        phase: merged.phase,
+        message: merged.message,
+        error: merged.error,
+        startedAt: runtime.startedAt,
+        targetImage: merged.targetTag,
+        targetImageReady: merged.targetReady,
+        downloadBytes: runtime.downloadBytes,
+        downloadTotalBytes: runtime.downloadTotalBytes,
+      }
       const image: HubImageUpdateInfo = {
         image: 'native-release',
         tag: currentVersion || 'unknown',
@@ -1141,19 +1209,28 @@ export async function applyPanelUpdate(action: PanelUpdateAction = 'auto'): Prom
   const status = cachedStatus ?? await refreshPanelUpdateStatus()
   const config = loadServerConfig()
   const applySupport = resolveApplySupport(config)
+  if (config.runtimeMode === 'native' && !applySupport.nativeSupported) {
+    // 旧安装没有更新组件：明确告知重跑安装脚本，而不是让人对着一条用不了的按钮发呆。
+    throw new Error(applySupport.hint || NATIVE_UPDATE_INSTALLER_HINT)
+  }
   const rawReleaseTag = status.release?.tagName?.trim() || null
   /**
    * 规范化后再往下传：镜像引用、离线包文件名与 updater 写回 panel.env 的值必须来自同一个 tag，
    * 否则自建/fork 的 release 命名会让离线包地址与镜像引用对不上。读不到 Release 时保持 null。
    */
   const releaseTag = rawReleaseTag
-    ? normalizeReleaseTag(rawReleaseTag, parseImageRef(config.panelImage).tag)
+    ? normalizeReleaseTag(
+        rawReleaseTag,
+        config.runtimeMode === 'native'
+          ? (config.releaseVersion || 'unknown')
+          : parseImageRef(config.panelImage).tag,
+      )
     : null
 
-  // 镜像已下载完成：跳过下载，直接进入安装（用户可能在别的标签页完成了下载）
+  // 更新包/镜像已就绪：跳过下载，直接进入安装（用户可能在别的标签页完成了下载）
   if (runtime.phase === 'downloaded' && runtime.targetImageReady && runtime.targetImage) {
     if (action === 'download') {
-      return { status: 'ready', message: '更新镜像已在本地，点击「立即安装」即可重建面板。' }
+      return { status: 'ready', message: '更新内容已在服务器上，点击「立即安装」即可完成更新。' }
     }
     return startPanelUpdateInstall({
       applySupport,
@@ -1166,13 +1243,20 @@ export async function applyPanelUpdate(action: PanelUpdateAction = 'auto'): Prom
     return { status: 'completed', message: '当前已是最新版本' }
   }
 
-  const targetImage = resolveTargetImageRef(releaseTag, config.panelImage)
+  if (config.runtimeMode === 'native' && !releaseTag) {
+    throw new Error('未能读取最新 Release 信息，无法确定要安装的版本。请点击「检查更新」后重试。')
+  }
+
+  // Native 下 targetImage 承载的是目标版本 tag（没有镜像引用这回事）
+  const targetImage = config.runtimeMode === 'native'
+    ? (releaseTag as string)
+    : resolveTargetImageRef(releaseTag, config.panelImage)
 
   ensureUpdateWatchdog()
   runtime = {
     ...createIdleRuntime(),
     phase: 'preparing',
-    message: '正在检查本地镜像…',
+    message: config.runtimeMode === 'native' ? '正在准备更新包…' : '正在检查本地镜像…',
     startedAt: Date.now(),
     targetImage,
   }
@@ -1231,6 +1315,16 @@ async function runPanelUpdate(input: {
   targetImage: string
   releaseTag: string | null
 }): Promise<void> {
+  if (loadServerConfig().runtimeMode === 'native') {
+    if (input.mode !== 'install') {
+      const downloaded = await downloadNativeTarget(input)
+      if (!downloaded || input.mode === 'download') {
+        return
+      }
+    }
+    await installNativeTarget(input)
+    return
+  }
   if (input.mode !== 'install') {
     const downloaded = await downloadTargetImage(input)
     if (!downloaded || input.mode === 'download') {
@@ -1238,6 +1332,170 @@ async function runPanelUpdate(input: {
     }
   }
   await installPanelUpdate(input)
+}
+
+/**
+ * Native 下载段：把 Native Release 包拉到 `<更新目录>/<tag>/`，带进度与断点续传。
+ * 执行器安装前会用官方 `.sha256` 独立复核这个包，所以这里下载的字节即便被替换也进不了系统。
+ */
+async function downloadNativeTarget(input: {
+  applySupport: ApplySupport
+  targetImage: string
+  releaseTag: string | null
+}): Promise<boolean> {
+  try {
+    const config = loadServerConfig()
+    const support = resolveNativeUpdateSupport(config)
+    if (!input.applySupport.nativeSupported || !support.supported) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: input.applySupport.hint || NATIVE_UPDATE_INSTALLER_HINT,
+      })
+      return false
+    }
+    const tag = input.releaseTag
+    if (!tag) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: '未能读取最新 Release 信息，无法拼出更新包地址。请点击「检查更新」后重试。',
+      })
+      return false
+    }
+    if (resolvePrefetchedArchive(support.dir, tag)) {
+      updateRuntime({
+        phase: 'downloaded',
+        targetImage: tag,
+        targetImageReady: true,
+        message: '更新包已在服务器上，可直接安装。',
+      })
+      return true
+    }
+
+    updateRuntime({
+      phase: 'preparing',
+      message: '正在检查磁盘空间…',
+      downloadBytes: 0,
+      downloadTotalBytes: null,
+    })
+    const report = createProgressReporter()
+    const result = await downloadNativeReleaseArchive({
+      dir: support.dir,
+      githubRepo: config.githubRepo,
+      releaseTag: tag,
+      githubProxy: config.githubProxy,
+      onProgress: progress => report(progress.downloadedBytes, progress.totalBytes),
+    })
+    if (!result.ok) {
+      throw new Error(result.error)
+    }
+    cleanupStalePrefetchedArchives(support.dir, tag)
+    updateRuntime({
+      phase: 'downloaded',
+      targetImage: tag,
+      targetImageReady: true,
+      message: '更新包已下载完成，点击「立即安装」完成更新。',
+    })
+    return true
+  }
+  catch (error) {
+    updateRuntime({
+      phase: 'failed',
+      message: null,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return false
+  }
+}
+
+/**
+ * Native 安装段：写请求文件即返回，真正的安装由 root 执行器完成。
+ * 面板通常会在几十秒后被杀掉重启，所以状态同时存在于内存（本进程）与 state.json（跨重启）。
+ */
+async function installNativeTarget(input: {
+  applySupport: ApplySupport
+  targetImage: string
+  releaseTag: string | null
+}): Promise<void> {
+  try {
+    const config = loadServerConfig()
+    const support = resolveNativeUpdateSupport(config)
+    if (!input.applySupport.nativeSupported || !support.supported) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: input.applySupport.hint || NATIVE_UPDATE_INSTALLER_HINT,
+      })
+      return
+    }
+    const tag = input.releaseTag
+    if (!tag) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: '缺失目标版本，无法发起安装。请点击「检查更新」后重试。',
+      })
+      return
+    }
+    if (!resolvePrefetchedArchive(support.dir, tag)) {
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: '更新包尚未下载完成，请先点击「下载更新」。',
+      })
+      return
+    }
+
+    updateRuntime({
+      phase: 'recreating',
+      targetImage: tag,
+      targetImageReady: true,
+      startedAt: Date.now(),
+      message: `正在安装 ${tag} 并重启面板，约 1-3 分钟后自动重连`,
+    })
+    writeNativeUpdateRequest(support.dir, tag)
+    watchNativeUpdateState(support.dir, tag)
+  }
+  catch (error) {
+    updateRuntime({
+      phase: 'failed',
+      message: null,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/** 轮询执行器写的状态文件；面板重启后这条链路由 refreshPanelUpdateStatus 接管 */
+function watchNativeUpdateState(dir: string, tag: string): void {
+  const deadline = Date.now() + NATIVE_INSTALL_WATCH_MS
+  const timer = setInterval(() => {
+    const state = readNativeUpdateState(dir)
+    if (state?.phase === 'done') {
+      clearInterval(timer)
+      runtime = createIdleRuntime()
+      syncRuntimeToCachedStatus()
+      return
+    }
+    if (state?.phase === 'failed') {
+      clearInterval(timer)
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: state.message || `更新到 ${tag} 失败，详情见服务器上的更新日志。`,
+      })
+      return
+    }
+    if (Date.now() > deadline) {
+      clearInterval(timer)
+      updateRuntime({
+        phase: 'failed',
+        message: null,
+        error: `等待更新结果超过 ${Math.round(NATIVE_INSTALL_WATCH_MS / 60_000)} 分钟。请到服务器上查看更新日志与面板服务状态。`,
+      })
+    }
+  }, NATIVE_INSTALL_POLL_MS)
+  timer.unref()
 }
 
 /**

@@ -36,6 +36,7 @@ const panelUpdateStatus = {
   updating: false,
   applySupported: true,
   imageApplySupported: false,
+  nativeUpdateSupported: false,
   applyHint: '开发环境未配置 GSH_STACK_DIR',
   updateKind: 'same-version-changed' as const,
   manualUpdateCommand: 'cd /opt/game-server-hub && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml pull && docker compose --env-file panel.env -f docker-compose.yml -f docker-compose.bind.yml up -d',

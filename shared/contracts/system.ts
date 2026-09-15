@@ -163,6 +163,8 @@ export const panelUpdateStatusSchema = z.object({
   updating: z.boolean(),
   applySupported: z.boolean(),
   imageApplySupported: z.boolean(),
+  /** Native/systemd 部署是否支持面板内一键更新（安装器已布置特权更新组件时为真） */
+  nativeUpdateSupported: z.boolean(),
   applyHint: z.string().nullable(),
   /** 更新语义分类：无更新 / 版本更高 / 版本号相同但镜像内容不同 / 有更新但读不到版本号 */
   updateKind: z.enum(['none', 'newer', 'same-version-changed', 'unknown']),

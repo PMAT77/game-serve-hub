@@ -95,6 +95,15 @@ NATIVE_STEAMCMD_DIR="${GSH_NATIVE_STEAMCMD_DIR:-${PANEL_INSTALL_DIR}/runtime/ste
 NATIVE_STEAMCMD_PATH="${NATIVE_STEAMCMD_DIR}/steamcmd.sh"
 NATIVE_STEAMCMD_URL="${GSH_NATIVE_STEAMCMD_URL:-https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz}"
 NATIVE_SYSTEMD_UNIT="/etc/systemd/system/game-server-hub.service"
+# Native 面板内更新：面板（非特权用户）只在 NATIVE_UPDATE_DIR 写请求文件，
+# 由 root 侧 oneshot 服务执行真正的安装动作（见 scripts/gsh-native-update.sh）。
+NATIVE_UPDATE_DIR="${GSH_NATIVE_UPDATE_DIR:-${PANEL_DATA_DIR}/panel-update}"
+NATIVE_UPDATE_HELPER_PATH="/usr/local/lib/game-server-hub/gsh-native-update"
+NATIVE_UPDATE_SERVICE="game-server-hub-update.service"
+NATIVE_UPDATE_PATH_UNIT="game-server-hub-update.path"
+NATIVE_UPDATE_SERVICE_UNIT="/etc/systemd/system/${NATIVE_UPDATE_SERVICE}"
+NATIVE_UPDATE_PATH_UNIT_FILE="/etc/systemd/system/${NATIVE_UPDATE_PATH_UNIT}"
+NATIVE_RELEASE_REPLACED=0
 NATIVE_PREVIOUS_RELEASE=""
 UPGRADE_STATE_BACKUP_DIR=""
 UPGRADE_DATABASE_BACKUP=""
@@ -1105,7 +1114,7 @@ install_native_dependencies() {
   # 与统一镜像使用同一套 32 位运行库（见 docker/unified/Dockerfile）：Docker 分支已实测，
   # Native 分支此前缺 libcurl4:i386、lib32stdc++6、libcurl3-gnutls，干净系统上 DST 与
   # SteamCMD 可能起不来。
-  apt_install tar gzip xz-utils ca-certificates lib32gcc-s1 lib32stdc++6 libc6-i386 libcurl3-gnutls libcurl4 libcurl4:i386 libgcc-s1 libstdc++6 libstdc++6:i386
+  apt_install tar gzip xz-utils ca-certificates curl util-linux lib32gcc-s1 lib32stdc++6 libc6-i386 libcurl3-gnutls libcurl4 libcurl4:i386 libgcc-s1 libstdc++6 libstdc++6:i386
 }
 
 ensure_native_service_user() {
@@ -1258,6 +1267,11 @@ install_native_release() {
   run_as_root chmod 0755 "${target_dir}/bin/game-server-hub"
   run_as_root ln -sfn "${target_dir}" "${NATIVE_CURRENT_LINK}.new"
   run_as_root mv -Tf "${NATIVE_CURRENT_LINK}.new" "${NATIVE_CURRENT_LINK}"
+  # 升级/重装换了 current 链接，但已在运行的服务进程仍指向旧代码：deploy_native_panel
+  # 必须显式重启一次，否则「升级完还是旧版本」且健康检查照样通过。
+  if [[ -n "${NATIVE_PREVIOUS_RELEASE}" && "${NATIVE_PREVIOUS_RELEASE}" != "${target_dir}" ]]; then
+    NATIVE_RELEASE_REPLACED=1
+  fi
   rm -rf "${temp_dir}"
 }
 
@@ -1317,6 +1331,8 @@ prepare_native_panel_env() {
       "GSH_NATIVE_RUNTIME_DIR=${PANEL_DATA_DIR}/runtime" \
       "GSH_NATIVE_STEAMCMD_PATH=${NATIVE_STEAMCMD_PATH}" \
       "GSH_NATIVE_SYSTEMD_UNIT_DIR=${NATIVE_USER_HOME}/.config/systemd/user" \
+      "GSH_NATIVE_USER=${NATIVE_SERVICE_USER}" \
+      "GSH_NATIVE_UPDATE_DIR=${NATIVE_UPDATE_DIR}" \
       "GSH_GITHUB_REPO=PMAT77/game-serve-hub" \
       "GSH_RELEASE_VERSION=${GSH_RELEASE_TAG}"
     log_info "Preserved existing Native panel.env and updated release/runtime keys."
@@ -1347,6 +1363,8 @@ prepare_native_panel_env() {
         "GSH_NATIVE_RUNTIME_DIR=${PANEL_DATA_DIR}/runtime" \
         "GSH_NATIVE_STEAMCMD_PATH=${NATIVE_STEAMCMD_PATH}" \
         "GSH_NATIVE_SYSTEMD_UNIT_DIR=${NATIVE_USER_HOME}/.config/systemd/user" \
+        "GSH_NATIVE_USER=${NATIVE_SERVICE_USER}" \
+        "GSH_NATIVE_UPDATE_DIR=${NATIVE_UPDATE_DIR}" \
         "GSH_STEAMCMD_DOWNLOAD_REGION=${steamcmd_region}" \
         "GSH_STEAMCMD_INSTALL_MAX_ATTEMPTS=${steamcmd_attempts}" \
         "GSH_GITHUB_REPO=PMAT77/game-serve-hub" \
@@ -1526,6 +1544,7 @@ Environment (optional):
   PANEL_HEALTHCHECK_INTERVAL_SECONDS=3  Panel /health polling interval
   USE_CN_DEBIAN_MIRROR=1        Enable CN Debian/Ubuntu mirror
   GSH_NATIVE_RELEASE_ARCHIVE=PATH  Install a local Native Release archive
+  GSH_NATIVE_UPDATE_DIR=PATH    Native panel-update exchange directory (default: <data dir>/panel-update)
   STRICT_INSTALLER_ASSET_CHECKSUM=0  Skip embedded checksum verification (not recommended)
   v0.2.0 unified image: one docker pull provides the panel, DST runtime libraries and SteamCMD.
 EOF
@@ -2195,6 +2214,7 @@ deploy_native_panel() {
   ROLLBACK_ENABLED=1
   install_native_release
   install_native_steamcmd
+  install_native_update_helper
   write_status "native-release" "ok" "Native Release and SteamCMD installed"
 
   begin_stage "configuration" "Preparing Native systemd service"
@@ -2203,6 +2223,12 @@ deploy_native_panel() {
 
   begin_stage "startup" "Starting Native panel service"
   run_as_root systemctl enable --now game-server-hub.service
+  if [[ "${NATIVE_RELEASE_REPLACED}" -eq 1 ]]; then
+    # enable --now 对已在运行的服务是空操作，而升级换的是 current 符号链接：
+    # 不重启的话面板进程仍跑旧版本，升级看似成功但界面还是旧版。
+    run_as_root systemctl try-restart game-server-hub.service
+    log_info "Restarted the panel service to load ${GSH_RELEASE_TAG}."
+  fi
   write_status "startup" "ok" "Native panel service started"
 
   begin_stage "health" "Waiting for Native panel health endpoint"
@@ -2226,6 +2252,83 @@ install_gsh_cli() {
   fi
   run_as_root install -m 0755 "${src}" /usr/local/bin/gsh
   log_info "Installed panel CLI: /usr/local/bin/gsh (try: gsh doctor)"
+}
+
+# 面板内更新（Native）的触发单元：面板只写请求文件，真正的安装动作由 root 的 oneshot 服务执行。
+native_update_service_unit() {
+  cat <<EOF
+[Unit]
+Description=Game Server Hub panel update (Native release install)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 把安装期确定下来的真实路径注入执行器：panel.env 里没有这些键（GSH_STACK_DIR 是 Docker 分支的键），
+# 自定义 PANEL_INSTALL_DIR / PANEL_DATA_DIR 的机器就靠它找到安装目录与交换目录。
+Environment="GSH_PANEL_ENV_FILE=${PANEL_ENV_FILE}"
+Environment="GSH_INSTALL_DIR=${PANEL_INSTALL_DIR}"
+Environment="GSH_NATIVE_UPDATE_DIR=${NATIVE_UPDATE_DIR}"
+Environment="GSH_NATIVE_USER=${NATIVE_SERVICE_USER}"
+ExecStart=${NATIVE_UPDATE_HELPER_PATH}
+TimeoutStartSec=2700
+EOF
+}
+
+native_update_path_unit() {
+  cat <<EOF
+[Unit]
+Description=Watch the panel update request for Game Server Hub (Native)
+
+[Path]
+PathExists=${NATIVE_UPDATE_DIR}/request
+Unit=${NATIVE_UPDATE_SERVICE}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+# 部署特权更新执行器（优先本地仓库，其次镜像池下载）；幂等，升级重跑时覆盖旧单元。
+install_native_update_helper() {
+  local script_dir src tmp service_tmp path_tmp
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
+  src=""
+  if [[ -n "${script_dir}" && -f "${script_dir}/gsh-native-update.sh" ]]; then
+    src="${script_dir}/gsh-native-update.sh"
+  elif [[ -n "${script_dir}" && -f "${script_dir}/../scripts/gsh-native-update.sh" ]]; then
+    src="${script_dir}/../scripts/gsh-native-update.sh"
+  fi
+  if [[ -z "${src}" ]]; then
+    tmp="$(mktemp)"
+    if download_installer_asset "scripts/gsh-native-update.sh" "${tmp}"; then
+      src="${tmp}"
+    else
+      log_warn "gsh-native-update.sh not available locally or from mirrors; panel updates will keep asking for a manual command."
+      return 0
+    fi
+  fi
+
+  # 先落到 .new 再原子改名：升级时这个脚本很可能正在被自己触发的那次更新执行（本脚本
+  # 在后台跑安装器），直接覆盖正在运行的文件会撞上 "Text file busy" 让整次升级失败。
+  run_as_root install -D -m 0755 "${src}" "${NATIVE_UPDATE_HELPER_PATH}.new"
+  run_as_root mv -f "${NATIVE_UPDATE_HELPER_PATH}.new" "${NATIVE_UPDATE_HELPER_PATH}"
+  # 请求文件目录归面板服务用户所有：它需要写请求，但拿不到 root。
+  run_as_root mkdir -p "${NATIVE_UPDATE_DIR}"
+  run_as_root chown "${NATIVE_SERVICE_USER}:${NATIVE_SERVICE_GROUP}" "${NATIVE_UPDATE_DIR}"
+  run_as_root chmod 0750 "${NATIVE_UPDATE_DIR}"
+
+  service_tmp="$(mktemp)"
+  path_tmp="$(mktemp)"
+  native_update_service_unit > "${service_tmp}"
+  native_update_path_unit > "${path_tmp}"
+  run_as_root install -m 0644 "${service_tmp}" "${NATIVE_UPDATE_SERVICE_UNIT}"
+  run_as_root install -m 0644 "${path_tmp}" "${NATIVE_UPDATE_PATH_UNIT_FILE}"
+  rm -f "${service_tmp}" "${path_tmp}"
+
+  run_as_root systemctl daemon-reload
+  run_as_root systemctl enable --now "${NATIVE_UPDATE_PATH_UNIT}"
+  log_info "Installed panel update helper: ${NATIVE_UPDATE_HELPER_PATH} (trigger: ${NATIVE_UPDATE_PATH_UNIT})"
 }
 
 # 输出最终访问信息与安全提醒。

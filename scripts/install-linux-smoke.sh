@@ -282,6 +282,100 @@ PANEL_ACCESS_URL='http://172.16.0.8:9527'
 reconcile_existing_public_url 'http://172.16.0.8:9527'
 [[ "${PANEL_ACCESS_URL}" == 'http://172.16.0.8:9527' ]]
 
+# ---- Native 面板内更新的特权执行器与触发单元（只断言产物内容，不触碰 systemd）----
+[[ "${NATIVE_UPDATE_HELPER_PATH}" == '/usr/local/lib/game-server-hub/gsh-native-update' ]]
+[[ "${NATIVE_UPDATE_PATH_UNIT_FILE}" == '/etc/systemd/system/game-server-hub-update.path' ]]
+[[ "${NATIVE_UPDATE_DIR}" == "${PANEL_DATA_DIR}/panel-update" ]]
+
+NATIVE_UPDATE_SERVICE_UNIT_CONTENT="$(native_update_service_unit)"
+[[ "${NATIVE_UPDATE_SERVICE_UNIT_CONTENT}" == *'Type=oneshot'* ]]
+[[ "${NATIVE_UPDATE_SERVICE_UNIT_CONTENT}" == *"ExecStart=${NATIVE_UPDATE_HELPER_PATH}"* ]]
+# 执行器不去猜路径：安装期定下来的真实路径必须由 unit 注入（panel.env 里没有 GSH_STACK_DIR）
+[[ "${NATIVE_UPDATE_SERVICE_UNIT_CONTENT}" == *"Environment=\"GSH_PANEL_ENV_FILE=${PANEL_ENV_FILE}\""* ]]
+[[ "${NATIVE_UPDATE_SERVICE_UNIT_CONTENT}" == *"Environment=\"GSH_INSTALL_DIR=${PANEL_INSTALL_DIR}\""* ]]
+[[ "${NATIVE_UPDATE_SERVICE_UNIT_CONTENT}" == *"Environment=\"GSH_NATIVE_UPDATE_DIR=${NATIVE_UPDATE_DIR}\""* ]]
+
+NATIVE_UPDATE_PATH_UNIT_CONTENT="$(native_update_path_unit)"
+[[ "${NATIVE_UPDATE_PATH_UNIT_CONTENT}" == *"PathExists=${NATIVE_UPDATE_DIR}/request"* ]]
+[[ "${NATIVE_UPDATE_PATH_UNIT_CONTENT}" == *"Unit=${NATIVE_UPDATE_SERVICE}"* ]]
+
+# 执行器必须自带这几道闸：官方摘要校验、只升不降、并发保护、中断也要落终态
+HELPER_SOURCE="${SCRIPT_DIR}/gsh-native-update.sh"
+[[ -f "${HELPER_SOURCE}" ]]
+grep -Fq 'verify_sha256' "${HELPER_SOURCE}"
+grep -Fq 'is_newer_version' "${HELPER_SOURCE}"
+grep -Fq 'flock -w' "${HELPER_SOURCE}"
+grep -Fq 'GSH_RELEASE_TAG="${TARGET_TAG}"' "${HELPER_SOURCE}"
+# root 的中间产物必须待在 root 专属子目录里：面板对交换目录有写权限，
+# 定名文件直接落在那里等于给面板一个符号链接攻击面
+grep -Fq 'ROOT_DIR="${UPDATE_DIR}/.root"' "${HELPER_SOURCE}"
+grep -Fq 'ensure_root_dir' "${HELPER_SOURCE}"
+grep -Fq 'on_exit' "${HELPER_SOURCE}"
+
+# 升级换了 current 链接后必须重启面板，否则升级完还在跑旧版本
+grep -Fq 'NATIVE_RELEASE_REPLACED' "${SCRIPT_DIR}/install.linux.sh"
+grep -Fq 'try-restart game-server-hub.service' "${SCRIPT_DIR}/install.linux.sh"
+
+# 面板侧靠 panel.env 的交换目录键判断更新组件是否就绪
+printf '%s\n' 'GSH_RUNTIME_MODE=native' > "${SMOKE_ENV_FILE}"
+upsert_env_values "${SMOKE_ENV_FILE}" "GSH_NATIVE_UPDATE_DIR=${NATIVE_UPDATE_DIR}"
+[[ "$(read_env_value "${SMOKE_ENV_FILE}" 'GSH_NATIVE_UPDATE_DIR')" == "${NATIVE_UPDATE_DIR}" ]]
+
+# ---- 执行器的行为（只测非特权纯逻辑：请求校验与版本闸门）----
+GSH_NATIVE_UPDATE_LIB_ONLY=1
+# shellcheck disable=SC1090,SC1091
+source "${SCRIPT_DIR}/gsh-native-update.sh"
+
+NATIVE_HELPER_TEST_DIR="$(mktemp -d)"
+NATIVE_HELPER_ENV="${NATIVE_HELPER_TEST_DIR}/panel.env"
+printf '%s\n' \
+  "GSH_NATIVE_UPDATE_DIR=${NATIVE_HELPER_TEST_DIR}/panel-update" \
+  "GSH_NATIVE_USER=$(id -un)" \
+  'GSH_RELEASE_VERSION=v0.4.4' \
+  'SERVER_PORT=9527' \
+  > "${NATIVE_HELPER_ENV}"
+PANEL_ENV_FILE="${NATIVE_HELPER_ENV}"
+load_config
+[[ "${UPDATE_DIR}" == "${NATIVE_HELPER_TEST_DIR}/panel-update" ]]
+[[ "${ROOT_DIR}" == "${UPDATE_DIR}/.root" ]]
+[[ "$(read_env_value "${PANEL_ENV_FILE}" 'GSH_NATIVE_USER')" == "$(id -un)" ]]
+
+is_valid_release_tag 'v0.4.5'
+is_valid_release_tag 'v0.4.5-beta.1'
+! is_valid_release_tag 'v0.4'
+! is_valid_release_tag 'v0.4.5; reboot'
+is_newer_version 'v0.4.4' 'v0.4.5'
+is_newer_version 'v0.4.5-beta.1' 'v0.4.5'
+! is_newer_version 'v0.4.4' 'v0.4.4'
+! is_newer_version 'v0.4.5' 'v0.4.4'
+! is_newer_version 'v0.4.5' 'v0.4.5-beta.1'
+
+mkdir -p "${ROOT_DIR}"
+TARGET_TAG=''
+printf '%s\n' 'v0.4.5' > "${UPDATE_DIR}/request"
+consume_request "${UPDATE_DIR}/request"
+[[ "${TARGET_TAG}" == 'v0.4.5' ]]
+[[ -f "${ROOT_DIR}/request.processing" ]]
+[[ ! -e "${UPDATE_DIR}/request" ]]
+
+# 同版本 / 降级请求必须被拒绝（在子 shell 里跑，fail() 的 exit 1 不会带走整个冒烟测试）
+printf '%s\n' 'v0.4.4' > "${UPDATE_DIR}/request"
+if ( consume_request "${UPDATE_DIR}/request" ) 2>/dev/null; then
+  printf 'a same-version request must be rejected\n' >&2
+  exit 1
+fi
+printf '%s\n' 'v0.3.0' > "${UPDATE_DIR}/request"
+if ( consume_request "${UPDATE_DIR}/request" ) 2>/dev/null; then
+  printf 'a downgrade request must be rejected\n' >&2
+  exit 1
+fi
+printf '%s\n' 'v0.4.5; reboot' > "${UPDATE_DIR}/request"
+if ( consume_request "${UPDATE_DIR}/request" ) 2>/dev/null; then
+  printf 'a request carrying shell metacharacters must be rejected\n' >&2
+  exit 1
+fi
+rm -rf "${NATIVE_HELPER_TEST_DIR}"
+
 rm -rf "${COMPOSE_PLUGIN_TEST_DIR}"
 
 printf 'install-linux-smoke-ok\n'

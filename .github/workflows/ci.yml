@@ -96,4 +96,6 @@ jobs:
         run: |
           bash -n scripts/install.linux.sh
           bash -n scripts/install-linux-smoke.sh
+          bash -n scripts/gsh.sh
+          bash -n scripts/gsh-native-update.sh
           bash scripts/install-linux-smoke.sh

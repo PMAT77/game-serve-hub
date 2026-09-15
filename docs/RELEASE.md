@@ -36,8 +36,8 @@
 [ ] 同步 install.linux.sh 内置的 compose 校验和（INSTALLER_ASSET_SHA256_DOCKER_COMPOSE_YML / _BIND_YML）
       —— 已由 `pnpm run release:verify`（scripts/check-release-consistency.mjs）强制校验，失配会直接给出新摘要
 [ ] 同步全部版本引用（清单见 `scripts/check-release-consistency.mjs` 的 `requiredReferences`；镜像 tag 会逐条比对，残留旧版本即失败）
-[ ] pnpm run release:check 本地通过（release:verify + docs:check + check:gsh + lint + lint:ox + lint:copy + test:unit + build）
-[ ] 文档：新增 / 改名文档已同步 docs/README.md 索引；界面相关改动同步更新 docs/images 截图
+[ ] pnpm run release:check 本地通过（release:verify + docs:check + check:gsh + lint + lint:ox + lint:copy + test:unit + check:installer + build）
+[ ] 文档：新增 / 改名文档已同步 docs/README.md 索引；界面相关改动同步更新 docs/images 截图与 docs/VIDEO.md 的分集画面标注
 [ ] PR 合并后 CI 绿色
 [ ] git tag v0.x.y && git push origin v0.x.y
 [ ] 首次发布后：在 GHCR Package settings 的 Manage Actions access 授予本仓库写权限（否则 candidate 清理会 403）
@@ -46,6 +46,10 @@
 [ ] 核对 GHCR 统一镜像 tag、`release-images.json` 与 GitHub Release（含离线镜像包）
 [ ] README / INSTALL 中如有破坏性变更，补充升级说明
 ```
+
+`release:check` 里的 `check:installer` 会真跑一遍安装器脚本（四个 `bash -n` 语法检查 + `scripts/install-linux-smoke.sh`），与 CI 的「Installer syntax and smoke test」同源。这一步不能省：v0.5.0 就是冒烟用例里的测试数据与已安装版本耦合（bump 版本号后「可升级目标」变成了降级请求）而本地门禁当时不含它，一路绿到 CI 才炸。
+
+它需要 bash 与网络（冒烟测试会下载 Compose 插件）：Linux / macOS 用系统自带 bash；Windows 自动探测 Git for Windows 自带的 bash，也可用 `GSH_BASH=<bash 路径>` 指定。确实找不到 bash 时脚本会打印跳过提示并成功退出——**本地跳过不等于通过，CI 的 Ubuntu runner 始终会真跑**。临时无网络时用 `GSH_SKIP_INSTALLER_SMOKE=1` 跳过。
 
 ---
 

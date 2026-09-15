@@ -9,6 +9,7 @@ import dayjs from 'dayjs'
 import { NAlert, NButton, NForm, NFormItem, NInputNumber } from 'naive-ui'
 import apiSystem from '@/api/modules/system'
 import MonitorNetwork from './components/MonitorNetwork.vue'
+import GettingStartedCard from './components/GettingStartedCard.vue'
 import MonitorStatus from './components/MonitorStatus.vue'
 import MonitorSystemInfo from './components/MonitorSystemInfo.vue'
 
@@ -320,6 +321,8 @@ onUnmounted(() => {
 
 <template>
   <div class="space-y-4">
+    <GettingStartedCard />
+
     <FaPageMain title="实时状态">
       <div v-if="systemError" class="mb-4 space-y-2">
         <NAlert type="error" :title="systemError" />

@@ -45,6 +45,8 @@ export const clusterConfigSchema = z.object({
   voteEnabled: z.boolean(),
   clusterIntention: clusterIntentionSchema,
   tickRate: z.number().int().min(15).max(60),
+  /** 白名单预留位；0 表示白名单未启用 */
+  whitelistSlots: z.number().int().min(0).max(64),
   maxSnapshots: z.number().int().min(1),
   shardEnabled: z.boolean(),
   bindIp: z.string(),
@@ -80,6 +82,11 @@ export const clusterSavePayloadSchema = z.object({
   voteEnabled: z.boolean(),
   clusterIntention: clusterIntentionSchema,
   tickRate: z.number().int().min(15).max(60),
+  /**
+   * 可选：省略时保留磁盘上的现值。
+   * 老版本前端不带该字段，按缺省 0 覆盖会把已启用的白名单悄然关掉。
+   */
+  whitelistSlots: z.number().int().min(0).max(64).optional(),
   maxSnapshots: z.number().int().min(1).max(10_000),
   shardEnabled: z.boolean(),
   bindIp: clusterTextSchema.max(128),

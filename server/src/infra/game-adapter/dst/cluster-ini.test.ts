@@ -37,6 +37,7 @@ describe('cluster-ini', () => {
       voteEnabled: true,
       clusterIntention: 'cooperative' as const,
       tickRate: 20,
+      whitelistSlots: 0,
       maxSnapshots: 6,
       shardEnabled: true,
       bindIp: '127.0.0.1',
@@ -76,6 +77,7 @@ describe('cluster-ini', () => {
       voteEnabled: true,
       clusterIntention: 'cooperative',
       tickRate: 15,
+      whitelistSlots: 0,
       maxSnapshots: 6,
       shardEnabled: false,
       bindIp: '127.0.0.1',
@@ -110,6 +112,7 @@ describe('cluster-ini', () => {
       voteEnabled: true,
       clusterIntention: 'cooperative',
       tickRate: 15,
+      whitelistSlots: 0,
       maxSnapshots: 6,
       shardEnabled: false,
       bindIp: '127.0.0.1',
@@ -136,6 +139,7 @@ describe('cluster-ini', () => {
       voteEnabled: true,
       clusterIntention: 'cooperative',
       tickRate: 15,
+      whitelistSlots: 0,
       maxSnapshots: 6,
       shardEnabled: false,
       bindIp: '127.0.0.1',
@@ -193,6 +197,7 @@ describe('cluster-ini', () => {
         voteEnabled: true,
         clusterIntention: 'cooperative',
         tickRate: 15,
+        whitelistSlots: 0,
         maxSnapshots: 6,
         shardEnabled: false,
         bindIp: '127.0.0.1',
@@ -206,6 +211,45 @@ describe('cluster-ini', () => {
       assert.ok(content.includes(`game_mode = ${gameMode}`))
       assert.equal(parseClusterIni(content).fields.gameMode, gameMode)
     }
+  })
+
+  it('round-trips whitelist_slots and validates its range', () => {
+    const base = {
+      networkMode: 'offline' as const,
+      clusterName: 'Room',
+      clusterDescription: '',
+      clusterPassword: '',
+      gameMode: 'survival' as const,
+      maxPlayers: 6,
+      pvp: false,
+      pauseWhenEmpty: true,
+      voteEnabled: true,
+      clusterIntention: 'cooperative' as const,
+      tickRate: 15,
+      whitelistSlots: 4,
+      maxSnapshots: 6,
+      shardEnabled: false,
+      bindIp: '127.0.0.1',
+      masterIp: '127.0.0.1',
+      masterPort: 10888,
+      clusterKey: 'key',
+      steamGroupOnly: false,
+      steamGroupId: '0',
+      steamGroupAdmins: false,
+    }
+
+    const content = buildClusterIni(base)
+    assert.match(content, /whitelist_slots = 4/)
+    assert.equal(parseClusterIni(content).fields.whitelistSlots, 4)
+    // 旧文件没有该键时按 0 处理（白名单未启用）
+    assert.equal(parseClusterIni('[NETWORK]\ncluster_name = Room\n').fields.whitelistSlots, 0)
+
+    assert.deepEqual(validateClusterFields({ ...base, whitelistSlots: 0 }), [])
+    assert.ok(
+      validateClusterFields({ ...base, maxPlayers: 4, whitelistSlots: 6 })
+        .some(item => item.includes('不能大于最大玩家数')),
+    )
+    assert.ok(validateClusterFields({ ...base, whitelistSlots: -1 }).some(item => item.includes('白名单预留位')))
   })
 })
 

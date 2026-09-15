@@ -9,6 +9,7 @@
 | `auth` | 认证、登录态、权限点与密码管理 |
 | `instance` | 实例生命周期、安装与更新检查、端口同步、异常退出处理 |
 | `cluster` | 集群与房间配置（`cluster.ini`） |
+| `player` | 玩家名单文件（`adminlist.txt` / `blocklist.txt` / `whitelist.txt`）的结构化读写 |
 | `shard` | 分片配置（地上 / 洞穴） |
 | `console` | 控制台日志流、命令下发与维护公告 |
 | `mod` | 创意工坊 Mod 下载、文件落位与同步 |

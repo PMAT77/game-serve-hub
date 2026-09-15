@@ -103,6 +103,7 @@ export function getClusterConfig(instance: DbGameInstance): ClusterConfigDto {
     voteEnabled: fields.voteEnabled,
     clusterIntention: fields.clusterIntention,
     tickRate: fields.tickRate,
+    whitelistSlots: fields.whitelistSlots,
     maxSnapshots: fields.maxSnapshots,
     shardEnabled: fields.shardEnabled,
     bindIp: fields.bindIp,
@@ -129,13 +130,17 @@ export function saveClusterConfig(instance: DbGameInstance, payload: ClusterSave
   }
   ensureClusterDirectory(installPath)
 
-  const fields = payloadToIniFields(payload)
+  const { clusterIniPath, clusterTokenPath } = resolveClusterPaths(installPath)
+  // 请求体省略 whitelistSlots 时保留磁盘现值：老版本前端不带该字段
+  const existingWhitelistSlots = fs.existsSync(clusterIniPath)
+    ? parseClusterIni(fs.readFileSync(clusterIniPath, 'utf8')).fields.whitelistSlots
+    : undefined
+  const fields = payloadToIniFields(payload, { whitelistSlots: existingWhitelistSlots })
   const fieldErrors = validateClusterFields(fields)
   if (fieldErrors.length > 0) {
     throw new Error(fieldErrors.join('；'))
   }
 
-  const { clusterIniPath, clusterTokenPath } = resolveClusterPaths(installPath)
   const existingToken = readClusterTokenFile(clusterTokenPath)
   const tokenConfigured = Boolean(existingToken && !validateClusterToken(existingToken))
 

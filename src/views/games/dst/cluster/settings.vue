@@ -27,6 +27,7 @@ import {
 } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
+import PlayerListsCard from './components/PlayerListsCard.vue'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import { computed, nextTick, onActivated, reactive, ref, shallowRef, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
@@ -80,6 +81,7 @@ const formModel = reactive({
   pauseWhenEmpty: true,
   voteEnabled: true,
   tickRate: 15,
+  whitelistSlots: 0,
   maxSnapshots: 6,
   shardEnabled: false,
   bindIp: '127.0.0.1',
@@ -253,6 +255,7 @@ function applyConfig(config: ClusterConfigDto) {
   formModel.pauseWhenEmpty = config.pauseWhenEmpty
   formModel.voteEnabled = config.voteEnabled
   formModel.tickRate = config.tickRate
+  formModel.whitelistSlots = config.whitelistSlots
   formModel.maxSnapshots = config.maxSnapshots
   formModel.shardEnabled = config.shardEnabled
   formModel.bindIp = config.bindIp
@@ -315,6 +318,7 @@ function buildSavePayload(restart = false): ClusterSavePayload {
     voteEnabled: formModel.voteEnabled,
     clusterIntention: serverConfig.value?.clusterIntention ?? 'cooperative',
     tickRate: formModel.tickRate,
+    whitelistSlots: formModel.whitelistSlots,
     maxSnapshots: formModel.maxSnapshots,
     shardEnabled: formModel.shardEnabled,
     bindIp: formModel.bindIp.trim(),
@@ -575,6 +579,17 @@ onActivated(() => {
                 <p>1核2G服务器推荐4人，<br> 2核4G服务器推荐6-8人</p>
               </NTooltip>
             </NFormItem>
+            <NFormItem label="白名单预留位" path="whitelistSlots">
+              <NInputNumber v-model:value="formModel.whitelistSlots" :min="0" :max="formModel.maxPlayers" class="w-40" />
+              <NTooltip :style="{ maxWidth: '300px' }">
+                <template #trigger>
+                  <NButton text class="ml-2">
+                    <FaIcon name="i-lucide:info" class="size-4" />
+                  </NButton>
+                </template>
+                <p>给白名单玩家保留的席位数量。<br>填 0 表示不使用白名单，此时白名单名单不会生效。</p>
+              </NTooltip>
+            </NFormItem>
             <NFormItem label="PVP">
               <NSwitch v-model:value="formModel.pvp" />
               <NTooltip :style="{ maxWidth: '300px' }">
@@ -609,6 +624,11 @@ onActivated(() => {
               </NTooltip>
             </NFormItem>
           </NCard>
+
+          <PlayerListsCard
+            :instance-id="instanceId"
+            :whitelist-slots="formModel.whitelistSlots"
+          />
 
           <NCard title="存档与快照" size="small" class="mt-4">
             <NFormItem label="最大快照数">

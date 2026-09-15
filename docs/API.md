@@ -5,7 +5,7 @@
 ## 约定
 
 - 业务接口统一挂在 `/app/...` 前缀下，例如 `GET /app/system/panel-update/status`、`POST /app/instance/shards`、`POST /app/schedule/list`。
-- 类型定义按模块放在 `shared/contracts/`：`system.ts`、`instance.ts`、`cluster.ts`、`shard.ts`、`console.ts`、`mod.ts`、`backup.ts`、`schedule.ts`、`notify.ts`、`node.ts`、`auth.ts`、`maintenance.ts`、`dst-summary.ts` 等；前端 `src/api/` 直接复用这些契约，改接口时两边同步。
+- 类型定义按模块放在 `shared/contracts/`：`system.ts`、`instance.ts`、`cluster.ts`、`player.ts`、`shard.ts`、`console.ts`、`mod.ts`、`backup.ts`、`schedule.ts`、`notify.ts`、`node.ts`、`auth.ts`、`maintenance.ts`、`dst-summary.ts` 等；前端 `src/api/` 直接复用这些契约，改接口时两边同步。
 - 响应统一为成功 `{ code: 'OK', data }` 或失败 `{ code: <错误码>, message }`（`ApiSuccessResponse` / `ApiErrorResponse`）。
 - 除登录相关接口外都需要登录态，未登录返回 `AUTH_UNAUTHORIZED`，权限不足返回 `AUTH_FORBIDDEN`。
 - 路由枚举与前端路径常量见 `shared/constants/frontend-routes.ts`。

@@ -6,6 +6,7 @@ import cors from '@fastify/cors'
 import fastifyStatic from '@fastify/static'
 import { registerAuthModule } from './modules/auth'
 import { registerClusterModule } from './modules/cluster'
+import { registerPlayerModule } from './modules/player'
 import { registerShardModule } from './modules/shard'
 import { registerModModule } from './modules/mod'
 import { registerConsoleModule } from './modules/console'
@@ -126,6 +127,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
   registerNodeModule(app)
   registerInstanceModule(app)
   registerClusterModule(app)
+  registerPlayerModule(app)
   registerShardModule(app)
   registerModModule(app)
   registerConsoleModule(app)

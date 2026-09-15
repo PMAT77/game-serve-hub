@@ -17,6 +17,8 @@ export interface ClusterIniFields {
   voteEnabled: boolean
   clusterIntention: ClusterIntention
   tickRate: number
+  /** 白名单预留位；0 表示白名单未启用（DST 只在大于 0 时校验白名单） */
+  whitelistSlots: number
   maxSnapshots: number
   shardEnabled: boolean
   bindIp: string
@@ -154,6 +156,7 @@ export function parseClusterIni(content: string): {
       voteEnabled: parseBool(getSectionValue(sections, 'GAMEPLAY', 'vote_enabled'), true),
       clusterIntention,
       tickRate: parseIntField(getSectionValue(sections, 'NETWORK', 'tick_rate'), 15),
+      whitelistSlots: Math.max(0, parseIntField(getSectionValue(sections, 'NETWORK', 'whitelist_slots'), 0)),
       maxSnapshots: parseIntField(getSectionValue(sections, 'MISC', 'max_snapshots'), 6),
       shardEnabled: parseBool(getSectionValue(sections, 'SHARD', 'shard_enabled'), false),
       bindIp: getSectionValue(sections, 'SHARD', 'bind_ip') ?? '127.0.0.1',
@@ -190,6 +193,8 @@ export function buildClusterIni(fields: ClusterIniFields): string {
   const safeBindIp = sanitizeInlineText(fields.bindIp) || '127.0.0.1'
   const safeMasterIp = sanitizeInlineText(fields.masterIp) || '127.0.0.1'
   const safeClusterKey = sanitizeInlineText(fields.clusterKey) || 'supersecretkey'
+  // 缺值或非法值一律写 0：ini 里出现 `whitelist_slots = undefined` 会让游戏读到非法配置
+  const whitelistSlots = Number.isInteger(fields.whitelistSlots) && fields.whitelistSlots >= 0 ? fields.whitelistSlots : 0
   const { offline_cluster, lan_only_cluster } = networkModeToIniFlags(fields.networkMode)
 
   return [
@@ -208,7 +213,7 @@ export function buildClusterIni(fields: ClusterIniFields): string {
     `lan_only_cluster = ${lan_only_cluster}`,
     `offline_cluster = ${offline_cluster}`,
     `tick_rate = ${fields.tickRate}`,
-    'whitelist_slots = 0',
+    `whitelist_slots = ${whitelistSlots}`,
     '',
     '[MISC]',
     'console_enabled = true',
@@ -246,6 +251,12 @@ export function validateClusterFields(fields: ClusterIniFields): string[] {
   if (!Number.isInteger(fields.maxSnapshots) || fields.maxSnapshots < 1) {
     errors.push('最大快照数须为正整数')
   }
+  if (!Number.isInteger(fields.whitelistSlots) || fields.whitelistSlots < 0 || fields.whitelistSlots > 64) {
+    errors.push('白名单预留位须在 0–64 之间')
+  }
+  else if (fields.whitelistSlots > fields.maxPlayers) {
+    errors.push('白名单预留位不能大于最大玩家数')
+  }
   if (fields.shardEnabled) {
     if (!sanitizeInlineText(fields.bindIp)) {
       errors.push('绑定 IP 不能为空')
@@ -270,7 +281,16 @@ export function validateClusterFields(fields: ClusterIniFields): string[] {
   return errors
 }
 
-export function payloadToIniFields(payload: Omit<ClusterSavePayload, 'instanceId' | 'restart' | 'clusterToken'>): ClusterIniFields {
+/**
+ * 组装 ini 字段。
+ *
+ * `fallback` 用于请求体省略可选字段时保留磁盘上的现值：老版本前端不带
+ * `whitelistSlots`，直接按缺省 0 写入会把已启用的白名单悄悄关掉。
+ */
+export function payloadToIniFields(
+  payload: Omit<ClusterSavePayload, 'instanceId' | 'restart' | 'clusterToken'>,
+  fallback?: { whitelistSlots?: number },
+): ClusterIniFields {
   return {
     networkMode: payload.networkMode,
     clusterName: payload.clusterName,
@@ -283,6 +303,7 @@ export function payloadToIniFields(payload: Omit<ClusterSavePayload, 'instanceId
     voteEnabled: payload.voteEnabled,
     clusterIntention: payload.clusterIntention,
     tickRate: payload.tickRate,
+    whitelistSlots: payload.whitelistSlots ?? fallback?.whitelistSlots ?? 0,
     maxSnapshots: payload.maxSnapshots,
     shardEnabled: payload.shardEnabled,
     bindIp: payload.bindIp,
@@ -308,6 +329,7 @@ export function defaultClusterIniFields(instanceName?: string): ClusterIniFields
     voteEnabled: true,
     clusterIntention: 'cooperative',
     tickRate: 15,
+    whitelistSlots: 0,
     maxSnapshots: 6,
     shardEnabled: false,
     bindIp: '127.0.0.1',

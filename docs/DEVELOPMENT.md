@@ -13,7 +13,7 @@
 | Node.js | `^22.13` / `>=24`（后端使用内置 `node:sqlite`，Node 20 无法启动） |
 | 包管理 | pnpm `10.33+`（见 `packageManager` 字段） |
 | Docker | 实例安装/启停依赖 Docker Engine（开发 Compose 模式亦需要） |
-| 数据库 | SQLite（`pnpm run dev:prepare` 自动初始化） |
+| 数据库 | SQLite（后端首次启动时自动创建并执行迁移） |
 
 ---
 
@@ -62,13 +62,13 @@ cp panel.env.example panel.env
 
 ---
 
-## 初始化数据库
+## 准备运行目录
 
 ```bash
 pnpm run dev:prepare
 ```
 
-创建 SQLite、运行 Drizzle 迁移、初始化日志目录。
+它只创建运行所需目录（数据目录、日志目录、实例与备份根目录）并打印解析到的配置，**不建库、也不执行迁移**：SQLite 文件与 Drizzle 迁移由后端首次启动时的 `initDatabase()` 完成（见 `server/src/shared/db/connection.ts`）。所以直接执行 `pnpm run dev` 就够了——它内部会先跑一次 `dev:prepare`。
 
 ---
 
@@ -160,10 +160,18 @@ STEAMCMD_ARCHIVE_URL=https://media.steampowered.com/client/installer/steamcmd_li
 
 ## 测试与代码检查
 
-提 PR 前直接跑与 CI 等价的检查（覆盖版本一致性、文档校验、类型检查、lint、UI 文案、单测与生产构建）：
+提 PR 前先跑一条命令，它覆盖 CI 的大部分步骤（版本一致性、文档校验、类型检查、lint、UI 文案、单测与前端构建）：
 
 ```bash
 pnpm run release:check
+```
+
+CI 另有两步不在 `release:check` 里，本地补跑即可完全对齐：
+
+```bash
+pnpm run build:server            # 服务端 esbuild 打包到 dist-server/
+pnpm exec drizzle-kit generate --config server/drizzle.config.ts
+git diff --exit-code -- server/drizzle      # 迁移漂移检查：无输出即通过
 ```
 
 按需单独执行：
@@ -177,7 +185,7 @@ pnpm run release:check
 | `pnpm run lint:copy` | UI 文案检查 |
 | `pnpm test:unit` | 单元测试（前端与脚本用例） |
 | `pnpm test:server` | 后端测试 |
-| `pnpm run build` | 生产构建（前端 `dist/` 与服务端 `dist-server/`） |
+| `pnpm run build` | 生产构建（仅前端 `dist/`；服务端 bundle 用 `pnpm run build:server`） |
 
 ### 面板后端环境变量（`server/.env.*`）
 
@@ -221,7 +229,8 @@ pnpm run build          # 输出 dist/
 
 ```bash
 # 统一镜像（面板 + DST 运行库 + SteamCMD）
-docker build -t ghcr.io/pmat77/game-server-hub:local docker/unified
+# 构建上下文必须是仓库根目录：Dockerfile 内要 COPY package.json、packages/、patches/ 与源码
+docker build -f docker/unified/Dockerfile -t ghcr.io/pmat77/game-server-hub:local .
 ```
 
 ### 本地 Compose 启动（非安装脚本路径）

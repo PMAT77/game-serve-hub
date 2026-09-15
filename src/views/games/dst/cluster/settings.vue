@@ -27,14 +27,13 @@ import {
 } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
-import PlayerListsCard from './components/PlayerListsCard.vue'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import { computed, nextTick, onActivated, reactive, ref, shallowRef, watch } from 'vue'
 import apiCluster from '@/api/modules/cluster'
 import apiInstance from '@/api/modules/instance'
 import { useHostMemoryGuidance } from '@/composables/useHostMemoryGuidance'
 import { useNarrowFormLayout } from '@/composables/useNarrowFormLayout'
-import { routeToDstRoomList, routeToDstWorldSettings } from '@/navigation/game-routes'
+import { routeToDstPlayerManage, routeToDstRoomList, routeToDstWorldSettings } from '@/navigation/game-routes'
 import { isInstanceInstallingStatus } from '@/views/node/instance/instanceDisplay'
 import { getPortConflictDialogLabels, isInstancePortConflictError } from '@/utils/instancePortConflict'
 import { tryNotifyHostMemoryPressure } from '@/utils/hostMemoryPressure'
@@ -397,6 +396,12 @@ function goWorldSettings() {
   }
 }
 
+function goPlayerManage() {
+  if (instanceId.value) {
+    router.push(routeToDstPlayerManage(instanceId.value))
+  }
+}
+
 function confirmSaveAndRestart() {
   dialog.warning({
     title: '保存并重启',
@@ -625,10 +630,15 @@ onActivated(() => {
             </NFormItem>
           </NCard>
 
-          <PlayerListsCard
-            :instance-id="instanceId"
-            :whitelist-slots="formModel.whitelistSlots"
-          />
+          <NCard title="玩家名单" size="small" class="mt-4">
+            <p class="text-sm text-muted-foreground">
+              管理员、白名单与黑名单已经集中到「玩家管理」页面：那里能看到在线玩家、按游戏名添加名单、踢出或封禁玩家。
+              白名单是否生效仍由上面的「白名单预留位」决定，填 0 就是不用白名单。
+            </p>
+            <NButton class="mt-3" size="small" secondary @click="goPlayerManage">
+              前往玩家管理
+            </NButton>
+          </NCard>
 
           <NCard title="存档与快照" size="small" class="mt-4">
             <NFormItem label="最大快照数">

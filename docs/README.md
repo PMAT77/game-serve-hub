@@ -18,7 +18,7 @@
 | --- | --- |
 | [VIDEO.md](VIDEO.md) | 视频教程系列：分集与状态、观看路线、录制与素材规范、当前不提供的能力 |
 | [INSTALL.md](INSTALL.md) | Linux 生产安装（Docker / Native 双模式）、升级、回滚、卸载、运维与故障排查 |
-| [DST_TUTORIAL.md](DST_TUTORIAL.md) | 服主视角从零开服：端口放行、面板操作、房间世界、控制台、玩家名单、备份与计划任务 |
+| [DST_TUTORIAL.md](DST_TUTORIAL.md) | 服主视角从零开服：端口放行、面板操作、房间世界、控制台、玩家管理与在线玩家、备份与计划任务 |
 | [MEMORY.md](MEMORY.md) | 宿主机内存档位（4 / 6 / 8 GiB）、洞穴与 Mod 建议、`panel.env` 预设 |
 | [GLOSSARY.md](GLOSSARY.md) | 术语表：实例、分片、集群、统一镜像、离线镜像包等 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Docker / Native 双运行时、Open-Core 与插件边界 |

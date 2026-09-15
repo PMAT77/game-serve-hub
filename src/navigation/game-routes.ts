@@ -8,6 +8,8 @@ export const ROUTE_NAMES = {
   nodeInstanceConsole: 'nodeInstanceConsole',
   dstRoomList: 'dstRoomList',
   dstRoomSettings: 'dstRoomSettings',
+  dstPlayerList: 'dstPlayerList',
+  dstPlayerManage: 'dstPlayerManage',
   dstWorldList: 'dstWorldList',
   dstWorldSettings: 'dstWorldSettings',
   dstModList: 'dstModList',
@@ -35,6 +37,14 @@ export function routeToDstRoomList(): RouteLocationRaw {
 
 export function routeToDstRoomSettings(instanceId: string): RouteLocationRaw {
   return { name: ROUTE_NAMES.dstRoomSettings, params: { instanceId } }
+}
+
+export function routeToDstPlayerList(): RouteLocationRaw {
+  return { name: ROUTE_NAMES.dstPlayerList }
+}
+
+export function routeToDstPlayerManage(instanceId: string): RouteLocationRaw {
+  return { name: ROUTE_NAMES.dstPlayerManage, params: { instanceId } }
 }
 
 export function routeToDstWorldList(): RouteLocationRaw {

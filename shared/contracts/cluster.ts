@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { instanceIdSchema, instanceStatusSchema } from './instance'
+import { playerKuIdSchema } from './player'
 
 export const clusterNetworkModeSchema = z.enum(['offline', 'lan_only', 'public'])
 export type ClusterNetworkMode = z.infer<typeof clusterNetworkModeSchema>
@@ -107,10 +108,29 @@ export const clusterSaveResultSchema = z.object({
 })
 export type ClusterSaveResult = z.infer<typeof clusterSaveResultSchema>
 
+/**
+ * 在线玩家一条记录。
+ *
+ * `kuId` 是 Klei 用户 ID（踢人与封禁都以它为凭据，比对时忽略大小写）；
+ * `name` 取自游戏实体的 name 字段，可能为空字符串，界面需容忍。
+ */
+export const clusterOnlinePlayerSchema = z.object({
+  kuId: playerKuIdSchema,
+  name: z.string(),
+})
+export type ClusterOnlinePlayer = z.infer<typeof clusterOnlinePlayerSchema>
+
 export const clusterOnlinePlayersSchema = z.object({
   instanceId: instanceIdSchema,
   running: z.boolean(),
   onlinePlayerCount: z.number().int().nonnegative().nullable(),
+  /**
+   * 在线玩家明细。
+   *
+   * null 表示这次没取到（查询超时、标记行被日志挤掉等），与空数组含义不同：
+   * 空数组是「确实没人在线」，null 是「不知道」，界面不能用同一种文案。
+   */
+  players: z.array(clusterOnlinePlayerSchema).nullable(),
   maxPlayers: z.number().int().min(1).max(64),
 })
 export type ClusterOnlinePlayersDto = z.infer<typeof clusterOnlinePlayersSchema>

@@ -16,7 +16,7 @@ import {
   getClusterConfig,
   saveClusterConfig,
 } from '../../infra/game-adapter/dst/cluster-service'
-import { queryDstOnlinePlayerCount } from '../../infra/game-adapter/dst/online-players'
+import { queryDstOnlinePlayers } from '../../infra/game-adapter/dst/online-players'
 import { isInstanceContainerRunning } from '../instance/container-lifecycle'
 import { injectRestartInstance } from '../instance/inject-restart'
 import { businessError, success } from '../../shared/http/response'
@@ -83,13 +83,13 @@ export function registerClusterModule(app: FastifyInstance) {
     try {
       const config = getClusterConfig(resolved.instance)
       const running = await isInstanceContainerRunning(instanceId)
-      const onlinePlayerCount = running
-        ? await queryDstOnlinePlayerCount(instanceId)
-        : null
+      // 一次查询同时给出人数与明细；查不到时两者都为 null（「不知道」而非「没人在线」）
+      const online = running ? await queryDstOnlinePlayers(instanceId) : null
       return success({
         instanceId,
         running,
-        onlinePlayerCount,
+        onlinePlayerCount: online?.count ?? null,
+        players: online?.players ?? null,
         maxPlayers: config.maxPlayers,
       }, request)
     }

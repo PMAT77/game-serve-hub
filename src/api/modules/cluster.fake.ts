@@ -54,6 +54,13 @@ export default defineFakeRoute([
           instanceId,
           running,
           onlinePlayerCount: running ? 2 : null,
+          // fake 也给出明细，开发模式下「在线玩家」卡片才有内容可看
+          players: running
+            ? [
+                { kuId: 'KU_fake0001', name: '玩家甲' },
+                { kuId: 'KU_fake0002', name: '玩家乙' },
+              ]
+            : null,
           maxPlayers: existing?.maxPlayers ?? 6,
         },
       }

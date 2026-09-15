@@ -29,13 +29,13 @@
 - **小团队 / 游戏社区** —— 需要多实例并存与操作可追溯；面板已内置账号认证与权限点，成员管理界面仍在开发中。
 - **托管商 / 集成方** —— 多节点统一管理属于规划中的 Pro 插件；也可直接联系做定制集成（见文末）。
 
-**不太适合的情况**（先说清楚，省得你白折腾）：只想点一下就用、需要在线玩家列表与一键踢人、需要多用户权限隔离，或者要在 Windows 上开服 —— 这几类需求请优先考虑同类面板，[视频教程文档](docs/VIDEO.md)里写了具体建议与对比。
+**不太适合的情况**（先说清楚，省得你白折腾）：只想点一下就用、需要多用户权限隔离，或者要在 Windows 上开服 —— 这几类需求请优先考虑同类面板，[视频教程文档](docs/VIDEO.md)里写了具体建议与对比。
 
 ## 它能做什么
 
 - **一键开服与更新** —— 图形化创建实例，SteamCMD 自动安装与更新，地上 / 洞穴双分片一键拉起。
 - **世界与 Mod 管理** —— 房间参数、世界生成配置、创意工坊 Mod 在线订阅与开关；存档点回档与重置世界前会自动创建安全备份。
-- **玩家名单与准入** —— 在房间设置里维护管理员、白名单与黑名单，白名单预留位可配，改动立即保存。
+- **玩家管理与准入** —— 独立的「玩家管理」页面：按游戏名维护管理员、白名单与黑名单（也支持粘贴玩家 ID），查看地上 / 洞穴的在线玩家并踢出或封禁；封禁立刻生效，房间重启后依然有效。
 - **文件与配置** —— 在浏览器里浏览实例目录、直接编辑房间与世界配置文件、上传下载单个文件，保存或覆盖前自动备份；集群令牌等敏感文件不可读写。
 - **实时掌控** —— CPU / 内存 / 磁盘 / 网络监控，SSE 实时日志，游戏控制台直接下发命令。
 - **出问题能自查** —— 环境自检一键检查运行环境、磁盘余量、数据目录可写、实例状态与通知渠道；控制台日志落盘，可查看历史与下载。
@@ -52,13 +52,13 @@ B 站系列视频按「先能装通、再能用好」的顺序录制，只演示
 | EP0 | 10 分钟在你自己的服务器上开一个饥荒专服（演示片） | 待发布 |
 | EP1 | 国内服务器安装全程：不换机器、不买镜像 | 待发布 |
 | EP2 | 装完怎么开服：世界、洞穴、Mod、端口 | 待录制 |
-| EP3 | 玩家名单：管理员、白名单、黑名单 | 待录制 |
+| EP3 | 玩家管理：按游戏名维护名单、在线玩家、踢出与封禁 | 待录制 |
 
 完整分集、观看路线与录制规范见[视频教程文档](docs/VIDEO.md)，其中也写明了本项目当前不提供的能力，以及更适合使用同类面板的场景。
 
 ## 快速开始
 
-当前为 `v0.5.0` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
+当前为 `v0.6.0` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
 
 | 模式 | 适合谁 | 面板 | SteamCMD / 游戏进程 | 进程管理 |
 | --- | --- | --- | --- | --- |
@@ -76,14 +76,14 @@ B 站系列视频按「先能装通、再能用好」的顺序录制，只演示
 > Native 模式不拉取任何容器镜像，不需要这一步。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.5.0/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.6.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 ### Native systemd 模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.5.0/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.6.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -94,7 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.5.0/script
 若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位（`--mode` 按你选的模式改）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.5.0/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.6.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 
@@ -187,7 +187,7 @@ sudo loginctl show-user gsh -p Linger
 | --- | --- |
 | [视频教程](docs/VIDEO.md) | 系列分集、观看路线、录制规范，以及本项目当前不提供的能力 |
 | [安装与运维](docs/INSTALL.md) | 两种模式的选型、安装、升级、回滚、卸载、日志与按关键词排错 |
-| [DST 开服教程](docs/DST_TUTORIAL.md) | 端口放行、面板操作、房间世界、控制台、玩家名单、备份与计划任务 |
+| [DST 开服教程](docs/DST_TUTORIAL.md) | 端口放行、面板操作、房间世界、控制台、玩家管理与在线玩家、备份与计划任务 |
 | [内存建议](docs/MEMORY.md) | 4 / 6 / 8 GiB 档位、洞穴与 Mod 建议、`panel.env` 预设 |
 
 **给开发者**

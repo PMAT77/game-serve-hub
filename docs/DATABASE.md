@@ -20,6 +20,7 @@ schema 定义在 `server/src/shared/db/schema/`，统一从 `index.ts` 导出：
 | `auth.ts` | 用户与权限点 |
 | `instance.ts` | 游戏实例 |
 | `node.ts` | 节点信息 |
+| `player.ts` | 玩家档案（Klei 用户 ID ↔ 游戏名、手工备注） |
 | `schedule.ts` | 计划任务 |
 | `notify.ts` | 通知渠道与事件 |
 | `system.ts` | 面板设置与系统状态 |
@@ -34,7 +35,7 @@ pnpm run db:studio     # 打开 Drizzle Studio 查看数据
 
 - 改动 schema 后，**同一次提交里必须包含 `server/drizzle/` 下的迁移文件**；CI 会执行 schema 漂移检查，漏提交会让 PR 变红。
 - 运行时数据库连接初始化时会自动应用尚未执行的迁移（见 `server/src/shared/db/connection.ts`），因此生产升级不需要手工执行 `db:migrate`。
-- 开发环境首次拉起用 `pnpm run dev:prepare` 初始化数据库与日志目录。
+- 开发环境首次拉起时，SQLite 文件与迁移由后端启动过程创建并应用（`initDatabase()`）；`pnpm run dev:prepare` 只创建数据目录与日志目录，不建库。
 
 ## 备份、快照与回滚
 

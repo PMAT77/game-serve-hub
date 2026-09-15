@@ -30,7 +30,7 @@ Node.js 后端代码位于本目录。前端在 `../src/`，前后端共享契�
 
 ## 本地开发
 
-- `pnpm run dev:prepare`：初始化数据库目录、日志目录与工作区组件
+- `pnpm run dev:prepare`：创建数据目录与日志目录（建库与迁移在后端启动时进行）并初始化工作区组件
 - `pnpm run dev`：同时启动前端与后端（内部会先跑 `dev:prepare`）
 
 ## Linux 生产安装

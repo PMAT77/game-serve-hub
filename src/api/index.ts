@@ -1,6 +1,7 @@
 import axios from 'axios'
 import router from '@/router'
 import { resolveApiBaseUrl } from './base-url'
+import { isBinaryResponse, parseBinaryErrorPayload } from './binary-response'
 
 // 请求重试配置
 const MAX_RETRY_COUNT = 3 // 最大重试次数
@@ -70,14 +71,41 @@ api.interceptors.request.use(
 )
 
 // 处理错误信息的函数
-function handleError(error: any) {
-  const responseData = error.response?.data
+async function handleError(error: any) {
+  const config = error?.config
+  /**
+   * 下载类接口失败时后端同样返回 JSON 业务信封（HTTP 4xx + { status, error, code }），
+   * 但 responseType: 'blob' 会把它包成 Blob，中文原因就此丢失。这里先把 Blob 读回对象，
+   * 未授权、强制改密与失败原因才能按业务语义处理；非二进制响应完全沿用原来的逻辑。
+   */
+  const binaryRequest = isBinaryResponse(config, error?.response?.data)
+  const responseData = binaryRequest
+    ? await parseBinaryErrorPayload(error?.response?.data)
+    : error?.response?.data
+  /** 二进制请求失败时把业务信封透出给调用方（含中文 error），其余仍是原来的 AxiosError */
+  const rejectRequest = () => Promise.reject(binaryRequest ? (responseData ?? error) : error)
+
   if (responseData?.code === 'AUTH_FORCE_PASSWORD_CHANGE') {
     useAppAccountStore().setMustChangePassword(true)
     if (router.currentRoute.value.name !== 'forceChangePassword') {
       void router.replace('/force-change-password')
     }
-    return Promise.reject(error)
+    return rejectRequest()
+  }
+  if (responseData?.code === 'AUTH_UNAUTHORIZED') {
+    if (config?.skipAuthRefresh !== true) {
+      const refreshed = await tryRefreshAuthSession()
+      if (refreshed) {
+        return api({ ...config, skipAuthRefresh: true })
+      }
+    }
+    useAppAccountStore().requestLogout()
+    return rejectRequest()
+  }
+  // 下载失败时如实显示后端给的原因，而不是 "Request failed with status code 404"
+  if (binaryRequest && typeof responseData?.error === 'string' && responseData.error) {
+    toastBusinessErrorOnce(responseData.error)
+    return rejectRequest()
   }
   if (error.status === 401) {
     useAppAccountStore().requestLogout()
@@ -87,7 +115,7 @@ function handleError(error: any) {
       description: error.message,
     })
   }
-  return Promise.reject(error)
+  return rejectRequest()
 }
 
 async function tryRefreshAuthSession(): Promise<boolean> {
@@ -122,6 +150,15 @@ async function tryRefreshAuthSession(): Promise<boolean> {
 
 api.interceptors.response.use(
   async (response) => {
+    /**
+     * 下载类接口（responseType: 'blob'）的响应体不是 { status, data } 业务信封：
+     * 原样透传整个响应，调用方按 { data: Blob } 取用。
+     * 否则 Blob 没有 status 字段，会被下面的业务分支判成登录失效并触发
+     * requestLogout()，表现为「点下载就直接退出登录」。
+     */
+    if (isBinaryResponse(response.config, response.data)) {
+      return response
+    }
     /**
      * 全局拦截请求发送后返回的数据，如果数据有报错则在这做全局的错误提示
      * 约定的数据格式：{ status: 1 | 0, error: string, data: object }

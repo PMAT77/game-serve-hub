@@ -8,15 +8,17 @@ import apiInstance from '@/api/modules/instance'
 import apiMod from '@/api/modules/mod'
 import apiShard from '@/api/modules/shard'
 import { NButton, NSpin } from 'naive-ui'
-import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { routeToInstanceConsole, routeToNodeInstance } from '@/navigation/game-routes'
 import { statusBadgeClass } from '@/constants/statusDictionary'
 import { getInstanceState } from './instanceDisplay'
 import CommandCenterCard from './components/detail/CommandCenterCard.vue'
 import InstanceFilesCard from './components/detail/InstanceFilesCard.vue'
 import InstanceControlCard from './components/detail/InstanceControlCard.vue'
+import OnlinePlayersCard from './components/detail/OnlinePlayersCard.vue'
 import RoomOverviewCard from './components/detail/RoomOverviewCard.vue'
 import WorldOverviewCard, { type InstanceWorldState } from './components/detail/WorldOverviewCard.vue'
+import { instanceSupportsDstRoom } from '@/composables/useGameInstance'
 
 defineOptions({
   name: 'NodeInstanceDetail',
@@ -46,9 +48,23 @@ const state = computed(() => (instance.value ? getInstanceState(instance.value) 
 const DETAIL_POLL_MS = 30_000
 let pollTimer: ReturnType<typeof setInterval> | undefined
 
+/**
+ * 路由对本页开启了 keepAlive：离开详情页时组件不会卸载，定时器与 watch 都还活着。
+ * 只有「本页正被激活」且「当前路由就是详情页」时才允许它自己导航，
+ * 否则后台轮询会把停在别的页面上的用户强行拉回实例管理列表。
+ */
+let pageActive = true
+const isDetailRouteActive = computed(() => route.name === 'nodeInstanceDetail')
+
+function ownsCurrentPage() {
+  return pageActive && isDetailRouteActive.value
+}
+
 async function loadDetail(options?: { silent?: boolean }) {
   if (!instanceId.value) {
-    router.replace(routeToNodeInstance())
+    if (ownsCurrentPage()) {
+      router.replace(routeToNodeInstance())
+    }
     return
   }
   if (!options?.silent) {
@@ -62,8 +78,12 @@ async function loadDetail(options?: { silent?: boolean }) {
     }
     const target = (listRes.data as InstanceItem[]).find(item => item.id === targetId)
     if (!target) {
-      faToast.warning('实例不存在或已删除')
-      router.replace(routeToNodeInstance())
+      // 被缓存在别的路由上时保持静默：返回详情页后 onActivated 会重新检测，
+      // 那时再提示并跳回列表页
+      if (ownsCurrentPage()) {
+        faToast.warning('实例不存在或已删除')
+        router.replace(routeToNodeInstance())
+      }
       return
     }
     instance.value = target
@@ -117,10 +137,17 @@ function goConsole() {
   }
 }
 
-function syncPolling() {
+function stopPolling() {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = undefined
+  }
+}
+
+function syncPolling() {
+  stopPolling()
+  if (!ownsCurrentPage()) {
+    return
   }
   if (instance.value?.status === 'running') {
     pollTimer = setInterval(() => {
@@ -131,10 +158,11 @@ function syncPolling() {
 
 watch(() => instance.value?.status, () => syncPolling())
 watch(instanceId, () => {
-  // 离开详情页的导航会清空 route.params.instanceId；组件被 keepAlive 缓存，
-  // watch 仍会触发。此时不应重载数据，否则 loadDetail 会因无 id 执行
-  // router.replace 强制跳回实例管理列表页（与 console.vue 的 watch 守卫一致）
-  if (!instanceId.value) {
+  // 组件被 keepAlive 缓存：离开详情页后 watch 仍会对全局 route.params 生效，
+  // 别的页面（控制台 / 世界设置 / 房间设置）同样带 :instanceId，参数一变就会
+  // 触发这里的重载，进而可能把用户从那些页面顶回实例管理列表。
+  // 因此只在「本页被激活且当前路由就是详情页」时才响应。
+  if (!ownsCurrentPage()) {
     return
   }
   instance.value = null
@@ -148,18 +176,25 @@ watch(instanceId, () => {
 })
 
 onMounted(() => {
+  pageActive = true
   void loadDetail()
 })
 
 onActivated(() => {
+  pageActive = true
   void loadDetail({ silent: true })
+  // 返回页面时实例状态往往没变化，watch(status) 不会触发，必须显式恢复轮询
+  syncPolling()
+})
+
+onDeactivated(() => {
+  pageActive = false
+  stopPolling()
 })
 
 onBeforeUnmount(() => {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = undefined
-  }
+  pageActive = false
+  stopPolling()
 })
 </script>
 
@@ -210,6 +245,12 @@ onBeforeUnmount(() => {
         :mod-list="modList"
         :connect-info="connectInfo"
         :loading="loading"
+      />
+
+      <OnlinePlayersCard
+        v-if="instance && instanceSupportsDstRoom(instance)"
+        :instance="instance"
+        :online-players="onlinePlayers"
       />
 
       <div class="grid gap-4 lg:grid-cols-2">

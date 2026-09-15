@@ -9,22 +9,29 @@ if [[ "${SCRIPT_DIR}" == "${BASH_SOURCE[0]}" ]]; then
 fi
 source "${SCRIPT_DIR}/install.linux.sh"
 
-# v0.5.0 统一镜像：三键同值（占位 registry 待 resolve_image_registry 替换）
-[[ "${GSH_RELEASE_TAG}" == "v0.5.0" ]]
+# 版本闸门用例的两个版本：RELEASE 取安装器默认 tag（即本次发布版本），INSTALLED 模拟
+# 机器上已安装的旧版本——发版时它要跟着往上挪一格。INSTALLED 必须严格小于 RELEASE，
+# 否则「升级请求应被接受」会退化成同版本重装、被闸门拒绝：v0.5.0、v0.6.0 两次发布都
+# 因为这个原因炸在 CI 上，所以下面用断言把它钉死，忘了改会当场报错而不是留下怪现象。
+SMOKE_RELEASE_TAG="${GSH_RELEASE_TAG}"
+SMOKE_INSTALLED_TAG='v0.5.0'
+
+# v0.6.0 统一镜像：三键同值（占位 registry 待 resolve_image_registry 替换）
+[[ "${GSH_RELEASE_TAG}" == "v0.6.0" ]]
 [[ "${PANEL_IMAGE}" == "" ]]
 [[ "${GSH_GAME_DST_IMAGE}" == "" ]]
 [[ "${GSH_STEAMCMD_IMAGE}" == "" ]]
 # 默认镜像池为空（由 init_installer_repo_pool 按代理清单生成）
 [[ "${INSTALLER_REPO_MIRRORS}" == "" ]]
 init_installer_repo_pool
-[[ "${INSTALLER_REPO_MIRRORS}" == *"@v0.5.0"* ]]
+[[ "${INSTALLER_REPO_MIRRORS}" == *"@v0.6.0"* ]]
 [[ "${INSTALLER_REPO_MIRRORS}" == *gh-proxy.com* ]]
 [[ "${PANEL_HEALTHCHECK_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]
 [[ "${PANEL_HEALTHCHECK_INTERVAL_SECONDS}" =~ ^[0-9]+$ ]]
 
 # 统一镜像引用直接生成（GHCR 官方源；PANEL_IMAGE 可覆盖）
 finalize_image_refs
-[[ "${PANEL_IMAGE}" == "ghcr.io/pmat77/game-server-hub:v0.5.0" ]]
+[[ "${PANEL_IMAGE}" == "ghcr.io/pmat77/game-server-hub:v0.6.0" ]]
 [[ "${GSH_GAME_DST_IMAGE}" == "${PANEL_IMAGE}" ]]
 [[ "${GSH_STEAMCMD_IMAGE}" == "${PANEL_IMAGE}" ]]
 
@@ -331,7 +338,7 @@ NATIVE_HELPER_ENV="${NATIVE_HELPER_TEST_DIR}/panel.env"
 printf '%s\n' \
   "GSH_NATIVE_UPDATE_DIR=${NATIVE_HELPER_TEST_DIR}/panel-update" \
   "GSH_NATIVE_USER=$(id -un)" \
-  'GSH_RELEASE_VERSION=v0.5.0' \
+  "GSH_RELEASE_VERSION=${SMOKE_INSTALLED_TAG}" \
   'SERVER_PORT=9527' \
   > "${NATIVE_HELPER_ENV}"
 PANEL_ENV_FILE="${NATIVE_HELPER_ENV}"
@@ -351,15 +358,17 @@ is_newer_version 'v0.4.5-beta.1' 'v0.4.5'
 ! is_newer_version 'v0.4.5' 'v0.4.5-beta.1'
 
 mkdir -p "${ROOT_DIR}"
+# 先确认「已安装版本 < 本次发布版本」，下面那条升级请求才有意义
+is_newer_version "${SMOKE_INSTALLED_TAG}" "${SMOKE_RELEASE_TAG}"
 TARGET_TAG=''
-printf '%s\n' 'v0.6.0' > "${UPDATE_DIR}/request"
+printf '%s\n' "${SMOKE_RELEASE_TAG}" > "${UPDATE_DIR}/request"
 consume_request "${UPDATE_DIR}/request"
-[[ "${TARGET_TAG}" == 'v0.6.0' ]]
+[[ "${TARGET_TAG}" == "${SMOKE_RELEASE_TAG}" ]]
 [[ -f "${ROOT_DIR}/request.processing" ]]
 [[ ! -e "${UPDATE_DIR}/request" ]]
 
 # 同版本 / 降级请求必须被拒绝（在子 shell 里跑，fail() 的 exit 1 不会带走整个冒烟测试）
-printf '%s\n' 'v0.5.0' > "${UPDATE_DIR}/request"
+printf '%s\n' "${SMOKE_INSTALLED_TAG}" > "${UPDATE_DIR}/request"
 if ( consume_request "${UPDATE_DIR}/request" ) 2>/dev/null; then
   printf 'a same-version request must be rejected\n' >&2
   exit 1

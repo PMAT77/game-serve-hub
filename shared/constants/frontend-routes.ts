@@ -3,6 +3,7 @@ export const FRONTEND_ROUTE_PATHS = {
   consoleMonitor: '/console/monitor',
   nodeInstance: '/node/instance',
   dstRooms: '/games/dst/rooms',
+  dstPlayers: '/games/dst/players',
   dstWorlds: '/games/dst/worlds',
   dstMods: '/games/dst/mods',
   dstModDetail: '/games/dst/mods/:workshopId/detail',

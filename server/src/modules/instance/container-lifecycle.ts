@@ -102,8 +102,11 @@ export async function resolveCavesContainerRef(instanceId: string): Promise<Cont
   return runtime.findByName(buildCavesContainerName(instanceId))
 }
 
-export async function isInstanceContainerRunning(instanceId: string): Promise<boolean> {
-  const ref = await resolveInstanceContainerRef(instanceId)
+export async function isInstanceContainerRunning(
+  instanceId: string,
+  shard: ConsoleCommandShard = 'master',
+): Promise<boolean> {
+  const ref = await resolveConsoleCommandContainerRef(instanceId, shard)
   if (!ref) {
     return false
   }
@@ -174,9 +177,13 @@ async function readRecentContainerLogs(runtime: ContainerRuntime, ref: Container
   return readRecentContainerLogLines(runtime, ref, tail).then(rows => rows.join('\n').trim())
 }
 
-/** 读取主世界容器最近日志行（不依赖面板内存日志流，面板重启后仍可用） */
-export async function readRecentInstanceContainerLogLines(instanceId: string, tail = 80): Promise<string[]> {
-  const ref = await resolveInstanceContainerRef(instanceId)
+/** 读取指定分片容器最近日志行（不依赖面板内存日志流，面板重启后仍可用） */
+export async function readRecentInstanceContainerLogLines(
+  instanceId: string,
+  tail = 80,
+  shard: ConsoleCommandShard = 'master',
+): Promise<string[]> {
+  const ref = await resolveConsoleCommandContainerRef(instanceId, shard)
   if (!ref) {
     return []
   }
@@ -500,6 +507,7 @@ export async function sendInstanceContainerCommand(
   instanceId: string,
   command: string,
   shard: ConsoleCommandShard = 'master',
+  options?: { silent?: boolean },
 ): Promise<{ ok: boolean, message?: string }> {
   const trimmed = command.trim()
   if (!trimmed) {
@@ -521,7 +529,11 @@ export async function sendInstanceContainerCommand(
     }
   }
   const result = await runtime.execStdin(ref, trimmed)
-  instanceConsoleLogStore.appendSystem(instanceId, `> ${trimmed}`, shard)
+  // 面板自己的周期查询（在线人数 / 名单）传 silent：它们不是用户发的命令，
+  // 不该每隔几十秒就往控制台里塞一条命令行回显
+  if (!options?.silent) {
+    instanceConsoleLogStore.appendSystem(instanceId, `> ${trimmed}`, shard)
+  }
   if (result.exitCode !== 0) {
     return { ok: false, message: result.output || '命令发送失败' }
   }

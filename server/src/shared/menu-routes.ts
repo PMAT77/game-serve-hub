@@ -172,6 +172,52 @@ export const menuRouteList: MenuRouteItem[] = [
   },
   {
     meta: {
+      title: '玩家管理',
+      icon: 'ri:user-star-line',
+    },
+    children: [
+      {
+        path: FRONTEND_ROUTE_PATHS.dstPlayers,
+        component: 'Layout',
+        name: 'dstPlayers',
+        meta: {
+          title: '玩家管理',
+          icon: 'ri:user-star-line',
+          auth: NODE_INSTANCE_MANAGE_PERMISSION,
+        },
+        children: [
+          {
+            path: '',
+            name: 'dstPlayerList',
+            component: 'games/dst/player/index.vue',
+            meta: {
+              title: '玩家管理',
+              icon: 'ri:user-star-line',
+              auth: NODE_INSTANCE_MANAGE_PERMISSION,
+              menu: false,
+              breadcrumb: false,
+              activeMenu: FRONTEND_ROUTE_PATHS.dstPlayers,
+            },
+          },
+          {
+            path: ':instanceId/manage',
+            name: 'dstPlayerManage',
+            component: 'games/dst/player/manage.vue',
+            meta: {
+              // 与列表页「玩家管理」区分开：面包屑与标签页才不会出现两个同名层级
+              title: '房间玩家',
+              icon: 'ri:user-settings-line',
+              auth: NODE_INSTANCE_MANAGE_PERMISSION,
+              activeMenu: FRONTEND_ROUTE_PATHS.dstPlayers,
+              menu: false,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    meta: {
       title: '世界管理',
       icon: 'ri:earth-line',
     },

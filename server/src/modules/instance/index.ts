@@ -27,6 +27,7 @@ import {
   getServerNodeById,
   getSystemSteamcmdConfig,
   listGameInstances,
+  removePlayerProfilesByInstance,
   updateGameInstanceRuntime,
 } from '../../shared/db/index'
 import {
@@ -1277,6 +1278,10 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       }
     }
     instanceConsoleLogStore.removeInstance(id)
+    // 玩家档案属于这个实例：实例没了就一起清掉，免得面板里留下一堆再也用不到的名字
+    await removePlayerProfilesByInstance(id).catch((error) => {
+      app.log.warn({ instanceId: id, error }, '清理实例玩家档案失败')
+    })
     return success({ isSuccess: true }, request)
   })
 

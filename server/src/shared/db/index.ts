@@ -35,6 +35,7 @@ export * from './instance-repository'
 export * from './backup-repository'
 export * from './schedule-repository'
 export * from './notify-repository'
+export * from './player-profile-repository'
 
 interface DbUserRow {
   id: string

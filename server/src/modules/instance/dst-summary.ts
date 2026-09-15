@@ -1,9 +1,11 @@
 import fs from 'node:fs'
 import type { DstInstanceSummariesDto, DstInstanceSummaryDto } from '../../../../shared/contracts/dst-summary'
 import type { DbGameInstance } from '../../shared/db/index'
+import type { DstConsoleShard } from '../../shared/instance/dst-container-command-port'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { getClusterConfig, resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
-import { queryDstOnlinePlayerCount } from '../../infra/game-adapter/dst/online-players'
+import { sumOnlinePlayerCounts } from '../../infra/game-adapter/dst/online-players'
+import { isCavesShardConfigured } from '../../infra/game-adapter/dst/shard-layout'
 import { getShardList } from '../../infra/game-adapter/dst/shard-service'
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -41,8 +43,12 @@ async function buildSummary(instance: DbGameInstance): Promise<DstInstanceSummar
       Promise.resolve(getClusterConfig(instance)),
       getShardList(instance),
     ])
+    // 在线人数按分片合计：玩家走进洞穴后，只查地上世界会少算一个人
+    const countShards: DstConsoleShard[] = isCavesShardConfigured(installPath)
+      ? ['master', 'caves']
+      : ['master']
     const onlinePlayerCount = instance.status === 'running'
-      ? await queryDstOnlinePlayerCount(instance.id).catch(() => null)
+      ? await sumOnlinePlayerCounts(instance.id, countShards).catch(() => null)
       : null
     const master = shardList.shards.find(shard => shard.id === 'master')
     const caves = shardList.shards.find(shard => shard.id === 'caves')

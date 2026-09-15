@@ -310,3 +310,22 @@ export interface UpdateScheduleTaskInput {
   lastRunMessage?: string | null
   nextRunAt?: string | null
 }
+
+/** 面板侧玩家档案：Klei 用户 ID ↔ 游戏内名字（可含管理员手工备注） */
+export interface DbPlayerProfile {
+  instanceId: string
+  kuId: string
+  name: string
+  note: string
+  firstSeenAt: string
+  lastSeenAt: string
+  updatedAt: string
+}
+
+export interface UpsertPlayerProfileInput {
+  kuId: string
+  /** 空字符串表示这次没拿到名字，保留库里已有的名字 */
+  name?: string
+  /** 该名字的观测时间，默认取当前时间 */
+  seenAt?: string
+}

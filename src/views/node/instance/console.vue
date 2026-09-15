@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { InstanceConnectInfo, InstanceConsoleLogLine, InstanceItem, InstanceMaintenancePushLog } from '@/api/modules/instance'
+import type { InstanceConnectInfo, InstanceConsoleLogFilter, InstanceConsoleLogLine, InstanceItem, InstanceMaintenancePushLog } from '@/api/modules/instance'
 import apiInstance from '@/api/modules/instance'
 import { routeToNodeInstance } from '@/navigation/game-routes'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
-import { consoleLogShardLabel, formatConsoleLogLineForCopy } from './consoleLogDisplay'
+import { consoleLogShardLabel, filterConsoleLines, formatConsoleLogLineForCopy, isCommandEcho } from './consoleLogDisplay'
 import { formatDateTime } from './utils'
 import type { InstanceConsoleCommandShard } from '@/api/modules/instance'
 import {
@@ -30,7 +30,7 @@ defineOptions({
   name: 'NodeInstanceConsole',
 })
 
-type ConsoleTab = 'logs' | 'panel' | 'maintenance'
+type ConsoleTab = 'console' | 'maintenance'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,7 +44,7 @@ const logs = ref<InstanceConsoleLogLine[]>([])
 const connectInfo = ref<InstanceConnectInfo | null>(null)
 const connectInfoLoading = ref(false)
 const running = ref(false)
-const activeTab = ref<ConsoleTab>('panel')
+const activeTab = ref<ConsoleTab>('console')
 const commandInput = ref('')
 const commandShard = ref<InstanceConsoleCommandShard>('master')
 const commandSending = ref(false)
@@ -55,8 +55,7 @@ const maintenanceLoading = ref(false)
 const maintenanceSaving = ref(false)
 const maintenancePushing = ref(false)
 const autoScroll = ref(true)
-const logViewportLogsRef = ref<HTMLElement | null>(null)
-const logViewportPanelRef = ref<HTMLElement | null>(null)
+const logViewportRef = ref<HTMLElement | null>(null)
 
 let eventSource: EventSource | null = null
 let pollTimer: ReturnType<typeof setInterval> | undefined
@@ -68,19 +67,29 @@ let logsRefreshRequest: Promise<void> | null = null
 let realtimeActive = false
 let initializing = false
 
+/**
+ * 路由对本页开启了 keepAlive：离开控制台时组件不会卸载，在途请求与 watch 都还活着。
+ * 只有「本页正被激活」且「当前路由就是控制台」时才允许它自己导航或重连，
+ * 否则用户会在别的页面上被后台逻辑顶回实例管理列表。
+ */
+let pageActive = true
+const isConsoleRouteActive = computed(() => route.name === 'nodeInstanceConsole')
+
+function ownsCurrentPage() {
+  return pageActive && isConsoleRouteActive.value
+}
+
 const pageTitle = computed(() => instanceName.value
   ? `实例控制台 · ${instanceName.value}`
   : '实例控制台')
 
-const gameLogs = computed(() => logs.value.filter(line => line.stream === 'stdout' || line.stream === 'stderr'))
-const panelLogs = computed(() => logs.value.filter(line => line.stream === 'system'))
+/**
+ * 日志流推的是全量行（面板消息 + 游戏输出），这里的过滤只作用于展示与复制。
+ * 命令回显与它的执行结果因此落在同一视图内，不再需要来回切换页签。
+ */
+const logFilter = ref<InstanceConsoleLogFilter>('all')
 
-const displayedLogs = computed(() => {
-  if (activeTab.value === 'panel') {
-    return panelLogs.value
-  }
-  return gameLogs.value
-})
+const displayedLogs = computed(() => filterConsoleLines(logs.value, logFilter.value))
 
 const consoleShards = computed(() => connectInfo.value?.consoleShards)
 
@@ -98,15 +107,17 @@ const cavesCommandDisabledHint = computed(() => {
   return ''
 })
 
-const emptyLogHint = computed(() => {
-  if (activeTab.value === 'panel') {
-    return '暂无面板消息'
-  }
-  return '暂无日志，启动实例后显示'
-})
+const emptyLogHint = '暂无日志，启动实例后显示'
 
-function streamClass(stream: InstanceConsoleLogLine['stream']) {
-  switch (stream) {
+/**
+ * 命令回显用琥珀色加粗突出：合并视图里游戏日志很吵，
+ * 用户需要能一眼定位「这条是我刚发的命令」，紧随其后的就是它的输出。
+ */
+function streamClass(line: InstanceConsoleLogLine) {
+  if (isCommandEcho(line)) {
+    return 'text-amber-300 font-medium'
+  }
+  switch (line.stream) {
     case 'stderr':
       return 'text-rose-400'
     case 'system':
@@ -121,7 +132,7 @@ function scrollToBottom() {
     return
   }
   nextTick(() => {
-    const el = activeTab.value === 'panel' ? logViewportPanelRef.value : logViewportLogsRef.value
+    const el = logViewportRef.value
     if (el) {
       el.scrollTop = el.scrollHeight
     }
@@ -141,7 +152,7 @@ function appendLines(lines: InstanceConsoleLogLine[]) {
     }
   }
   logs.value = merged
-  if (activeTab.value === 'logs' || activeTab.value === 'panel') {
+  if (activeTab.value === 'console') {
     scrollToBottom()
   }
 }
@@ -151,8 +162,11 @@ async function loadInstanceMeta() {
   const list = res.data as InstanceItem[]
   const target = list.find((item: InstanceItem) => item.id === instanceId.value)
   if (!target) {
-    faToast.warning('实例不存在或已删除')
-    router.replace(routeToNodeInstance())
+    // 被缓存在别的路由上时保持静默：返回控制台后 onActivated 会重新检测
+    if (ownsCurrentPage()) {
+      faToast.warning('实例不存在或已删除')
+      router.replace(routeToNodeInstance())
+    }
     return
   }
   instanceName.value = target.name
@@ -298,8 +312,9 @@ async function refreshLogs() {
   const targetInstanceId = instanceId.value
   const request = (async () => {
     const lastId = logs.value.at(-1)?.id ?? 0
-    const stream = activeTab.value === 'panel' ? 'panel' : 'game'
-    const res = await apiInstance.getInstanceConsoleLogs(targetInstanceId, lastId, stream)
+    // 固定拉全量：afterId 取的是本地最大 id，若按页签只拉某一类流，
+    // 另一类行会被这个 id 永久跳过（实时流断开时表现为丢日志）。
+    const res = await apiInstance.getInstanceConsoleLogs(targetInstanceId, lastId, 'all')
     if (targetInstanceId !== instanceId.value) {
       return
     }
@@ -440,10 +455,15 @@ function resetInstanceRuntimeState() {
 
 async function initInstanceConsole() {
   if (!instanceId.value) {
-    goBack()
+    if (ownsCurrentPage()) {
+      goBack()
+    }
     return
   }
   await loadInstanceMeta()
+  if (!ownsCurrentPage()) {
+    return
+  }
   await loadConnectInfo()
   await loadMaintenanceAnnounce()
   await refreshLogs()
@@ -456,6 +476,10 @@ async function activateConsole() {
   initializing = true
   try {
     await initInstanceConsole()
+    // 初始化期间用户可能已离开控制台：此时不要再建连与开轮询
+    if (!ownsCurrentPage()) {
+      return
+    }
     void connectStream()
     startRealtimeJobs()
   }
@@ -505,7 +529,8 @@ async function clearLogs() {
 }
 
 async function copyLogs() {
-  const source = activeTab.value === 'panel' ? panelLogs.value : gameLogs.value
+  // 复制当前可见内容：所见即所得，过滤档位不同则复制结果不同
+  const source = displayedLogs.value
   const text = source.map(line => formatConsoleLogLineForCopy(line)).join('\n')
   if (!text) {
     faToast.warning('暂无日志可复制')
@@ -665,9 +690,14 @@ watch(consoleShards, (shards) => {
 })
 
 watch(activeTab, (tab) => {
-  if (tab === 'logs' || tab === 'panel') {
+  if (tab === 'console') {
     scrollToBottom()
   }
+})
+
+// 切换过滤档位后视图内容整体变化，同样贴到底部看最新几行
+watch(logFilter, () => {
+  scrollToBottom()
 })
 
 watch(running, (value) => {
@@ -677,6 +707,12 @@ watch(running, (value) => {
 })
 
 watch(instanceId, async (nextId, prevId) => {
+  // 组件被 keepAlive 缓存（key 为路由名，切换实例由本页内部处理重连）：
+  // 离开控制台后 watch 仍对全局 route.params 生效，别的页面同样带 :instanceId，
+  // 参数一变就会在后台重连日志流、甚至在实例不存在时把用户顶走。
+  if (!ownsCurrentPage()) {
+    return
+  }
   if (!nextId || nextId === prevId) {
     return
   }
@@ -686,18 +722,22 @@ watch(instanceId, async (nextId, prevId) => {
 })
 
 onMounted(() => {
+  pageActive = true
   void activateConsole()
 })
 
 onActivated(() => {
+  pageActive = true
   void activateConsole()
 })
 
 onDeactivated(() => {
+  pageActive = false
   stopRealtimeJobs()
 })
 
 onBeforeUnmount(() => {
+  pageActive = false
   stopRealtimeJobs()
 })
 </script>
@@ -799,21 +839,34 @@ onBeforeUnmount(() => {
       </NCard>
 
       <NTabs v-model:value="activeTab" type="line" animated>
-        <NTabPane name="panel" tab="面板与控制">
+        <NTabPane name="console" tab="控制台">
+          <div class="flex flex-wrap gap-2 items-center mt-3 mb-2">
+            <span class="text-xs text-muted-foreground">显示：</span>
+            <NRadioGroup v-model:value="logFilter" size="small">
+              <NRadioButton value="all" label="全部" />
+              <NRadioButton value="panel" label="面板消息" />
+              <NRadioButton value="game" label="游戏输出" />
+            </NRadioGroup>
+          </div>
           <div
-            ref="logViewportPanelRef"
-            class="font-mono text-xs leading-5 p-3 border rounded-lg bg-zinc-950 text-zinc-100 h-[min(52vh,560px)] overflow-y-auto mt-3"
+            ref="logViewportRef"
+            class="font-mono text-xs leading-5 p-3 border rounded-lg bg-zinc-950 text-zinc-100 h-[min(52vh,560px)] overflow-y-auto"
           >
             <p v-if="displayedLogs.length === 0" class="text-zinc-500">
               {{ emptyLogHint }}
             </p>
-            <div v-for="line in displayedLogs" :key="line.id" class="whitespace-pre-wrap break-all">
+            <div
+              v-for="line in displayedLogs"
+              :key="line.id"
+              class="whitespace-pre-wrap break-all"
+              :class="isCommandEcho(line) ? 'border-l-2 border-amber-400/70 pl-2 -ml-2' : ''"
+            >
               <span class="text-zinc-500 mr-2">{{ formatDateTime(line.at) }}</span>
               <span
                 v-if="line.shard"
                 class="text-amber-400/90 mr-1.5"
               >[{{ consoleLogShardLabel(line.shard) }}]</span>
-              <span :class="streamClass(line.stream)">{{ line.text }}</span>
+              <span :class="streamClass(line)">{{ line.text }}</span>
             </div>
           </div>
           <div class="flex flex-wrap gap-2 items-center mt-3">
@@ -837,7 +890,7 @@ onBeforeUnmount(() => {
 
           <div class="mt-6 pt-4 border-t border-border">
             <p class="text-xs text-muted-foreground mb-3">
-              向游戏服务器发送控制台命令。命令回显显示在上方面板消息区。
+              向游戏服务器发送控制台命令。命令回显与执行结果都会出现在上方日志里；把上方「显示」切到「游戏输出」即可只看游戏原始日志。
             </p>
             <div class="flex flex-wrap gap-2 items-center mb-3">
               <span class="text-xs text-muted-foreground">命令发送到：</span>
@@ -891,43 +944,6 @@ onBeforeUnmount(() => {
                 发送
               </FaButton>
             </form>
-          </div>
-        </NTabPane>
-        
-        <NTabPane name="logs" tab="运行日志">
-          <div
-            ref="logViewportLogsRef"
-            class="font-mono text-xs leading-5 p-3 border rounded-lg bg-zinc-950 text-zinc-100 h-[min(52vh,560px)] overflow-y-auto mt-3"
-          >
-            <p v-if="displayedLogs.length === 0" class="text-zinc-500">
-              {{ emptyLogHint }}
-            </p>
-            <div v-for="line in displayedLogs" :key="line.id" class="whitespace-pre-wrap break-all">
-              <span class="text-zinc-500 mr-2">{{ formatDateTime(line.at) }}</span>
-              <span
-                v-if="line.shard"
-                class="text-amber-400/90 mr-1.5"
-              >[{{ consoleLogShardLabel(line.shard) }}]</span>
-              <span :class="streamClass(line.stream)">{{ line.text }}</span>
-            </div>
-          </div>
-          <div class="flex flex-wrap gap-2 items-center mt-3">
-            <FaButton size="sm" variant="outline" @click="clearLogs">
-              清空日志
-            </FaButton>
-            <FaButton size="sm" variant="outline" @click="copyLogs">
-              复制日志
-            </FaButton>
-            <FaButton size="sm" variant="outline" :loading="logDownloading" @click="downloadLogs">
-              下载日志
-            </FaButton>
-            <FaButton size="sm" variant="outline" @click="openLogHistory">
-              历史日志
-            </FaButton>
-            <NSpace align="center" :size="8">
-              <NSwitch v-model:value="autoScroll" size="small" />
-              <span class="text-xs text-muted-foreground">自动滚动</span>
-            </NSpace>
           </div>
         </NTabPane>
 

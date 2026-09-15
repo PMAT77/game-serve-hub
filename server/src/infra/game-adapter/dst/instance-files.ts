@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { isEditableInstanceFilePath } from '../../../../../shared/contracts/instance-file'
 import { backupFile, writeFileAtomic } from './atomic-write'
+import { DST_CLUSTER_NAME, DST_CONF_DIR, DST_STORAGE_DIR } from './constants'
 
 /** 文本文件读写上限：超过则拒绝读写，避免把面板内存当传输通道 */
 export const INSTANCE_TEXT_FILE_MAX_BYTES = 1024 * 1024
@@ -254,4 +255,37 @@ export function renameInstancePath(instanceRoot: string, relativePath: string, n
   }
   fs.renameSync(resolved.absolutePath, target.absolutePath)
   return { path: target.relativePath }
+}
+
+export interface InstanceKeyFile {
+  label: string
+  /** 相对实例目录的路径 */
+  path: string
+  /** 这一项里能改什么 */
+  description: string
+  /** 文件当前是否存在；不存在时界面不提供跳转 */
+  exists: boolean
+}
+
+/**
+ * DST 的关键配置文件清单。
+ *
+ * 房间页、世界页、Mod 页已经覆盖了常用项，这里只解决「知道要改哪个文件、但不想在
+ * 目录树里翻」的问题：路径按 DST 目录约定拼出来，存在与否由磁盘决定。
+ */
+export function listInstanceKeyFiles(instanceRoot: string): InstanceKeyFile[] {
+  const clusterBase = `${DST_STORAGE_DIR}/${DST_CONF_DIR}/${DST_CLUSTER_NAME}`
+  const candidates: Omit<InstanceKeyFile, 'exists'>[] = [
+    { label: '房间配置', path: `${clusterBase}/cluster.ini`, description: '房间名、密码、人数、联网方式、分片总开关' },
+    { label: '地上世界', path: `${clusterBase}/Master/server.ini`, description: '地上分片的端口与分片角色' },
+    { label: '地上世界生成', path: `${clusterBase}/Master/worldgenoverride.lua`, description: '地上地图预设与规则覆盖项' },
+    { label: '地上 Mod 配置', path: `${clusterBase}/Master/modoverrides.lua`, description: '地上分片启用的 Mod 与参数' },
+    { label: '洞穴配置', path: `${clusterBase}/Caves/server.ini`, description: '洞穴分片的端口与分片角色' },
+    { label: '洞穴世界生成', path: `${clusterBase}/Caves/worldgenoverride.lua`, description: '洞穴地图预设与规则覆盖项' },
+    { label: '洞穴 Mod 配置', path: `${clusterBase}/Caves/modoverrides.lua`, description: '洞穴分片启用的 Mod 与参数' },
+  ]
+  return candidates.map(item => ({
+    ...item,
+    exists: fs.existsSync(path.join(instanceRoot, item.path)),
+  }))
 }

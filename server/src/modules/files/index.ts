@@ -13,12 +13,15 @@ import type {
   InstanceFileListDto,
   InstanceFileRenameResult,
   InstanceFileWriteResult,
+  InstanceKeyFileListDto,
 } from '../../../../shared/contracts/instance-file'
+import { instanceKeyFileListQuerySchema } from '../../../../shared/contracts/instance-file'
 import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import { resolveLocalDstInstance } from '../../shared/dst/local-dst-instance'
 import {
   deleteInstancePath,
   listInstanceDirectory,
+  listInstanceKeyFiles,
   readInstanceTextFile,
   renameInstancePath,
   writeInstanceTextFile,
@@ -79,6 +82,25 @@ export function registerFilesModule(app: FastifyInstance) {
       const message = error instanceof Error ? error.message : '读取目录失败'
       return businessError(message, request)
     }
+  })
+
+  app.get('/app/instance/files/key-files', async (request): Promise<ApiSuccessResponse<InstanceKeyFileListDto> | ApiErrorResponse> => {
+    const auth = await authorize(request)
+    if (auth.error) {
+      return auth.error
+    }
+    const query = instanceKeyFileListQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const resolved = await resolveLocalDstInstance(query.data.instanceId, request, { messages: FILE_RESOLVE_MESSAGES })
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    return success({
+      instanceId: resolved.instance.id,
+      files: listInstanceKeyFiles(resolved.instance.installPath),
+    }, request)
   })
 
   app.get('/app/instance/files/content', async (request): Promise<ApiSuccessResponse<InstanceFileContentDto> | ApiErrorResponse> => {

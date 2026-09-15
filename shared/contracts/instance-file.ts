@@ -108,3 +108,24 @@ export const instanceFileRenameResultSchema = z.object({
   path: z.string(),
 })
 export type InstanceFileRenameResult = z.infer<typeof instanceFileRenameResultSchema>
+
+/** 关键配置文件：房间页 / 世界页覆盖常用项，这里给出原始文件的一键入口 */
+export const instanceKeyFileSchema = z.object({
+  label: z.string(),
+  path: z.string(),
+  description: z.string(),
+  /** 文件当前是否存在；不存在时界面不提供跳转 */
+  exists: z.boolean(),
+})
+export type InstanceKeyFile = z.infer<typeof instanceKeyFileSchema>
+
+export const instanceKeyFileListQuerySchema = z.object({
+  instanceId: instanceIdSchema,
+})
+export type InstanceKeyFileListQuery = z.infer<typeof instanceKeyFileListQuerySchema>
+
+export const instanceKeyFileListSchema = z.object({
+  instanceId: instanceIdSchema,
+  files: z.array(instanceKeyFileSchema),
+})
+export type InstanceKeyFileListDto = z.infer<typeof instanceKeyFileListSchema>

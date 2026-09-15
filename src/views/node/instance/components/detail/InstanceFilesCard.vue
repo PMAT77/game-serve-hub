@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { InstanceFileEntry } from '@/api/modules/instanceFile'
+import type { InstanceFileEntry, InstanceKeyFile } from '@/api/modules/instanceFile'
 import {
   NAlert,
   NButton,
@@ -28,6 +28,7 @@ const message = useMessage()
 
 const currentPath = ref('')
 const entries = ref<InstanceFileEntry[]>([])
+const keyFiles = ref<InstanceKeyFile[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 const busy = ref(false)
@@ -75,6 +76,19 @@ function canEdit(entry: InstanceFileEntry): boolean {
   return entry.type === 'file' && !entry.protected && isEditableInstanceFilePath(entry.name)
 }
 
+async function loadKeyFiles() {
+  if (!props.instanceId) {
+    return
+  }
+  try {
+    const { data } = await apiInstanceFile.listKeyFiles(props.instanceId)
+    keyFiles.value = data.files.filter(item => item.exists)
+  }
+  catch {
+    keyFiles.value = []
+  }
+}
+
 async function loadEntries(path = currentPath.value) {
   if (!props.instanceId) {
     return
@@ -95,6 +109,25 @@ async function loadEntries(path = currentPath.value) {
   }
 }
 
+/** 按相对路径直接打开编辑器：关键文件入口与目录里点文件走同一条路径 */
+async function openFileByPath(filePath: string) {
+  busy.value = true
+  try {
+    const { data } = await apiInstanceFile.readFile(props.instanceId, filePath)
+    editorPath.value = data.path
+    editorContent.value = data.content
+    editorTruncated.value = data.truncated
+    editorSizeBytes.value = data.sizeBytes
+    editorVisible.value = true
+  }
+  catch {
+    message.error('读取文件失败：文件可能已被移除或不属于可编辑类型。')
+  }
+  finally {
+    busy.value = false
+  }
+}
+
 async function openEntry(entry: InstanceFileEntry) {
   if (entry.type === 'directory') {
     await loadEntries(entry.path)
@@ -108,21 +141,7 @@ async function openEntry(entry: InstanceFileEntry) {
     message.warning('该文件类型不支持在面板中编辑。')
     return
   }
-  busy.value = true
-  try {
-    const { data } = await apiInstanceFile.readFile(props.instanceId, entry.path)
-    editorPath.value = data.path
-    editorContent.value = data.content
-    editorTruncated.value = data.truncated
-    editorSizeBytes.value = data.sizeBytes
-    editorVisible.value = true
-  }
-  catch {
-    message.error('读取文件失败。')
-  }
-  finally {
-    busy.value = false
-  }
+  await openFileByPath(entry.path)
 }
 
 async function saveEditor() {
@@ -138,7 +157,7 @@ async function saveEditor() {
     })
     message.success(`已保存 ${data.path}（${formatSize(data.sizeBytes)}），旧内容已备份`)
     editorVisible.value = false
-    await loadEntries()
+    await Promise.all([loadEntries(), loadKeyFiles()])
   }
   catch {
     message.error('保存失败：文件类型、大小或路径不在允许范围内。')
@@ -202,6 +221,7 @@ async function submitRename() {
 
 watch(() => props.instanceId, () => {
   currentPath.value = ''
+  void loadKeyFiles()
   void loadEntries('')
 }, { immediate: true })
 </script>
@@ -218,6 +238,27 @@ watch(() => props.instanceId, () => {
       浏览实例目录并直接编辑文本配置（房间、世界、Mod 等）。保存会先备份原文件；
       集群令牌等敏感文件不提供查看与编辑。
     </p>
+
+    <div v-if="keyFiles.length > 0" class="mb-4 rounded-lg border p-3">
+      <p class="mb-2 text-sm font-medium">
+        关键配置文件
+      </p>
+      <p class="mb-2 text-xs text-muted-foreground">
+        房间页、世界页与 Mod 页已覆盖常用项；这里用于直接改原始文件。
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <NButton
+          v-for="item in keyFiles"
+          :key="item.path"
+          size="tiny"
+          :disabled="busy"
+          :title="item.description"
+          @click="openFileByPath(item.path)"
+        >
+          {{ item.label }}
+        </NButton>
+      </div>
+    </div>
 
     <div class="mb-3 flex flex-wrap items-center gap-1 text-sm">
       <template v-for="(item, index) in breadcrumbs" :key="item.path">

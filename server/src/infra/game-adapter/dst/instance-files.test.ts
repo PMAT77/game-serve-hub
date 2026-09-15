@@ -9,6 +9,7 @@ import {
   isEditableTextPath,
   isProtectedInstanceFile,
   listInstanceDirectory,
+  listInstanceKeyFiles,
   readInstanceTextFile,
   renameInstancePath,
   resolveInstancePath,
@@ -175,5 +176,25 @@ describe('instance-files sandbox', () => {
     assert.equal(isEditableTextPath('worldgenoverride.lua'), true)
     assert.equal(isEditableTextPath('server'), false)
     assert.equal(isEditableTextPath('modinfo.chs'), false)
+  })
+
+  it('lists key config files with existence flags', () => {
+    const root = createTempInstanceRoot()
+    const clusterDir = path.join(root, 'klei-storage', 'DoNotStarveTogether', 'Cluster_1')
+    fs.mkdirSync(path.join(clusterDir, 'Master'), { recursive: true })
+    fs.writeFileSync(path.join(clusterDir, 'cluster.ini'), '[NETWORK]', 'utf8')
+    fs.writeFileSync(path.join(clusterDir, 'Master', 'server.ini'), '[SHARD]', 'utf8')
+
+    const files = listInstanceKeyFiles(root)
+    assert.equal(files.length, 7)
+    const byLabel = new Map(files.map(item => [item.label, item]))
+    assert.equal(byLabel.get('房间配置')?.path, 'klei-storage/DoNotStarveTogether/Cluster_1/cluster.ini')
+    assert.equal(byLabel.get('房间配置')?.exists, true)
+    assert.equal(byLabel.get('地上世界')?.exists, true)
+    assert.equal(byLabel.get('洞穴配置')?.exists, false)
+    // 所有条目都必须是可编辑文本类型，否则跳转过去也打不开
+    for (const item of files) {
+      assert.equal(isEditableTextPath(item.path), true, item.path)
+    }
   })
 })

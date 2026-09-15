@@ -47,6 +47,8 @@ const kindMeta: Record<BackupItem['kind'], { label: string, type: 'default' | 'i
   pre_delete: { label: '删除前', type: 'warning' },
   pre_restore: { label: '恢复前', type: 'default' },
   pre_import: { label: '导入前', type: 'warning' },
+  pre_rollback: { label: '回档前', type: 'warning' },
+  pre_reset: { label: '重置前', type: 'warning' },
   database: { label: '面板数据备份', type: 'success' },
 }
 

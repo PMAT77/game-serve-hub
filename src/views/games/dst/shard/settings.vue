@@ -42,6 +42,7 @@ import {
   isInstancePortConflictError,
 } from '@/utils/instancePortConflict'
 import ShardNetworkSection from './components/ShardNetworkSection.vue'
+import WorldMaintenanceCard from './components/WorldMaintenanceCard.vue'
 import ShardModsSection from './components/ShardModsSection.vue'
 import ShardWorldRulesSection from './components/ShardWorldRulesSection.vue'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
@@ -688,6 +689,14 @@ onActivated(() => {
             />
           </NTabPane>
         </NTabs>
+
+        <NCard v-if="mainTab !== 'mods'" title="世界维护" size="small" class="mt-4">
+          <WorldMaintenanceCard
+            :instance-id="instanceId"
+            :shard="mainTab === 'caves' ? 'caves' : 'master'"
+            :instance-name="shardList?.instanceName ?? ''"
+          />
+        </NCard>
 
         <ConfigActionBar
           :dirty="formDirty"

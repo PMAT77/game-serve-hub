@@ -19,7 +19,7 @@ import { sendInstanceContainerCommand, resolveDefaultInstanceInstallPath } from 
 import { InstanceArchiveBusyError, withInstanceArchiveOperationLock } from './archive-lock'
 
 const HOT_SAVE_DELAY_MS = 3000
-const RETENTION_KINDS: DbBackupKind[] = ['manual', 'scheduled', 'pre_update', 'pre_delete', 'pre_restore', 'pre_import']
+const RETENTION_KINDS: DbBackupKind[] = ['manual', 'scheduled', 'pre_update', 'pre_delete', 'pre_restore', 'pre_import', 'pre_rollback', 'pre_reset']
 
 function normalizeInstallPath(value: string | null | undefined): string {
   return value?.trim() ?? ''

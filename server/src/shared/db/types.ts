@@ -189,7 +189,7 @@ export interface InsertMaintenancePushLogInput {
   errorMessage?: string | null
 }
 
-export type DbBackupKind = 'manual' | 'scheduled' | 'pre_update' | 'pre_delete' | 'pre_restore' | 'pre_import' | 'database'
+export type DbBackupKind = 'manual' | 'scheduled' | 'pre_update' | 'pre_delete' | 'pre_restore' | 'pre_import' | 'pre_rollback' | 'pre_reset' | 'database'
 export type DbBackupStatus = 'completed' | 'failed' | 'stale'
 
 export interface DbBackup {

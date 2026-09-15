@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-/** 备份来源：手动 / 计划任务（预留）/ 更新前 / 删除前 / 恢复前 / 导入前 / 数据库快照 */
+/** 备份来源：手动 / 计划任务（预留）/ 更新前 / 删除前 / 恢复前 / 导入前 / 回档前 / 重置世界前 / 数据库快照 */
 export const backupKindSchema = z.enum([
   'manual',
   'scheduled',
@@ -8,6 +8,8 @@ export const backupKindSchema = z.enum([
   'pre_delete',
   'pre_restore',
   'pre_import',
+  'pre_rollback',
+  'pre_reset',
   'database',
 ])
 export type BackupKind = z.infer<typeof backupKindSchema>

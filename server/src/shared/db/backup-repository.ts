@@ -10,7 +10,7 @@ import type {
   DbSystemBackupSettings,
 } from './types'
 
-const BACKUP_KINDS: DbBackupKind[] = ['manual', 'scheduled', 'pre_update', 'pre_delete', 'pre_restore', 'pre_import', 'database']
+const BACKUP_KINDS: DbBackupKind[] = ['manual', 'scheduled', 'pre_update', 'pre_delete', 'pre_restore', 'pre_import', 'pre_rollback', 'pre_reset', 'database']
 const BACKUP_STATUSES: DbBackupStatus[] = ['completed', 'failed', 'stale']
 
 function normalizeKind(kind: string | null | undefined): DbBackupKind {

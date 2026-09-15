@@ -117,3 +117,59 @@ export const shardInitCavesResultSchema = z.object({
   worldgenPreset: cavesWorldgenPresetSchema,
 })
 export type ShardInitCavesResult = z.infer<typeof shardInitCavesResultSchema>
+
+/** 回档步数上限：防御性上限，实际可用步数由游戏内快照与房间设置决定 */
+export const SHARD_ROLLBACK_STEPS_LIMIT = 99
+
+export const shardSnapshotSchema = z.object({
+  /** 存档点目录名（游戏生成的会话 ID），只用于界面区分 */
+  id: z.string(),
+  /** 存档点的最后修改时间（ISO）；读不到时为空串 */
+  savedAt: z.string(),
+})
+export type ShardSnapshotDto = z.infer<typeof shardSnapshotSchema>
+
+export const shardSnapshotsQuerySchema = z.object({
+  instanceId: instanceIdSchema,
+  shard: shardIdSchema,
+})
+export type ShardSnapshotsQuery = z.infer<typeof shardSnapshotsQuerySchema>
+
+export const shardSnapshotsSchema = z.object({
+  instanceId: instanceIdSchema,
+  shard: shardIdSchema,
+  running: z.boolean(),
+  /** 房间设置里的快照保留数量，决定回档可用的步数上限 */
+  maxSnapshots: z.number().int().min(1),
+  snapshots: z.array(shardSnapshotSchema),
+  warnings: z.array(z.string()),
+})
+export type ShardSnapshotsDto = z.infer<typeof shardSnapshotsSchema>
+
+export const shardRollbackPayloadSchema = z.object({
+  instanceId: instanceIdSchema,
+  shard: shardIdSchema,
+  steps: z.number().int().min(1).max(SHARD_ROLLBACK_STEPS_LIMIT),
+  /** 默认开启：回档前先自动备份一次，回档过头还能从备份翻回来 */
+  backupBeforeRollback: z.boolean().optional(),
+})
+export type ShardRollbackPayload = z.infer<typeof shardRollbackPayloadSchema>
+
+export const shardResetWorldPayloadSchema = z.object({
+  instanceId: instanceIdSchema,
+  shard: shardIdSchema,
+  /** 二次确认：须与实例名完全一致，避免误点 */
+  confirmName: z.string().trim().min(1).max(128),
+})
+export type ShardResetWorldPayload = z.infer<typeof shardResetWorldPayloadSchema>
+
+export const shardMaintenanceResultSchema = z.object({
+  accepted: z.literal(true),
+  /** 实际下发的控制台命令，便于排错与展示 */
+  command: z.string(),
+  /** 安全备份 ID；未做备份或备份失败时为 null */
+  backupId: z.string().nullable(),
+  /** 备份失败的说明：备份失败不阻断操作，但必须如实告知 */
+  backupWarning: z.string().nullable(),
+})
+export type ShardMaintenanceResult = z.infer<typeof shardMaintenanceResultSchema>

@@ -26,6 +26,8 @@ const typeMeta: Record<NotifyChannelType, { label: string, hint: string }> = {
   feishu: { label: '飞书群机器人', hint: '粘贴飞书自定义机器人的 Webhook 地址' },
   serverchan: { label: 'Server酱', hint: '填写 Server酱（sct.ftqq.com）的 SendKey，通知将推送到你的微信' },
   pushplus: { label: 'PushPlus', hint: '填写 PushPlus（pushplus.plus）的 token，通知将推送到你的微信' },
+  webhook: { label: '通用 Webhook', hint: '任意接收 HTTP POST 的 https 地址；面板发送 JSON：source、severity、title、message、text、at' },
+  telegram: { label: 'Telegram', hint: '填写 @BotFather 给的 Bot Token，以及接收消息的 Chat ID（群组为负数，频道可用 @频道名）' },
 }
 
 const typeOptions: SelectOption[] = (Object.keys(typeMeta) as NotifyChannelType[]).map(type => ({
@@ -84,8 +86,20 @@ const editorWebhookUrl = ref('')
 const editorSecret = ref('')
 const editorSendKey = ref('')
 const editorToken = ref('')
+const editorBotToken = ref('')
+const editorChatId = ref('')
 /** 编辑时已配置的键（留空=保留原值） */
 const editorConfigured = ref<string[]>([])
+
+/** 字段键 → 输入框：submitEditor 与占位文案共用一张表，避免新增渠道时漏接某个键 */
+const editorFieldRefs: Record<string, Ref<string>> = {
+  webhookUrl: editorWebhookUrl,
+  secret: editorSecret,
+  sendKey: editorSendKey,
+  token: editorToken,
+  botToken: editorBotToken,
+  chatId: editorChatId,
+}
 
 const editorFields = computed(() => {
   if (editorType.value === 'serverchan') {
@@ -93,6 +107,9 @@ const editorFields = computed(() => {
   }
   if (editorType.value === 'pushplus') {
     return ['token']
+  }
+  if (editorType.value === 'telegram') {
+    return ['botToken', 'chatId']
   }
   if (editorType.value === 'dingtalk') {
     return ['webhookUrl', 'secret']
@@ -117,6 +134,8 @@ function openCreateDialog() {
   editorSecret.value = ''
   editorSendKey.value = ''
   editorToken.value = ''
+  editorBotToken.value = ''
+  editorChatId.value = ''
   editorConfigured.value = []
   editorVisible.value = true
 }
@@ -130,6 +149,8 @@ function openEditDialog(item: NotifyChannelItem) {
   editorSecret.value = ''
   editorSendKey.value = ''
   editorToken.value = ''
+  editorBotToken.value = ''
+  editorChatId.value = ''
   editorConfigured.value = item.configPreview.filter(preview => preview.configured).map(preview => preview.key)
   editorVisible.value = true
 }
@@ -137,13 +158,7 @@ function openEditDialog(item: NotifyChannelItem) {
 async function submitEditor() {
   const config: Record<string, string> = {}
   for (const key of editorFields.value) {
-    const value = key === 'webhookUrl'
-      ? editorWebhookUrl.value.trim()
-      : key === 'secret'
-        ? editorSecret.value.trim()
-        : key === 'sendKey'
-          ? editorSendKey.value.trim()
-          : editorToken.value.trim()
+    const value = editorFieldRefs[key]?.value.trim() ?? ''
     if (value || isConfigured(key)) {
       config[key] = value
     }
@@ -327,6 +342,12 @@ const columns = computed<DataTableColumns<NotifyChannelItem>>(() => [
         </NFormItem>
         <NFormItem v-if="editorFields.includes('token')" label="Token">
           <NInput v-model:value="editorToken" :placeholder="fieldPlaceholder('token')" />
+        </NFormItem>
+        <NFormItem v-if="editorFields.includes('botToken')" label="Bot Token">
+          <NInput v-model:value="editorBotToken" :placeholder="fieldPlaceholder('botToken') || '如 123456:ABC-DEF...'" placeholder-class="opacity-40" />
+        </NFormItem>
+        <NFormItem v-if="editorFields.includes('chatId')" label="Chat ID">
+          <NInput v-model:value="editorChatId" :placeholder="fieldPlaceholder('chatId') || '如 -1001234567890 或 @频道名'" placeholder-class="opacity-40" />
         </NFormItem>
         <div class="mb-3 text-xs opacity-50">
           {{ typeMeta[editorType].hint }}

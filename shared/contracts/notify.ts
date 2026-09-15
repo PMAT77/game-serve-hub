@@ -1,14 +1,14 @@
 import { z } from 'zod'
 
-/** 通知渠道类型（国内直连可达优先） */
-export const notifyChannelTypeSchema = z.enum(['dingtalk', 'wecom', 'feishu', 'serverchan', 'pushplus'])
+/** 通知渠道类型（国内直连可达优先，另含通用 Webhook 与 Telegram） */
+export const notifyChannelTypeSchema = z.enum(['dingtalk', 'wecom', 'feishu', 'serverchan', 'pushplus', 'webhook', 'telegram'])
 export type NotifyChannelType = z.infer<typeof notifyChannelTypeSchema>
 
 export const notifyHealthStatusSchema = z.enum(['healthy', 'failing'])
 export type NotifyHealthStatus = z.infer<typeof notifyHealthStatusSchema>
 
 /** 渠道配置键：不同类型使用不同键，脱敏后以 configured 布尔返回 */
-export const notifyConfigKeySchema = z.enum(['webhookUrl', 'secret', 'sendKey', 'token'])
+export const notifyConfigKeySchema = z.enum(['webhookUrl', 'secret', 'sendKey', 'token', 'botToken', 'chatId'])
 export type NotifyConfigKey = z.infer<typeof notifyConfigKeySchema>
 
 export const notifyChannelItemSchema = z.object({
@@ -36,6 +36,8 @@ export const notifyChannelCreateRequestSchema = z.object({
     secret: z.string().trim().max(256).optional(),
     sendKey: z.string().trim().max(256).optional(),
     token: z.string().trim().max(256).optional(),
+    botToken: z.string().trim().max(256).optional(),
+    chatId: z.string().trim().max(64).optional(),
   }).default({}),
 })
 export type NotifyChannelCreateRequest = z.infer<typeof notifyChannelCreateRequestSchema>
@@ -50,6 +52,8 @@ export const notifyChannelUpdateRequestSchema = z.object({
     secret: z.string().trim().max(256).optional(),
     sendKey: z.string().trim().max(256).optional(),
     token: z.string().trim().max(256).optional(),
+    botToken: z.string().trim().max(256).optional(),
+    chatId: z.string().trim().max(64).optional(),
   }).optional(),
 })
 export type NotifyChannelUpdateRequest = z.infer<typeof notifyChannelUpdateRequestSchema>

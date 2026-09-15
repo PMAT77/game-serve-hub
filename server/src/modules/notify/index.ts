@@ -25,7 +25,8 @@ import {
 import type { DbNotifyChannelType, DbNotifySettings } from '../../shared/db/index'
 import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from '../system/auth'
-import { listConfiguredKeys, parseChannelConfig } from './channels'
+import { listConfiguredKeys, parseChannelConfig, validateChannelConfig } from './channels'
+import type { NotifyChannelConfig } from './channels'
 import { sendTestNotification } from './notify-service'
 import { startNotifyService } from './notify-service'
 
@@ -35,11 +36,13 @@ const REQUIRED_CONFIG_KEYS: Record<DbNotifyChannelType, string[]> = {
   feishu: ['webhookUrl'],
   serverchan: ['sendKey'],
   pushplus: ['token'],
+  webhook: ['webhookUrl'],
+  telegram: ['botToken', 'chatId'],
 }
 
 function maskPreview(configJson: string): NotifyChannelItem['configPreview'] {
   const configured = new Set(listConfiguredKeys(configJson))
-  return (['webhookUrl', 'secret', 'sendKey', 'token'] as const).map(key => ({
+  return (['webhookUrl', 'secret', 'sendKey', 'token', 'botToken', 'chatId'] as const).map(key => ({
     key,
     configured: configured.has(key),
   }))
@@ -95,8 +98,9 @@ export function registerNotifyModule(app: FastifyInstance) {
     if (missing.length > 0) {
       return businessError(`缺少必填配置：${missing.join(', ')}`, request)
     }
-    if (config.webhookUrl && !config.webhookUrl.startsWith('https://')) {
-      return businessError('Webhook 地址必须以 https:// 开头', request)
+    const configError = validateChannelConfig(type, config)
+    if (configError) {
+      return businessError(configError, request)
     }
     const channel = await createNotifyChannel({
       id: newNotifyChannelId(),
@@ -144,6 +148,10 @@ export function registerNotifyModule(app: FastifyInstance) {
     const missing = requiredKeys.filter(key => !merged[key]?.trim())
     if (missing.length > 0) {
       return businessError(`缺少必填配置：${missing.join(', ')}`, request)
+    }
+    const mergedConfigError = validateChannelConfig(channel.type, merged as NotifyChannelConfig)
+    if (mergedConfigError) {
+      return businessError(mergedConfigError, request)
     }
 
     await updateNotifyChannel(channel.id, {

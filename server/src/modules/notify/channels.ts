@@ -10,6 +10,10 @@ export interface NotifyChannelConfig {
   sendKey?: string
   /** PushPlus token */
   token?: string
+  /** Telegram Bot Token（@BotFather 提供，形如 123456:ABC-DEF...） */
+  botToken?: string
+  /** Telegram 接收方：用户会话 ID、群组 ID（负数）或 @频道用户名 */
+  chatId?: string
 }
 
 export interface OutgoingNotification {
@@ -34,6 +38,12 @@ export function parseChannelConfig(configJson: string): NotifyChannelConfig {
     }
     if (typeof raw.token === 'string' && raw.token.trim()) {
       config.token = raw.token.trim()
+    }
+    if (typeof raw.botToken === 'string' && raw.botToken.trim()) {
+      config.botToken = raw.botToken.trim()
+    }
+    if (typeof raw.chatId === 'string' && raw.chatId.trim()) {
+      config.chatId = raw.chatId.trim()
     }
     return config
   }
@@ -141,9 +151,62 @@ export function buildNotification(type: DbNotifyChannelType, config: NotifyChann
         contentType: 'application/json',
       }
     }
+    case 'webhook': {
+      if (!config.webhookUrl) {
+        return null
+      }
+      // 通用 Webhook：结构化字段 + 已排版文本，接收方按需取用
+      return {
+        url: config.webhookUrl,
+        headers: {},
+        body: JSON.stringify({
+          source: 'game-server-hub',
+          severity: event.severity,
+          title: formatEventTitle(event),
+          message: event.message,
+          text,
+          at: event.at,
+        }),
+        contentType: 'application/json',
+      }
+    }
+    case 'telegram': {
+      if (!config.botToken || !config.chatId) {
+        return null
+      }
+      return {
+        url: `https://api.telegram.org/bot${config.botToken}/sendMessage`,
+        headers: {},
+        body: JSON.stringify({
+          chat_id: config.chatId,
+          text,
+          disable_web_page_preview: true,
+        }),
+        contentType: 'application/json',
+      }
+    }
     default:
       return null
   }
+}
+
+/**
+ * 配置格式校验：在保存渠道时就挡住必然发不出去的配置，
+ * 而不是等到事件触发时才发现渠道一直是失败的。
+ */
+export function validateChannelConfig(type: DbNotifyChannelType, config: NotifyChannelConfig): string | undefined {
+  if (config.webhookUrl && !config.webhookUrl.startsWith('https://')) {
+    return 'Webhook 地址必须以 https:// 开头'
+  }
+  if (type === 'telegram') {
+    if (config.botToken && !/^\d+:[A-Za-z0-9_-]{10,}$/.test(config.botToken)) {
+      return 'Bot Token 形如 123456:ABC-DEF...，请从 @BotFather 获取'
+    }
+    if (config.chatId && !/^(-?\d+|@[A-Za-z0-9_]{5,32})$/.test(config.chatId)) {
+      return 'Chat ID 须为数字（群组为负数）或 @频道用户名'
+    }
+  }
+  return undefined
 }
 
 export async function sendNotification(outgoing: OutgoingNotification): Promise<void> {

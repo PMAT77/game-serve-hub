@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { buildNotification, formatEventText, parseChannelConfig, signDingtalk } from './channels'
+import { buildNotification, formatEventText, parseChannelConfig, signDingtalk, validateChannelConfig } from './channels'
 import type { PanelEvent } from './events'
 
 const baseEvent: PanelEvent = {
@@ -67,6 +67,55 @@ describe('buildNotification', () => {
   it('returns null when required key missing', () => {
     assert.equal(buildNotification('serverchan', {}, baseEvent), null)
     assert.equal(buildNotification('pushplus', {}, baseEvent), null)
+  })
+
+  it('webhook posts structured json with text fallback', () => {
+    const outgoing = buildNotification('webhook', { webhookUrl: 'https://example.com/hook' }, baseEvent)
+    assert.equal(outgoing?.url, 'https://example.com/hook')
+    assert.equal(outgoing?.contentType, 'application/json')
+    const body = JSON.parse(outgoing?.body ?? '{}') as {
+      source: string
+      severity: string
+      title: string
+      message: string
+      text: string
+      at: string
+    }
+    assert.equal(body.source, 'game-server-hub')
+    assert.equal(body.severity, 'critical')
+    assert.ok(body.title.includes('进程异常退出'))
+    assert.equal(body.message, baseEvent.message)
+    assert.ok(body.text.includes('Game Server Hub'))
+    assert.equal(body.at, baseEvent.at)
+    assert.equal(buildNotification('webhook', {}, baseEvent), null)
+  })
+
+  it('telegram posts sendMessage with chat id and escaped text', () => {
+    const outgoing = buildNotification('telegram', { botToken: '123456:ABC-DEF1234', chatId: '-1001234567890' }, baseEvent)
+    assert.equal(outgoing?.url, 'https://api.telegram.org/bot123456:ABC-DEF1234/sendMessage')
+    const body = JSON.parse(outgoing?.body ?? '{}') as { chat_id: string, text: string, disable_web_page_preview: boolean }
+    assert.equal(body.chat_id, '-1001234567890')
+    assert.ok(body.text.includes('进程异常退出'))
+    assert.equal(body.disable_web_page_preview, true)
+    // 缺任一必填项都不构建请求
+    assert.equal(buildNotification('telegram', { botToken: '123456:ABC-DEF1234' }, baseEvent), null)
+    assert.equal(buildNotification('telegram', { chatId: '1' }, baseEvent), null)
+  })
+})
+
+describe('validateChannelConfig', () => {
+  it('requires https for webhook-style channels', () => {
+    assert.equal(validateChannelConfig('webhook', { webhookUrl: 'http://example.com/hook' }), 'Webhook 地址必须以 https:// 开头')
+    assert.equal(validateChannelConfig('webhook', { webhookUrl: 'https://example.com/hook' }), undefined)
+    assert.equal(validateChannelConfig('dingtalk', { webhookUrl: 'ftp://example.com' }), 'Webhook 地址必须以 https:// 开头')
+  })
+
+  it('validates telegram token and chat id shapes', () => {
+    assert.equal(validateChannelConfig('telegram', { botToken: '123456:ABC-DEF1234', chatId: '12345' }), undefined)
+    assert.equal(validateChannelConfig('telegram', { botToken: '123456:ABC-DEF1234', chatId: '-1001234567890' }), undefined)
+    assert.equal(validateChannelConfig('telegram', { botToken: '123456:ABC-DEF1234', chatId: '@my_channel' }), undefined)
+    assert.match(validateChannelConfig('telegram', { botToken: 'not-a-token' }) ?? '', /Bot Token/)
+    assert.match(validateChannelConfig('telegram', { chatId: 'abc def' }) ?? '', /Chat ID/)
   })
 })
 

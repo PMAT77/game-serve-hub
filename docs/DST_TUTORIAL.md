@@ -322,7 +322,13 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.5.0/script
 
 ### 7.2 通知设置
 
-**系统设置 → 通知** 用来配置事件通知渠道（钉钉、企业微信、飞书、Server酱、PushPlus），接收实例异常退出、内存阈值等事件。通知只做提醒，不会代替面板里的操作；通用 Webhook、Telegram 与告警平台集成（Prometheus、PagerDuty 等）尚在计划中，见[架构与产品边界](ARCHITECTURE.md#运维能力的-community--pro-细分)。
+**系统设置 → 通知** 用来配置事件通知渠道（钉钉、企业微信、飞书、Server酱、PushPlus、通用 Webhook、Telegram），接收实例异常退出、内存阈值等事件。其中：
+
+- **通用 Webhook**：面板向你的 https 地址 POST 一段 JSON，字段为 `source`、`severity`、`title`、`message`、`text`、`at`，方便接自建告警或中转；
+- **Telegram**：填写 @BotFather 给的 Bot Token 与接收消息的 Chat ID（群组 ID 为负数，频道可用 `@频道名`）；
+- 渠道配置在保存时就会校验格式（Webhook 必须 https、Token 与 Chat ID 形状），避免等到事件触发才发现发不出去。
+
+通知只做提醒，不会代替面板里的操作；告警平台集成（Prometheus、PagerDuty 等）尚在计划中，见[架构与产品边界](ARCHITECTURE.md#运维能力的-community--pro-细分)。
 
 ## 8. 检查更新：运行环境与镜像版本
 

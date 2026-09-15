@@ -218,7 +218,7 @@ export interface CreateBackupInput {
   createdBy?: string
 }
 
-export type DbNotifyChannelType = 'dingtalk' | 'wecom' | 'feishu' | 'serverchan' | 'pushplus'
+export type DbNotifyChannelType = 'dingtalk' | 'wecom' | 'feishu' | 'serverchan' | 'pushplus' | 'webhook' | 'telegram'
 export type DbNotifyHealthStatus = 'healthy' | 'failing'
 
 export interface DbNotifyChannel {

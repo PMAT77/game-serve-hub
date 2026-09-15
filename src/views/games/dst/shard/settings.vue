@@ -71,6 +71,8 @@ const instanceId = computed(() => String(route.params.instanceId ?? ''))
 const loading = ref(false)
 const activeSaveOperation = shallowRef<ShardSaveOperation | null>(null)
 const isSaving = computed(() => activeSaveOperation.value !== null)
+/** 「重置」按钮自身的 loading（重新拉取远端配置） */
+const resetting = ref(false)
 const shardList = ref<ShardListDto | null>(null)
 
 const saveAndRestartDisabled = computed(() =>
@@ -293,6 +295,28 @@ function describePayloadIssues(payload: ShardSavePayload): string | null {
 
 function getSaveOperation(shard: ShardId, restart: boolean): ShardSaveOperation {
   return `${shard}:${restart ? 'restart' : 'save'}`
+}
+
+/** 底部按钮各自只反映自己的动作：只有当前分片正在执行的那一个动作显示 loading */
+const savingCurrentShard = computed(() =>
+  activeSaveOperation.value === getSaveOperation(currentShardId.value, false),
+)
+const restartingCurrentShard = computed(() =>
+  activeSaveOperation.value === getSaveOperation(currentShardId.value, true),
+)
+
+/** 重置：丢弃本地未保存修改，重新拉取远端配置 */
+async function resetConfig() {
+  if (isSaving.value || resetting.value) {
+    return
+  }
+  resetting.value = true
+  try {
+    await loadConfig()
+  }
+  finally {
+    resetting.value = false
+  }
 }
 
 async function saveShard(shard: ShardId, restart: boolean) {
@@ -667,11 +691,14 @@ onActivated(() => {
 
         <ConfigActionBar
           :dirty="formDirty"
-          :saving="isSaving"
+          :busy="isSaving || resetting"
+          :saving="savingCurrentShard"
+          :restarting="restartingCurrentShard"
+          :resetting="resetting"
           :restart-disabled="saveAndRestartDisabled"
           :restart-disabled-title="saveAndRestartDisabledTitle"
           :save-label="mainTab === 'caves' ? '保存洞穴' : '保存地上'"
-          @reset="loadConfig"
+          @reset="resetConfig"
           @save="saveShard(currentShardId, false)"
           @save-and-restart="confirmSaveAndRestart(currentShardId)"
         />

@@ -5,7 +5,14 @@ defineOptions({ name: 'ConfigActionBar' })
 
 withDefaults(defineProps<{
   dirty?: boolean
+  /** 任一操作进行中：三个按钮一律置灰，避免并发提交 */
+  busy?: boolean
+  /** 「保存」按钮自身的 loading */
   saving?: boolean
+  /** 「保存并重启」按钮自身的 loading */
+  restarting?: boolean
+  /** 「重置」按钮自身的 loading */
+  resetting?: boolean
   restartDisabled?: boolean
   /** 「保存并重启」禁用原因（禁用时以 tooltip 展示） */
   restartDisabledTitle?: string
@@ -33,15 +40,15 @@ const emit = defineEmits<{
         {{ dirty ? '存在未保存的修改' : '所有修改已保存' }}
       </span>
       <div class="flex flex-wrap gap-2">
-        <FaButton variant="outline" :disabled="!dirty || saving" @click="emit('reset')">
+        <FaButton variant="outline" :loading="resetting" :disabled="!dirty || busy" @click="emit('reset')">
           重置
         </FaButton>
-        <FaButton :loading="saving" :disabled="!dirty || saving" @click="emit('save')">
+        <FaButton :loading="saving" :disabled="!dirty || busy" @click="emit('save')">
           {{ saveLabel }}
         </FaButton>
         <NTooltip v-if="showRestart" :disabled="!restartDisabled || !restartDisabledTitle">
           <template #trigger>
-            <FaButton :loading="saving" :disabled="!dirty || saving || restartDisabled" @click="emit('saveAndRestart')">
+            <FaButton :loading="restarting" :disabled="!dirty || busy || restartDisabled" @click="emit('saveAndRestart')">
               {{ restartLabel }}
             </FaButton>
           </template>

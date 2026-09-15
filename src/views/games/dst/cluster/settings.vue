@@ -63,6 +63,8 @@ const loading = ref(false)
 const loadError = shallowRef<string | null>(null)
 const activeSaveOperation = shallowRef<'save' | 'restart' | null>(null)
 const isSaving = computed(() => activeSaveOperation.value !== null)
+/** 「重置」按钮自身的 loading（重新拉取远端配置） */
+const resetting = ref(false)
 const formRef = ref<FormInst | null>(null)
 const serverConfig = ref<ClusterConfigDto | null>(null)
 
@@ -282,6 +284,20 @@ async function loadConfig() {
   }
   finally {
     loading.value = false
+  }
+}
+
+/** 重置：丢弃本地未保存修改，重新拉取远端配置 */
+async function resetConfig() {
+  if (isSaving.value || resetting.value) {
+    return
+  }
+  resetting.value = true
+  try {
+    await loadConfig()
+  }
+  finally {
+    resetting.value = false
   }
 }
 
@@ -695,10 +711,13 @@ onActivated(() => {
 
         <ConfigActionBar
           :dirty="formDirty"
-          :saving="isSaving"
+          :busy="isSaving || resetting"
+          :saving="activeSaveOperation === 'save'"
+          :restarting="activeSaveOperation === 'restart'"
+          :resetting="resetting"
           :restart-disabled="saveAndRestartDisabled"
           :restart-disabled-title="saveAndRestartDisabledTitle"
-          @reset="loadConfig"
+          @reset="resetConfig"
           @save="saveConfig(false)"
           @save-and-restart="confirmSaveAndRestart"
         />

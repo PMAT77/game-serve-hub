@@ -13,6 +13,7 @@ import { routeToInstanceConsole, routeToNodeInstance } from '@/navigation/game-r
 import { statusBadgeClass } from '@/constants/statusDictionary'
 import { getInstanceState } from './instanceDisplay'
 import CommandCenterCard from './components/detail/CommandCenterCard.vue'
+import InstanceFilesCard from './components/detail/InstanceFilesCard.vue'
 import InstanceControlCard from './components/detail/InstanceControlCard.vue'
 import RoomOverviewCard from './components/detail/RoomOverviewCard.vue'
 import WorldOverviewCard, { type InstanceWorldState } from './components/detail/WorldOverviewCard.vue'
@@ -229,6 +230,11 @@ onBeforeUnmount(() => {
         :instance="instance"
         :connect-info="connectInfo"
         @refreshed="() => loadDetail({ silent: true })"
+      />
+
+      <InstanceFilesCard
+        v-if="instance"
+        :instance-id="instance.id"
       />
 
       <p v-if="instance" class="text-xs text-muted-foreground">

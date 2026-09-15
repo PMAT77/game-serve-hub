@@ -1,0 +1,257 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { isEditableInstanceFilePath } from '../../../../../shared/contracts/instance-file'
+import { backupFile, writeFileAtomic } from './atomic-write'
+
+/** 文本文件读写上限：超过则拒绝读写，避免把面板内存当传输通道 */
+export const INSTANCE_TEXT_FILE_MAX_BYTES = 1024 * 1024
+
+/**
+ * 敏感文件：面板不通过文件接口提供内容，也不接受写入。
+ * 集群令牌等于服务器控制权，房间页已经按「只回脱敏值」处理，这里保持一致。
+ */
+const PROTECTED_FILE_NAMES = new Set(['cluster_token.txt'])
+
+export interface InstanceFileEntry {
+  /** 相对实例目录的路径（API 与界面都用相对路径，不暴露宿主绝对路径） */
+  path: string
+  name: string
+  type: 'file' | 'directory'
+  sizeBytes: number
+  /** 最后修改时间（ISO）；读不到为空串 */
+  modifiedAt: string
+  /** 敏感文件：可以列出，但不提供内容与写入 */
+  protected: boolean
+}
+
+export type ResolveInstancePathResult =
+  | { ok: true, absolutePath: string, relativePath: string }
+  | { ok: false, message: string }
+
+function toPosixRelative(root: string, absolutePath: string): string {
+  const relative = path.relative(root, absolutePath)
+  return relative.split(path.sep).join('/')
+}
+
+/**
+ * 把界面传来的相对路径解析成实例目录内的绝对路径。
+ *
+ * 两道校验都不能省：字面路径要落在实例目录内（挡住 `..`），解析符号链接后的真实路径
+ * 也要落在实例目录内（挡住实例目录里预先埋好的符号链接）。这与面板其它文件浏览入口同一策略。
+ */
+export function resolveInstancePath(
+  instanceRoot: string,
+  rawRelativePath: string,
+  options?: { allowRoot?: boolean },
+): ResolveInstancePathResult {
+  const root = path.resolve(instanceRoot)
+  const trimmed = (rawRelativePath ?? '').replace(/\\/g, '/').trim()
+  if (trimmed.startsWith('/') || /^[a-zA-Z]:/.test(trimmed)) {
+    return { ok: false, message: '只支持实例目录内的相对路径' }
+  }
+  const segments = trimmed.split('/').filter(segment => segment.length > 0)
+  if (segments.some(segment => segment === '..')) {
+    return { ok: false, message: '路径不能包含上级目录' }
+  }
+  if (segments.length === 0 && !options?.allowRoot) {
+    return { ok: false, message: '请指定实例目录内的文件或目录' }
+  }
+
+  const absolutePath = segments.length === 0 ? root : path.resolve(root, ...segments)
+  if (!isInside(absolutePath, root)) {
+    return { ok: false, message: '路径超出实例目录范围' }
+  }
+  let realPath = absolutePath
+  try {
+    realPath = fs.realpathSync(absolutePath)
+  }
+  catch {
+    // 目标还不存在（例如要新建文件）时退回字面路径
+    realPath = absolutePath
+  }
+  let realRoot = root
+  try {
+    realRoot = fs.realpathSync(root)
+  }
+  catch {
+    realRoot = root
+  }
+  if (!isInside(realPath, realRoot)) {
+    return { ok: false, message: '路径超出实例目录范围' }
+  }
+  return { ok: true, absolutePath, relativePath: toPosixRelative(root, absolutePath) }
+}
+
+function isInside(targetPath: string, basePath: string): boolean {
+  const relative = path.relative(basePath, targetPath)
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+export function isProtectedInstanceFile(relativePath: string): boolean {
+  const base = path.posix.basename((relativePath ?? '').replace(/\\/g, '/')).toLowerCase()
+  return PROTECTED_FILE_NAMES.has(base)
+}
+
+export function isEditableTextPath(relativePath: string): boolean {
+  return isEditableInstanceFilePath(relativePath)
+}
+
+function readEntry(instanceRoot: string, absolutePath: string, name: string, isDirectory: boolean): InstanceFileEntry {
+  let sizeBytes = 0
+  let modifiedAt = ''
+  try {
+    const stat = fs.statSync(absolutePath)
+    sizeBytes = isDirectory ? 0 : stat.size
+    modifiedAt = stat.mtime.toISOString()
+  }
+  catch {
+    sizeBytes = 0
+    modifiedAt = ''
+  }
+  const relativePath = toPosixRelative(path.resolve(instanceRoot), absolutePath)
+  return {
+    path: relativePath,
+    name,
+    type: isDirectory ? 'directory' : 'file',
+    sizeBytes,
+    modifiedAt,
+    protected: !isDirectory && isProtectedInstanceFile(relativePath),
+  }
+}
+
+/**
+ * 列出目录的直接子项。
+ *
+ * 跳过符号链接：面板以 root 运行，跟随链接可能把读写引到实例目录之外。
+ * 链接本身也不能作为「文件」展示，否则点开就是一次越权尝试。
+ */
+export function listInstanceDirectory(instanceRoot: string, relativePath: string): InstanceFileEntry[] {
+  const resolved = resolveInstancePath(instanceRoot, relativePath, { allowRoot: true })
+  if (!resolved.ok) {
+    throw new Error(resolved.message)
+  }
+  const entries = fs.readdirSync(resolved.absolutePath, { withFileTypes: true })
+  return entries
+    .filter(entry => !entry.isSymbolicLink())
+    .map(entry => readEntry(
+      instanceRoot,
+      path.resolve(resolved.absolutePath, entry.name),
+      entry.name,
+      entry.isDirectory(),
+    ))
+    .sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'directory' ? -1 : 1
+      }
+      return a.name.localeCompare(b.name)
+    })
+}
+
+export interface InstanceTextFile {
+  content: string
+  sizeBytes: number
+  truncated: boolean
+  modifiedAt: string
+  editable: boolean
+}
+
+export function readInstanceTextFile(instanceRoot: string, relativePath: string): InstanceTextFile {
+  const resolved = resolveInstancePath(instanceRoot, relativePath)
+  if (!resolved.ok) {
+    throw new Error(resolved.message)
+  }
+  if (isProtectedInstanceFile(resolved.relativePath)) {
+    throw new Error('该文件包含敏感信息，面板不提供内容查看')
+  }
+  const stat = fs.statSync(resolved.absolutePath)
+  if (!stat.isFile()) {
+    throw new Error('只能查看文件内容')
+  }
+  const editable = isEditableTextPath(resolved.relativePath)
+  if (!editable) {
+    throw new Error('该文件类型不支持在面板中编辑')
+  }
+  const truncated = stat.size > INSTANCE_TEXT_FILE_MAX_BYTES
+  const buffer = Buffer.alloc(Math.min(stat.size, INSTANCE_TEXT_FILE_MAX_BYTES))
+  const fd = fs.openSync(resolved.absolutePath, 'r')
+  try {
+    fs.readSync(fd, buffer, 0, buffer.length, 0)
+  }
+  finally {
+    fs.closeSync(fd)
+  }
+  return {
+    content: buffer.toString('utf8'),
+    sizeBytes: stat.size,
+    truncated,
+    modifiedAt: stat.mtime.toISOString(),
+    editable,
+  }
+}
+
+export function writeInstanceTextFile(instanceRoot: string, relativePath: string, content: string): { sizeBytes: number } {
+  const resolved = resolveInstancePath(instanceRoot, relativePath)
+  if (!resolved.ok) {
+    throw new Error(resolved.message)
+  }
+  if (isProtectedInstanceFile(resolved.relativePath)) {
+    throw new Error('该文件包含敏感信息，面板不提供写入')
+  }
+  if (!isEditableTextPath(resolved.relativePath)) {
+    throw new Error('该文件类型不支持在面板中编辑')
+  }
+  const sizeBytes = Buffer.byteLength(content, 'utf8')
+  if (sizeBytes > INSTANCE_TEXT_FILE_MAX_BYTES) {
+    throw new Error(`文件内容超过 ${Math.floor(INSTANCE_TEXT_FILE_MAX_BYTES / 1024)} KiB 上限`)
+  }
+  if (fs.existsSync(resolved.absolutePath) && !fs.statSync(resolved.absolutePath).isFile()) {
+    throw new Error('目标不是文件，无法写入')
+  }
+  backupFile(resolved.absolutePath)
+  writeFileAtomic(resolved.absolutePath, content)
+  return { sizeBytes }
+}
+
+export function deleteInstancePath(instanceRoot: string, relativePath: string): { removed: boolean } {
+  const resolved = resolveInstancePath(instanceRoot, relativePath)
+  if (!resolved.ok) {
+    throw new Error(resolved.message)
+  }
+  if (isProtectedInstanceFile(resolved.relativePath)) {
+    throw new Error('该文件包含敏感信息，面板不提供删除')
+  }
+  if (!fs.existsSync(resolved.absolutePath)) {
+    return { removed: false }
+  }
+  fs.rmSync(resolved.absolutePath, { recursive: true, force: true })
+  return { removed: true }
+}
+
+/** 重命名只改同目录内的名字，避免把文件搬到实例目录之外或跨目录覆盖 */
+export function renameInstancePath(instanceRoot: string, relativePath: string, nextName: string): { path: string } {
+  const resolved = resolveInstancePath(instanceRoot, relativePath)
+  if (!resolved.ok) {
+    throw new Error(resolved.message)
+  }
+  if (isProtectedInstanceFile(resolved.relativePath)) {
+    throw new Error('该文件包含敏感信息，面板不提供重命名')
+  }
+  const name = (nextName ?? '').trim()
+  if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+    throw new Error('新名称不合法')
+  }
+  if (isProtectedInstanceFile(name)) {
+    throw new Error('不能重命名为敏感文件名')
+  }
+  const parentRelative = path.posix.dirname(resolved.relativePath)
+  const nextRelative = parentRelative === '.' ? name : `${parentRelative}/${name}`
+  const target = resolveInstancePath(instanceRoot, nextRelative)
+  if (!target.ok) {
+    throw new Error(target.message)
+  }
+  if (fs.existsSync(target.absolutePath)) {
+    throw new Error('同名文件已存在')
+  }
+  fs.renameSync(resolved.absolutePath, target.absolutePath)
+  return { path: target.relativePath }
+}

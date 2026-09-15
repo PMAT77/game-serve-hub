@@ -5,6 +5,7 @@ import type {
   NetworkConfigRequest,
   PanelSettingsRequest,
   PanelSettingsSaveResponse,
+  SelfCheckReport,
   SteamcmdConfigRequest,
 } from '../../../../shared/contracts/system'
 import {
@@ -90,6 +91,7 @@ import { applyPanelPortToDeployment, resolveActualPanelPortFromRequest } from '.
 import { syncDevComposeWebPort } from './dev-compose-env'
 import type { PanelPortSyncResult } from './panel-port-deploy'
 import { registerDatabaseBackupRoutes } from './db-backup-routes'
+import { collectSelfCheckReport } from './self-check'
 
 /**
  * system 模块注册入口
@@ -182,6 +184,21 @@ export function registerSystemModule(app: FastifyInstance) {
       isSuccess: true,
       portSync,
     }, request)
+  })
+
+  app.get('/app/system/self-check', async (request): Promise<ApiSuccessResponse<SelfCheckReport> | ApiErrorResponse> => {
+    const authError = await requirePermission(request, SYSTEM_READ_PERMISSION)
+    if (authError) {
+      return authError
+    }
+    try {
+      const report = await collectSelfCheckReport(loadServerConfig().releaseVersion)
+      return success(report, request)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '环境自检失败'
+      return businessError(message, request)
+    }
   })
 
   app.get('/app/system/filesystem/directories', async (request): Promise<ApiSuccessResponse<DirectoryItem[]> | ApiErrorResponse> => {

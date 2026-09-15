@@ -209,3 +209,35 @@ export type PanelUpdateApplyResponse = z.infer<typeof panelUpdateApplyResponseSc
 
 export const systemSuccessResponseSchema = successResultSchema
 export type SystemSuccessResponse = z.infer<typeof systemSuccessResponseSchema>
+
+// ---------------------------------------------------------------------------
+// 环境自检
+// ---------------------------------------------------------------------------
+
+export const selfCheckStatusSchema = z.enum(['ok', 'warn', 'fail', 'skipped'])
+export type SelfCheckStatus = z.infer<typeof selfCheckStatusSchema>
+
+export const selfCheckItemSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  status: selfCheckStatusSchema,
+  /** 这一项的实测结论，直接可读，不含敏感值 */
+  detail: z.string(),
+  /** 不通过时的下一步动作；通过时为 null */
+  hint: z.string().nullable(),
+})
+export type SelfCheckItem = z.infer<typeof selfCheckItemSchema>
+
+export const selfCheckReportSchema = z.object({
+  generatedAt: z.string(),
+  releaseVersion: z.string(),
+  runtimeMode: z.string(),
+  items: z.array(selfCheckItemSchema),
+  summary: z.object({
+    ok: z.number().int().nonnegative(),
+    warn: z.number().int().nonnegative(),
+    fail: z.number().int().nonnegative(),
+    skipped: z.number().int().nonnegative(),
+  }),
+})
+export type SelfCheckReport = z.infer<typeof selfCheckReportSchema>

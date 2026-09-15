@@ -4,6 +4,7 @@ import { h } from 'vue'
 import { NAlert, NCollapse, NCollapseItem, NInputNumber, NSelect, NSpin, useDialog } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
+import SelfCheckCard from './SelfCheckCard.vue'
 import apiSystem from '@/api/modules/system'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
 import { buildPanelUpdatePresentation, MANUAL_UPDATE_NOTE } from './panelUpdatePresentation'
@@ -592,6 +593,12 @@ onActivated(async () => {
         <div class="flex gap-3 items-center">
           <FaSwitch v-model="form.checkUpdateBeforeStart" />
         </div>
+      </AdminSettingsSection>
+
+      <AdminSettingsSection
+        title="环境自检"
+      >
+        <SelfCheckCard />
       </AdminSettingsSection>
 
       <AdminSettingsSection

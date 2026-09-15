@@ -11,6 +11,9 @@ import type {
   PanelUpdateStatus,
   SteamcmdConfigPayload,
   SteamcmdConfigResponse,
+  SelfCheckItem,
+  SelfCheckReport,
+  SelfCheckStatus,
   SystemSuccessResponse,
 } from '../../../shared/contracts/system'
 import api from '../index'
@@ -26,6 +29,9 @@ export type {
   PanelUpdateApplyRequest,
   PanelUpdateApplyResponse,
   PanelUpdateStatus,
+  SelfCheckItem,
+  SelfCheckReport,
+  SelfCheckStatus,
   SteamcmdConfigPayload,
   SteamcmdConfigResponse,
 }
@@ -50,6 +56,7 @@ export default {
   installSteamcmd: () => api.post('app/system/steamcmd/install'),
   installGameDstImage: () => api.post('app/system/game-dst/install'),
   getPanelUpdateStatus: () => api.get('app/system/panel-update/status') as Promise<{ data: PanelUpdateStatus }>,
+  getSelfCheck: () => api.get('app/system/self-check') as Promise<{ data: SelfCheckReport }>,
   checkPanelUpdate: () => api.post('app/system/panel-update/check') as Promise<{ data: PanelUpdateStatus }>,
   applyPanelUpdate: (data?: PanelUpdateApplyRequest) => api.post('app/system/panel-update/apply', data ?? {}) as Promise<{
     data: PanelUpdateApplyResponse

@@ -88,3 +88,13 @@ export type InstanceConsoleStreamTicketDto = z.infer<typeof consoleStreamTicketS
 export const consoleStreamQuerySchema = consoleInstanceQuerySchema.extend({
   streamTicket: z.string().trim().min(1),
 })
+
+/** 落盘的历史日志（面板重启后仍可查看与下载） */
+export const consoleLogHistorySchema = z.object({
+  instanceId: instanceIdSchema,
+  /** 是否已经存在日志文件；从未运行过时为 false */
+  available: z.boolean(),
+  /** 末尾若干行（不含轮转掉的历史文件） */
+  content: z.string(),
+})
+export type ConsoleLogHistoryDto = z.infer<typeof consoleLogHistorySchema>

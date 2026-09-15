@@ -13,6 +13,7 @@ import {
   NDescriptionsItem,
   NEmpty,
   NInput,
+  NModal,
   NRadioButton,
   NRadioGroup,
   NSpace,
@@ -518,6 +519,56 @@ async function copyLogs() {
   faToast.success('日志已复制')
 }
 
+const logHistoryVisible = ref(false)
+const logHistoryLoading = ref(false)
+const logHistoryAvailable = ref(false)
+const logHistoryContent = ref('')
+const logDownloading = ref(false)
+
+/** 历史日志：内存里只有最近 2000 行，落盘文件能翻到面板重启之前的记录 */
+async function openLogHistory() {
+  if (!instanceId.value) {
+    return
+  }
+  logHistoryVisible.value = true
+  logHistoryLoading.value = true
+  try {
+    const { data } = await apiInstance.getInstanceConsoleLogHistory(instanceId.value)
+    logHistoryAvailable.value = data.available
+    logHistoryContent.value = data.content
+  }
+  catch {
+    logHistoryAvailable.value = false
+    logHistoryContent.value = ''
+    faToast.error('读取历史日志失败')
+  }
+  finally {
+    logHistoryLoading.value = false
+  }
+}
+
+async function downloadLogs() {
+  if (!instanceId.value || logDownloading.value) {
+    return
+  }
+  logDownloading.value = true
+  try {
+    const { data } = await apiInstance.downloadInstanceConsoleLog(instanceId.value)
+    const url = URL.createObjectURL(data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${instanceName.value || instanceId.value}-console.log`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+  catch {
+    faToast.error('下载日志失败：实例还没启动过，或日志文件已被清理')
+  }
+  finally {
+    logDownloading.value = false
+  }
+}
+
 type ConnectCopyMode = 'public' | 'local' | 'lan'
 
 const connectDisplayMode = ref<ConnectCopyMode>('public')
@@ -772,6 +823,12 @@ onBeforeUnmount(() => {
             <FaButton size="sm" variant="outline" @click="copyLogs">
               复制日志
             </FaButton>
+            <FaButton size="sm" variant="outline" :loading="logDownloading" @click="downloadLogs">
+              下载日志
+            </FaButton>
+            <FaButton size="sm" variant="outline" @click="openLogHistory">
+              历史日志
+            </FaButton>
             <NSpace align="center" :size="8">
               <NSwitch v-model:value="autoScroll" size="small" />
               <span class="text-xs text-muted-foreground">自动滚动</span>
@@ -861,6 +918,12 @@ onBeforeUnmount(() => {
             <FaButton size="sm" variant="outline" @click="copyLogs">
               复制日志
             </FaButton>
+            <FaButton size="sm" variant="outline" :loading="logDownloading" @click="downloadLogs">
+              下载日志
+            </FaButton>
+            <FaButton size="sm" variant="outline" @click="openLogHistory">
+              历史日志
+            </FaButton>
             <NSpace align="center" :size="8">
               <NSwitch v-model:value="autoScroll" size="small" />
               <span class="text-xs text-muted-foreground">自动滚动</span>
@@ -937,5 +1000,27 @@ onBeforeUnmount(() => {
         实例 ID：{{ instanceId }}
       </p>
     </div>
+
+    <NModal
+      v-model:show="logHistoryVisible"
+      preset="card"
+      title="历史日志"
+      class="max-w-4xl"
+    >
+      <p class="mb-3 text-xs text-muted-foreground">
+        来自落盘日志文件（面板重启前的记录也在），最多显示末尾 500 行；需要完整内容请用「下载日志」。
+      </p>
+      <NSpin :show="logHistoryLoading">
+        <NEmpty
+          v-if="!logHistoryLoading && !logHistoryAvailable"
+          size="small"
+          description="还没有历史日志，实例启动过一次后才会生成"
+        />
+        <pre
+          v-else
+          class="max-h-[min(60vh,560px)] overflow-auto whitespace-pre-wrap break-all rounded-md border border-border p-3 text-xs"
+        >{{ logHistoryContent }}</pre>
+      </NSpin>
+    </NModal>
   </FaPageMain>
 </template>

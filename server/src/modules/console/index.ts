@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import fs from 'node:fs'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import type {
+  ConsoleLogHistoryDto,
   InstanceConnectInfoDto,
   InstanceConsoleLogsPayload,
   InstanceConsoleLogFilter,
@@ -21,6 +23,7 @@ import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { buildDstConnectInfo } from '../../infra/game-adapter/dst/direct-connect'
 import { resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
+import { getActiveConsoleLogFile } from '../../shared/instance-runtime/console-log-file'
 import {
   ensureContainerRuntimeReady,
   isCavesContainerRunning,
@@ -138,6 +141,53 @@ export function registerConsoleModule(app: FastifyInstance) {
       lines,
       running,
     }, request)
+  })
+
+  app.get('/app/instance/console/logs/history', async (request): Promise<ApiSuccessResponse<ConsoleLogHistoryDto> | ApiErrorResponse> => {
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
+    if (authError) {
+      return authError
+    }
+    const query = consoleInstanceQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const resolved = await resolveLocalInstance(query.data.instanceId, request)
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    const content = getActiveConsoleLogFile()?.readTail(resolved.instance.id) ?? null
+    return success({
+      instanceId: resolved.instance.id,
+      available: content !== null,
+      content: content ?? '',
+    }, request)
+  })
+
+  app.get('/app/instance/console/logs/download', async (request, reply): Promise<void> => {
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
+    if (authError) {
+      reply.status(401).send(authError)
+      return
+    }
+    const query = consoleInstanceQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      reply.status(400).send(businessError('请求参数无效', request))
+      return
+    }
+    const resolved = await resolveLocalInstance(query.data.instanceId, request)
+    if (!resolved.ok) {
+      reply.status(400).send(resolved.error)
+      return
+    }
+    const filePath = getActiveConsoleLogFile()?.resolveFilePath(resolved.instance.id)
+    if (!filePath || !fs.existsSync(filePath)) {
+      reply.status(404).send(businessError('还没有可下载的日志，实例启动过一次后才会生成', request))
+      return
+    }
+    reply.header('Content-Type', 'text/plain; charset=utf-8')
+    reply.header('Content-Disposition', `attachment; filename="${resolved.instance.id}-console.log"`)
+    reply.send(fs.createReadStream(filePath))
   })
 
   app.post('/app/instance/console/logs/clear', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {

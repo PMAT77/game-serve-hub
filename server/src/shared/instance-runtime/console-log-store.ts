@@ -13,12 +13,28 @@ export interface ConsoleLogLine {
 
 type LogListener = (line: ConsoleLogLine) => void
 
+/**
+ * 控制台日志的下游接收方（当前用于落盘）。
+ *
+ * 挂在 store 上是刻意的：所有日志最终都经过 pushLine 这一个入口，
+ * 散在各个调用点做持久化迟早会漏掉某一类日志。
+ */
+export interface ConsoleLogSink {
+  append: (instanceId: string, line: ConsoleLogLine) => void
+  remove: (instanceId: string) => void
+}
+
 const MAX_LOG_LINES = 2000
 
 class InstanceConsoleLogStore {
   private readonly logs = new Map<string, ConsoleLogLine[]>()
   private readonly listeners = new Map<string, Set<LogListener>>()
+  private sink: ConsoleLogSink | null = null
   private seq = 0
+
+  setSink(sink: ConsoleLogSink | null) {
+    this.sink = sink
+  }
 
   listLogs(instanceId: string, afterId = 0, limit = 500): ConsoleLogLine[] {
     const rows = this.logs.get(instanceId) ?? []
@@ -37,6 +53,7 @@ class InstanceConsoleLogStore {
   removeInstance(instanceId: string) {
     this.logs.delete(instanceId)
     this.listeners.delete(instanceId)
+    this.sink?.remove(instanceId)
   }
 
   subscribe(instanceId: string, listener: LogListener): () => void {
@@ -90,6 +107,7 @@ class InstanceConsoleLogStore {
         listener(line)
       }
     }
+    this.sink?.append(instanceId, line)
   }
 }
 

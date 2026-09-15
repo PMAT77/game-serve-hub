@@ -1,6 +1,7 @@
 import { resolveApiBaseUrl, withTrailingSlash } from '../base-url'
 import api from '../index'
 import type {
+  ConsoleLogHistoryDto,
   InstanceConnectInfoDto,
   InstanceConsoleCommandShard,
   InstanceConsoleLogFilter,
@@ -37,6 +38,7 @@ import type {
 } from '../../../shared/contracts/maintenance'
 
 export type {
+  ConsoleLogHistoryDto,
   CreateInstancePayload,
   InstanceAllocatePortsPayload,
   InstanceCheckUpdatesPayload,
@@ -101,6 +103,13 @@ export default {
     params: { instanceId, afterId, stream: stream === 'all' ? undefined : stream },
   }) as Promise<{ data: InstanceConsoleLogsPayload }>,
   clearInstanceConsoleLogs: (instanceId: string) => api.post('app/instance/console/logs/clear', { instanceId }),
+  getInstanceConsoleLogHistory: (instanceId: string) => api.get('app/instance/console/logs/history', {
+    params: { instanceId },
+  }) as Promise<{ data: ConsoleLogHistoryDto }>,
+  downloadInstanceConsoleLog: (instanceId: string) => api.get('app/instance/console/logs/download', {
+    params: { instanceId },
+    responseType: 'blob',
+  }) as Promise<{ data: Blob }>,
   sendInstanceConsoleCommand: (
     instanceId: string,
     command: string,

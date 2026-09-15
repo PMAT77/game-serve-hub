@@ -7,6 +7,8 @@ import { syncPanelPortSettingIfStale } from './modules/system/panel-port'
 import type { AdminCredentialOutcome } from './shared/config/credentials-file'
 import { shouldWriteAdminCredentialsFile, writeAdminCredentialsFile } from './shared/config/credentials-file'
 import { ensureServerRuntimeDirs, loadServerConfig } from './shared/config'
+import { InstanceConsoleLogFile, resolveConsoleLogsDir, setActiveConsoleLogFile } from './shared/instance-runtime/console-log-file'
+import { instanceConsoleLogStore } from './shared/instance-runtime/console-log-store'
 import { initDatabase } from './shared/db/index'
 import { resolveRepoRoot } from './shared/repo-root'
 
@@ -19,6 +21,10 @@ import { resolveRepoRoot } from './shared/repo-root'
 export async function bootstrap() {
   const config = loadServerConfig()
   ensureServerRuntimeDirs(config)
+  // 控制台日志落盘：内存里只留最近 2000 行，面板重启后仍能从文件里翻出上一次运行的游戏日志
+  const consoleLogFile = new InstanceConsoleLogFile(resolveConsoleLogsDir(config.dbPath))
+  setActiveConsoleLogFile(consoleLogFile)
+  instanceConsoleLogStore.setSink(consoleLogFile)
   const app = await createServerApp(config)
   let isClosing = false
   let isListening = false

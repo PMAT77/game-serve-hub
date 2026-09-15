@@ -1289,7 +1289,8 @@ function extractWorkshopId(input: string): string | null {
   if (!trimmed) {
     return null
   }
-  const urlMatch = trimmed.match(/filedetails\?id=(\d+)/i)
+  // 详情页形如 /sharedfiles/filedetails/?id=123：filedetails 后的斜杠可有可无，id 也可能不是第一个参数
+  const urlMatch = trimmed.match(/filedetails\/?\?[^#]*\bid=(\d+)/i)
   if (urlMatch) {
     return urlMatch[1]
   }
@@ -1300,7 +1301,7 @@ function extractWorkshopId(input: string): string | null {
 async function subscribeManualWorkshop() {
   const workshopId = extractWorkshopId(manualWorkshopInput.value)
   if (!workshopId) {
-    message.warning('请输入有效的创意工坊 ID（纯数字）或 Mod 详情页链接')
+    message.warning('请输入有效的创意工坊 ID 或 Mod 详情页链接')
     return
   }
   if (!selectedInstanceId.value) {

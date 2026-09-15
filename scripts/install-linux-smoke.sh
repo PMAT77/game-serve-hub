@@ -352,9 +352,9 @@ is_newer_version 'v0.4.5-beta.1' 'v0.4.5'
 
 mkdir -p "${ROOT_DIR}"
 TARGET_TAG=''
-printf '%s\n' 'v0.4.5' > "${UPDATE_DIR}/request"
+printf '%s\n' 'v0.6.0' > "${UPDATE_DIR}/request"
 consume_request "${UPDATE_DIR}/request"
-[[ "${TARGET_TAG}" == 'v0.4.5' ]]
+[[ "${TARGET_TAG}" == 'v0.6.0' ]]
 [[ -f "${ROOT_DIR}/request.processing" ]]
 [[ ! -e "${UPDATE_DIR}/request" ]]
 

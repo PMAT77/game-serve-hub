@@ -149,7 +149,7 @@ cmd_update() {
   require_root update
   load_config
   if [[ "${RUNTIME_MODE}" == "native" ]]; then
-    log_warn "Native mode does not use container images. Upgrade via the pinned installer command shown by: gsh doctor"
+    log_warn "Native mode does not use container images. Update from the panel (System settings -> Panel & game version), or upgrade with the pinned installer command shown by: gsh doctor"
     return 0
   fi
   log_info "Pulling the unified image (panel + DST + SteamCMD in one)..."
@@ -228,6 +228,8 @@ cmd_doctor() {
     repo="$(read_env_value "${PANEL_ENV_FILE}" "GSH_GITHUB_REPO")"
     repo="${repo:-PMAT77/game-serve-hub}"
     log_info "Native upgrade (pinned, checksum-verified):"
+    log_info "  # 也可以在面板「系统设置 → 面板与游戏版本」里一键更新（安装器布置好更新组件后可用）；"
+    log_info "  # 面板内更新不可用时，用下面的命令在服务器上升级："
     log_info "  # 目标版本填 Release 页上的版本号（例如 v0.4.4），必须高于当前已安装版本；"
     log_info "  # 填成当前版本只会原地重装，不会升级。"
     log_info "  curl -fsSL https://raw.githubusercontent.com/${repo}/<目标版本>/scripts/install.linux.sh | sudo env GSH_RELEASE_TAG=<目标版本> bash -s -- --mode native"

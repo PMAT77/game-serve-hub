@@ -43,6 +43,10 @@ const renameVisible = ref(false)
 const renameTarget = ref<InstanceFileEntry | null>(null)
 const renameValue = ref('')
 
+const uploadInputRef = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+const uploadPercent = ref(0)
+
 const breadcrumbs = computed(() => {
   const segments = currentPath.value.split('/').filter(Boolean)
   const items = [{ label: '实例目录', path: '' }]
@@ -167,6 +171,65 @@ async function saveEditor() {
   }
 }
 
+function openUploadPicker() {
+  if (uploading.value) {
+    return
+  }
+  uploadInputRef.value?.click()
+}
+
+async function handleUploadFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !props.instanceId) {
+    return
+  }
+  uploading.value = true
+  uploadPercent.value = 0
+  try {
+    const { data } = await apiInstanceFile.uploadFile({
+      instanceId: props.instanceId,
+      dirPath: currentPath.value,
+      file,
+      overwrite: true,
+    }, percent => {
+      uploadPercent.value = percent
+    })
+    message.success(`已上传 ${data.path}（${formatSize(data.sizeBytes)}）${data.overwritten ? '，原文件已备份' : ''}`)
+    await Promise.all([loadEntries(), loadKeyFiles()])
+  }
+  catch {
+    message.error('上传失败：文件名不合法、超出大小上限，或目标不可写。')
+  }
+  finally {
+    uploading.value = false
+    uploadPercent.value = 0
+  }
+}
+
+async function downloadEntry(entry: InstanceFileEntry) {
+  if (busy.value) {
+    return
+  }
+  busy.value = true
+  try {
+    const { data } = await apiInstanceFile.downloadFile(props.instanceId, entry.path)
+    const url = URL.createObjectURL(data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = entry.name
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+  catch {
+    message.error('下载失败：文件可能已被移动或属于敏感文件。')
+  }
+  finally {
+    busy.value = false
+  }
+}
+
 function confirmDelete(entry: InstanceFileEntry) {
   dialog.warning({
     title: `确认删除 ${entry.name}？`,
@@ -236,7 +299,7 @@ watch(() => props.instanceId, () => {
 
     <p class="mb-3 text-xs text-muted-foreground">
       浏览实例目录并直接编辑文本配置（房间、世界、Mod 等）。保存会先备份原文件；
-      集群令牌等敏感文件不提供查看与编辑。
+      集群令牌等敏感文件不提供查看与编辑。上传会把文件放进当前所在目录，同名文件会先备份再覆盖。
     </p>
 
     <div v-if="keyFiles.length > 0" class="mb-4 rounded-lg border p-3">
@@ -272,6 +335,17 @@ watch(() => props.instanceId, () => {
           {{ item.label }}
         </NButton>
       </template>
+      <span class="grow" />
+      <NButton size="tiny" :loading="uploading" @click="openUploadPicker">
+        上传到当前目录
+      </NButton>
+      <span v-if="uploading" class="text-xs text-muted-foreground">已上传 {{ uploadPercent }}%</span>
+      <input
+        ref="uploadInputRef"
+        type="file"
+        class="hidden"
+        @change="handleUploadFile"
+      >
     </div>
 
     <NSpin :show="loading">
@@ -310,6 +384,15 @@ watch(() => props.instanceId, () => {
               @click="openEntry(entry)"
             >
               编辑
+            </NButton>
+            <NButton
+              v-if="entry.type === 'file' && !entry.protected"
+              text
+              size="tiny"
+              :disabled="busy"
+              @click="downloadEntry(entry)"
+            >
+              下载
             </NButton>
             <NButton
               v-if="!entry.protected"

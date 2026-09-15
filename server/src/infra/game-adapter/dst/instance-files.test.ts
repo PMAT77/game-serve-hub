@@ -2,18 +2,25 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import { afterEach, describe, it } from 'node:test'
 import {
+  backupExistingInstanceFile,
   deleteInstancePath,
   INSTANCE_TEXT_FILE_MAX_BYTES,
+  INSTANCE_UPLOAD_DEFAULT_MAX_BYTES,
   isEditableTextPath,
   isProtectedInstanceFile,
   listInstanceDirectory,
   listInstanceKeyFiles,
   readInstanceTextFile,
   renameInstancePath,
+  resolveInstanceDownloadPath,
   resolveInstancePath,
+  resolveInstanceUploadMaxBytes,
+  resolveInstanceUploadTarget,
   writeInstanceTextFile,
+  writeInstanceUploadFile,
 } from './instance-files'
 
 const tempDirs: string[] = []
@@ -196,5 +203,74 @@ describe('instance-files sandbox', () => {
     for (const item of files) {
       assert.equal(isEditableTextPath(item.path), true, item.path)
     }
+  })
+})
+
+describe('instance file upload and download', () => {
+  it('resolves upload targets inside the instance directory', () => {
+    const root = createTempInstanceRoot()
+    const atRoot = resolveInstanceUploadTarget(root, '', 'cluster.ini')
+    assert.equal(atRoot.ok, true)
+    assert.equal(atRoot.ok && atRoot.relativePath, 'cluster.ini')
+
+    const nested = resolveInstanceUploadTarget(root, 'klei-storage/DoNotStarveTogether/Cluster_1/', 'modoverrides.lua')
+    assert.equal(nested.ok, true)
+    assert.equal(nested.ok && nested.relativePath, 'klei-storage/DoNotStarveTogether/Cluster_1/modoverrides.lua')
+  })
+
+  it('rejects unsafe upload file names and protected targets', () => {
+    const root = createTempInstanceRoot()
+    for (const name of ['', '   ', '.', '..', 'a/b.ini', 'a\\b.ini']) {
+      const result = resolveInstanceUploadTarget(root, '', name)
+      assert.equal(result.ok, false, `应拒绝文件名 ${JSON.stringify(name)}`)
+    }
+    const protectedTarget = resolveInstanceUploadTarget(root, 'DoNotStarveTogether/Cluster_1', 'cluster_token.txt')
+    assert.equal(protectedTarget.ok, false)
+    assert.match(protectedTarget.ok ? '' : protectedTarget.message, /敏感/)
+  })
+
+  it('rejects upload directories that escape the instance directory', () => {
+    const root = createTempInstanceRoot()
+    const escaped = resolveInstanceUploadTarget(root, '../../etc', 'passwd')
+    assert.equal(escaped.ok, false)
+    assert.match(escaped.ok ? '' : escaped.message, /超出实例目录范围|上级目录/)
+  })
+
+  it('reads the upload size limit from the environment', () => {
+    assert.equal(resolveInstanceUploadMaxBytes({}), INSTANCE_UPLOAD_DEFAULT_MAX_BYTES)
+    assert.equal(resolveInstanceUploadMaxBytes({ GSH_INSTANCE_UPLOAD_MAX_BYTES: '1024' }), 1024)
+    assert.equal(resolveInstanceUploadMaxBytes({ GSH_INSTANCE_UPLOAD_MAX_BYTES: '0' }), INSTANCE_UPLOAD_DEFAULT_MAX_BYTES)
+    assert.equal(resolveInstanceUploadMaxBytes({ GSH_INSTANCE_UPLOAD_MAX_BYTES: 'abc' }), INSTANCE_UPLOAD_DEFAULT_MAX_BYTES)
+  })
+
+  it('backs up the existing file before an overwriting upload', () => {
+    const root = createTempInstanceRoot()
+    fs.writeFileSync(path.join(root, 'cluster.ini'), 'old', 'utf8')
+    assert.deepEqual(backupExistingInstanceFile(path.join(root, 'cluster.ini')), { overwritten: true })
+    assert.equal(fs.readdirSync(root).filter(name => name.startsWith('cluster.ini.bak.')).length, 1)
+    assert.deepEqual(backupExistingInstanceFile(path.join(root, 'missing.ini')), { overwritten: false })
+  })
+
+  it('streams an upload to the target through a temp file', async () => {
+    const root = createTempInstanceRoot()
+    const target = path.join(root, 'uploaded.txt')
+    const sizeBytes = await writeInstanceUploadFile(target, Readable.from([Buffer.from('hello '), Buffer.from('world')]))
+    assert.equal(sizeBytes, 11)
+    assert.equal(fs.readFileSync(target, 'utf8'), 'hello world')
+    // 临时文件不应残留
+    assert.equal(fs.readdirSync(root).some(name => name.includes('.uploading-')), false)
+  })
+
+  it('only allows regular files inside the instance directory to be downloaded', () => {
+    const root = createTempInstanceRoot()
+    fs.mkdirSync(path.join(root, 'sub'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'sub', 'data.txt'), 'x', 'utf8')
+    fs.writeFileSync(path.join(root, 'cluster_token.txt'), 'pds-secret', 'utf8')
+
+    assert.equal(resolveInstanceDownloadPath(root, 'sub/data.txt').ok, true)
+    assert.match(resolveInstanceDownloadPath(root, 'cluster_token.txt').ok ? '' : (resolveInstanceDownloadPath(root, 'cluster_token.txt') as { message: string }).message, /敏感/)
+    assert.equal(resolveInstanceDownloadPath(root, 'sub').ok, false)
+    assert.equal(resolveInstanceDownloadPath(root, 'missing.txt').ok, false)
+    assert.equal(resolveInstanceDownloadPath(root, '../outside.txt').ok, false)
   })
 })

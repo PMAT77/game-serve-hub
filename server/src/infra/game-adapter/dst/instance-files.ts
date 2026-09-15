@@ -1,11 +1,20 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import process from 'node:process'
 import { isEditableInstanceFilePath } from '../../../../../shared/contracts/instance-file'
 import { backupFile, writeFileAtomic } from './atomic-write'
 import { DST_CLUSTER_NAME, DST_CONF_DIR, DST_STORAGE_DIR } from './constants'
 
 /** 文本文件读写上限：超过则拒绝读写，避免把面板内存当传输通道 */
 export const INSTANCE_TEXT_FILE_MAX_BYTES = 1024 * 1024
+
+/** 实例内文件上传上限：默认 256 MiB，可用 env 收紧（测试与小内存部署） */
+export const INSTANCE_UPLOAD_DEFAULT_MAX_BYTES = 256 * 1024 * 1024
+
+export function resolveInstanceUploadMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number(env.GSH_INSTANCE_UPLOAD_MAX_BYTES)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : INSTANCE_UPLOAD_DEFAULT_MAX_BYTES
+}
 
 /**
  * 敏感文件：面板不通过文件接口提供内容，也不接受写入。
@@ -265,6 +274,94 @@ export interface InstanceKeyFile {
   description: string
   /** 文件当前是否存在；不存在时界面不提供跳转 */
   exists: boolean
+}
+
+/**
+ * 解析上传目标：目录相对路径 + 文件名 → 实例目录内的目标文件。
+ *
+ * 文件名单独校验而不是拼成路径再校验：`fileName` 里带 `/` 或 `..` 时，
+ * 拼接后的路径仍然「在实例目录内」，但用户以为传到了子目录，语义上是错的。
+ */
+export function resolveInstanceUploadTarget(
+  instanceRoot: string,
+  dirRelativePath: string,
+  fileName: string,
+): ResolveInstancePathResult {
+  const name = (fileName ?? '').trim()
+  if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    return { ok: false, message: '文件名不合法' }
+  }
+  if (isProtectedInstanceFile(name)) {
+    return { ok: false, message: '该文件包含敏感信息，面板不提供上传覆盖' }
+  }
+  const dir = (dirRelativePath ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  const target = dir ? `${dir}/${name}` : name
+  return resolveInstancePath(instanceRoot, target)
+}
+
+/** 上传落盘：先写同目录临时文件再改名，避免中断留下半个同名文件 */
+export function writeInstanceUploadFile(targetAbsolutePath: string, payload: NodeJS.ReadableStream): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const tempPath = `${targetAbsolutePath}.uploading-${process.pid}`
+    const writeStream = fs.createWriteStream(tempPath)
+    let received = 0
+    let settled = false
+
+    const fail = (error: Error) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      writeStream.destroy()
+      fs.rmSync(tempPath, { force: true })
+      reject(error)
+    }
+
+    payload.on('error', fail)
+    writeStream.on('error', fail)
+    writeStream.on('finish', () => {
+      if (settled) {
+        return
+      }
+      settled = true
+      try {
+        fs.renameSync(tempPath, targetAbsolutePath)
+        resolve(received)
+      }
+      catch (error) {
+        fs.rmSync(tempPath, { force: true })
+        reject(error instanceof Error ? error : new Error('写入失败'))
+      }
+    })
+    payload.on('data', (chunk: Buffer) => {
+      received += chunk.length
+    })
+    payload.pipe(writeStream)
+  })
+}
+
+/** 覆盖前留一份原件，与文本编辑保持一致：上传错文件还能自己翻回去 */
+export function backupExistingInstanceFile(targetAbsolutePath: string): { overwritten: boolean } {
+  if (!fs.existsSync(targetAbsolutePath)) {
+    return { overwritten: false }
+  }
+  backupFile(targetAbsolutePath)
+  return { overwritten: true }
+}
+
+/** 下载前的检查：只允许实例目录内的普通文件，敏感文件一律拒绝 */
+export function resolveInstanceDownloadPath(instanceRoot: string, relativePath: string): ResolveInstancePathResult {
+  const resolved = resolveInstancePath(instanceRoot, relativePath)
+  if (!resolved.ok) {
+    return resolved
+  }
+  if (isProtectedInstanceFile(resolved.relativePath)) {
+    return { ok: false, message: '该文件包含敏感信息，面板不提供下载' }
+  }
+  if (!fs.existsSync(resolved.absolutePath) || !fs.statSync(resolved.absolutePath).isFile()) {
+    return { ok: false, message: '只能下载实例目录内的普通文件' }
+  }
+  return resolved
 }
 
 /**

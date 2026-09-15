@@ -1,10 +1,14 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
+import fs from 'node:fs'
+import path from 'node:path'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import {
   instanceFileContentQuerySchema,
   instanceFileDeletePayloadSchema,
+  instanceFileDownloadQuerySchema,
   instanceFileListQuerySchema,
   instanceFileRenamePayloadSchema,
+  instanceFileUploadQuerySchema,
   instanceFileWritePayloadSchema,
 } from '../../../../shared/contracts/instance-file'
 import type {
@@ -12,6 +16,7 @@ import type {
   InstanceFileDeleteResult,
   InstanceFileListDto,
   InstanceFileRenameResult,
+  InstanceFileUploadResult,
   InstanceFileWriteResult,
   InstanceKeyFileListDto,
 } from '../../../../shared/contracts/instance-file'
@@ -20,11 +25,16 @@ import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import { resolveLocalDstInstance } from '../../shared/dst/local-dst-instance'
 import {
   deleteInstancePath,
+  backupExistingInstanceFile,
   listInstanceDirectory,
   listInstanceKeyFiles,
   readInstanceTextFile,
   renameInstancePath,
+  resolveInstanceDownloadPath,
+  resolveInstanceUploadMaxBytes,
+  resolveInstanceUploadTarget,
   writeInstanceTextFile,
+  writeInstanceUploadFile,
 } from '../../infra/game-adapter/dst/instance-files'
 import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from '../system/auth'
@@ -56,6 +66,13 @@ async function authorize(request: FastifyRequest): Promise<FileAuth> {
  * 越权与写入动作都记日志，便于回溯谁在什么时候改了哪个文件。
  */
 export function registerFilesModule(app: FastifyInstance) {
+  const maxUploadBytes = resolveInstanceUploadMaxBytes()
+  // 实例文件上传：以原始二进制体接收并流式落盘（与存档导入同一个思路，内容类型刻意区分，
+  // 避免与存档导入的解析器冲突）。解析器只把流交给路由，落盘位置由路由决定。
+  app.addContentTypeParser('application/x-gsh-instance-file', (_request, payload, done) => {
+    done(null, payload)
+  })
+
   app.get('/app/instance/files', async (request): Promise<ApiSuccessResponse<InstanceFileListDto> | ApiErrorResponse> => {
     const auth = await authorize(request)
     if (auth.error) {
@@ -196,6 +213,82 @@ export function registerFilesModule(app: FastifyInstance) {
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '删除失败'
+      return businessError(message, request)
+    }
+  })
+
+  app.get('/app/instance/files/download', async (request, reply): Promise<void> => {
+    const auth = await authorize(request)
+    if (auth.error) {
+      reply.status(401).send(auth.error)
+      return
+    }
+    const query = instanceFileDownloadQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      reply.status(400).send(businessError('请求参数无效', request))
+      return
+    }
+    const resolved = await resolveLocalDstInstance(query.data.instanceId, request, { messages: FILE_RESOLVE_MESSAGES })
+    if (!resolved.ok) {
+      reply.status(400).send(resolved.error)
+      return
+    }
+    const target = resolveInstanceDownloadPath(resolved.instance.installPath, query.data.path)
+    if (!target.ok) {
+      reply.status(400).send(businessError(target.message, request))
+      return
+    }
+    const fileName = path.basename(target.absolutePath)
+    reply.header('Content-Type', 'application/octet-stream')
+    reply.header('Content-Disposition', `attachment; filename="${fileName}"`)
+    reply.send(fs.createReadStream(target.absolutePath))
+  })
+
+  app.post('/app/instance/files/upload', { bodyLimit: maxUploadBytes }, async (request): Promise<ApiSuccessResponse<InstanceFileUploadResult> | ApiErrorResponse> => {
+    const auth = await authorize(request)
+    if (auth.error) {
+      return auth.error
+    }
+    const query = instanceFileUploadQuerySchema.safeParse(request.query ?? {})
+    if (!query.success) {
+      return businessError('请求参数无效', request)
+    }
+    const { instanceId, fileName } = query.data
+    const overwrite = query.data.overwrite === '1'
+    const resolved = await resolveLocalDstInstance(instanceId, request, { messages: FILE_RESOLVE_MESSAGES })
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    const target = resolveInstanceUploadTarget(
+      resolved.instance.installPath,
+      query.data.path ?? '',
+      fileName,
+    )
+    if (!target.ok) {
+      return businessError(target.message, request)
+    }
+    if (!overwrite && fs.existsSync(target.absolutePath)) {
+      return businessError('同名文件已存在；确认覆盖请重试', request)
+    }
+    try {
+      fs.mkdirSync(path.dirname(target.absolutePath), { recursive: true })
+      const backup = backupExistingInstanceFile(target.absolutePath)
+      const sizeBytes = await writeInstanceUploadFile(target.absolutePath, request.body as NodeJS.ReadableStream)
+      app.log.info({
+        instanceId: resolved.instance.id,
+        path: target.relativePath,
+        sizeBytes,
+        overwritten: backup.overwritten,
+        operator: auth.operatorAccount,
+      }, '实例文件已上传')
+      return success({
+        path: target.relativePath,
+        sizeBytes,
+        overwritten: backup.overwritten,
+      }, request)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '上传失败'
       return businessError(message, request)
     }
   })

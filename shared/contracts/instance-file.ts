@@ -129,3 +129,31 @@ export const instanceKeyFileListSchema = z.object({
   files: z.array(instanceKeyFileSchema),
 })
 export type InstanceKeyFileListDto = z.infer<typeof instanceKeyFileListSchema>
+
+// ---------------------------------------------------------------------------
+// 上传与下载
+// ---------------------------------------------------------------------------
+
+/** 上传目标：`path` 是目标目录（根目录传空串），`fileName` 单独传，避免把子目录写进文件名 */
+export const instanceFileUploadQuerySchema = z.object({
+  instanceId: instanceIdSchema,
+  path: instanceRelativePathSchema.optional(),
+  fileName: z.string().trim().min(1).max(255),
+  /** 只认 '1'：存在同名文件时默认拒绝覆盖，避免误伤 */
+  overwrite: z.string().optional(),
+})
+export type InstanceFileUploadQuery = z.infer<typeof instanceFileUploadQuerySchema>
+
+export const instanceFileUploadResultSchema = z.object({
+  path: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  /** 是否覆盖了原有文件（覆盖前已自动备份旧内容） */
+  overwritten: z.boolean(),
+})
+export type InstanceFileUploadResult = z.infer<typeof instanceFileUploadResultSchema>
+
+export const instanceFileDownloadQuerySchema = z.object({
+  instanceId: instanceIdSchema,
+  path: z.string().min(1).max(1024),
+})
+export type InstanceFileDownloadQuery = z.infer<typeof instanceFileDownloadQuerySchema>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ClusterOnlinePlayersDto } from '@/api/modules/cluster'
 import type { InstanceItem } from '@/api/modules/instance'
-import { NAlert, NButton, NCard, NEmpty, NTag } from 'naive-ui'
+import { NButton, NCard, NEmpty, NTag } from 'naive-ui'
 import { computed } from 'vue'
 import { routeToDstPlayerManage } from '@/navigation/game-routes'
 
@@ -24,9 +24,6 @@ const hasPlayers = computed(() => Boolean(players.value && players.value.length 
 
 /** 有在线记录却列不出来的人数（游戏没给出可用 ID），与概览的人数读数同源 */
 const unlistedCount = computed(() => props.onlinePlayers?.unlistedPlayerCount ?? 0)
-
-/** 有运行中的分片没答上来：此时列表可能少人，不能当成完整名单 */
-const partial = computed(() => Boolean(props.onlinePlayers?.partial))
 
 const emptyDescription = computed(() => {
   if (!running.value) {
@@ -66,10 +63,6 @@ function goPlayerManage() {
         管理玩家
       </NButton>
     </template>
-
-    <NAlert v-if="partial" type="warning" :bordered="false" class="mb-3">
-      这次没能取到完整的在线玩家（房间日志太密时会这样），列表可能少人，稍后会自动重试。
-    </NAlert>
 
     <NEmpty v-if="!hasPlayers" :description="emptyDescription" size="small" />
     <template v-else>

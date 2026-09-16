@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlayerListKind, PlayerOnlineEntry, PlayerOnlineRosterDto, PlayerShard } from '@/api/modules/player'
-import { NAlert, NButton, NCard, NEmpty, NSpace, NSpin, NTag } from 'naive-ui'
+import { NButton, NCard, NEmpty, NSpace, NSpin, NTag } from 'naive-ui'
 import { computed } from 'vue'
 
 const props = defineProps<{
@@ -78,10 +78,6 @@ function displayId(player: PlayerOnlineEntry): string {
     <template #header-extra>
       <span class="text-xs text-muted-foreground">每 15 秒自动刷新</span>
     </template>
-
-    <NAlert v-if="roster?.partial" type="warning" :bordered="false" class="mb-3">
-      这次没能取到完整的在线玩家（房间日志太密时会这样），列表可能少人，稍后会自动重试。
-    </NAlert>
 
     <NSpin :show="loading && !roster">
       <NEmpty v-if="!roster || roster.players.length === 0" :description="emptyDescription" size="small" />

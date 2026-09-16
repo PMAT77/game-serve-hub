@@ -140,6 +140,8 @@ function handleDownload(row: BackupItem) {
 const createDialogVisible = ref(false)
 const createDialogNote = ref('')
 const importModalVisible = ref(false)
+/** 打包存档可能要几十秒：提交期间按钮转圈，并挂一条常驻提示，避免点完像没反应 */
+const creatingBackup = ref(false)
 
 function openCreateBackupDialog() {
   if (!selectedInstanceId.value || selectedInstanceId.value === 'panel-db') {
@@ -152,18 +154,24 @@ function openCreateBackupDialog() {
 
 async function submitCreateBackup() {
   const instanceId = selectedInstanceId.value
-  if (!instanceId) {
+  if (!instanceId || creatingBackup.value) {
     return
   }
   createDialogVisible.value = false
+  creatingBackup.value = true
+  // 同一条 toast 先报「正在进行」、完成后再原地换成结果，中途始终有反馈
+  const pendingToastId = faToast.loading('正在备份存档，请稍候…')
   try {
     await apiBackup.createBackup(instanceId, createDialogNote.value)
-    faToast.success('备份创建成功')
+    faToast.success('备份创建成功', { id: pendingToastId })
     triggerLoad()
   }
   catch (err) {
     const message = err instanceof Error ? err.message : '备份创建失败'
-    faToast.error(message)
+    faToast.error(message, { id: pendingToastId })
+  }
+  finally {
+    creatingBackup.value = false
   }
 }
 
@@ -174,14 +182,16 @@ function handleCreateDbBackup() {
     positiveText: '开始备份',
     negativeText: '取消',
     onPositiveClick: async () => {
+      // 快照同样要等一会儿：先给进行中的提示，完成后再换成结果
+      const pendingToastId = faToast.loading('正在备份面板数据，请稍候…')
       try {
         await apiBackup.createDbBackup()
-        faToast.success('面板数据备份已创建')
+        faToast.success('面板数据备份已创建', { id: pendingToastId })
         triggerLoad()
       }
       catch (err) {
         const message = err instanceof Error ? err.message : '面板数据备份失败'
-        faToast.error(message)
+        faToast.error(message, { id: pendingToastId })
       }
     },
   })
@@ -398,6 +408,7 @@ onMounted(() => {
         type="primary"
         strong
         secondary
+        :loading="creatingBackup"
         :disabled="!selectedInstanceId || selectedInstanceId === 'panel-db'"
         @click="openCreateBackupDialog"
       >

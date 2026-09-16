@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SaveImportCandidate, SaveImportProbeResult, SaveImportResult, SaveImportTokenSource } from '@/api/modules/backup'
-import { NAlert, NButton, NInput, NModal, NProgress, NSelect, NSpin, NTag, useDialog } from 'naive-ui'
+import { NAlert, NButton, NInput, NModal, NProgress, NSelect, NTag, useDialog } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import apiBackup from '@/api/modules/backup'
@@ -216,7 +216,6 @@ watch(() => props.show, (visible) => {
             <span v-if="selectedFile" class="importer-file-name">
               {{ selectedFile.name }}（{{ formatSize(selectedFile.size) }}）
             </span>
-            <NSpin v-if="uploading" :size="14" />
           </div>
           <NProgress v-if="uploading" type="line" :percentage="uploadPercent" :height="6" />
           <div class="importer-hint">
@@ -228,65 +227,63 @@ watch(() => props.show, (visible) => {
           {{ uploadError }}
         </NAlert>
 
-        <NSpin :show="uploading">
-          <div v-if="probeResult" class="importer-probe">
-            <NAlert
-              v-if="!probeResult.candidates || probeResult.candidates.length === 0"
-              type="error"
-              :show-icon="false"
-            >
-              {{ probeResult.warnings?.[0] ?? '未识别到可导入的房间存档' }}
-            </NAlert>
+        <div v-if="probeResult" class="importer-probe">
+          <NAlert
+            v-if="!probeResult.candidates || probeResult.candidates.length === 0"
+            type="error"
+            :show-icon="false"
+          >
+            {{ probeResult.warnings?.[0] ?? '未识别到可导入的房间存档' }}
+          </NAlert>
 
-            <template v-else>
-              <div v-if="probeResult.candidates.length > 1" class="importer-field">
-                <div class="importer-label">
-                  识别到多个房间，请选择要导入的存档
-                </div>
-                <NSelect
-                  :value="selectedPath"
+          <template v-else>
+            <div v-if="probeResult.candidates.length > 1" class="importer-field">
+              <div class="importer-label">
+                识别到多个房间，请选择要导入的存档
+              </div>
+              <NSelect
+                :value="selectedPath"
+                size="small"
+                :options="candidateOptions"
+                placeholder="选择房间存档"
+                @update:value="(value: string) => selectedPath = value"
+              />
+            </div>
+
+            <div v-if="selectedCandidate" class="importer-candidate">
+              <div class="importer-candidate-row">
+                <span class="importer-label">房间名</span>
+                <span>{{ selectedCandidate.clusterName ?? '未知' }}</span>
+                <NTag
                   size="small"
-                  :options="candidateOptions"
-                  placeholder="选择房间存档"
-                  @update:value="(value: string) => selectedPath = value"
-                />
+                  :bordered="false"
+                  :type="selectedCandidate.worldGenerated ? 'success' : 'default'"
+                >
+                  {{ selectedCandidate.worldGenerated ? '世界已生成' : '世界未生成' }}
+                </NTag>
               </div>
-
-              <div v-if="selectedCandidate" class="importer-candidate">
-                <div class="importer-candidate-row">
-                  <span class="importer-label">房间名</span>
-                  <span>{{ selectedCandidate.clusterName ?? '未知' }}</span>
-                  <NTag
-                    size="small"
-                    :bordered="false"
-                    :type="selectedCandidate.worldGenerated ? 'success' : 'default'"
-                  >
-                    {{ selectedCandidate.worldGenerated ? '世界已生成' : '世界未生成' }}
-                  </NTag>
-                </div>
-                <div class="importer-candidate-row">
-                  <span class="importer-label">包含世界</span>
-                  <span>{{ selectedCandidate.shards.map(shardLabel).join('、') || '无' }}</span>
-                  <span class="importer-label">存档大小</span>
-                  <span>
-                    {{ formatSize(selectedCandidate.sizeBytes) }}{{ selectedCandidate.sizeIncomplete ? '（存档过大，未完全统计）' : '' }}
-                  </span>
-                </div>
-                <div class="importer-candidate-row">
-                  <span class="importer-label">Mod</span>
-                  <span>{{ selectedCandidate.modCount }} 个</span>
-                  <span class="importer-label">令牌</span>
-                  <span>{{ selectedCandidate.hasTokenFile ? '源档自带' : '源档未带' }}</span>
-                </div>
-                <div v-if="selectedCandidate.warnings.length > 0" class="importer-warns">
-                  <div v-for="warning in selectedCandidate.warnings" :key="warning" class="importer-warn">
-                    ⚠ {{ warning }}
-                  </div>
+              <div class="importer-candidate-row">
+                <span class="importer-label">包含世界</span>
+                <span>{{ selectedCandidate.shards.map(shardLabel).join('、') || '无' }}</span>
+                <span class="importer-label">存档大小</span>
+                <span>
+                  {{ formatSize(selectedCandidate.sizeBytes) }}{{ selectedCandidate.sizeIncomplete ? '（存档过大，未完全统计）' : '' }}
+                </span>
+              </div>
+              <div class="importer-candidate-row">
+                <span class="importer-label">Mod</span>
+                <span>{{ selectedCandidate.modCount }} 个</span>
+                <span class="importer-label">令牌</span>
+                <span>{{ selectedCandidate.hasTokenFile ? '源档自带' : '源档未带' }}</span>
+              </div>
+              <div v-if="selectedCandidate.warnings.length > 0" class="importer-warns">
+                <div v-for="warning in selectedCandidate.warnings" :key="warning" class="importer-warn">
+                  ⚠ {{ warning }}
                 </div>
               </div>
-            </template>
-          </div>
-        </NSpin>
+            </div>
+          </template>
+        </div>
 
         <div class="importer-field">
           <div class="importer-label">

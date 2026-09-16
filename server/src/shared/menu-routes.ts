@@ -26,7 +26,7 @@ export const OPS_MANAGE_PERMISSION = 'ops:manage'
  * 后端驱动的动态菜单与路由（component 为 views/ 下相对路径）。
  *
  * 菜单组织约定（扁平化，杜绝「控制台>控制台>监控台」式同名嵌套）：
- * - 主导航（图标栏）每一项对应一个页面任务：监控台 / 实例管理 / 房间管理 / 世界管理 / 模组管理 / 系统设置；
+ * - 主导航（图标栏）每一项对应一个页面任务：监控台 / 实例管理 / 房间管理 / 世界管理 / 玩家管理 / 模组管理 / 系统设置；
  * - 页面路由挂在 Layout 容器下（component: 'Layout'），真实页面 `meta.menu: false` 使容器在菜单中呈现为可点击的单项；
  * - 容器用 redirect 指向真实页面；列表页 `meta.breadcrumb: false` 避免与容器标题重复；
  * - 房间/世界/Mod 的设置页保持隐藏路由（menu: false），面包屑正常展示，activeMenu 归属列表项。
@@ -172,6 +172,51 @@ export const menuRouteList: MenuRouteItem[] = [
   },
   {
     meta: {
+      title: '世界管理',
+      icon: 'ri:earth-line',
+    },
+    children: [
+      {
+        path: FRONTEND_ROUTE_PATHS.dstWorlds,
+        component: 'Layout',
+        name: 'dstWorlds',
+        meta: {
+          title: '世界管理',
+          icon: 'ri:earth-line',
+          auth: NODE_INSTANCE_MANAGE_PERMISSION,
+        },
+        children: [
+          {
+            path: '',
+            name: 'dstWorldList',
+            component: 'games/dst/shard/index.vue',
+            meta: {
+              title: '世界管理',
+              icon: 'ri:earth-line',
+              auth: NODE_INSTANCE_MANAGE_PERMISSION,
+              menu: false,
+              breadcrumb: false,
+              activeMenu: FRONTEND_ROUTE_PATHS.dstWorlds,
+            },
+          },
+          {
+            path: ':instanceId/settings',
+            name: 'dstWorldSettings',
+            component: 'games/dst/shard/settings.vue',
+            meta: {
+              title: '世界设置',
+              icon: 'ri:landscape-line',
+              auth: NODE_INSTANCE_MANAGE_PERMISSION,
+              activeMenu: FRONTEND_ROUTE_PATHS.dstWorlds,
+              menu: false,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    meta: {
       title: '玩家管理',
       icon: 'ri:user-star-line',
     },
@@ -209,51 +254,6 @@ export const menuRouteList: MenuRouteItem[] = [
               icon: 'ri:user-settings-line',
               auth: NODE_INSTANCE_MANAGE_PERMISSION,
               activeMenu: FRONTEND_ROUTE_PATHS.dstPlayers,
-              menu: false,
-            },
-          },
-        ],
-      },
-    ],
-  },
-  {
-    meta: {
-      title: '世界管理',
-      icon: 'ri:earth-line',
-    },
-    children: [
-      {
-        path: FRONTEND_ROUTE_PATHS.dstWorlds,
-        component: 'Layout',
-        name: 'dstWorlds',
-        meta: {
-          title: '世界管理',
-          icon: 'ri:earth-line',
-          auth: NODE_INSTANCE_MANAGE_PERMISSION,
-        },
-        children: [
-          {
-            path: '',
-            name: 'dstWorldList',
-            component: 'games/dst/shard/index.vue',
-            meta: {
-              title: '世界管理',
-              icon: 'ri:earth-line',
-              auth: NODE_INSTANCE_MANAGE_PERMISSION,
-              menu: false,
-              breadcrumb: false,
-              activeMenu: FRONTEND_ROUTE_PATHS.dstWorlds,
-            },
-          },
-          {
-            path: ':instanceId/settings',
-            name: 'dstWorldSettings',
-            component: 'games/dst/shard/settings.vue',
-            meta: {
-              title: '世界设置',
-              icon: 'ri:landscape-line',
-              auth: NODE_INSTANCE_MANAGE_PERMISSION,
-              activeMenu: FRONTEND_ROUTE_PATHS.dstWorlds,
               menu: false,
             },
           },

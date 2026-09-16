@@ -138,6 +138,11 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
     }
     const operationKey = `${action}:${instanceId}`
     actionLoadingIds.value = new Set([...actionLoadingIds.value, operationKey])
+    /**
+     * 停止要等在跑的进程落盘退出，删除还要先停实例再清目录，都不是转眼能完成的：
+     * 先挂一条常驻提示，结束时（成功或失败）原地换成结果，中途一直有反馈。
+     */
+    let pendingToastId: number | string | undefined
     try {
       if (action === 'start') {
         await runInstanceLifecycleWithPortHandling(instanceId, 'start')
@@ -148,19 +153,23 @@ export function useInstanceLifecycleActions(options: UseInstanceLifecycleActions
         return
       }
       if (action === 'stop') {
+        pendingToastId = faToast.loading('正在停止实例，请稍候…')
         await apiInstance.stopInstance(instanceId)
-        faToast.success('实例已停止')
+        faToast.success('实例已停止', { id: pendingToastId })
       }
       else {
+        pendingToastId = faToast.loading('正在删除实例，请稍候…')
         await apiInstance.deleteInstance(instanceId)
-        faToast.success('实例已删除')
+        faToast.success('实例已删除', { id: pendingToastId })
       }
       await options.refresh()
     }
     catch (error) {
       if (action !== 'start' && action !== 'restart') {
+        // 同一条 toast 换成失败结果，别让「正在删除…」一直转下去
         faToast.error('操作失败', {
           description: describeInstanceActionError(error, '请稍后重试'),
+          ...(pendingToastId === undefined ? {} : { id: pendingToastId }),
         })
       }
     }

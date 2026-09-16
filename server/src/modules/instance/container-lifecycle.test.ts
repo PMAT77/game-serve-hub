@@ -5,8 +5,10 @@ import path from 'node:path'
 import { after, afterEach, describe, it } from 'node:test'
 import { resolveDockerStatus } from '../../infra/docker.ts'
 import {
+  bumpCavesStartGeneration,
   classifyMasterProbe,
   ensureContainerRuntimeReady,
+  isCurrentCavesStartGeneration,
   isHealthyRuntimeForResurrect,
   readClusterMasterPort,
   resolveShardReadyWaitSec,
@@ -139,8 +141,27 @@ describe('classifyMasterProbe', () => {
   })
 })
 
-describe('resolveShardReadyWaitSec', () => {
-  const original = process.env.GSH_SHARD_READY_WAIT_SEC
+/**
+ * 后台等主世界就绪可能好几分钟，这期间用户完全可能又点了一次停止或重新启动。
+ * 旧任务若不作废，就会在实例已经停机之后把洞穴拉起来，并挂上一个再也停不掉的日志跟随。
+ */
+describe('洞穴启动代号', () => {
+  it('停止或重新启动会让等待中的任务作废', () => {
+    const instanceId = 'instance-gen-1'
+    const first = bumpCavesStartGeneration(instanceId)
+    assert.equal(isCurrentCavesStartGeneration(instanceId, first), true)
+    const second = bumpCavesStartGeneration(instanceId)
+    assert.equal(isCurrentCavesStartGeneration(instanceId, first), false)
+    assert.equal(isCurrentCavesStartGeneration(instanceId, second), true)
+  })
+
+  it('从未启动过的实例没有任何代号算当前', () => {
+    assert.equal(isCurrentCavesStartGeneration('instance-gen-never-started', 1), false)
+    assert.equal(isCurrentCavesStartGeneration('instance-gen-never-started', 0), true)
+  })
+})
+
+describe('resolveShardReadyWaitSec', () => {  const original = process.env.GSH_SHARD_READY_WAIT_SEC
   afterEach(() => {
     if (original === undefined) {
       delete process.env.GSH_SHARD_READY_WAIT_SEC

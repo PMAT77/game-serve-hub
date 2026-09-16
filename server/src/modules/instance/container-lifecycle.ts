@@ -674,6 +674,7 @@ export async function startInstanceContainer(
       installPath: input.installPath,
       masterRef: ref,
       cavesSpec,
+      generation: bumpCavesStartGeneration(input.instanceId),
       startCaves: async () => {
         const result = await startSingleShardContainer(runtime, cavesSpec, gameDstImage, runtimeMode)
         return result.ok ? { ok: true as const, ref: result.ref } : { ok: false as const, message: `洞穴：${result.message}` }
@@ -681,6 +682,25 @@ export async function startInstanceContainer(
     })
   }
   return { ok: true, ref, displayCommand }
+}
+
+/**
+ * 每次启动/停止自增的代号，用来作废还在等待中的洞穴启动任务。
+ *
+ * 后台任务要等主世界就绪（可能好几分钟）才动手。这段时间里用户完全可能又点了一次
+ * 停止或重新启动：旧任务若不感知，就会在实例已经被停机之后把洞穴拉起来、还会顺手挂上
+ * 一个再也停不掉的日志跟随。代号变了就静默退出，并把已经起来的残留分片收掉。
+ */
+const cavesStartGenerations = new Map<string, number>()
+
+export function bumpCavesStartGeneration(instanceId: string): number {
+  const next = (cavesStartGenerations.get(instanceId) ?? 0) + 1
+  cavesStartGenerations.set(instanceId, next)
+  return next
+}
+
+export function isCurrentCavesStartGeneration(instanceId: string, generation: number): boolean {
+  return (cavesStartGenerations.get(instanceId) ?? 0) === generation
 }
 
 /**
@@ -697,11 +717,17 @@ async function startCavesAfterMasterReady(
     installPath: string
     masterRef: ContainerRef
     cavesSpec: ShardContainerSpec
+    /** 本次启动的代号；与当前代号不一致说明用户已重新启动或停止，任务应作废 */
+    generation: number
     startCaves: () => Promise<{ ok: true, ref: ContainerRef } | { ok: false, message: string }>
   },
 ): Promise<void> {
   const runtime = getContainerRuntime()
+  const stale = () => !isCurrentCavesStartGeneration(input.instanceId, input.generation)
   const failStart = async (message: string) => {
+    if (stale()) {
+      return
+    }
     await stopAndRemoveShard(runtime, input.masterRef)
     instanceConsoleLogStore.appendSystem(input.instanceId, message, 'caves')
     await updateGameInstanceRuntime(input.instanceId, {
@@ -721,6 +747,10 @@ async function startCavesAfterMasterReady(
       input.masterRef,
       readClusterMasterPort(input.installPath),
     )
+    if (stale()) {
+      app.log.info({ instanceId: input.instanceId }, '实例已被重新启动或停止，放弃本次洞穴启动')
+      return
+    }
     if (readiness.kind === 'stopped' || readiness.kind === 'restart-loop') {
       await failStart(
         `${readiness.detail}，已中止启动洞穴分片。内存不足时可先执行 gsh setup-swap 增加 swap，'
@@ -736,6 +766,13 @@ async function startCavesAfterMasterReady(
       )
     }
     const cavesStart = await input.startCaves()
+    if (stale()) {
+      // 洞穴是在代号变更之后才起来的：立刻收掉，别留下没人管的残留分片与日志跟随
+      if (cavesStart.ok) {
+        await stopAndRemoveShard(runtime, cavesStart.ref)
+      }
+      return
+    }
     if (!cavesStart.ok) {
       await failStart(cavesStart.message)
       return
@@ -749,6 +786,8 @@ async function startCavesAfterMasterReady(
 }
 
 export async function stopInstanceContainer(instanceId: string): Promise<void> {
+  // 先作废还在等待中的洞穴启动任务：否则它会在实例停机之后把洞穴拉起来
+  bumpCavesStartGeneration(instanceId)
   stopLogFollow(instanceId)
   const instance = await getGameInstanceById(instanceId)
   const runtime = getContainerRuntime()
@@ -788,6 +827,8 @@ export async function stopInstanceContainer(instanceId: string): Promise<void> {
 }
 
 export async function removeInstanceContainer(instanceId: string): Promise<void> {
+  // 删除实例同样要作废等待中的洞穴启动任务，否则它会把分片又拉回来
+  bumpCavesStartGeneration(instanceId)
   stopLogFollow(instanceId)
   const runtime = getContainerRuntime()
   const cavesRef = await resolveCavesContainerRef(instanceId)

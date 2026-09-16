@@ -64,10 +64,10 @@ function clearResourceEnv() {
   }
 }
 
-describe('NativeSystemdRuntime serialization', () => {
-  const LAUNCHER = '/srv/gsh/runtime/launch.sh'
-  const CONSOLE_LOG = '/srv/gsh/runtime/console-logs/shard.log'
+const LAUNCHER = '/srv/gsh/runtime/launch.sh'
+const CONSOLE_LOG = '/srv/gsh/runtime/console-logs/shard.log'
 
+describe('NativeSystemdRuntime serialization', () => {
   it('quotes launcher arguments and feeds stdin from a FIFO', () => {
     const script = buildNativeLauncherScript(buildSpec(), '/srv/gsh/runtime/stdin.fifo')
     assert.match(script, /mkfifo -m 600/)
@@ -278,5 +278,73 @@ describe('readFileTailLines', () => {
 
   it('空文件返回空数组', () => {
     assert.deepEqual(readFileTailLines(writeLog(''), 10), [])
+  })
+})
+
+/** 把 unit 拆成 { section: { key: value } }，用来断言指令落在哪个分区 */
+function parseUnitSections(unit: string): Record<string, Record<string, string>> {
+  const sections: Record<string, Record<string, string>> = {}
+  let current = ''
+  for (const rawLine of unit.split('\n')) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) {
+      continue
+    }
+    const header = /^\[(.+)\]$/.exec(line)
+    if (header) {
+      current = header[1]!
+      sections[current] = {}
+      continue
+    }
+    const separator = line.indexOf('=')
+    if (separator <= 0 || !current) {
+      continue
+    }
+    sections[current]![line.slice(0, separator)] = line.slice(separator + 1)
+  }
+  return sections
+}
+
+/**
+ * systemd 对指令分区极其严格：把 [Service] 的指令写进 [Unit]（或反过来）会让**整个**
+ * unit 被判非法，`systemctl start` 只回一句 "has a bad unit file setting"，Native 下
+ * 实例一个都起不来，而现场完全看不出是哪一行的问题。
+ *
+ * 已用 Debian 12 自带的 systemd 252 跑过 `systemd-analyze verify`，确认当前 unit 无语法
+ * 错误；这里把分区固化下来，避免以后挪动指令时无人察觉。
+ */
+describe('生成的 unit 指令落在正确分区', () => {
+  it('资源与重启限制都在 systemd 要求的 section 里', () => {
+    setResourceEnv('GSH_DST_CONTAINER_MEMORY_MB', '2048')
+    const sections = parseUnitSections(buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG))
+    for (const key of ['Description', 'StartLimitIntervalSec', 'StartLimitBurst']) {
+      assert.ok(key in (sections.Unit ?? {}), `${key} 应写在 [Unit]`)
+    }
+    for (const key of [
+      'Type',
+      'WorkingDirectory',
+      'ExecStart',
+      'Restart',
+      'RestartSec',
+      'KillMode',
+      'TimeoutStopSec',
+      'LimitNOFILE',
+      'StandardOutput',
+      'StandardError',
+      'Environment',
+      'MemoryHigh',
+      'MemoryMax',
+      'MemorySwapMax',
+      'CPUQuota',
+    ]) {
+      assert.ok(key in (sections.Service ?? {}), `${key} 应写在 [Service]`)
+    }
+    assert.ok('WantedBy' in (sections.Install ?? {}), 'WantedBy 应写在 [Install]')
+  })
+
+  it('标准输出与错误落到同一个面板可读的日志文件', () => {
+    const sections = parseUnitSections(buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG))
+    assert.equal(sections.Service!.StandardOutput, `append:${CONSOLE_LOG}`)
+    assert.equal(sections.Service!.StandardError, `append:${CONSOLE_LOG}`)
   })
 })

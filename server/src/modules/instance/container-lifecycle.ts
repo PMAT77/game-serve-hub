@@ -214,10 +214,19 @@ export async function ensureInstanceContainerLogFollow(instanceId: string): Prom
   }
 }
 
+/**
+ * 镜像类错误只在 Docker 模式翻译：Native 模式没有镜像，它的报错原文里带着
+ * unit 诊断（systemd 的原始抱怨、unit 文件内容），必须原样透出，不能被镜像文案顶掉。
+ */
+function formatShardStartError(raw: string, gameDstImage: string, runtimeMode: 'docker' | 'native'): string {
+  return runtimeMode === 'docker' ? formatGameDstImageError(raw, gameDstImage) : raw
+}
+
 async function startSingleShardContainer(
   runtime: ContainerRuntime,
   spec: ShardContainerSpec,
   gameDstImage: string,
+  runtimeMode: 'docker' | 'native',
 ): Promise<{ ok: true, ref: ContainerRef } | { ok: false, message: string }> {
   let ref: ContainerRef
   try {
@@ -225,7 +234,7 @@ async function startSingleShardContainer(
   }
   catch (error) {
     const raw = error instanceof Error ? error.message : '创建分片运行时失败'
-    return { ok: false, message: formatGameDstImageError(raw, gameDstImage) }
+    return { ok: false, message: formatShardStartError(raw, gameDstImage, runtimeMode) }
   }
   try {
     await runtime.start(ref)
@@ -233,7 +242,7 @@ async function startSingleShardContainer(
   catch (error) {
     await runtime.remove(ref)
     const raw = error instanceof Error ? error.message : '分片运行时启动失败'
-    return { ok: false, message: formatGameDstImageError(raw, gameDstImage) }
+    return { ok: false, message: formatShardStartError(raw, gameDstImage, runtimeMode) }
   }
   const inspect = await runtime.inspect(ref)
   if (!inspect.running) {
@@ -396,7 +405,7 @@ export async function startInstanceContainer(
   }
   const startedRefs: ContainerRef[] = []
   const startSpec = async (spec: ShardContainerSpec, label: string) => {
-    const result = await startSingleShardContainer(runtime, spec, gameDstImage)
+    const result = await startSingleShardContainer(runtime, spec, gameDstImage, runtimeMode)
     if (!result.ok) {
       return { ok: false as const, message: `${label}：${result.message}` }
     }

@@ -435,6 +435,25 @@ sudo loginctl show-user gsh -p Linger
 
 不要用 tmux、screen 或 PM2 绕过；会破坏日志、自恢复和资源限制语义。
 
+### `has a bad unit file setting`（Native 启动实例时）
+
+systemd 只会回这一句，不说是哪一行。分片 unit 落在数据目录下，直接看原文，并让 systemd 按**用户实例**解析它：
+
+```bash
+INSTANCE_ID=<报错信息里那个实例 ID>
+UNIT_DIR=/var/lib/game-server-hub/home/.config/systemd/user
+cat "${UNIT_DIR}/gsh-${INSTANCE_ID}-master.service"
+sudo -u gsh env XDG_RUNTIME_DIR=/run/user/$(id -u gsh) \
+  systemd-analyze --user verify "${UNIT_DIR}/gsh-${INSTANCE_ID}-master.service"
+```
+
+注意启动失败后面板会删掉这份 unit（避免宿主重启时被 systemd 自动拉起），所以要尽快看；新版面板会把 unit 原文、`systemd-analyze --user verify` 与 `systemctl --user status` 的输出直接放进「启动失败」提示里。
+
+已知原因有两类，都属于面板生成 unit 的写法问题，新版已修：
+
+- `WorkingDirectory=` 被加了双引号。systemd 对这一行**不做去引号处理**，会把 `"/srv/..."` 整串当路径，判定「非绝对路径」后直接判整个 unit 非法——表现为这台机器上**所有实例都起不来**，与是否导入存档无关。`ExecStart=` 走 shell 风格分词，引号是合法的，两行不能共用同一种写法。
+- 值里出现裸 `%`：systemd 会按 specifier 展开，路径含 `%` 时 unit 同样会被判非法；新版统一转义为 `%%`。
+
 ### `cross-mode migration is not supported`（重装时）
 
 Docker 与 Native 之间不自动迁移。保留数据目录后按目标模式重装，再手工迁移 `/var/lib/game-server-hub` 下的数据。

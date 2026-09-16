@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
-import { buildNativeLauncherScript, buildNativeSystemdUnit } from './native-systemd-runtime'
+import { buildNativeLauncherScript, buildNativeSystemdUnit, formatUnitLoadDiagnostic } from './native-systemd-runtime'
 import type { ShardContainerSpec } from './types'
 
 function buildSpec(): ShardContainerSpec {
@@ -91,5 +91,58 @@ describe('NativeSystemdRuntime serialization', () => {
     const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
     assert.doesNotMatch(unit, /MemoryMax=/)
     assert.doesNotMatch(unit, /CPUQuota=/)
+  })
+
+  // 回归：systemd 对 WorkingDirectory= 不做去引号处理，写 `"/path"` 会被判成
+  // "path is not absolute" → `has a bad unit file setting`，Native 下实例一个都起不来。
+  it('writes WorkingDirectory without quotes', () => {
+    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    assert.match(unit, /^WorkingDirectory=\/srv\/gsh\/instance-1\/bin64$/m)
+    assert.doesNotMatch(unit, /WorkingDirectory="/)
+  })
+
+  // 回归：路径里的裸 % 会被 systemd 当成 specifier 展开，整个 unit 被判非法，
+  // systemctl 只回一句 "has a bad unit file setting"，现场无法定位。
+  it('escapes percent signs in the values systemd expands', () => {
+    const spec = buildSpec()
+    spec.workingDir = '/srv/gsh/room%1/bin64'
+    spec.cmd = ['/srv/gsh/room%1/bin64/dontstarve_dedicated_server_nullrenderer_x64', '-cluster', 'Cluster_1']
+    const unit = buildNativeSystemdUnit(spec, '/srv/gsh/room%1/launch.sh')
+    assert.match(unit, /^WorkingDirectory=\/srv\/gsh\/room%%1\/bin64$/m)
+    assert.match(unit, /ExecStart="\/srv\/gsh\/room%%1\/launch\.sh"/)
+    assert.doesNotMatch(unit, /room%1/)
+  })
+
+  it('clamps out-of-range resource limits instead of writing an invalid unit', () => {
+    setResourceEnv('GSH_DST_CONTAINER_MEMORY_MB', '1536')
+    setResourceEnv('GSH_DST_CONTAINER_CPU_QUOTA', '200')
+    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    assert.match(unit, /MemoryMax=1610612736/)
+    assert.match(unit, /CPUQuota=10000\.00%/)
+  })
+
+  it('does not wait on network-online.target, which no user instance provides', () => {
+    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    assert.doesNotMatch(unit, /network-online\.target/)
+  })
+
+  it('collects the evidence systemd hides behind a bad unit file setting', () => {
+    const diagnostic = formatUnitLoadDiagnostic({
+      unitPath: '/srv/gsh/unit.service',
+      unitContent: '[Service]\nWorkingDirectory="x"\n',
+      verifyOutput: '/srv/gsh/unit.service:2: Invalid setting\n',
+      statusOutput: 'Loaded: bad-setting\n',
+    })
+    assert.match(diagnostic, /systemd-analyze verify：/)
+    assert.match(diagnostic, /Invalid setting/)
+    assert.match(diagnostic, /unit 文件内容（\/srv\/gsh\/unit\.service）/)
+  })
+
+  it('truncates oversized diagnostics', () => {
+    const diagnostic = formatUnitLoadDiagnostic({
+      unitPath: '/srv/gsh/unit.service',
+      unitContent: 'x'.repeat(5000),
+    })
+    assert.match(diagnostic, /已截断/)
   })
 })

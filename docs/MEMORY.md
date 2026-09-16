@@ -71,9 +71,10 @@ sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose
 | `GSH_STEAMCMD_CONTAINER_MEMORY_SWAP_MB` | SteamCMD 子容器 swap 上限（MiB），预设中与内存上限同值 |
 | `GSH_DST_CONTAINER_MEMORY_MB` | 每个 DST 分片容器上限（MiB） |
 | `GSH_HOST_STEAMCMD_PLANNING_MB` | 安装 / 更新前的内存规划预留（MiB），参与守卫判断 |
-| `GSH_HOST_DST_PLANNING_MB` | 单个 DST 分片启动前的内存规划预留（MiB） |
+| `GSH_HOST_DST_PLANNING_MB` | DST 启动守卫的单分片规划**下界**（MiB）；实际按「512 + 每个启用中的 Mod 32 MiB」估算，双分片再乘 2 并加余量。**设小不会让守卫更宽松** |
 | `GSH_HOST_MEMORY_HEADROOM_MB` | 安装/启动守卫保留空闲（默认 512） |
 | `GSH_HOST_MIN_AVAILABLE_MB` | 设为 `0` 可关闭守卫（小内存慎用） |
+| `GSH_SHARD_READY_WAIT_SEC` | 等待主世界分片就绪的上限秒数（默认 900）；超时会照常启动洞穴分片 |
 | `GSH_STEAMCMD_APP_UPDATE_TIMEOUT_MS` | 单次 app_update 超时（毫秒，默认 3600000 = 60 分钟），超时终止后重试断点续传 |
 
 完整示例见仓库根目录 `panel.env.example`。

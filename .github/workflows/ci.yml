@@ -54,6 +54,11 @@ jobs:
       - name: gsh CLI checks
         run: pnpm run check:gsh
 
+      # panel.env 预设有两份拷贝（仓库文件 + 安装器内置 heredoc），历史上因不同步
+      # 让走兜底路径安装的小内存机器拿到了一半的 DST 内存上限。
+      - name: panel.env preset consistency
+        run: pnpm run check:presets
+
       - name: Unit tests
         env:
           GSH_UNIT_TEST: '1'

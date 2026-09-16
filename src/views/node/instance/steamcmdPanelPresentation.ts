@@ -42,6 +42,14 @@ export interface RuntimeEnvironmentView {
   imageRows: RuntimeEnvironmentImageView[]
   tags: RuntimeEnvironmentTagView[]
   primaryActionLabel: string
+  /**
+   * 是否提供独立的「手动拉取运行镜像」入口。
+   *
+   * 只在 Docker 异构部署（安装镜像与运行镜像不是同一引用）时为 true：此时两个按钮
+   * 拉的是两个不同镜像，才需要两个入口。同源时主按钮已经覆盖了同一个引用，再摆一个
+   * 等价入口会让人以为有两个任务在跑（历史实现里两个按钮还共用一个 loading，同时转圈
+   * 更加深了这种误解）。Native 模式没有运行镜像概念，主按钮本身也只做检查。
+   */
   secondaryPullVisible: boolean
   hint: RuntimeEnvironmentHint | null
 }
@@ -115,7 +123,9 @@ export function resolveRuntimeEnvironmentView(input: RuntimeEnvironmentInput): R
     imageRows,
     tags,
     primaryActionLabel: isNativeMode ? '检查 SteamCMD' : '准备游戏镜像',
-    secondaryPullVisible: !isNativeMode && !input.gameDstInstalled,
+    // imageUnified 已蕴含 !isNativeMode，但仍显式写出：Native 下运行环境不可用会让
+    // gameDstInstalled 为 false，只靠 !imageUnified 会把「手动拉取运行镜像」漏出来。
+    secondaryPullVisible: !isNativeMode && !imageUnified && !input.gameDstInstalled,
     hint,
   }
 }

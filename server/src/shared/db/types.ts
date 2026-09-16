@@ -91,6 +91,8 @@ export interface DbGameInstance {
   lastCommand: string | null
   lastExitCode: number | null
   lastError: string | null
+  /** 运行期警告（重启循环 / 退出原因 / 分片残留）；与 lastError 分开，停止实例不清空 */
+  runtimeWarning: string | null
   /** 最近一次异常退出检测时间（ISO）；成功启动后清除 */
   unexpectedExitAt: string | null
   installLogStatus: DbInstallLogStatus | null
@@ -120,6 +122,7 @@ export interface CreateGameInstanceInput {
   lastCommand?: string | null
   lastExitCode?: number | null
   lastError?: string | null
+  runtimeWarning?: string | null
 }
 
 export interface UpdateGameInstanceRuntimeInput {
@@ -136,6 +139,7 @@ export interface UpdateGameInstanceRuntimeInput {
   lastCommand?: string | null
   lastExitCode?: number | null
   lastError?: string | null
+  runtimeWarning?: string | null
   unexpectedExitAt?: string | null
   installLogStatus?: DbInstallLogStatus | null
   installPercent?: number | null

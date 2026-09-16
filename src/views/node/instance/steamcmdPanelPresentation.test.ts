@@ -33,13 +33,15 @@ describe('resolveRuntimeEnvironmentView', () => {
     assert.equal(view.hint, null)
   })
 
-  it('Docker 同源且镜像缺失：标签与提示都说游戏镜像', () => {
+  it('Docker 同源且镜像缺失：标签与提示都说游戏镜像，且不给出等价的第二入口', () => {
     const input = baseInput({ steamcmdInstalled: false, gameDstInstalled: false })
     const view = resolveRuntimeEnvironmentView(input)
 
     assert.deepEqual(tagsOf(input), ['Docker 可用', '游戏镜像未就绪'])
     assert.equal(view.hint?.tone, 'warning')
     assert.match(view.hint?.text ?? '', /提前准备/)
+    // 同源时两个入口拉同一个引用，第二个按钮只是主按钮的重复
+    assert.equal(view.secondaryPullVisible, false)
   })
 
   it('Docker 异构：退回两行镜像与三条标签', () => {
@@ -57,6 +59,15 @@ describe('resolveRuntimeEnvironmentView', () => {
     ])
     assert.deepEqual(tagsOf(input), ['Docker 可用', '安装镜像已就绪', '安装实例后自动准备'])
     assert.equal(view.secondaryPullVisible, true)
+  })
+
+  it('Docker 异构且运行镜像已就绪：不再需要第二个入口', () => {
+    const input = baseInput({
+      gameDstInstalled: true,
+      gameDstImage: 'ghcr.io/pmat77/game-server-hub:v0.3.10',
+    })
+
+    assert.equal(resolveRuntimeEnvironmentView(input).secondaryPullVisible, false)
   })
 
   it('Docker 异构时运行镜像已就绪也单独成标签', () => {
@@ -121,6 +132,19 @@ describe('resolveRuntimeEnvironmentView', () => {
 
     assert.equal(view.hint?.tone, 'error')
     assert.match(view.hint?.text ?? '', /运行环境不可用/)
+  })
+
+  it('Native 模式且运行环境不可用时运行镜像恒为未就绪，也不能因此漏出第二入口', () => {
+    // Native 下 isGameDstImageInstalled 跟随 runtimeStatus，环境不可用时为 false；
+    // 若只用「!imageUnified」判断，这个 false 会把 Docker 专有的第二入口漏到 Native 界面上。
+    const view = resolveRuntimeEnvironmentView(baseInput({
+      isNativeMode: true,
+      runtimeAvailable: false,
+      steamcmdInstalled: false,
+      gameDstInstalled: false,
+    }))
+
+    assert.equal(view.secondaryPullVisible, false)
   })
 
   it('界面文案不含部署变量名与容器内路径这类实现细节', () => {

@@ -17,6 +17,14 @@ export const gameInstances = sqliteTable('game_instances', {
   lastCommand: text('last_command'),
   lastExitCode: integer('last_exit_code'),
   lastError: text('last_error'),
+  /**
+   * 运行期警告（重启循环、退出原因、分片残留）。
+   *
+   * 与 lastError 分开存：lastError 会被「启动失败」「停止实例」「状态对账」反复覆盖，
+   * 曾经把「主世界已停止但洞穴仍在运行」这类提示在写入一秒后就擦掉，服主永远看不到。
+   * 本字段只在实例干净运行足够久或用户显式清除时才清空。
+   */
+  runtimeWarning: text('runtime_warning'),
   /** 最近一次异常退出检测时间（ISO）；成功启动后清除 */
   unexpectedExitAt: text('unexpected_exit_at'),
   installLogStatus: text('install_log_status'),

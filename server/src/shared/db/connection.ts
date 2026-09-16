@@ -195,6 +195,7 @@ function ensureSchemaCompatibility(database: DatabaseSync) {
   ensureColumn(database, 'game_instances', 'last_command', 'text')
   ensureColumn(database, 'game_instances', 'last_exit_code', 'integer')
   ensureColumn(database, 'game_instances', 'last_error', 'text')
+  ensureColumn(database, 'game_instances', 'runtime_warning', 'text')
   // install_log_* 由 drizzle 0003 迁移维护，勿在此 ensureColumn，避免与未入账的 0003 SQL 重复 ADD
 }
 

@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { HostMemoryPressureFailure } from '../../infra/container/host-resource-guard'
+import fs from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
 import { resolveDockerStatus } from '../../infra/docker'
 import { createDockerClient } from '../../infra/docker-connect'
@@ -41,7 +43,14 @@ import {
 import { getServerContainerConfig } from '../../shared/config/container'
 import { isSteamcmdRuntimeReady, resolveRuntimeStatus } from '../../infra/runtime'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
-import { getGameInstanceById, updateGameInstanceRuntime } from '../../shared/db/index'
+import { getGameInstanceById, listInstanceMods, updateGameInstanceRuntime } from '../../shared/db/index'
+import { resolveClusterPaths } from '../../infra/game-adapter/dst/cluster-service'
+import { parseClusterIni } from '../../infra/game-adapter/dst/cluster-ini'
+
+/** 主世界分片互联端口（cluster.ini [SHARD] master_port）；读不到时退回 DST 默认值 */
+const DEFAULT_DST_MASTER_PORT = 10888
+/** 等待主世界就绪的默认上限（秒）。36 个 Mod 在 2 核机上单分片加载约需 2–3 分钟 */
+const DEFAULT_SHARD_READY_WAIT_SEC = 300
 
 export type ConsoleCommandShard = 'master' | 'caves'
 
@@ -157,10 +166,14 @@ function stopShardLogFollow(instanceId: string, shard: ConsoleCommandShard) {
   logFollowAbortControllers.delete(key)
 }
 
-/** journalctl 权限不足时写在 stderr 的提示：面板读不到它会把它当成一条普通日志显示 */
+/**
+ * 分片日志来源已改为 systemd 直接追加到面板可读的文件（见 NativeSystemdRuntime），
+ * 不再依赖 journald 权限。这里保留一条兜底：万一文件读不到，至少告诉用户去哪找
+ * 游戏自己写的 server_log.txt。
+ */
 const JOURNAL_PERMISSION_HINT = /No journal files were opened|insufficient permissions/i
 
-/** 实例目录内游戏自己写的启动日志（面板读不到系统日志时，用户据此排查崩溃原因） */
+/** 实例目录内游戏自己写的启动日志（面板读不到分片日志时，用户据此排查崩溃原因） */
 function resolveShardGameLogHint(shard: ConsoleCommandShard): string {
   const shardDir = shard === 'caves' ? 'Caves' : 'Master'
   return `${DST_STORAGE_DIR}/${DST_CONF_DIR}/${DST_CLUSTER_NAME}/${shardDir}/server_log.txt`
@@ -182,13 +195,13 @@ function startShardLogFollow(instanceId: string, ref: ContainerRef, shard: Conso
           break
         }
         if (JOURNAL_PERMISSION_HINT.test(line.text)) {
-          // 这条是 journalctl 的报错，不是游戏输出：换成一句能指导排查的说明，
+          // 万一还是读到了系统日志的报错（不是游戏输出）：换成一句能指导排查的说明，
           // 否则控制台看起来像「服务器什么都没说」，把真正的崩溃原因藏起来。
           if (!permissionHintShown) {
             permissionHintShown = true
             instanceConsoleLogStore.appendSystem(
               instanceId,
-              `${label}日志暂时取不到（面板没有读取系统日志的权限）。完整的启动与报错信息在实例目录的 ${resolveShardGameLogHint(shard)}`,
+              `${label}分片日志暂时取不到。请查看实例目录的 ${resolveShardGameLogHint(shard)}，或服务器上的 systemctl --user status 输出`,
               shard,
             )
           }
@@ -322,6 +335,111 @@ async function stopAndRemoveShard(runtime: ContainerRuntime, ref: ContainerRef |
   }
 }
 
+/** 启用中且内容已就绪的 Mod 数量：内存估算的直接输入 */
+export async function countEnabledInstanceMods(instanceId: string): Promise<number> {
+  try {
+    const mods = await listInstanceMods(instanceId)
+    return mods.filter(mod => mod.enabled && mod.installStatus === 'ready').length
+  }
+  catch {
+    return 0
+  }
+}
+
+/**
+ * DB 记为已停止时，运行时探测到的快照是否真的代表「实例还在正常服务」。
+ *
+ * 正在被 systemd 自动拉起（`Restart=on-failure` 的 auto-restart 窗口）或已经重启过，
+ * 属于崩溃循环而不是「容器还在跑」。若此时把状态翻回运行中，就会抹掉上一趟对账刚写入
+ * 的崩溃告警——线上实测同一个请求里两趟对账互相覆盖，服主永远看不到「主世界已停止」。
+ */
+export function isHealthyRuntimeForResurrect(snapshot: ContainerInspect | null): boolean {
+  if (!snapshot?.running) {
+    return false
+  }
+  return !snapshot.restarting && (snapshot.restarts ?? 0) === 0
+}
+
+/** 主世界分片互联端口（cluster.ini [SHARD] master_port）；读不到时退回 DST 默认值 */
+export function readClusterMasterPort(installPath: string): number {  try {
+    const { clusterIniPath } = resolveClusterPaths(installPath)
+    const { fields } = parseClusterIni(fs.readFileSync(clusterIniPath, 'utf8'))
+    return Number.isInteger(fields.masterPort) && fields.masterPort > 0 && fields.masterPort <= 65535
+      ? fields.masterPort
+      : DEFAULT_DST_MASTER_PORT
+  }
+  catch {
+    return DEFAULT_DST_MASTER_PORT
+  }
+}
+
+/** 单次 TCP 连通探测：主世界完成 Lua 初始化、分片监听端口打开后才会接受连接 */
+function probeTcpPort(port: number, timeoutMs = 1000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port })
+    const finish = (ok: boolean) => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolve(ok)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+  })
+}
+
+/**
+ * 等主世界就绪后再拉起洞穴。
+ *
+ * 两个分片同时加载时，各自都要把整套 Mod 与世界读一遍：2 核 4G 机器上两个峰值叠在
+ * 一起会触发整机 OOM（线上实测主世界 anon-rss 已达 2.0 GiB 时被内核杀掉），而洞穴
+ * 此时连不上主世界，只会反复报 `Connection to master failed`，最后两个分片都白跑。
+ * 主世界先跑完，洞穴再加载时页缓存已经热了，整机峰值只剩原来的一个多一点。
+ */
+export async function waitForMasterShardReady(
+  app: FastifyInstance,
+  instanceId: string,
+  masterRef: ContainerRef,
+  masterPort: number,
+  waitSec = DEFAULT_SHARD_READY_WAIT_SEC,
+): Promise<{ ready: boolean, aborted: boolean }> {
+  const runtime = getContainerRuntime()
+  const startAt = Date.now()
+  const deadline = startAt + waitSec * 1000
+  let lastHeartbeat = startAt
+  while (Date.now() < deadline) {
+    if (await probeTcpPort(masterPort)) {
+      return { ready: true, aborted: false }
+    }
+    // 主世界单元已经不在运行（例如被 OOM 杀掉且不再拉起）：再等没有意义，
+    // 洞穴起来了也只是白占内存，直接中止本次启动更诚实。
+    let alive = true
+    try {
+      alive = (await runtime.inspect(masterRef)).running
+    }
+    catch {
+      alive = true
+    }
+    if (!alive) {
+      return { ready: false, aborted: true }
+    }
+    const now = Date.now()
+    if (now - lastHeartbeat >= 30_000) {
+      lastHeartbeat = now
+      const waited = Math.round((now - startAt) / 1000)
+      instanceConsoleLogStore.appendSystem(
+        instanceId,
+        `主世界仍在加载（已等待 ${waited} 秒），就绪后再启动洞穴分片`,
+        'master',
+      )
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000))
+  }
+  app.log.warn({ instanceId, masterPort, waitSec }, '等待主世界就绪超时，仍继续启动洞穴分片')
+  return { ready: false, aborted: false }
+}
+
 export async function startInstanceContainer(
   app: FastifyInstance,
   input: {
@@ -337,10 +455,6 @@ export async function startInstanceContainer(
 > {
   if (input.gameCode.trim() !== DST_APP_ID) {
     return { ok: false, message: '当前仅支持饥荒（343050）实例启动' }
-  }
-  const memoryPressure = assessHostMemoryForHeavyOperation('dst-container-start')
-  if (!memoryPressure.ok) {
-    return { ok: false, message: memoryPressure.detail, hostMemoryPressure: memoryPressure }
   }
   const { gameDstImage, instancesRoot, runtimeMode } = getServerContainerConfig()
   let containerGameRoot = input.installPath
@@ -392,6 +506,16 @@ export async function startInstanceContainer(
     }
   }
   const cavesConfigured = shardEnabled && isCavesShardConfigured(input.installPath)
+  // 内存守卫放在这里而不是函数开头：只有知道「要不要起洞穴、挂了多少 Mod」，
+  // 估算才对得上实际峰值。线上就是因为固定按单分片 512 MiB 放行，
+  // 36 个 Mod 的双分片启动在加载途中被内核 OOM 杀掉。
+  const memoryPressure = assessHostMemoryForHeavyOperation('dst-container-start', {
+    shardCount: cavesConfigured ? 2 : 1,
+    modCount: await countEnabledInstanceMods(input.instanceId),
+  })
+  if (!memoryPressure.ok) {
+    return { ok: false, message: memoryPressure.detail, hostMemoryPressure: memoryPressure }
+  }
   if (shardEnabled && !cavesConfigured) {
     return { ok: false, message: '已开启洞穴分片但无法准备洞穴配置，请检查安装目录权限后重试' }
   }
@@ -467,6 +591,34 @@ export async function startInstanceContainer(
     return { ok: false, message: masterStart.message }
   }
   if (cavesSpec) {
+    instanceConsoleLogStore.appendSystem(
+      input.instanceId,
+      '主世界分片已启动，正在加载 Mod 与世界；就绪后再启动洞穴分片',
+      'master',
+    )
+    const readiness = await waitForMasterShardReady(
+      app,
+      input.instanceId,
+      masterStart.ref,
+      readClusterMasterPort(input.installPath),
+    )
+    if (readiness.aborted) {
+      // 主世界已不在运行：把刚拉起的残留分片清掉，避免留下「洞穴单独在跑」的残局
+      for (const ref of startedRefs) {
+        await stopAndRemoveShard(runtime, ref)
+      }
+      return {
+        ok: false,
+        message: '主世界分片在加载途中退出，已中止启动洞穴分片。请查看分片日志确认原因（内存不足时可在「世界设置 → 模组」减少订阅的 Mod）。',
+      }
+    }
+    if (!readiness.ready) {
+      instanceConsoleLogStore.appendSystem(
+        input.instanceId,
+        `等待主世界就绪超时（${DEFAULT_SHARD_READY_WAIT_SEC} 秒），仍继续启动洞穴分片；若洞穴反复重连失败请检查主世界日志`,
+        'caves',
+      )
+    }
     const cavesStart = await startSpec(cavesSpec, '洞穴')
     if (!cavesStart.ok) {
       for (const ref of startedRefs) {

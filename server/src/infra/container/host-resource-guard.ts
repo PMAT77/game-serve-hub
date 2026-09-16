@@ -9,10 +9,25 @@ const MIB = 1024 * 1024
 const DEFAULT_STEAMCMD_PLANNING_MB = 1280
 /** 守卫用：未限制 DST 容器时的启动峰值估计 */
 const DEFAULT_DST_PLANNING_MB = 768
+/** 单分片空跑（0 个 Mod）的内存基线（MiB） */
+const DST_PLANNING_BASE_MB = 512
+/**
+ * 每个已启用 Mod 的额外内存估算（MiB）。
+ * 线上实测：36 个 Mod 的主世界分片 anon-rss 峰值约 2.0 GiB，与 512 + 32×36 ≈ 1.6 GiB 同量级。
+ */
+const DST_PLANNING_MB_PER_MOD = 32
 /** 守卫用：同机 seed 复制时的页缓存峰值估计 */
 const DEFAULT_SEED_PLANNING_MB = 768
 
 export type HeavyHostOperation = 'steamcmd-install' | 'dst-container-start' | 'install-seed-copy'
+
+/** DST 启动守卫的上下文：只有知道要起几个分片、挂多少 Mod，估算才有意义 */
+export interface DstStartMemoryContext {
+  /** 本次启动会拉起的分片数（仅主世界 1，开启洞穴 2） */
+  shardCount?: number
+  /** 启用中的 Mod 数量 */
+  modCount?: number
+}
 
 function readProcMeminfoKb(field: string): number | null {
   try {
@@ -65,17 +80,23 @@ export function resolveSteamcmdPlanningMb(): number {
   return Math.min(capMb, DEFAULT_STEAMCMD_PLANNING_MB)
 }
 
-function resolveDstPlanningMb(): number {
-  const explicit = parsePositiveMbEnv('GSH_HOST_DST_PLANNING_MB')
-  if (explicit !== undefined) {
-    return explicit
-  }
+/**
+ * 单分片启动峰值估算（MiB）。
+ *
+ * 传入 Mod 数量时按真实规模估算：Mod 才是内存大头，只用固定值会让「36 个 Mod 双分片」
+ * 这种配置轻易通过守卫，然后在加载途中被内核 OOM 杀掉（线上已发生）。
+ * 显式配置只作为下界——配置写得偏小不能变成「放行一次注定 OOM 的启动」；
+ * 确实要强制启动请用 GSH_HOST_MIN_AVAILABLE_MB=0 关掉守卫。
+ */
+export function resolveDstShardPlanningMb(modCount?: number): number {
   const limits = resolveDstContainerResourceLimits()
-  if (limits?.memory) {
-    const capMb = Math.round(limits.memory / MIB)
-    return Math.min(capMb, DEFAULT_DST_PLANNING_MB)
-  }
-  return DEFAULT_DST_PLANNING_MB
+  const capMb = limits?.memory ? Math.round(limits.memory / MIB) : undefined
+  const base = parsePositiveMbEnv('GSH_HOST_DST_PLANNING_MB') ?? DEFAULT_DST_PLANNING_MB
+  const estimated = typeof modCount === 'number' && Number.isFinite(modCount)
+    ? DST_PLANNING_BASE_MB + DST_PLANNING_MB_PER_MOD * Math.max(0, Math.floor(modCount))
+    : 0
+  const planned = Math.max(base, estimated)
+  return capMb ? Math.min(capMb, planned) : planned
 }
 
 function resolveSeedPlanningMb(): number {
@@ -87,7 +108,10 @@ function resolveHostMemoryHeadroomMb(): number {
 }
 
 /** 执行重操作前要求宿主机（面板容器 /proc）剩余可用内存下限（MiB） */
-export function resolveMinHostAvailableMbForOperation(operation: HeavyHostOperation): number {
+export function resolveMinHostAvailableMbForOperation(
+  operation: HeavyHostOperation,
+  context: DstStartMemoryContext = {},
+): number {
   const override = parsePositiveMbEnv('GSH_HOST_MIN_AVAILABLE_MB')
   if (override !== undefined) {
     return override
@@ -96,8 +120,12 @@ export function resolveMinHostAvailableMbForOperation(operation: HeavyHostOperat
   switch (operation) {
     case 'steamcmd-install':
       return resolveSteamcmdPlanningMb() + headroomMb
-    case 'dst-container-start':
-      return resolveDstPlanningMb() + Math.min(headroomMb, 384)
+    case 'dst-container-start': {
+      // 按分片数累加：主世界与洞穴会各自把整套 Mod 读进内存，同时加载时峰值叠加。
+      // （面板现在会等主世界就绪再拉起洞穴，但这是上界估算，宁可保守。）
+      const shardCount = Math.max(1, Math.floor(context.shardCount ?? 1))
+      return resolveDstShardPlanningMb(context.modCount) * shardCount + Math.min(headroomMb, 384)
+    }
     case 'install-seed-copy':
       return resolveSeedPlanningMb() + headroomMb
     default:
@@ -107,6 +135,11 @@ export function resolveMinHostAvailableMbForOperation(operation: HeavyHostOperat
 
 export function readHostMemoryAvailableMb(): number | null {
   return kbToMb(readProcMeminfoKb('MemAvailable'))
+}
+
+/** 可回收的 swap 余量：MemoryHigh 触发的换页要靠它兜底，没有 swap 时内核只能直接杀进程 */
+export function readHostSwapFreeMb(): number | null {
+  return kbToMb(readProcMeminfoKb('SwapFree'))
 }
 
 export function readHostMemoryTotalMb(): number | null {
@@ -131,25 +164,32 @@ function buildHostMemoryPressureFailure(
   requiredMb: number,
   totalMb: number | null,
   capMb: number | undefined,
+  swapFreeMb: number | null,
+  context: DstStartMemoryContext,
 ): HostMemoryPressureFailure {
   const totalHint = totalMb ? `（总内存约 ${totalMb} MiB）` : ''
+  const swapHint = swapFreeMb === null ? '' : `，可用 swap 约 ${swapFreeMb} MiB`
   const explanationLines = [
     '说明：安装/启动按典型峰值估算，并非按容器上限占满内存。',
-    ...(capMb ? [`SteamCMD 容器内存硬上限为 ${capMb} MiB（非预留占用）。`] : []),
+    ...(capMb ? [`DST 分片内存硬上限为 ${capMb} MiB（每个分片，非预留占用）。`] : []),
+    ...(context.modCount !== undefined
+      ? [`本次启动按 ${context.shardCount ?? 1} 个分片、${context.modCount} 个启用中的 Mod 估算单分片峰值。`]
+      : []),
   ]
   const detail = [
-    `当前可用约 ${availableMb} MiB，本操作建议至少 ${requiredMb} MiB${totalHint}。`,
+    `当前可用约 ${availableMb} MiB${swapHint}，本操作建议至少 ${requiredMb} MiB${totalHint}。`,
     '',
     ...explanationLines,
     '',
     '建议：',
-    '1. 停止其他正在运行的实例，释放内存',
-    '2. 启用同机 seed 复制，跳过 Steam 下载',
-    '3. 小内存机可在 panel.env 设置 GSH_STEAMCMD_CONTAINER_MEMORY_MB 限制 SteamCMD 容器内存（高配机可不设置）',
+    '1. 加 swap（最有效）：执行 gsh setup-swap 创建 2 GiB swapfile，让加载尖峰有地方落',
+    '2. 关闭洞穴分片：单分片启动峰值约为双分片的一半',
+    '3. 在「世界设置 → 模组」减少订阅的 Mod：内存占用与 Mod 数量近似线性',
+    '4. 停止其他正在运行的实例，释放内存',
     '',
     '若确需强制执行：在 panel.env 设置 GSH_HOST_MIN_AVAILABLE_MB=0 可关闭内存守卫（小内存机慎用，可能触发 OOM）。',
   ].join('\n')
-  const summary = `宿主机可用内存不足（当前约 ${availableMb} MiB，建议至少 ${requiredMb} MiB${totalHint}）`
+  const summary = `宿主机可用内存不足（当前约 ${availableMb} MiB${swapHint}，建议至少 ${requiredMb} MiB${totalHint}）`
   const data: HostMemoryPressureData = {
     availableMb,
     requiredMb,
@@ -162,18 +202,24 @@ function buildHostMemoryPressureFailure(
 
 /**
  * 在面板容器内读取 MemAvailable，避免 SteamCMD 与 DST 同时压垮小内存宿主机。
- * Windows 原生进程模式无 /proc 时跳过检查。
+ * 判据用 MemAvailable + SwapFree：DST 加载尖峰是短时的，swap 能实打实地吸收它；
+ * 只看物理内存会把「有 swap 就能跑」的机器误判成跑不动。Windows 原生进程模式无 /proc 时跳过检查。
  */
-export function assessHostMemoryForHeavyOperation(operation: HeavyHostOperation): HostMemoryPressureResult {
-  const requiredMb = resolveMinHostAvailableMbForOperation(operation)
+export function assessHostMemoryForHeavyOperation(
+  operation: HeavyHostOperation,
+  context: DstStartMemoryContext = {},
+): HostMemoryPressureResult {
+  const requiredMb = resolveMinHostAvailableMbForOperation(operation, context)
   const availableMb = readHostMemoryAvailableMb()
   const totalMb = readHostMemoryTotalMb()
+  const swapFreeMb = readHostSwapFreeMb()
   if (availableMb === null) {
     return { ok: true, availableMb: null, requiredMb }
   }
-  if (availableMb >= requiredMb) {
+  const usableMb = availableMb + (swapFreeMb ?? 0)
+  if (usableMb >= requiredMb) {
     return { ok: true, availableMb, requiredMb }
   }
   const capMb = resolveSteamcmdContainerMemoryCapMb('app-update')
-  return buildHostMemoryPressureFailure(availableMb, requiredMb, totalMb, capMb)
+  return buildHostMemoryPressureFailure(availableMb, requiredMb, totalMb, capMb, swapFreeMb, context)
 }

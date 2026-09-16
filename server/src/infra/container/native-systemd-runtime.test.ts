@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
-import { buildNativeLauncherScript, buildNativeSystemdUnit, formatUnitLoadDiagnostic, resolveNativeUnitState } from './native-systemd-runtime'
+import {
+  buildNativeLauncherScript,
+  buildNativeSystemdUnit,
+  formatUnitLoadDiagnostic,
+  readFileTailLines,
+  resolveNativeUnitState,
+  resolveShardCpuQuotaPercent,
+} from './native-systemd-runtime'
 import type { ShardContainerSpec } from './types'
 
 function buildSpec(): ShardContainerSpec {
@@ -55,6 +65,9 @@ function clearResourceEnv() {
 }
 
 describe('NativeSystemdRuntime serialization', () => {
+  const LAUNCHER = '/srv/gsh/runtime/launch.sh'
+  const CONSOLE_LOG = '/srv/gsh/runtime/console-logs/shard.log'
+
   it('quotes launcher arguments and feeds stdin from a FIFO', () => {
     const script = buildNativeLauncherScript(buildSpec(), '/srv/gsh/runtime/stdin.fifo')
     assert.match(script, /mkfifo -m 600/)
@@ -62,18 +75,40 @@ describe('NativeSystemdRuntime serialization', () => {
     assert.match(script, /<&3/)
   })
 
-  it('writes a restartable user unit with journald output', () => {
-    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+  /**
+   * 回归：原先分片输出走 journald，而面板以 gsh 用户跑在系统服务里、不在 systemd-journal
+   * 组内，线上必然报「No journal files were opened due to insufficient permissions」，
+   * 控制台一条游戏输出都看不到，排查只能靠 SSH。改为追加到面板自己可读的文件。
+   */
+  it('appends stdout and stderr to a file the panel can always read', () => {
+    const unit = buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG)
     assert.match(unit, /Restart=on-failure/)
-    assert.match(unit, /StandardOutput=journal/)
+    assert.match(unit, /StandardOutput=append:\/srv\/gsh\/runtime\/console-logs\/shard\.log/)
+    assert.match(unit, /StandardError=append:\/srv\/gsh\/runtime\/console-logs\/shard\.log/)
+    assert.doesNotMatch(unit, /StandardOutput=journal/)
     assert.match(unit, /Environment="LD_LIBRARY_PATH=/)
     assert.match(unit, /WantedBy=default\.target/)
+  })
+
+  /**
+   * 回归：进程一崩 systemd 就 5 秒后重来，每次都重新吃满 CPU 与磁盘加载整套 Mod，
+   * 永远到不了「世界加载完成」。必须给崩溃循环踩刹车，并把内存软限与 swap 打开，
+   * 让加载尖峰走回收/换页而不是被内核直接杀掉。
+   */
+  it('bounds the restart storm and softens the memory limit', () => {
+    setResourceEnv('GSH_DST_CONTAINER_MEMORY_MB', '2048')
+    const unit = buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG)
+    assert.match(unit, /StartLimitBurst=3/)
+    assert.match(unit, /StartLimitIntervalSec=600/)
+    assert.match(unit, /MemoryHigh=1717986918/)
+    assert.match(unit, /MemoryMax=2147483648/)
+    assert.match(unit, /MemorySwapMax=infinity/)
   })
 
   // 回归：客户端等待曾短于 unit 的停机预算，DST 存盘途中被判失败，remove 中断后
   // disable 未执行，宿主重启时该分片会被 systemd 自行拉起。
   it('gives the unit enough time to stop and a raised file descriptor limit', () => {
-    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    const unit = buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG)
     assert.match(unit, /TimeoutStopSec=30/)
     assert.match(unit, /LimitNOFILE=65535/)
   })
@@ -81,22 +116,24 @@ describe('NativeSystemdRuntime serialization', () => {
   it('wires DST resource limits from the environment into the unit', () => {
     setResourceEnv('GSH_DST_CONTAINER_MEMORY_MB', '1536')
     setResourceEnv('GSH_DST_CONTAINER_CPU_QUOTA', '1.5')
-    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    const unit = buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG)
     assert.match(unit, /MemoryMax=1610612736/)
     assert.match(unit, /CPUQuota=150\.00%/)
   })
 
-  it('omits resource limits when neither variable is set', () => {
+  it('omits the memory cap when the variable is unset but still reserves CPU for the panel', () => {
     clearResourceEnv()
-    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    const unit = buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG)
     assert.doesNotMatch(unit, /MemoryMax=/)
-    assert.doesNotMatch(unit, /CPUQuota=/)
+    // 未显式配置 CPU 配额时也要留出余量：两个分片各占满一个核时，2 核机上
+    // 面板与 sshd 会一起饿死（线上实测面板出现过 69 秒完全无日志的静默期）。
+    assert.match(unit, /CPUQuota=\d+\.\d{2}%/)
   })
 
   // 回归：systemd 对 WorkingDirectory= 不做去引号处理，写 `"/path"` 会被判成
   // "path is not absolute" → `has a bad unit file setting`，Native 下实例一个都起不来。
   it('writes WorkingDirectory without quotes', () => {
-    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    const unit = buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG)
     assert.match(unit, /^WorkingDirectory=\/srv\/gsh\/instance-1\/bin64$/m)
     assert.doesNotMatch(unit, /WorkingDirectory="/)
   })
@@ -107,7 +144,7 @@ describe('NativeSystemdRuntime serialization', () => {
     const spec = buildSpec()
     spec.workingDir = '/srv/gsh/room%1/bin64'
     spec.cmd = ['/srv/gsh/room%1/bin64/dontstarve_dedicated_server_nullrenderer_x64', '-cluster', 'Cluster_1']
-    const unit = buildNativeSystemdUnit(spec, '/srv/gsh/room%1/launch.sh')
+    const unit = buildNativeSystemdUnit(spec, '/srv/gsh/room%1/launch.sh', CONSOLE_LOG)
     assert.match(unit, /^WorkingDirectory=\/srv\/gsh\/room%%1\/bin64$/m)
     assert.match(unit, /ExecStart="\/srv\/gsh\/room%%1\/launch\.sh"/)
     assert.doesNotMatch(unit, /room%1/)
@@ -116,13 +153,13 @@ describe('NativeSystemdRuntime serialization', () => {
   it('clamps out-of-range resource limits instead of writing an invalid unit', () => {
     setResourceEnv('GSH_DST_CONTAINER_MEMORY_MB', '1536')
     setResourceEnv('GSH_DST_CONTAINER_CPU_QUOTA', '200')
-    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    const unit = buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG)
     assert.match(unit, /MemoryMax=1610612736/)
     assert.match(unit, /CPUQuota=10000\.00%/)
   })
 
   it('does not wait on network-online.target, which no user instance provides', () => {
-    const unit = buildNativeSystemdUnit(buildSpec(), '/srv/gsh/runtime/launch.sh')
+    const unit = buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG)
     assert.doesNotMatch(unit, /network-online\.target/)
   })
 
@@ -191,5 +228,55 @@ describe('resolveNativeUnitState', () => {
     const state = resolveNativeUnitState({ ActiveState: 'active', SubState: 'running', Result: 'success', NRestarts: '0' })
     assert.equal(state.exitResult, undefined)
     assert.equal(state.restarts, undefined)
+  })
+})
+
+/**
+ * 两个 DST 分片各占满一个核时，2 核机上一点余量都不剩，面板与 sshd 会一起饿死
+ * （线上实测面板出现过 69 秒完全无日志的静默期）。配额必须给面板留出 CPU。
+ */
+describe('resolveShardCpuQuotaPercent', () => {
+  it('2 核机给两个分片各 90%，留出 0.2 核给面板与 sshd', () => {
+    assert.equal(resolveShardCpuQuotaPercent(2), 90)
+  })
+
+  it('核数越多单分片配额越高', () => {
+    assert.equal(resolveShardCpuQuotaPercent(8), 390)
+  })
+
+  it('核数异常时不下发配额', () => {
+    assert.equal(resolveShardCpuQuotaPercent(0), undefined)
+    assert.equal(resolveShardCpuQuotaPercent(-1), undefined)
+  })
+})
+
+describe('readFileTailLines', () => {
+  const tempDirs: string[] = []
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  function writeLog(content: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-log-'))
+    tempDirs.push(dir)
+    const filePath = path.join(dir, 'shard.log')
+    fs.writeFileSync(filePath, content)
+    return filePath
+  }
+
+  it('只取最后 N 行并丢掉空行', () => {
+    const filePath = writeLog('a\n\nb\nc\n')
+    assert.deepEqual(readFileTailLines(filePath, 2), ['b', 'c'])
+  })
+
+  it('文件不存在时返回空数组而不是抛错', () => {
+    assert.deepEqual(readFileTailLines('/nonexistent/gsh/shard.log', 10), [])
+  })
+
+  it('空文件返回空数组', () => {
+    assert.deepEqual(readFileTailLines(writeLog(''), 10), [])
   })
 })

@@ -13,6 +13,7 @@ const emit = defineEmits<{
 }>()
 
 const steamcmdInstalling = shallowRef(false)
+const gameDstPulling = shallowRef(false)
 const steamcmdInstalled = shallowRef(false)
 const gameDstInstalled = shallowRef(false)
 const runtimeMode = shallowRef<'docker' | 'native'>('docker')
@@ -68,15 +69,20 @@ async function ensureSteamcmdImage() {
   }
 }
 
+/**
+ * 两个入口各自维护 loading：异构部署下它们拉的是不同镜像，共用一个状态会让另一个
+ * 按钮无端转圈，看起来像有两个任务在跑。同源部署下副按钮不渲染（见 presentation 的
+ * secondaryPullVisible），此时只有一个入口持有 loading。
+ */
 async function ensureGameDstImageManual() {
-  steamcmdInstalling.value = true
+  gameDstPulling.value = true
   try {
     const res = await apiSystem.installGameDstImage()
     faToast.success(res.data.message || 'DST 运行镜像已就绪')
     await fetchSteamcmdConfig()
   }
   finally {
-    steamcmdInstalling.value = false
+    gameDstPulling.value = false
   }
 }
 
@@ -114,7 +120,7 @@ onMounted(() => {
             v-if="environmentView.secondaryPullVisible"
             type="default"
             secondary
-            :loading="steamcmdInstalling"
+            :loading="gameDstPulling"
             :disabled="!runtimeAvailable"
             @click="ensureGameDstImageManual"
           >

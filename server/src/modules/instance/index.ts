@@ -37,6 +37,7 @@ import {
 import { formatInstallLogContent } from '../../shared/instance-install/log-format'
 import { isSteamcmdAppUpdateBusy } from '../../infra/container/steamcmd-app-update-queue'
 import { isSteamcmdImagePresent } from '../../infra/container'
+import { resolveDstContainerResourceLimits } from '../../infra/container/dst-container-resources'
 import {
   buildDstStartBlockedMessage,
   diagnoseDstInstallReadiness,
@@ -55,6 +56,7 @@ import {
   ensureContainerRuntimeReady,
   ensureInstanceContainerLogFollow,
   inspectInstanceShardRuntime,
+  isHealthyRuntimeForResurrect,
   isInstanceContainerRunning,
   removeInstanceContainer,
   resolveDefaultInstanceInstallPath,
@@ -232,10 +234,12 @@ function validateInstallPath(rawPath: string, options: InstallPathValidationOpti
 }
 
 /** systemd 的 Result 值 → 用户能看懂的原因 */
-function describeSystemdExitReason(result: string | undefined): string | null {
+function describeSystemdExitReason(result: string | undefined, memoryCapMb?: number): string | null {
   switch (result) {
     case 'oom-kill':
-      return '内存不足被系统终止'
+      return memoryCapMb
+        ? `内存不足被系统终止（该分片上限 ${memoryCapMb} MiB）`
+        : '内存不足被系统终止'
     case 'exit-code':
       return '进程以非零状态退出'
     case 'signal':
@@ -246,9 +250,17 @@ function describeSystemdExitReason(result: string | undefined): string | null {
       return '看门狗超时'
     case 'core-dump':
       return '进程崩溃并产生核心转储'
+    case 'start-limit-hit':
+      return '反复重启次数已达上限，运行时已停止拉起'
     default:
       return null
   }
+}
+
+/** 分片当前的 cgroup 内存上限（MiB）；未设置时为 undefined */
+function resolveShardMemoryCapMb(): number | undefined {
+  const limits = resolveDstContainerResourceLimits()
+  return limits?.memory ? Math.round(limits.memory / (1024 * 1024)) : undefined
 }
 
 /**
@@ -256,32 +268,64 @@ function describeSystemdExitReason(result: string | undefined): string | null {
  *
  * 进程能被运行时反复拉起时，实例状态一直显示「运行中」，服主会以为一切正常；
  * 实际上服务器可能从未加载完成，玩家连不上（大厅搜不到、直连报失去联系）。
- * 这里把重启次数与退出原因写成可读的 lastError，界面据此在「运行中」旁给出警示；
+ *
+ * 写 runtimeWarning 而不是 lastError：lastError 会被「启动失败」「停止实例」
+ * 与状态对账反复覆盖，实测出现过写入一秒后就被清空、服主永远看不到的情况。
  * 文案没变就不重复写库，避免每次请求都触发一次更新。
  */
 async function warnInstanceRestartLoop(
   app: FastifyInstance,
-  instance: { id: string, lastError: string | null },
+  instance: { id: string, runtimeWarning: string | null },
   snapshot: ContainerInspect,
 ): Promise<void> {
   const restarts = snapshot.restarts ?? 0
   if (restarts <= 0) {
     return
   }
-  const reason = describeSystemdExitReason(snapshot.exitResult)
+  const reason = describeSystemdExitReason(snapshot.exitResult, resolveShardMemoryCapMb())
   const message = [
     `实例进程反复重启（已重启 ${restarts} 次）`,
     reason ? `，最近一次退出：${reason}` : '',
-    '。请打开控制台查看日志确认原因；若是内存不足，可在「世界设置 → 模组」减少订阅的 Mod。',
+    '。请打开控制台查看分片日志确认原因；内存不足时可在「世界设置 → 模组」减少订阅的 Mod，或关闭洞穴分片。',
   ].join('')
-  if (instance.lastError === message) {
+  if (instance.runtimeWarning === message) {
     return
   }
-  await updateGameInstanceRuntime(instance.id, { lastError: message })
+  await updateGameInstanceRuntime(instance.id, { runtimeWarning: message })
   app.log.warn(
     { instanceId: instance.id, restarts, exitResult: snapshot.exitResult },
     '实例进程反复重启，已在实例上标注原因',
   )
+}
+
+/** 主世界已停、洞穴还在跑：只写运行期警告，不占用 lastError（它留给真正的启动失败） */
+async function warnCavesLeftRunning(
+  app: FastifyInstance,
+  instance: { id: string, runtimeWarning: string | null },
+): Promise<void> {
+  const message = '主世界分片已停止，但洞穴分片仍在运行。请在实例控制里重新启动或停止实例，避免洞穴单独占着内存。'
+  if (instance.runtimeWarning === message) {
+    return
+  }
+  await updateGameInstanceRuntime(instance.id, { runtimeWarning: message })
+  app.log.warn({ instanceId: instance.id }, '主世界已停止但洞穴分片仍在运行，已标注到实例')
+}
+
+/**
+ * 实例已连续干净运行多久（毫秒）。用于判断「运行期警告可以清掉了」：
+ * 崩溃循环后又自己站稳的实例不该永远挂着旧警告。
+ */
+const RUNTIME_WARNING_CLEAR_AFTER_MS = 30 * 60 * 1000
+
+function shouldClearRuntimeWarning(instance: { runtimeStartedAt: string | null }, snapshot: ContainerInspect): boolean {
+  if (snapshot.restarts) {
+    return false
+  }
+  const startedAt = instance.runtimeStartedAt ? Date.parse(instance.runtimeStartedAt) : Number.NaN
+  if (!Number.isFinite(startedAt)) {
+    return false
+  }
+  return Date.now() - startedAt >= RUNTIME_WARNING_CLEAR_AFTER_MS
 }
 
 /**
@@ -311,6 +355,10 @@ async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<num
         })
       }
       await warnInstanceRestartLoop(app, instance, snapshot)
+      // 崩溃循环后自己站稳、且已连续干净运行足够久的实例，旧警告要能自己消失
+      if (instance.runtimeWarning && shouldClearRuntimeWarning(instance, snapshot)) {
+        await updateGameInstanceRuntime(instance.id, { runtimeWarning: null })
+      }
       await ensureInstanceContainerLogFollow(instance.id)
       continue
     }
@@ -323,13 +371,10 @@ async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<num
       containerId: null,
       runtimePid: null,
       runtimeStartedAt: null,
-      ...(cavesStillRunning
-        ? { lastError: '主世界分片已停止，但洞穴分片仍在运行。请在实例控制里重新启动或停止实例，避免洞穴单独占着内存。' }
-        : {}),
     })
     reconciled++
     if (cavesStillRunning) {
-      app.log.warn({ instanceId: instance.id }, '主世界已停止但洞穴分片仍在运行，已标注到实例')
+      await warnCavesLeftRunning(app, instance)
     }
     app.log.info({ instanceId: instance.id }, '实例运行时不存在，已同步状态为已停止')
   }
@@ -338,6 +383,10 @@ async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<num
 
 /**
  * DB 为 stopped/error 但容器仍在运行时的对齐（如异常退出后面板重启）。
+ *
+ * 关键：正在被运行时自动拉起（systemd 的 auto-restart 窗口）或已经重启过的实例，
+ * 属于崩溃循环而不是「容器还在跑」。此处若把状态翻回运行中，就会抹掉上一趟对账
+ * 刚写入的崩溃告警——线上实测同一个请求里两趟对账互相覆盖，服主永远看不到原因。
  */
 async function reconcileStoppedButContainerRunning(app: FastifyInstance): Promise<number> {
   const instances = await listGameInstances()
@@ -349,7 +398,13 @@ async function reconcileStoppedButContainerRunning(app: FastifyInstance): Promis
     if (instance.status !== 'stopped' && instance.status !== 'error') {
       continue
     }
-    if (!await isInstanceContainerRunning(instance.id)) {
+    const probe = await inspectInstanceShardRuntime(instance.id)
+    const snapshot = probe.snapshot
+    if (!snapshot?.running) {
+      continue
+    }
+    if (!isHealthyRuntimeForResurrect(snapshot)) {
+      await warnInstanceRestartLoop(app, instance, snapshot)
       continue
     }
     const ref = await resolveInstanceContainerRef(instance.id)
@@ -357,7 +412,7 @@ async function reconcileStoppedButContainerRunning(app: FastifyInstance): Promis
       status: 'running',
       containerId: ref?.id ?? instance.containerId,
       runtimeStartedAt: instance.runtimeStartedAt ?? new Date().toISOString(),
-      lastError: null,
+      runtimeWarning: null,
     })
     await ensureInstanceContainerLogFollow(instance.id)
     reconciled++
@@ -1135,6 +1190,7 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
         lastCommand: started.displayCommand,
         lastExitCode: null,
         lastError: null,
+        runtimeWarning: null,
         unexpectedExitAt: null,
       })
       return success({ isSuccess: true }, request)

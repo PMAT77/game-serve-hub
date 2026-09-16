@@ -53,6 +53,7 @@ function mapDbGameInstance(row: {
   lastCommand: string | null
   lastExitCode: number | null
   lastError: string | null
+  runtimeWarning: string | null
   unexpectedExitAt: string | null
   installLogStatus: string | null
   installPercent: number | null
@@ -104,6 +105,7 @@ function gameInstanceSelectFields() {
     lastCommand: gameInstances.lastCommand,
     lastExitCode: gameInstances.lastExitCode,
     lastError: gameInstances.lastError,
+    runtimeWarning: gameInstances.runtimeWarning,
     unexpectedExitAt: gameInstances.unexpectedExitAt,
     installLogStatus: gameInstances.installLogStatus,
     installPercent: gameInstances.installPercent,
@@ -139,6 +141,7 @@ export async function createGameInstance(input: CreateGameInstanceInput): Promis
       lastCommand: input.lastCommand ?? null,
       lastExitCode: input.lastExitCode ?? null,
       lastError: input.lastError ?? null,
+      runtimeWarning: input.runtimeWarning ?? null,
       createdAt: now,
       updatedAt: now,
     })
@@ -455,6 +458,7 @@ export async function updateGameInstanceRuntime(
     lastCommand?: string | null
     lastExitCode?: number | null
     lastError?: string | null
+    runtimeWarning?: string | null
     unexpectedExitAt?: string | null
     installLogStatus?: DbInstallLogStatus | null
     installPercent?: number | null
@@ -490,6 +494,9 @@ export async function updateGameInstanceRuntime(
   }
   if (typeof input.lastError !== 'undefined') {
     setPayload.lastError = input.lastError?.trim() || null
+  }
+  if (typeof input.runtimeWarning !== 'undefined') {
+    setPayload.runtimeWarning = input.runtimeWarning?.trim() || null
   }
   if (typeof input.unexpectedExitAt !== 'undefined') {
     setPayload.unexpectedExitAt = input.unexpectedExitAt?.trim() || null

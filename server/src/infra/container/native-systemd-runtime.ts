@@ -1,6 +1,7 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { execFile, spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { resolveDstContainerResourceLimits } from './dst-container-resources'
 import { sampleProcessMetrics } from '../../shared/instance-runtime/process-metrics'
@@ -27,8 +28,96 @@ const NATIVE_STOP_CLIENT_TIMEOUT_MS = (NATIVE_UNIT_STOP_TIMEOUT_SEC + 15) * 1000
 const NATIVE_UNIT_NOFILE_LIMIT = 65_535
 /** CPUQuota 只接受 1%–10000%：越界会让 systemd 判定整个 unit 非法，宁可钳到边界 */
 const NATIVE_UNIT_CPU_QUOTA_MAX_PERCENT = 10_000
+/** 低配机上给面板与 sshd 留出的 CPU 余量（百分比，按整机核数折算） */
+const NATIVE_SHARD_CPU_RESERVE_PERCENT = 20
+/** 单分片 CPUQuota 下限：压太低游戏会跑不动 */
+const NATIVE_UNIT_CPU_QUOTA_MIN_PERCENT = 25
 /** MemoryMax 低于 1 MiB 是非法值，钳到 1 MiB 而不是写出一个起不来的 unit */
 const NATIVE_UNIT_MEMORY_MIN_BYTES = 1024 * 1024
+/** 软限比例：超过它就触发回收/换页，而不是直接杀进程 */
+const NATIVE_UNIT_MEMORY_HIGH_RATIO = 0.8
+/** 崩溃重启风暴的上限：10 分钟内最多拉起 3 次，之后停手并如实报错 */
+const NATIVE_UNIT_START_LIMIT_INTERVAL_SEC = 600
+const NATIVE_UNIT_START_LIMIT_BURST = 3
+/** 分片日志跟随的轮询间隔 */
+const NATIVE_LOG_POLL_MS = 500
+/** 读取日志尾部时最多回溯的字节数，避免大文件整份读进内存 */
+const NATIVE_LOG_TAIL_MAX_BYTES = 512 * 1024
+/** 分片日志文件上限；超过就在下次启动时轮转，避免无限增长 */
+const NATIVE_CONSOLE_LOG_MAX_BYTES = 16 * 1024 * 1024
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function readFileSize(filePath: string): number {
+  try {
+    return fs.statSync(filePath).size
+  }
+  catch {
+    return 0
+  }
+}
+
+function readFileRange(filePath: string, start: number, end: number): string | null {
+  let descriptor: number | undefined
+  try {
+    descriptor = fs.openSync(filePath, 'r')
+    const length = Math.max(0, end - start)
+    if (length === 0) {
+      return ''
+    }
+    const buffer = Buffer.allocUnsafe(length)
+    const read = fs.readSync(descriptor, buffer, 0, length, start)
+    return buffer.subarray(0, read).toString('utf8')
+  }
+  catch {
+    return null
+  }
+  finally {
+    if (descriptor !== undefined) {
+      fs.closeSync(descriptor)
+    }
+  }
+}
+
+/** 读日志文件最后 maxLines 行；文件不存在时返回空数组 */
+export function readFileTailLines(filePath: string, maxLines: number): string[] {
+  const size = readFileSize(filePath)
+  if (size === 0 || maxLines <= 0) {
+    return []
+  }
+  const start = size > NATIVE_LOG_TAIL_MAX_BYTES ? size - NATIVE_LOG_TAIL_MAX_BYTES : 0
+  const chunk = readFileRange(filePath, start, size)
+  if (!chunk) {
+    return []
+  }
+  const lines = chunk.split(/\r?\n/).filter(line => line.trim())
+  // 从文件中部开始读时首行可能是半截，丢掉更安全
+  if (start > 0 && lines.length > 0) {
+    lines.shift()
+  }
+  return lines.slice(-maxLines)
+}
+
+/**
+ * 分片 CPUQuota（百分比）。
+ *
+ * 两个 DST 分片各占满一个核时，2 核机上一个核都不剩，面板和 sshd 会一起饿死
+ * （线上实测面板出现 69 秒完全无日志的静默期）。这里按「整机核数 − 预留」均分给
+ * 两个分片，保证面板始终有一小片 CPU；用户显式设了 GSH_DST_CONTAINER_CPU_QUOTA
+ * 时以用户配置为准。
+ */
+export function resolveShardCpuQuotaPercent(cpuCount = os.cpus().length): number | undefined {
+  if (cpuCount <= 0) {
+    return undefined
+  }
+  const perShard = Math.floor((100 * cpuCount - NATIVE_SHARD_CPU_RESERVE_PERCENT) / 2)
+  return Math.min(
+    NATIVE_UNIT_CPU_QUOTA_MAX_PERCENT,
+    Math.max(NATIVE_UNIT_CPU_QUOTA_MIN_PERCENT, perShard),
+  )
+}
 /** 启动失败时回给界面的诊断文本上限，避免整份 unit 加 status 输出刷屏 */
 const UNIT_DIAGNOSTIC_MAX_CHARS = 2_000
 
@@ -166,24 +255,41 @@ exec ${command} <&3
 `
 }
 
-export function buildNativeSystemdUnit(spec: ShardContainerSpec, launcherPath: string): string {
+export function buildNativeSystemdUnit(
+  spec: ShardContainerSpec,
+  launcherPath: string,
+  consoleLogPath: string,
+): string {
   const limits = resolveDstContainerResourceLimits()
   const environment = Object.entries(spec.env ?? {})
     .map(([key, value]) => `Environment=${systemdQuote(`${key}=${value}`)}`)
   const resourceLines: string[] = []
   if (limits?.memory) {
-    resourceLines.push(`MemoryMax=${Math.max(limits.memory, NATIVE_UNIT_MEMORY_MIN_BYTES)}`)
+    const maxBytes = Math.max(limits.memory, NATIVE_UNIT_MEMORY_MIN_BYTES)
+    resourceLines.push(`MemoryHigh=${Math.floor(maxBytes * NATIVE_UNIT_MEMORY_HIGH_RATIO)}`)
+    resourceLines.push(`MemoryMax=${maxBytes}`)
+    // 允许分片使用 swap：没有它时 MemoryHigh 触发的回收无处可去，内核只能直接 OOM 杀进程。
+    resourceLines.push('MemorySwapMax=infinity')
   }
-  if (limits?.nanoCpus) {
-    const quotaPercent = Math.min(NATIVE_UNIT_CPU_QUOTA_MAX_PERCENT, Math.max(1, limits.nanoCpus / 1e7))
-    resourceLines.push(`CPUQuota=${quotaPercent.toFixed(2)}%`)
+  const cpuQuotaPercent = limits?.nanoCpus
+    ? limits.nanoCpus / 1e7
+    : resolveShardCpuQuotaPercent()
+  if (cpuQuotaPercent) {
+    const clamped = Math.min(NATIVE_UNIT_CPU_QUOTA_MAX_PERCENT, Math.max(1, cpuQuotaPercent))
+    resourceLines.push(`CPUQuota=${clamped.toFixed(2)}%`)
   }
   /**
    * 不写 After=/Wants=network-online.target：分片跑在用户级 systemd 里，用户实例没有这个
    * target（依赖只会是 not-found 噪音），DST 分片本身也不需要等网络在线。
+   *
+   * StartLimit* 用来给崩溃循环踩刹车：进程一崩 systemd 就 5 秒后重来，每次都重新吃满
+   * CPU 与磁盘加载整套 Mod，永远到不了「世界加载完成」。10 分钟内超过 3 次就停手，
+   * 由面板如实报告失败原因。用户手动启动前会先 reset-failed，正常重启不会撞上限。
    */
   return `[Unit]
 Description=Game Server Hub ${escapeSpecifiers(spec.instanceId)} ${spec.shard}
+StartLimitIntervalSec=${NATIVE_UNIT_START_LIMIT_INTERVAL_SEC}
+StartLimitBurst=${NATIVE_UNIT_START_LIMIT_BURST}
 
 [Service]
 Type=simple
@@ -194,8 +300,8 @@ RestartSec=5
 KillMode=control-group
 TimeoutStopSec=${NATIVE_UNIT_STOP_TIMEOUT_SEC}
 LimitNOFILE=${NATIVE_UNIT_NOFILE_LIMIT}
-StandardOutput=journal
-StandardError=journal
+StandardOutput=append:${systemdPath(consoleLogPath)}
+StandardError=append:${systemdPath(consoleLogPath)}
 ${environment.join('\n')}
 ${resourceLines.join('\n')}
 
@@ -231,6 +337,23 @@ export class NativeSystemdRuntime implements ContainerRuntime {
       fifoPath: path.join(serviceDir, 'stdin.fifo'),
       launcherPath: path.join(serviceDir, 'launch.sh'),
       unitPath: path.join(this.options.unitDir, `${name}.service`),
+      consoleLogPath: path.join(this.options.runtimeDir, 'console-logs', `${name}.log`),
+    }
+  }
+
+  /**
+   * 分片日志轮转：文件超过上限时把当前内容挪到 .1，避免无限增长。
+   * 用 rename 而不是截断，这样上一轮崩溃的现场还能留下来。
+   */
+  private rotateConsoleLog(consoleLogPath: string): void {
+    if (readFileSize(consoleLogPath) < NATIVE_CONSOLE_LOG_MAX_BYTES) {
+      return
+    }
+    try {
+      fs.renameSync(consoleLogPath, `${consoleLogPath}.1`)
+    }
+    catch {
+      // 轮转失败不阻断启动：systemd 的 append 模式会继续追加到原文件
     }
   }
 
@@ -308,8 +431,10 @@ export class NativeSystemdRuntime implements ContainerRuntime {
     const paths = this.servicePaths(spec.name)
     fs.mkdirSync(paths.serviceDir, { recursive: true, mode: 0o700 })
     fs.mkdirSync(this.options.unitDir, { recursive: true, mode: 0o700 })
+    fs.mkdirSync(path.dirname(paths.consoleLogPath), { recursive: true, mode: 0o700 })
+    this.rotateConsoleLog(paths.consoleLogPath)
     writeFileAtomic(paths.launcherPath, buildNativeLauncherScript(spec, paths.fifoPath), 0o700)
-    writeFileAtomic(paths.unitPath, buildNativeSystemdUnit(spec, paths.launcherPath), 0o600)
+    writeFileAtomic(paths.unitPath, buildNativeSystemdUnit(spec, paths.launcherPath, paths.consoleLogPath), 0o600)
     await this.recordUnitVerify(paths.unitPath)
     await this.systemctl(['daemon-reload'])
     return {
@@ -319,6 +444,14 @@ export class NativeSystemdRuntime implements ContainerRuntime {
   }
 
   async start(ref: ContainerRef): Promise<void> {
+    // 手动启动前先清掉 StartLimit 计数：崩溃循环触发的「不再拉起」不应该连累用户
+    // 主动点击的启动，否则重启几次之后实例会拒绝启动，看起来像面板坏了。
+    try {
+      await this.systemctl(['reset-failed', this.unitName(ref)])
+    }
+    catch {
+      // unit 不存在或未处于 failed 状态时 reset-failed 会报错，忽略即可
+    }
     try {
       await this.systemctl(['enable', '--now', this.unitName(ref)])
     }
@@ -390,108 +523,57 @@ export class NativeSystemdRuntime implements ContainerRuntime {
     }
   }
 
+  /**
+   * 分片日志读取。
+   *
+   * 原先走 `journalctl --user-unit`：面板以 gsh 用户跑在系统服务里、不在 systemd-journal
+   * 组内，线上必然报 `No journal files were opened due to insufficient permissions`，
+   * 控制台一条游戏输出都看不到，排查只能靠 SSH。改为让 systemd 直接追加到分片日志文件后，
+   * 面板自己就能读，且日志跨重启累积，上一轮崩溃的现场不会再被覆盖。
+   */
   async *logs(ref: ContainerRef, opts: LogOpts = {}): AsyncIterable<LogLine> {
-    const args = [
-      `--user-unit=${this.unitName(ref)}`,
-      '--output=cat',
-      '--no-pager',
-      '--quiet',
-      '--lines',
-      String(opts.tail ?? 200),
-    ]
-    if (!opts.follow) {
-      try {
-        const { stdout } = await execFileAsync('journalctl', args, {
-          timeout: 15_000,
-          windowsHide: true,
-          maxBuffer: 4 * 1024 * 1024,
-        })
-        for (const line of stdout.split(/\r?\n/)) {
+    const { consoleLogPath } = this.servicePaths(ref.name)
+    for (const line of readFileTailLines(consoleLogPath, opts.tail ?? 200)) {
+      yield { stream: 'stdout', text: line }
+    }
+    if (!opts.follow || opts.signal?.aborted) {
+      return
+    }
+    let offset = readFileSize(consoleLogPath)
+    let carry = ''
+    let done = false
+    const abort = () => {
+      done = true
+    }
+    opts.signal?.addEventListener('abort', abort, { once: true })
+    try {
+      while (!done) {
+        await sleepMs(NATIVE_LOG_POLL_MS)
+        const size = readFileSize(consoleLogPath)
+        if (size < offset) {
+          // 文件被轮转或截断：从头再读，避免停留在旧 offset 上再也读不到内容
+          offset = 0
+          carry = ''
+        }
+        if (size === offset) {
+          continue
+        }
+        const chunk = readFileRange(consoleLogPath, offset, size)
+        if (chunk === null) {
+          continue
+        }
+        offset = size
+        const parts = `${carry}${chunk}`.split(/\r?\n/)
+        carry = parts.pop() ?? ''
+        for (const line of parts) {
           if (line.trim()) {
             yield { stream: 'stdout', text: line }
           }
         }
       }
-      catch {
-        return
-      }
-      return
-    }
-
-    const child = spawn('journalctl', [...args, '--follow'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    })
-    const queue: LogLine[] = []
-    let stdoutCarry = ''
-    let stderrCarry = ''
-    let done = false
-    let failure: Error | undefined
-    let notify: (() => void) | undefined
-    const wake = () => {
-      notify?.()
-      notify = undefined
-    }
-    const consume = (stream: 'stdout' | 'stderr', text: string) => {
-      const previous = stream === 'stdout' ? stdoutCarry : stderrCarry
-      const parts = `${previous}${text}`.split(/\r?\n/)
-      const carry = parts.pop() ?? ''
-      if (stream === 'stdout') {
-        stdoutCarry = carry
-      }
-      else {
-        stderrCarry = carry
-      }
-      for (const line of parts) {
-        if (line.trim()) {
-          queue.push({ stream, text: line })
-        }
-      }
-      wake()
-    }
-    child.stdout.on('data', chunk => consume('stdout', String(chunk)))
-    child.stderr.on('data', chunk => consume('stderr', String(chunk)))
-    child.once('error', (error) => {
-      failure = error
-      done = true
-      wake()
-    })
-    child.once('exit', () => {
-      done = true
-      wake()
-    })
-    // 与 Docker 运行时对齐：消费方 abort 后立即结束循环并回收 journalctl 子进程。
-    // 缺了这段，实例无日志输出时 journalctl --follow 会永久挂起，每次开停泄漏一个进程。
-    if (opts.signal) {
-      const signal = opts.signal
-      const abort = () => {
-        done = true
-        wake()
-      }
-      if (signal.aborted) {
-        abort()
-      }
-      else {
-        signal.addEventListener('abort', abort, { once: true })
-      }
-    }
-    try {
-      while (!done || queue.length > 0) {
-        if (failure) {
-          throw failure
-        }
-        const line = queue.shift()
-        if (line) {
-          yield line
-          continue
-        }
-        await new Promise<void>((resolve) => {
-          notify = resolve
-        })
-      }
     }
     finally {
-      child.kill('SIGTERM')
+      opts.signal?.removeEventListener('abort', abort)
     }
   }
 

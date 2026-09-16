@@ -60,13 +60,18 @@ onBeforeUnmount(() => stopRuntimeObservability())
 
 const state = computed(() => (props.instance ? getInstanceState(props.instance) : null))
 
-/** 运行期异常（进程反复重启、分片残留）：用警示色，别和普通说明混成一样 */
+/**
+ * 运行期异常（进程反复重启、分片残留）。独立字段：lastError 会被启动失败与
+ * 状态对账反复覆盖，实测出现过刚写入就被清空、服主永远看不到的情况。
+ * 老数据里这类文案曾写在 lastError，保留前缀兼容，避免升级后旧告警消失。
+ */
 const runtimeWarning = computed(() => {
-  const error = props.instance?.lastError?.trim() ?? ''
-  if (!error) {
-    return null
+  const warning = props.instance?.runtimeWarning?.trim()
+  if (warning) {
+    return warning
   }
-  return error.startsWith('实例进程反复重启') || error.startsWith('主世界分片已停止') ? error : null
+  const legacy = props.instance?.lastError?.trim() ?? ''
+  return legacy.startsWith('实例进程反复重启') || legacy.startsWith('主世界分片已停止') ? legacy : null
 })
 const actionRunning = computed(() => Boolean(props.instance && isInstanceActionRunning(props.instance.id)))
 
@@ -160,11 +165,15 @@ function goConsole() {
       </div>
 
       <p
+        v-if="runtimeWarning"
+        class="mb-4 rounded-md px-3 py-2 text-xs leading-relaxed break-all bg-amber-500/10 text-amber-700 dark:text-amber-400"
+      >
+        {{ runtimeWarning }}
+      </p>
+
+      <p
         v-if="instance.lastError?.trim() && !isInstalling"
-        class="mb-4 rounded-md px-3 py-2 text-xs leading-relaxed break-all"
-        :class="runtimeWarning
-          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-          : 'bg-muted/50 text-muted-foreground'"
+        class="mb-4 rounded-md px-3 py-2 text-xs leading-relaxed break-all bg-muted/50 text-muted-foreground"
       >
         {{ instance.lastError }}
       </p>

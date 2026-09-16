@@ -32,6 +32,7 @@ function buildInstance(installPath: string | null, id = 'test-instance'): DbGame
     runtimeStartedAt: null,
     lastCommand: null,
     lastError: null,
+    runtimeWarning: null,
     lastExitCode: null,
     unexpectedExitAt: null,
     installPercent: null,

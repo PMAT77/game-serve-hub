@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
-import { buildNativeLauncherScript, buildNativeSystemdUnit, formatUnitLoadDiagnostic } from './native-systemd-runtime'
+import { buildNativeLauncherScript, buildNativeSystemdUnit, formatUnitLoadDiagnostic, resolveNativeUnitState } from './native-systemd-runtime'
 import type { ShardContainerSpec } from './types'
 
 function buildSpec(): ShardContainerSpec {
@@ -144,5 +144,52 @@ describe('NativeSystemdRuntime serialization', () => {
       unitContent: 'x'.repeat(5000),
     })
     assert.match(diagnostic, /已截断/)
+  })
+})
+
+describe('resolveNativeUnitState', () => {
+  it('treats an active unit as running', () => {
+    const state = resolveNativeUnitState({ LoadState: 'loaded', ActiveState: 'active', SubState: 'running' })
+    assert.equal(state.running, true)
+    assert.equal(state.restarting, false)
+    assert.equal(state.exitResult, undefined)
+    assert.equal(state.restarts, undefined)
+  })
+
+  it('treats the restart window as running instead of stopping the instance', () => {
+    // Restart=on-failure + RestartSec=5 期间单元是 activating/auto-restart：
+    // 报成「已停止」会让实例状态在运行与停止之间来回跳。
+    const state = resolveNativeUnitState({
+      LoadState: 'loaded',
+      ActiveState: 'activating',
+      SubState: 'auto-restart',
+    })
+    assert.equal(state.running, true)
+    assert.equal(state.restarting, true)
+  })
+
+  it('reports a unit that really stopped as not running', () => {
+    assert.equal(resolveNativeUnitState({ ActiveState: 'inactive', SubState: 'dead' }).running, false)
+    assert.equal(resolveNativeUnitState({ ActiveState: 'failed', SubState: 'failed' }).running, false)
+    assert.equal(resolveNativeUnitState({ LoadState: 'not-found', ActiveState: 'inactive' }).running, false)
+    assert.equal(resolveNativeUnitState({}).running, false)
+  })
+
+  it('carries the exit reason and restart count back to the caller', () => {
+    const state = resolveNativeUnitState({
+      LoadState: 'loaded',
+      ActiveState: 'active',
+      SubState: 'running',
+      Result: 'oom-kill',
+      NRestarts: '3',
+    })
+    assert.equal(state.exitResult, 'oom-kill')
+    assert.equal(state.restarts, 3)
+  })
+
+  it('omits a clean exit result and a zero restart count', () => {
+    const state = resolveNativeUnitState({ ActiveState: 'active', SubState: 'running', Result: 'success', NRestarts: '0' })
+    assert.equal(state.exitResult, undefined)
+    assert.equal(state.restarts, undefined)
   })
 })

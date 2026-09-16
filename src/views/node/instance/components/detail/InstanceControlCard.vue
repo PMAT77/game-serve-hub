@@ -59,6 +59,15 @@ onMounted(() => syncRuntimeObservabilityPolling())
 onBeforeUnmount(() => stopRuntimeObservability())
 
 const state = computed(() => (props.instance ? getInstanceState(props.instance) : null))
+
+/** 运行期异常（进程反复重启、分片残留）：用警示色，别和普通说明混成一样 */
+const runtimeWarning = computed(() => {
+  const error = props.instance?.lastError?.trim() ?? ''
+  if (!error) {
+    return null
+  }
+  return error.startsWith('实例进程反复重启') || error.startsWith('主世界分片已停止') ? error : null
+})
 const actionRunning = computed(() => Boolean(props.instance && isInstanceActionRunning(props.instance.id)))
 
 const isInstalling = computed(() => Boolean(props.instance && isInstanceInstallingStatus(props.instance.status)))
@@ -152,7 +161,10 @@ function goConsole() {
 
       <p
         v-if="instance.lastError?.trim() && !isInstalling"
-        class="mb-4 rounded-md bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground break-all"
+        class="mb-4 rounded-md px-3 py-2 text-xs leading-relaxed break-all"
+        :class="runtimeWarning
+          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+          : 'bg-muted/50 text-muted-foreground'"
       >
         {{ instance.lastError }}
       </p>

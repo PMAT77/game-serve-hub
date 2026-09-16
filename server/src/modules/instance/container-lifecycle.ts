@@ -13,8 +13,8 @@ import {
 } from '../../infra/container'
 import { resolveInstanceContainerBind } from '../../infra/container/steamcmd-install-bind'
 import { buildCavesContainerName, buildMasterContainerName } from '../../infra/container/naming'
-import type { ContainerRef, ContainerRuntime, ShardContainerSpec } from '../../infra/container/types'
-import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
+import type { ContainerInspect, ContainerRef, ContainerRuntime, ShardContainerSpec } from '../../infra/container/types'
+import { DST_APP_ID, DST_CLUSTER_NAME, DST_CONF_DIR, DST_STORAGE_DIR } from '../../infra/game-adapter/dst/constants'
 import {
   buildDstStartBlockedMessage,
   diagnoseDstInstallReadiness,
@@ -115,6 +115,33 @@ export async function isInstanceContainerRunning(
   return inspect.running
 }
 
+export interface InstanceShardRuntimeProbe {
+  /** 该分片是否存在运行时单元（从未创建或已被移除时为 false） */
+  unitExists: boolean
+  /** 运行时快照；运行时不可达时为 null（此时不能据此判定已停止） */
+  snapshot: ContainerInspect | null
+}
+
+/**
+ * 分片运行时快照：状态对账用它区分「运行中 / 崩溃后等待重启 / 真的停了 / 问不到」。
+ * 把这四种情况压成一个布尔值正是实例状态在运行与停止之间来回跳的根源。
+ */
+export async function inspectInstanceShardRuntime(
+  instanceId: string,
+  shard: ConsoleCommandShard = 'master',
+): Promise<InstanceShardRuntimeProbe> {
+  const ref = await resolveConsoleCommandContainerRef(instanceId, shard)
+  if (!ref) {
+    return { unitExists: false, snapshot: null }
+  }
+  try {
+    return { unitExists: true, snapshot: await getContainerRuntime().inspect(ref) }
+  }
+  catch {
+    return { unitExists: true, snapshot: null }
+  }
+}
+
 function stopLogFollow(instanceId: string) {
   for (const [key, controller] of logFollowAbortControllers.entries()) {
     if (key === instanceId || key.startsWith(`${instanceId}:`)) {
@@ -130,6 +157,15 @@ function stopShardLogFollow(instanceId: string, shard: ConsoleCommandShard) {
   logFollowAbortControllers.delete(key)
 }
 
+/** journalctl 权限不足时写在 stderr 的提示：面板读不到它会把它当成一条普通日志显示 */
+const JOURNAL_PERMISSION_HINT = /No journal files were opened|insufficient permissions/i
+
+/** 实例目录内游戏自己写的启动日志（面板读不到系统日志时，用户据此排查崩溃原因） */
+function resolveShardGameLogHint(shard: ConsoleCommandShard): string {
+  const shardDir = shard === 'caves' ? 'Caves' : 'Master'
+  return `${DST_STORAGE_DIR}/${DST_CONF_DIR}/${DST_CLUSTER_NAME}/${shardDir}/server_log.txt`
+}
+
 function startShardLogFollow(instanceId: string, ref: ContainerRef, shard: ConsoleCommandShard) {
   stopShardLogFollow(instanceId, shard)
   const key = logFollowKey(instanceId, shard)
@@ -139,10 +175,24 @@ function startShardLogFollow(instanceId: string, ref: ContainerRef, shard: Conso
   instanceConsoleLogStore.appendSystem(instanceId, `已连接${label}运行时，开始采集控制台输出`, shard)
   void (async () => {
     const runtime = getContainerRuntime()
+    let permissionHintShown = false
     try {
       for await (const line of runtime.logs(ref, { follow: true, tail: 100, signal: controller.signal })) {
         if (controller.signal.aborted) {
           break
+        }
+        if (JOURNAL_PERMISSION_HINT.test(line.text)) {
+          // 这条是 journalctl 的报错，不是游戏输出：换成一句能指导排查的说明，
+          // 否则控制台看起来像「服务器什么都没说」，把真正的崩溃原因藏起来。
+          if (!permissionHintShown) {
+            permissionHintShown = true
+            instanceConsoleLogStore.appendSystem(
+              instanceId,
+              `${label}日志暂时取不到（面板没有读取系统日志的权限）。完整的启动与报错信息在实例目录的 ${resolveShardGameLogHint(shard)}`,
+              shard,
+            )
+          }
+          continue
         }
         instanceConsoleLogStore.appendDockerLine(instanceId, line.text, shard)
       }

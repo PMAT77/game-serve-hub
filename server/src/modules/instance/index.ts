@@ -50,9 +50,11 @@ import { allocateDstGamePort } from './dst-port-service'
 import { registerDstContainerCommandPort } from '../../shared/instance/dst-container-command-port'
 import { applyDstPortAutoAllocate, probeDstPortConflictForStart, resolveDstGamePortForStart } from './dst-port-sync'
 import { ErrorCode } from '../../../../shared/constants/error-code'
+import type { ContainerInspect } from '../../infra/container/types'
 import {
   ensureContainerRuntimeReady,
   ensureInstanceContainerLogFollow,
+  inspectInstanceShardRuntime,
   isInstanceContainerRunning,
   removeInstanceContainer,
   resolveDefaultInstanceInstallPath,
@@ -229,8 +231,64 @@ function validateInstallPath(rawPath: string, options: InstallPathValidationOpti
   }
 }
 
+/** systemd 的 Result 值 → 用户能看懂的原因 */
+function describeSystemdExitReason(result: string | undefined): string | null {
+  switch (result) {
+    case 'oom-kill':
+      return '内存不足被系统终止'
+    case 'exit-code':
+      return '进程以非零状态退出'
+    case 'signal':
+      return '进程被信号终止'
+    case 'timeout':
+      return '启动或停止超时'
+    case 'watchdog':
+      return '看门狗超时'
+    case 'core-dump':
+      return '进程崩溃并产生核心转储'
+    default:
+      return null
+  }
+}
+
 /**
- * 服务重启后 DB 可能仍保留 running；与 Docker 实际状态对齐。
+ * 崩溃循环告警。
+ *
+ * 进程能被运行时反复拉起时，实例状态一直显示「运行中」，服主会以为一切正常；
+ * 实际上服务器可能从未加载完成，玩家连不上（大厅搜不到、直连报失去联系）。
+ * 这里把重启次数与退出原因写成可读的 lastError，界面据此在「运行中」旁给出警示；
+ * 文案没变就不重复写库，避免每次请求都触发一次更新。
+ */
+async function warnInstanceRestartLoop(
+  app: FastifyInstance,
+  instance: { id: string, lastError: string | null },
+  snapshot: ContainerInspect,
+): Promise<void> {
+  const restarts = snapshot.restarts ?? 0
+  if (restarts <= 0) {
+    return
+  }
+  const reason = describeSystemdExitReason(snapshot.exitResult)
+  const message = [
+    `实例进程反复重启（已重启 ${restarts} 次）`,
+    reason ? `，最近一次退出：${reason}` : '',
+    '。请打开控制台查看日志确认原因；若是内存不足，可在「世界设置 → 模组」减少订阅的 Mod。',
+  ].join('')
+  if (instance.lastError === message) {
+    return
+  }
+  await updateGameInstanceRuntime(instance.id, { lastError: message })
+  app.log.warn(
+    { instanceId: instance.id, restarts, exitResult: snapshot.exitResult },
+    '实例进程反复重启，已在实例上标注原因',
+  )
+}
+
+/**
+ * 服务重启后 DB 可能仍保留 running；与运行时实际状态对齐。
+ *
+ * 四种情况必须分开处理，压成一个布尔值正是实例状态在「运行中 / 已停止」之间来回跳的根源：
+ * 运行中、崩溃后等待运行时拉起（同样算运行中）、运行时单元已不存在（真停了）、问不到运行时（保持现状）。
  */
 async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<number> {
   const instances = await listGameInstances({ status: 'running' })
@@ -239,23 +297,40 @@ async function reconcileStaleRunningInstances(app: FastifyInstance): Promise<num
     if (instance.nodeId !== LOCAL_NODE_ID) {
       continue
     }
-    const running = await isInstanceContainerRunning(instance.id)
-    if (running) {
+    const probe = await inspectInstanceShardRuntime(instance.id)
+    // 问不到运行时（systemd user bus 不可达等）：保持现状，不能把运行中的实例判成已停止
+    if (probe.unitExists && !probe.snapshot) {
+      app.log.debug({ instanceId: instance.id }, '实例运行时探测失败，保持当前状态')
+      continue
+    }
+    const snapshot = probe.snapshot
+    if (snapshot?.running) {
       if (!instance.runtimeStartedAt) {
         await updateGameInstanceRuntime(instance.id, {
           runtimeStartedAt: new Date().toISOString(),
         })
       }
+      await warnInstanceRestartLoop(app, instance, snapshot)
       await ensureInstanceContainerLogFollow(instance.id)
       continue
     }
+    // master 不在运行：确认洞穴分片是否还在跑。两个分片生命周期本应一致，
+    // 只剩洞穴在跑时既白占内存，又让服主以为「已经停了」，必须如实说出来。
+    const cavesProbe = await inspectInstanceShardRuntime(instance.id, 'caves')
+    const cavesStillRunning = cavesProbe.snapshot?.running === true
     await updateGameInstanceRuntime(instance.id, {
       status: 'stopped',
       containerId: null,
       runtimePid: null,
       runtimeStartedAt: null,
+      ...(cavesStillRunning
+        ? { lastError: '主世界分片已停止，但洞穴分片仍在运行。请在实例控制里重新启动或停止实例，避免洞穴单独占着内存。' }
+        : {}),
     })
     reconciled++
+    if (cavesStillRunning) {
+      app.log.warn({ instanceId: instance.id }, '主世界已停止但洞穴分片仍在运行，已标注到实例')
+    }
     app.log.info({ instanceId: instance.id }, '实例运行时不存在，已同步状态为已停止')
   }
   return reconciled

@@ -93,6 +93,33 @@ function writeFileAtomic(filePath: string, content: string, mode: number) {
   fs.chmodSync(filePath, mode)
 }
 
+/**
+ * 由 `systemctl show` 的属性解析出单元运行状态。
+ *
+ * 分片 unit 是 `Type=simple` + `Restart=on-failure` + `RestartSec=5`：进程一崩，unit 会在
+ * `activating (auto-restart)` 停留 5 秒。只看 ActiveState 会把这段窗口报成「已停止」，
+ * 于是实例状态被对账成 stopped、下一轮又变回 running，在两次请求之间来回翻转。
+ * 等待重启同样算运行中；真正停下来时 ActiveState 是 inactive/failed。
+ */
+export function resolveNativeUnitState(properties: Record<string, string>): {
+  running: boolean
+  restarting: boolean
+  exitResult?: string
+  restarts?: number
+} {
+  const loaded = properties.LoadState !== 'not-found'
+  const restarting = loaded && properties.SubState === 'auto-restart'
+  const restarts = Number(properties.NRestarts)
+  const exitResult = properties.Result?.trim()
+  return {
+    running: loaded && (properties.ActiveState === 'active' || restarting),
+    restarting,
+    // Result=success 是正常值，只有非正常退出才值得带回上层
+    ...(exitResult && exitResult !== 'success' ? { exitResult } : {}),
+    ...(Number.isInteger(restarts) && restarts > 0 ? { restarts } : {}),
+  }
+}
+
 export interface UnitLoadDiagnosticInput {
   unitPath: string
   unitContent?: string
@@ -505,24 +532,30 @@ export class NativeSystemdRuntime implements ContainerRuntime {
       const { stdout } = await this.systemctl([
         'show',
         this.unitName(ref),
-        '--property=LoadState,ActiveState,MainPID,ExecMainStartTimestamp',
+        '--property=LoadState,ActiveState,SubState,MainPID,ExecMainStartTimestamp,Result,NRestarts',
       ])
       const properties = parseSystemctlProperties(stdout)
-      const running = properties.LoadState !== 'not-found' && properties.ActiveState === 'active'
+      const state = resolveNativeUnitState(properties)
       const pid = Number(properties.MainPID)
       return {
         id: this.unitName(ref),
         name: ref.name,
-        running,
+        running: state.running,
+        ...(state.restarting ? { restarting: true } : {}),
         ...(Number.isInteger(pid) && pid > 0 ? { pid } : {}),
         ...(properties.ExecMainStartTimestamp ? { startedAt: properties.ExecMainStartTimestamp } : {}),
+        ...(state.exitResult ? { exitResult: state.exitResult } : {}),
+        ...(state.restarts ? { restarts: state.restarts } : {}),
       }
     }
     catch {
+      // 问不到 systemd（user bus 不可达、systemctl 不可用）：这不是「没在运行」，
+      // 如实标出来，由调用方保持现状——否则运行中的实例会被对账成已停止。
       return {
         id: this.unitName(ref),
         name: ref.name,
         running: false,
+        probeFailed: true,
       }
     }
   }

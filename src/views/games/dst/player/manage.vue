@@ -297,7 +297,7 @@ watch(instanceId, () => {
         </div>
         <div class="flex flex-wrap gap-2">
           <NButton size="small" secondary @click="goRoomSettings">
-            房间设置（白名单预留位）
+            房间设置
           </NButton>
           <NButton size="small" secondary :loading="rosterLoading" @click="reloadAll">
             刷新
@@ -331,7 +331,6 @@ watch(instanceId, () => {
           :roster="roster"
           :loading="rosterLoading"
           :acting-ku-id="actingKuId"
-          @refresh="loadRoster()"
           @kick="confirmKick"
           @ban="confirmBan"
           @add-to-list="addOnlinePlayerToList"

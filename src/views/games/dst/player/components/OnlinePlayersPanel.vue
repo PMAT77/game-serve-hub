@@ -11,7 +11,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  refresh: []
   kick: [player: PlayerOnlineEntry]
   ban: [player: PlayerOnlineEntry]
   addToList: [payload: { player: PlayerOnlineEntry, kind: PlayerListKind }]
@@ -66,12 +65,7 @@ function displayName(player: PlayerOnlineEntry): string {
 <template>
   <NCard title="在线玩家" size="small">
     <template #header-extra>
-      <NSpace :size="8" align="center">
-        <span class="text-xs text-muted-foreground">每 15 秒自动刷新</span>
-        <NButton size="tiny" :loading="loading" @click="emit('refresh')">
-          刷新
-        </NButton>
-      </NSpace>
+      <span class="text-xs text-muted-foreground">每 15 秒自动刷新</span>
     </template>
 
     <NAlert v-if="roster?.partial" type="warning" :bordered="false" class="mb-3">

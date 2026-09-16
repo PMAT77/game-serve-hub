@@ -33,9 +33,20 @@ const installed = computed(() => Boolean(
 
 const roomName = computed(() => props.cluster?.clusterName?.trim() || props.connectInfo?.roomName || '—')
 
+/**
+ * 联网模式只显示模式本身。
+ *
+ * 后端标签是给控制台「连接与加入」卡片用的，带了括号补充（例如「公网（Klei 列表）」）；
+ * 房间概览这一格只需要模式名，括号里那截属于噪音。
+ */
+function stripParenthetical(label: string): string {
+  return label.replace(/（[^）]*）/g, '').trim() || label
+}
+
 const networkModeLabel = computed(() => {
-  if (props.connectInfo?.networkModeLabel) {
-    return props.connectInfo.networkModeLabel
+  const label = props.connectInfo?.networkModeLabel?.trim()
+  if (label) {
+    return stripParenthetical(label)
   }
   const mode = props.cluster?.networkMode
   if (mode === 'public') {

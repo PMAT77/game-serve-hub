@@ -71,6 +71,11 @@ const slotsFromApi = ref<number | null>(null)
 const whitelistSlots = computed(() => slotsFromApi.value ?? props.whitelistSlots)
 const whitelistDisabled = computed(() => whitelistSlots.value <= 0)
 
+/** 白名单没启用时不该再往里加人：加了也不生效，先去把预留位填成大于 0 */
+function whitelistBlocked(kind: PlayerListKind): boolean {
+  return kind === 'whitelist' && whitelistDisabled.value
+}
+
 const keyword = ref('')
 const searching = ref(false)
 const candidates = ref<PlayerProfileDto[]>([])
@@ -194,22 +199,51 @@ async function restartRoom(): Promise<boolean> {
  * 黑名单要单独对待：游戏只在启动时读取黑名单文件，运行中的房间把封禁记在内存里，
  * 光是删掉文件里那一行，人还是会被拒之门外（踩过一次坑）。
  * 所以房间在运行时直接问「要不要一并重启」，并把后果说清楚。
+ *
+ * 两个按钮都会发请求（移出名单，必要时还要重启房间），等待期间两个按钮一起转圈并禁用：
+ * 重启要好几秒，点下去没反馈的话管理员只会以为没点上、再点一次。
  */
 function confirmRemove(kind: PlayerListKind, entry: PlayerListEntry) {
+  const busy = reactive({
+    positive: { loading: false, disabled: false },
+    negative: { loading: false, disabled: false },
+  })
+  function setBusy(value: boolean) {
+    for (const side of [busy.positive, busy.negative]) {
+      side.loading = value
+      side.disabled = value
+    }
+  }
+
   if (kind === 'block' && props.instanceRunning) {
     dialog.warning({
       title: '移出黑名单',
       content: `房间正在运行，而游戏只在启动时读取黑名单：只把「${displayName(entry)}」移出名单，他仍然会被拒绝加入。要现在移出并重启房间吗？房间里的玩家会被断开。`,
       positiveText: '移出并重启',
       negativeText: '只移出',
+      maskClosable: false,
+      positiveButtonProps: busy.positive,
+      negativeButtonProps: busy.negative,
       onPositiveClick: async () => {
-        if (await removeEntry(kind, entry.kuId)) {
-          await restartRoom()
+        setBusy(true)
+        try {
+          if (await removeEntry(kind, entry.kuId)) {
+            await restartRoom()
+          }
+        }
+        finally {
+          setBusy(false)
         }
       },
       onNegativeClick: async () => {
-        if (await removeEntry(kind, entry.kuId)) {
-          message.warning('已移出黑名单，但需要重启房间后该玩家才能重新加入', { duration: 8000 })
+        setBusy(true)
+        try {
+          if (await removeEntry(kind, entry.kuId)) {
+            message.warning('已移出黑名单，但需要重启房间后该玩家才能重新加入', { duration: 8000 })
+          }
+        }
+        finally {
+          setBusy(false)
         }
       },
     })
@@ -223,7 +257,17 @@ function confirmRemove(kind: PlayerListKind, entry: PlayerListEntry) {
       : `将把「${displayName(entry)}」移出${labelOf(kind)}名单。`,
     positiveText: '移出',
     negativeText: '取消',
-    onPositiveClick: () => removeEntry(kind, entry.kuId),
+    maskClosable: false,
+    positiveButtonProps: busy.positive,
+    onPositiveClick: async () => {
+      setBusy(true)
+      try {
+        await removeEntry(kind, entry.kuId)
+      }
+      finally {
+        setBusy(false)
+      }
+    },
   })
 }
 
@@ -351,11 +395,6 @@ defineExpose({ loadAll })
       </NButton>
     </template>
 
-    <p class="mb-3 text-xs text-muted-foreground">
-      名单里显示的是玩家在游戏里的名字，保存时写入的仍是玩家 ID——游戏的名单文件只认 ID。
-      名字来自「在线玩家」与服务器日志，管理员也可以给认不出来的 ID 加个备注名。
-    </p>
-
     <NTabs v-model:value="activeKind" type="line" animated>
       <NTabPane
         v-for="item in LIST_META"
@@ -376,21 +415,21 @@ defineExpose({ loadAll })
           <NInput
             v-model:value="keyword"
             class="max-w-96"
-            :placeholder="`游戏名或玩家 ID（加进${item.label}名单）`"
-            :disabled="lists[item.kind].saving || searching"
+            placeholder="游戏名或玩家 ID"
+            :disabled="lists[item.kind].saving || searching || whitelistBlocked(item.kind)"
             @keyup.enter="handleAdd"
           />
           <NButton
             type="primary"
             :loading="searching"
-            :disabled="!keyword.trim() || lists[item.kind].saving"
+            :disabled="!keyword.trim() || lists[item.kind].saving || whitelistBlocked(item.kind)"
             @click="handleAdd"
           >
             加入名单
           </NButton>
         </div>
         <p class="mt-2 text-xs text-muted-foreground">
-          填游戏名会先在面板记录里查找；填 KU_ 开头的玩家 ID 可以直接加入，多个 ID 用空格或逗号分隔。
+          多个 ID 用空格或逗号分隔。
         </p>
 
         <div v-if="candidates.length > 0" class="mt-3 rounded-md border p-3">
@@ -454,7 +493,7 @@ defineExpose({ loadAll })
                   {{ entry.kuId }}
                 </p>
               </div>
-              <div class="flex items-center gap-1">
+              <div class="flex items-center gap-3">
                 <NButton text size="small" :disabled="lists[item.kind].saving" @click="openNote(entry)">
                   备注
                 </NButton>

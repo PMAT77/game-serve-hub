@@ -5,6 +5,7 @@ import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import { resolveDockerStatus } from '../../infra/docker.ts'
 import {
+  classifyMasterProbe,
   ensureContainerRuntimeReady,
   isHealthyRuntimeForResurrect,
   readClusterMasterPort,
@@ -88,8 +89,56 @@ describe('isHealthyRuntimeForResurrect', () => {
   })
 })
 
-describe('readClusterMasterPort', () => {
-  it('读取 cluster.ini 的 master_port', () => {
+/**
+ * 等待主世界就绪期间的判决。
+ *
+ * 关键回归：`Restart=on-failure` 的重启窗口里单元仍算「在运行」。若只看 running，
+ * 主世界崩溃循环时会被判成「还活着」，白等满 300 秒上限后照样把洞穴拉起来占内存
+ * ——这正是线上「洞穴单独在跑、主世界反复重启」的成因。
+ */
+describe('classifyMasterProbe', () => {
+  it('把重启窗口里的主世界判成崩溃循环而不是还活着', () => {
+    assert.equal(classifyMasterProbe({
+      id: 'gsh-x-master.service',
+      name: 'gsh-x-master',
+      running: true,
+      restarting: true,
+    }), 'restart-loop')
+  })
+
+  it('把已经重启过的主世界判成崩溃循环', () => {
+    assert.equal(classifyMasterProbe({
+      id: 'gsh-x-master.service',
+      name: 'gsh-x-master',
+      running: true,
+      restarts: 2,
+      exitResult: 'oom-kill',
+    }), 'restart-loop')
+  })
+
+  it('把真正在跑的主世界判成健康', () => {
+    assert.equal(classifyMasterProbe({
+      id: 'gsh-x-master.service',
+      name: 'gsh-x-master',
+      running: true,
+    }), 'healthy')
+  })
+
+  it('把已停止的主世界判成退出', () => {
+    assert.equal(classifyMasterProbe({
+      id: 'gsh-x-master.service',
+      name: 'gsh-x-master',
+      running: false,
+      exitResult: 'oom-kill',
+    }), 'stopped')
+  })
+
+  it('问不到运行时只算未知，不能误判成崩溃', () => {
+    assert.equal(classifyMasterProbe(null), 'unknown')
+  })
+})
+
+describe('readClusterMasterPort', () => {  it('读取 cluster.ini 的 master_port', () => {
     const installPath = createTempDir()
     const shardRoot = path.join(installPath, 'klei-storage', 'DoNotStarveTogether', 'Cluster_1')
     fs.mkdirSync(shardRoot, { recursive: true })

@@ -37,7 +37,7 @@ import {
 import { formatInstallLogContent } from '../../shared/instance-install/log-format'
 import { isSteamcmdAppUpdateBusy } from '../../infra/container/steamcmd-app-update-queue'
 import { isSteamcmdImagePresent } from '../../infra/container'
-import { resolveDstContainerResourceLimits } from '../../infra/container/dst-container-resources'
+import { describeSystemdExitReason, resolveShardMemoryCapMb } from '../../infra/container/exit-reason'
 import {
   buildDstStartBlockedMessage,
   diagnoseDstInstallReadiness,
@@ -231,36 +231,6 @@ function validateInstallPath(rawPath: string, options: InstallPathValidationOpti
       return '安装路径必须位于实例数据目录（GSH_INSTANCES_ROOT）之下；如确需自定义目录，请设置 GSH_INSTALL_PATH_POLICY=any 并自行承担隔离风险'
     }
   }
-}
-
-/** systemd 的 Result 值 → 用户能看懂的原因 */
-function describeSystemdExitReason(result: string | undefined, memoryCapMb?: number): string | null {
-  switch (result) {
-    case 'oom-kill':
-      return memoryCapMb
-        ? `内存不足被系统终止（该分片上限 ${memoryCapMb} MiB）`
-        : '内存不足被系统终止'
-    case 'exit-code':
-      return '进程以非零状态退出'
-    case 'signal':
-      return '进程被信号终止'
-    case 'timeout':
-      return '启动或停止超时'
-    case 'watchdog':
-      return '看门狗超时'
-    case 'core-dump':
-      return '进程崩溃并产生核心转储'
-    case 'start-limit-hit':
-      return '反复重启次数已达上限，运行时已停止拉起'
-    default:
-      return null
-  }
-}
-
-/** 分片当前的 cgroup 内存上限（MiB）；未设置时为 undefined */
-function resolveShardMemoryCapMb(): number | undefined {
-  const limits = resolveDstContainerResourceLimits()
-  return limits?.memory ? Math.round(limits.memory / (1024 * 1024)) : undefined
 }
 
 /**

@@ -46,6 +46,7 @@ import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-l
 import { getGameInstanceById, listInstanceMods, updateGameInstanceRuntime } from '../../shared/db/index'
 import { resolveClusterPaths } from '../../infra/game-adapter/dst/cluster-service'
 import { parseClusterIni } from '../../infra/game-adapter/dst/cluster-ini'
+import { describeSystemdExitReason, resolveShardMemoryCapMb } from '../../infra/container/exit-reason'
 
 /** 主世界分片互联端口（cluster.ini [SHARD] master_port）；读不到时退回 DST 默认值 */
 const DEFAULT_DST_MASTER_PORT = 10888
@@ -397,32 +398,86 @@ function probeTcpPort(port: number, timeoutMs = 1000): Promise<boolean> {
  * 此时连不上主世界，只会反复报 `Connection to master failed`，最后两个分片都白跑。
  * 主世界先跑完，洞穴再加载时页缓存已经热了，整机峰值只剩原来的一个多一点。
  */
+export type MasterReadyOutcome =
+  /** 主世界分片端口已可连接，洞穴可以起来了 */
+  | { kind: 'ready' }
+  /** 等满上限仍未就绪：照常启动洞穴，但要在控制台说明原因 */
+  | { kind: 'timed-out' }
+  /** 主世界进程已不在（退出或被运行时放弃拉起） */
+  | { kind: 'stopped', detail: string }
+  /** 主世界在崩溃循环里反复重启，永远不会就绪 */
+  | { kind: 'restart-loop', detail: string }
+
+export type MasterProbeVerdict = 'healthy' | 'unknown' | 'stopped' | 'restart-loop'
+
+/**
+ * 等待期间对主世界分片快照的判决。
+ *
+ * `unknown`（问不到运行时）必须继续等：user bus 抖动一次就判崩溃会误伤正常启动。
+ * `restart-loop` 必须判失败：`Restart=on-failure` 的重启窗口里单元仍算「在运行」，
+ * 只按这一条判断就会白等满上限、然后照样把洞穴拉起来占内存。
+ */
+export function classifyMasterProbe(snapshot: ContainerInspect | null): MasterProbeVerdict {
+  if (!snapshot) {
+    return 'unknown'
+  }
+  if (!snapshot.running) {
+    return 'stopped'
+  }
+  if (snapshot.restarting || (snapshot.restarts ?? 0) > 0) {
+    return 'restart-loop'
+  }
+  return 'healthy'
+}
+
+/**
+ * 等主世界就绪后再拉起洞穴。
+ *
+ * 两个分片同时加载时，各自都要把整套 Mod 与世界读一遍：2 核 4G 机器上两个峰值叠在
+ * 一起会触发整机 OOM（线上实测主世界 anon-rss 已达 2.0 GiB 时被内核杀掉），而洞穴
+ * 此时连不上主世界，只会反复报 `Connection to master failed`，最后两个分片都白跑。
+ * 主世界先跑完，洞穴再加载时页缓存已经热了，整机峰值只剩原来的一个多一点。
+ *
+ * 崩溃循环必须当成失败：`Restart=on-failure` 的重启窗口里单元仍算「在运行」，
+ * 若只按这一条判断就会白等满上限、然后照样把洞穴拉起来占内存。
+ */
 export async function waitForMasterShardReady(
   app: FastifyInstance,
   instanceId: string,
   masterRef: ContainerRef,
   masterPort: number,
   waitSec = DEFAULT_SHARD_READY_WAIT_SEC,
-): Promise<{ ready: boolean, aborted: boolean }> {
+): Promise<MasterReadyOutcome> {
   const runtime = getContainerRuntime()
   const startAt = Date.now()
   const deadline = startAt + waitSec * 1000
   let lastHeartbeat = startAt
   while (Date.now() < deadline) {
     if (await probeTcpPort(masterPort)) {
-      return { ready: true, aborted: false }
+      return { kind: 'ready' }
     }
-    // 主世界单元已经不在运行（例如被 OOM 杀掉且不再拉起）：再等没有意义，
-    // 洞穴起来了也只是白占内存，直接中止本次启动更诚实。
-    let alive = true
+    let snapshot: ContainerInspect | null = null
     try {
-      alive = (await runtime.inspect(masterRef)).running
+      snapshot = await runtime.inspect(masterRef)
     }
     catch {
-      alive = true
+      // 问不到运行时（user bus 抖动等）：当作还活着，继续等，别误判成崩溃
+      snapshot = null
     }
-    if (!alive) {
-      return { ready: false, aborted: true }
+    const verdict = classifyMasterProbe(snapshot)
+    if (verdict === 'stopped') {
+      const reason = describeSystemdExitReason(snapshot?.exitResult, resolveShardMemoryCapMb())
+      return {
+        kind: 'stopped',
+        detail: reason ? `主世界分片在加载途中退出：${reason}` : '主世界分片在加载途中退出',
+      }
+    }
+    if (verdict === 'restart-loop') {
+      const reason = describeSystemdExitReason(snapshot?.exitResult, resolveShardMemoryCapMb())
+      return {
+        kind: 'restart-loop',
+        detail: `主世界分片反复重启（已重启 ${snapshot?.restarts ?? 0} 次）${reason ? `，最近一次退出：${reason}` : ''}`,
+      }
     }
     const now = Date.now()
     if (now - lastHeartbeat >= 30_000) {
@@ -437,7 +492,7 @@ export async function waitForMasterShardReady(
     await new Promise(resolve => setTimeout(resolve, 2000))
   }
   app.log.warn({ instanceId, masterPort, waitSec }, '等待主世界就绪超时，仍继续启动洞穴分片')
-  return { ready: false, aborted: false }
+  return { kind: 'timed-out' }
 }
 
 export async function startInstanceContainer(
@@ -577,57 +632,9 @@ export async function startInstanceContainer(
       cavesSpec.networkName = shardNetworkName
     }
   }
-  const startedRefs: ContainerRef[] = []
-  const startSpec = async (spec: ShardContainerSpec, label: string) => {
-    const result = await startSingleShardContainer(runtime, spec, gameDstImage, runtimeMode)
-    if (!result.ok) {
-      return { ok: false as const, message: `${label}：${result.message}` }
-    }
-    startedRefs.push(result.ref)
-    return { ok: true as const, ref: result.ref }
-  }
-  const masterStart = await startSpec(masterSpec, '主世界')
+  const masterStart = await startSingleShardContainer(runtime, masterSpec, gameDstImage, runtimeMode)
   if (!masterStart.ok) {
-    return { ok: false, message: masterStart.message }
-  }
-  if (cavesSpec) {
-    instanceConsoleLogStore.appendSystem(
-      input.instanceId,
-      '主世界分片已启动，正在加载 Mod 与世界；就绪后再启动洞穴分片',
-      'master',
-    )
-    const readiness = await waitForMasterShardReady(
-      app,
-      input.instanceId,
-      masterStart.ref,
-      readClusterMasterPort(input.installPath),
-    )
-    if (readiness.aborted) {
-      // 主世界已不在运行：把刚拉起的残留分片清掉，避免留下「洞穴单独在跑」的残局
-      for (const ref of startedRefs) {
-        await stopAndRemoveShard(runtime, ref)
-      }
-      return {
-        ok: false,
-        message: '主世界分片在加载途中退出，已中止启动洞穴分片。请查看分片日志确认原因（内存不足时可在「世界设置 → 模组」减少订阅的 Mod）。',
-      }
-    }
-    if (!readiness.ready) {
-      instanceConsoleLogStore.appendSystem(
-        input.instanceId,
-        `等待主世界就绪超时（${DEFAULT_SHARD_READY_WAIT_SEC} 秒），仍继续启动洞穴分片；若洞穴反复重连失败请检查主世界日志`,
-        'caves',
-      )
-    }
-    const cavesStart = await startSpec(cavesSpec, '洞穴')
-    if (!cavesStart.ok) {
-      for (const ref of startedRefs) {
-        await stopAndRemoveShard(runtime, ref)
-      }
-      return { ok: false, message: cavesStart.message }
-    }
-    instanceConsoleLogStore.appendSystem(input.instanceId, '洞穴分片已启动', 'caves')
-    startShardLogFollow(input.instanceId, cavesStart.ref, 'caves')
+    return { ok: false, message: `主世界：${masterStart.message}` }
   }
   const ref = masterStart.ref
   const displayCommand = masterSpec.cmd.join(' ')
@@ -639,7 +646,93 @@ export async function startInstanceContainer(
     shardEnabled,
   }, '实例运行时已启动')
   startShardLogFollow(input.instanceId, ref, 'master')
+
+  if (cavesSpec) {
+    instanceConsoleLogStore.appendSystem(
+      input.instanceId,
+      '主世界分片已启动，正在加载 Mod 与世界；就绪后再启动洞穴分片',
+      'master',
+    )
+    // 不能在 HTTP 请求里等主世界就绪：36 个 Mod 在 2 核机上要加载两分多钟，
+    // 而前端 axios 的超时是 60 秒——同步等待会让面板先报「启动失败」，
+    // 实际却已经起来了。这里放到后台，主世界本身就已经算「实例在运行」。
+    void startCavesAfterMasterReady(app, {
+      instanceId: input.instanceId,
+      installPath: input.installPath,
+      masterRef: ref,
+      cavesSpec,
+      startCaves: async () => {
+        const result = await startSingleShardContainer(runtime, cavesSpec, gameDstImage, runtimeMode)
+        return result.ok ? { ok: true as const, ref: result.ref } : { ok: false as const, message: `洞穴：${result.message}` }
+      },
+    })
+  }
   return { ok: true, ref, displayCommand }
+}
+
+/**
+ * 后台等主世界就绪再拉起洞穴，并在失败时如实上报。
+ *
+ * 两个分片同时加载会把整机内存吃穿（线上实测主世界 anon-rss 2.0 GiB 时被内核 OOM 杀掉），
+ * 而主世界崩了以后洞穴连不上它、只会反复重连失败，白占内存。所以主世界没站住就中止，
+ * 并把状态写成 error——用 whereStatus 守卫，避免用户在等待期间主动停止实例后又被改回错误态。
+ */
+async function startCavesAfterMasterReady(
+  app: FastifyInstance,
+  input: {
+    instanceId: string
+    installPath: string
+    masterRef: ContainerRef
+    cavesSpec: ShardContainerSpec
+    startCaves: () => Promise<{ ok: true, ref: ContainerRef } | { ok: false, message: string }>
+  },
+): Promise<void> {
+  const runtime = getContainerRuntime()
+  const failStart = async (message: string) => {
+    await stopAndRemoveShard(runtime, input.masterRef)
+    instanceConsoleLogStore.appendSystem(input.instanceId, message, 'caves')
+    await updateGameInstanceRuntime(input.instanceId, {
+      status: 'error',
+      containerId: null,
+      runtimePid: null,
+      runtimeStartedAt: null,
+      lastError: message,
+      whereStatus: 'running',
+    })
+    app.log.error({ instanceId: input.instanceId }, message)
+  }
+  try {
+    const readiness = await waitForMasterShardReady(
+      app,
+      input.instanceId,
+      input.masterRef,
+      readClusterMasterPort(input.installPath),
+    )
+    if (readiness.kind === 'stopped' || readiness.kind === 'restart-loop') {
+      await failStart(
+        `${readiness.detail}，已中止启动洞穴分片。内存不足时可先执行 gsh setup-swap 增加 swap，'
+        + '或在「世界设置 → 模组」减少订阅的 Mod；完整日志见控制台。`,
+      )
+      return
+    }
+    if (readiness.kind === 'timed-out') {
+      instanceConsoleLogStore.appendSystem(
+        input.instanceId,
+        `等待主世界就绪超时（${DEFAULT_SHARD_READY_WAIT_SEC} 秒），仍继续启动洞穴分片；若洞穴反复重连失败请检查主世界日志`,
+        'caves',
+      )
+    }
+    const cavesStart = await input.startCaves()
+    if (!cavesStart.ok) {
+      await failStart(cavesStart.message)
+      return
+    }
+    instanceConsoleLogStore.appendSystem(input.instanceId, '洞穴分片已启动', 'caves')
+    startShardLogFollow(input.instanceId, cavesStart.ref, 'caves')
+  }
+  catch (error) {
+    app.log.error({ instanceId: input.instanceId, err: error }, '等待主世界就绪或启动洞穴分片时发生异常')
+  }
 }
 
 export async function stopInstanceContainer(instanceId: string): Promise<void> {

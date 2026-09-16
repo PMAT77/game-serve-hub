@@ -14,7 +14,11 @@ import {
   listInstanceMods,
 } from '../../shared/db/index'
 import type { DbGameInstance } from '../../shared/db/index'
-import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
+import { DST_APP_ID, resolveDstSteamWorkshopModDir } from '../../infra/game-adapter/dst/constants'
+import {
+  resetModDownloadExecutorForTest,
+  setModDownloadExecutorForTest,
+} from '../mod/mod-download-service'
 import { InstanceArchiveBusyError, withInstanceArchiveOperationLock } from './archive-lock'
 import { importSaveToInstance, probeSaveImportSource } from './import-service'
 
@@ -112,6 +116,8 @@ before(async () => {
   process.env.GSH_INSTANCES_ROOT = path.join(workDir, 'instances')
   sourceRoot = path.join(workDir, 'sources')
   fs.mkdirSync(sourceRoot, { recursive: true })
+  // 导入后会把缺失内容的 Mod 排进下载队列：这里只验证入库与 Lua 状态，不真的下载
+  setModDownloadExecutorForTest(() => new Promise<{ ok: boolean }>(() => {}))
   await initDatabase(path.join(workDir, `test-${randomUUID()}.sqlite`), migrationsFolder, {
     adminUsername: 'superadmin',
     adminPassword: '123456',
@@ -120,6 +126,7 @@ before(async () => {
 })
 
 after(() => {
+  resetModDownloadExecutorForTest()
   closeDatabase()
   fs.rmSync(workDir, { recursive: true, force: true })
 })
@@ -213,24 +220,56 @@ describe('save import execution', () => {
     const safety = await getBackupById(detail.safetyBackupId!)
     assert.ok(safety)
     assert.equal(safety.kind, 'pre_import')
-    // Mod 反向入库
+    // Mod 反向入库：本机没有创意工坊内容，必须记为「等待下载」而不是「已就绪」
     assert.equal(detail.modCount, 2)
     const mods = await listInstanceMods(instance.id)
     assert.equal(mods.length, 2)
     const first = mods.find(mod => mod.workshopId === '123456789')
     assert.ok(first)
     assert.equal(first.enabled, true)
-    assert.equal(first.installStatus, 'ready')
+    assert.equal(first.installStatus, 'pending')
+    assert.match(first.installError ?? '', /创意工坊/)
     assert.deepEqual(JSON.parse(first.config ?? '{}'), { maze: 'on' })
     const second = mods.find(mod => mod.workshopId === '987654321')
     assert.ok(second)
     assert.equal(second.enabled, false)
+    assert.equal(second.installStatus, 'pending')
     // workshop 内容缺失提示（实例未下载 mod 内容）
     assert.deepEqual(detail.missingWorkshopContent.sort(), ['123456789', '987654321'])
-    // 源档 modoverrides.lua 原样保留
-    assert.match(fs.readFileSync(path.join(clusterRoot, 'Master', 'modoverrides.lua'), 'utf8'), /workshop-123456789/)
+    assert.ok(detail.warnings.some(warning => warning.includes('下载队列')))
+    // 缺失内容的 Mod 不进 modoverrides.lua：否则 DST 每次启动都会自行补下载，legacy 包常超时失败
+    assert.equal(fs.readFileSync(path.join(clusterRoot, 'Master', 'modoverrides.lua'), 'utf8'), 'return {}\n')
     // staging 清理
     assert.equal(fs.readdirSync(instance.installPath!).filter(name => name.startsWith('.import-staging-')).length, 0)
+  })
+
+  it('imports a mod as ready only when its workshop content already exists', async () => {
+    const sourcePath = buildSourceCluster('Cluster_ModsPresent')
+    const instance = await buildInstalledInstance({ withOldSave: true })
+    // 预置其中一个 Mod 的创意工坊下载产物（steamapps/workshop/content/<appid>/<id>）
+    const presentDir = resolveDstSteamWorkshopModDir(instance.installPath!, '123456789')
+    fs.mkdirSync(presentDir, { recursive: true })
+    fs.writeFileSync(path.join(presentDir, 'modinfo.lua'), 'return { name = "已下载的 Mod" }\n')
+
+    const result = await importSaveToInstance({
+      instanceId: instance.id,
+      sourceClusterPath: sourcePath,
+      createdBy: 'tester',
+    })
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.result!.missingWorkshopContent, ['987654321'])
+
+    const mods = await listInstanceMods(instance.id)
+    const present = mods.find(mod => mod.workshopId === '123456789')
+    const missing = mods.find(mod => mod.workshopId === '987654321')
+    assert.equal(present?.installStatus, 'ready')
+    assert.equal(present?.installError, null)
+    assert.equal(missing?.installStatus, 'pending')
+
+    // 只有就绪的 Mod 进 modoverrides.lua，且源档的开关与配置照旧
+    const overrides = fs.readFileSync(path.join(resolveClusterRoot(instance.installPath!), 'Master', 'modoverrides.lua'), 'utf8')
+    assert.match(overrides, /\["workshop-123456789"\]=\{ enabled=true, configuration_options=\{ maze="on" \} \},/)
+    assert.doesNotMatch(overrides, /workshop-987654321/)
   })
 
   it('prefers an explicit token over existing and source tokens', async () => {

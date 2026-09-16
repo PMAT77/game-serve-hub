@@ -43,8 +43,9 @@ import {
   readModDependencyMap,
   writeModDependencyMap,
 } from '../../infra/game-adapter/dst/mod-service'
-import { ensureDstUgcModLayout } from '../../infra/game-adapter/dst/ugc-mod-install'
 import { LOCAL_NODE_ID, resolveLocalDstInstance } from '../../shared/dst/local-dst-instance'
+import type { ModReadinessResult } from './mod-readiness-service'
+import { reconcileInstanceModReadiness } from './mod-readiness-service'
 import { syncInstanceModFilesFromDb } from './mod-file-sync-service'
 import { fetchDstSteamWorkshopMods, fetchWorkshopFileDetail, fetchWorkshopPreviewImages, fetchWorkshopRatings, isSteamWorkshopFetchError, scheduleWarmSteamWorkshopModCache } from '../../infra/game-adapter/dst/steam-workshop'
 import {
@@ -369,32 +370,22 @@ function normalizeLoadOrder(mods: Awaited<ReturnType<typeof listInstanceMods>>) 
     .map((mod, index) => ({ ...mod, loadOrder: index }))
 }
 
-/**
- * 面板启动自愈：把已就绪 Mod 落位到 ugc_mods。
- * 历史上面板只把 Mod 下载到 steamapps/workshop/content，DST 专用服不读该位置，
- * 于是服务器会自己联网重下、legacy 包超时后静默丢弃——表现为「已启用但游戏里没有」。
- */
-async function ensureInstanceUgcModLayout(app: FastifyInstance, instanceId: string, installPath: string) {
-  try {
-    const mods = (await listInstanceMods(instanceId)).filter(mod => mod.installStatus === 'ready')
-    if (mods.length === 0) {
-      return
-    }
-    const outcomes = await ensureDstUgcModLayout(installPath, mods.map(mod => mod.workshopId))
-    for (const outcome of outcomes) {
-      if (outcome.status === 'failed') {
-        app.log.warn(
-          { instanceId, workshopId: outcome.workshopId, error: outcome.error },
-          'Mod 文件未能落位到 ugc_mods，DST 启动时可能无法加载该 Mod',
-        )
-      }
-      else if (outcome.status === 'installed') {
-        app.log.info({ instanceId, workshopId: outcome.workshopId }, '已将已下载的 Mod 落位到 ugc_mods')
-      }
-    }
+/** 把一次状态校准的结果落到日志，便于排查「面板说就绪、游戏里没有」 */
+function logModReadinessResult(app: FastifyInstance, instanceId: string, result: ModReadinessResult) {
+  if (result.demotedToPending.length > 0) {
+    app.log.warn(
+      { instanceId, workshopIds: result.demotedToPending },
+      'Mod 创意工坊内容缺失，已由「已就绪」降级为等待下载',
+    )
   }
-  catch (error) {
-    app.log.warn({ instanceId, err: error }, '同步 Mod 落位时发生异常')
+  for (const item of result.markedFailed) {
+    app.log.warn(
+      { instanceId, workshopId: item.workshopId, error: item.error },
+      'Mod 文件未能落位到 ugc_mods，DST 启动时无法加载该 Mod',
+    )
+  }
+  if (result.renamed.length > 0) {
+    app.log.info({ instanceId, renamed: result.renamed }, '已按 modinfo.lua 补齐 Mod 名称')
   }
 }
 
@@ -414,12 +405,26 @@ export function registerModModule(app: FastifyInstance) {
       if (!fs.existsSync(installPath)) {
         continue
       }
+      // 先按磁盘校准状态：缺内容的从「已就绪」降级为等待下载，才能被下面的下载队列接手
+      const readiness = await reconcileInstanceModReadiness({
+        instanceId: instance.id,
+        installPath,
+      })
+      logModReadinessResult(app, instance.id, readiness)
       await ensurePendingModDownloadsRecovered({
         instanceId: instance.id,
         installPath,
       })
-      // 不阻塞面板启动：落位在后台补齐，失败只记日志
-      void ensureInstanceUgcModLayout(app, instance.id, installPath)
+      // 不阻塞面板启动：落位与失败标注在后台补齐（DST 只从 ugc_mods 加载创意工坊 Mod）
+      void reconcileInstanceModReadiness({
+        instanceId: instance.id,
+        installPath,
+        relocate: true,
+      })
+        .then(result => logModReadinessResult(app, instance.id, result))
+        .catch((error) => {
+          app.log.warn({ instanceId: instance.id, err: error }, 'Mod 状态校准时发生异常')
+        })
     }
   })
 
@@ -445,6 +450,12 @@ export function registerModModule(app: FastifyInstance) {
       return resolved.error
     }
     try {
+      // 列表口径必须与磁盘一致：先把缺内容的记录降级为等待下载，再交给下载队列补齐
+      const readiness = await reconcileInstanceModReadiness({
+        instanceId,
+        installPath: resolved.instance.installPath,
+      })
+      logModReadinessResult(app, instanceId, readiness)
       await ensurePendingModDownloadsRecovered({
         instanceId,
         installPath: resolved.instance.installPath,

@@ -318,6 +318,35 @@ export function parseModInfoConfigurations(installPath: string, workshopId: stri
 }
 
 /**
+ * 读取 modinfo.lua 的展示名。
+ * 导入存档时源档 modoverrides.lua 只有 workshop ID，入库名是 `workshop-<id>` 占位，
+ * 内容下载落地后由此补齐真实名称；文件不存在或解析失败返回 null，绝不抛错。
+ */
+export function resolveModDisplayName(installPath: string, workshopId: string): string | null {
+  const modInfoPath = resolveDstModInfoPath(installPath, workshopId)
+  if (!modInfoPath) {
+    return null
+  }
+  try {
+    if (fs.statSync(modInfoPath).size > MAX_LUA_PARSE_LENGTH) {
+      return null
+    }
+    const content = fs.readFileSync(modInfoPath, 'utf8')
+    const table = parseLuaTableLiteral(content.replace(/^\s*return\s*/, ''))
+    const tableName = table?.entries.get('name')
+    if (typeof tableName === 'string' && tableName.trim()) {
+      return tableName.trim()
+    }
+    // 少数 modinfo.lua 不是单个表字面量，退化为顶层赋值匹配
+    const fallback = /^\s*name\s*=\s*["']([^"'\r\n]+)["']/m.exec(content)?.[1]?.trim()
+    return fallback || null
+  }
+  catch {
+    return null
+  }
+}
+
+/**
  * 读取 Master/modoverrides.lua 中各 mod 的 configuration_options（导入预填用）。
  * 文件不存在或解析失败返回空 Map。
  */

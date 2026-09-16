@@ -8,8 +8,10 @@ import {
   readModDependencyMap,
   writeModDependencyMap,
 } from '../../infra/game-adapter/dst/mod-service'
+import { resolveModDisplayName } from '../../infra/game-adapter/dst/mod-config'
 import { ensureDstUgcModLayout } from '../../infra/game-adapter/dst/ugc-mod-install'
 import { syncInstanceModFilesFromDb } from './mod-file-sync-service'
+import { isPlaceholderModName } from './mod-readiness-service'
 import {
   getInstanceModByWorkshopId,
   listInstanceMods,
@@ -148,6 +150,18 @@ async function upsertPendingModRecord(input: ModDownloadJobInput) {
   })
 }
 
+/**
+ * 下载完成后登记的 Mod 名：订阅走 UI 时带的是 Steam 上的真实名称，
+ * 而导入存档触发的补下载只带着 `workshop-<id>` 占位名，此时从已落地的 modinfo.lua 补齐。
+ */
+function resolvePersistedModName(installPath: string, workshopId: string, requestedName?: string): string {
+  const trimmed = requestedName?.trim() ?? ''
+  if (trimmed && !isPlaceholderModName(trimmed)) {
+    return trimmed
+  }
+  return resolveModDisplayName(installPath, workshopId) || trimmed || `Workshop Mod ${workshopId}`
+}
+
 async function persistSubscribedMod(input: ModDownloadJobInput) {
   const { instanceId, installPath, payload } = input
   const workshopId = payload.workshopId.trim()
@@ -157,7 +171,7 @@ async function persistSubscribedMod(input: ModDownloadJobInput) {
   await upsertInstanceModFn({
     instanceId,
     workshopId,
-    name: payload.name?.trim() || `Workshop Mod ${workshopId}`,
+    name: resolvePersistedModName(installPath, workshopId, payload.name),
     previewImage: payload.previewImage?.trim() || null,
     enabled: typeof payload.enabled === 'boolean'
       ? payload.enabled

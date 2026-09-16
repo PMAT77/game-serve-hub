@@ -69,13 +69,20 @@ const playerCountText = computed(() => {
   return `${online.onlinePlayerCount} / ${online.maxPlayers}`
 })
 
+/**
+ * Mod 概览只认「已生效」：文件就绪且开关打开才会被房间加载。
+ * 只数开关会漏掉没下载下来的 Mod（导入存档后尤其常见），
+ * 于是面板显示满员、游戏里却只加载出有文件的那几个。
+ */
+const notReadyModCount = computed(() => props.modList?.mods.filter(mod => mod.installStatus !== 'ready').length ?? 0)
+
 const modCountText = computed(() => {
   const mods = props.modList?.mods
   if (!mods) {
     return '—'
   }
-  const enabled = mods.filter(mod => mod.enabled).length
-  return `${enabled} / ${mods.length}`
+  const effective = mods.filter(mod => mod.enabled && mod.installStatus === 'ready').length
+  return `${effective} / ${mods.length}`
 })
 
 const cavesText = computed(() => {
@@ -120,8 +127,17 @@ function goMods() {
             {{ playerCountText }}
           </span>
         </NStatistic>
-        <NStatistic label="Mod（启用 / 总数）">
+        <NStatistic label="Mod（已生效 / 总数）">
           {{ modCountText }}
+          <NTag
+            v-if="notReadyModCount > 0"
+            size="tiny"
+            :bordered="false"
+            type="warning"
+            class="ml-1"
+          >
+            {{ notReadyModCount }} 个未就绪
+          </NTag>
         </NStatistic>
         <NStatistic label="洞穴">
           <NTag size="small" :bordered="false" :type="cavesText === '已开启' ? 'success' : 'default'">

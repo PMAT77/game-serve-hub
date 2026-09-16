@@ -25,8 +25,8 @@ import {
 } from '../../infra/game-adapter/dst/panel-config-meta'
 import {
   parseModOverridesEntries,
-  resolveDstModInfoPath,
 } from '../../infra/game-adapter/dst/mod-config'
+import { isDstWorkshopModPresent } from '../../infra/game-adapter/dst/mod-download'
 import {
   buildServerIni,
   defaultCavesServerIniFields,
@@ -48,6 +48,9 @@ import {
 import type { DbGameInstance } from '../../shared/db/index'
 import { createInstanceBackupUnlocked } from './backup-service'
 import { InstanceArchiveBusyError, withInstanceArchiveOperationLock } from './archive-lock'
+import { ensurePendingModDownloadsRecovered } from '../mod/mod-download-service'
+import { syncInstanceModFilesFromDb } from '../mod/mod-file-sync-service'
+import { MISSING_MOD_CONTENT_ERROR } from '../mod/mod-readiness-service'
 
 /** 目录大小扫描上限：超出后停止累计（session 小文件可达数十万，防 probe/导入卡死） */
 const SIZE_SCAN_MAX_FILES = 50_000
@@ -483,18 +486,22 @@ async function syncImportedModsToDb(options: {
   try {
     await deleteInstanceModsByInstanceId(instanceId)
     for (const [index, entry] of entries.entries()) {
+      // 源档 modoverrides.lua 只有创意工坊 ID，内容在不在本机必须按磁盘判定：
+      // 把没下载的记成「已就绪」会让面板显示全部开启、游戏里却只加载出有文件的那几个。
+      const contentPresent = isDstWorkshopModPresent(installPath, entry.workshopId)
+      if (!contentPresent) {
+        missingWorkshopContent.push(entry.workshopId)
+      }
       await upsertInstanceMod({
         instanceId,
         workshopId: entry.workshopId,
         name: `workshop-${entry.workshopId}`,
         enabled: entry.enabled,
         loadOrder: index,
-        installStatus: 'ready',
+        installStatus: contentPresent ? 'ready' : 'pending',
+        installError: contentPresent ? null : MISSING_MOD_CONTENT_ERROR,
         config: JSON.stringify(entry.configurationOptions),
       })
-      if (!resolveDstModInfoPath(installPath, entry.workshopId)) {
-        missingWorkshopContent.push(entry.workshopId)
-      }
     }
     return { modCount: entries.length, missingWorkshopContent, modSyncOk: true }
   }
@@ -672,7 +679,21 @@ async function importSaveToInstanceLocked(options: ImportSaveToInstanceOptions):
       warnings.push('Mod 列表写入面板数据库失败，请到 Mod 页面手动核对，否则下次同步可能丢失导入 Mod 配置')
     }
     if (modSync.missingWorkshopContent.length > 0) {
-      warnings.push(`${modSync.missingWorkshopContent.length} 个 Mod 的创意工坊内容尚未下载，首次启动由游戏自动拉取（可能较慢），也可到 Mod 页面手动下载`)
+      warnings.push(`${modSync.missingWorkshopContent.length} 个 Mod 的创意工坊内容尚未下载，面板已加入下载队列，可在「世界设置 → 模组」查看进度`)
+    }
+    if (modSync.modSyncOk) {
+      try {
+        // 只把真正就绪的 Mod 写进 modoverrides.lua：否则 DST 每次启动都会自行补下载，
+        // legacy 包在容器网络下常超时失败，玩家进游戏只看到一部分 Mod。
+        await syncInstanceModFilesFromDb(instanceId, installPath)
+        // 缺失内容交给面板自己的下载队列补齐（与面板启动、Mod 列表同一机制）
+        await ensurePendingModDownloadsRecovered({ instanceId, installPath })
+      }
+      catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        app?.log.warn({ instanceId, error: message }, '导入后同步 Mod 文件失败')
+        warnings.push('Mod 配置文件同步失败，请到 Mod 页面手动核对后再启动实例')
+      }
     }
 
     app?.log.info({ instanceId, sourcePath, importedShards, modCount: modSync.modCount }, '存档导入完成')

@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import type {
   BackupItem,
@@ -27,6 +27,7 @@ import {
 } from '../../shared/db/index'
 import type { DbBackup } from '../../shared/db/index'
 import { loadServerConfig } from '../../shared/config'
+import { sendFileDownload } from '../../shared/http/file-download'
 import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from '../system/auth'
 import { createInstanceBackup, restoreInstanceBackup } from './backup-service'
@@ -137,7 +138,7 @@ export function registerBackupModule(app: FastifyInstance) {
     return success(items, request)
   })
 
-  app.post('/app/instance/backup/download', async (request, reply): Promise<void> => {
+  app.post('/app/instance/backup/download', async (request, reply): Promise<void | FastifyReply> => {
     const auth = await authorize(request)
     if (auth.error) {
       reply.status(401).send(auth.error)
@@ -163,9 +164,11 @@ export function registerBackupModule(app: FastifyInstance) {
       return
     }
     const fileName = path.basename(record.filePath)
-    reply.header('Content-Type', record.kind === 'database' ? 'application/x-sqlite3' : 'application/gzip')
-    reply.header('Content-Disposition', `attachment; filename="${fileName}"`)
-    reply.send(fs.createReadStream(record.filePath))
+    return sendFileDownload(reply, {
+      filePath: record.filePath,
+      contentType: record.kind === 'database' ? 'application/x-sqlite3' : 'application/gzip',
+      fileName,
+    })
   })
 
   app.post('/app/instance/backup/delete', async (request): Promise<ApiSuccessResponse<BackupMutationResult> | ApiErrorResponse> => {

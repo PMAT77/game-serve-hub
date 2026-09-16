@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
@@ -36,6 +36,7 @@ import {
   writeInstanceTextFile,
   writeInstanceUploadFile,
 } from '../../infra/game-adapter/dst/instance-files'
+import { sendFileDownload } from '../../shared/http/file-download'
 import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from '../system/auth'
 
@@ -217,7 +218,7 @@ export function registerFilesModule(app: FastifyInstance) {
     }
   })
 
-  app.get('/app/instance/files/download', async (request, reply): Promise<void> => {
+  app.get('/app/instance/files/download', async (request, reply): Promise<void | FastifyReply> => {
     const auth = await authorize(request)
     if (auth.error) {
       reply.status(401).send(auth.error)
@@ -239,9 +240,11 @@ export function registerFilesModule(app: FastifyInstance) {
       return
     }
     const fileName = path.basename(target.absolutePath)
-    reply.header('Content-Type', 'application/octet-stream')
-    reply.header('Content-Disposition', `attachment; filename="${fileName}"`)
-    reply.send(fs.createReadStream(target.absolutePath))
+    return sendFileDownload(reply, {
+      filePath: target.absolutePath,
+      contentType: 'application/octet-stream',
+      fileName,
+    })
   })
 
   app.post('/app/instance/files/upload', { bodyLimit: maxUploadBytes }, async (request): Promise<ApiSuccessResponse<InstanceFileUploadResult> | ApiErrorResponse> => {

@@ -31,6 +31,7 @@ import {
   sendInstanceContainerCommand,
 } from '../instance/container-lifecycle'
 import { isCavesShardConfigured, readClusterShardEnabledFromInstall } from '../../infra/game-adapter/dst/shard-service'
+import { sendFileDownload } from '../../shared/http/file-download'
 import { businessError, success } from '../../shared/http/response'
 import { requirePermission, resolveAuthorizedContext } from '../system/auth'
 import { consoleStreamTicketStore } from './stream-ticket'
@@ -164,7 +165,7 @@ export function registerConsoleModule(app: FastifyInstance) {
     }, request)
   })
 
-  app.get('/app/instance/console/logs/download', async (request, reply): Promise<void> => {
+  app.get('/app/instance/console/logs/download', async (request, reply): Promise<void | FastifyReply> => {
     const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
     if (authError) {
       reply.status(401).send(authError)
@@ -185,9 +186,11 @@ export function registerConsoleModule(app: FastifyInstance) {
       reply.status(404).send(businessError('还没有可下载的日志，实例启动过一次后才会生成', request))
       return
     }
-    reply.header('Content-Type', 'text/plain; charset=utf-8')
-    reply.header('Content-Disposition', `attachment; filename="${resolved.instance.id}-console.log"`)
-    reply.send(fs.createReadStream(filePath))
+    return sendFileDownload(reply, {
+      filePath,
+      contentType: 'text/plain; charset=utf-8',
+      fileName: `${resolved.instance.id}-console.log`,
+    })
   })
 
   app.post('/app/instance/console/logs/clear', async (request): Promise<ApiSuccessResponse<{ isSuccess: boolean }> | ApiErrorResponse> => {

@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { after, describe, it } from 'node:test'
+import { after, afterEach, describe, it } from 'node:test'
 import { resolveDockerStatus } from '../../infra/docker.ts'
 import {
   classifyMasterProbe,
   ensureContainerRuntimeReady,
   isHealthyRuntimeForResurrect,
   readClusterMasterPort,
+  resolveShardReadyWaitSec,
 } from './container-lifecycle.ts'
 
 const tempDirs: string[] = []
@@ -135,6 +136,39 @@ describe('classifyMasterProbe', () => {
 
   it('问不到运行时只算未知，不能误判成崩溃', () => {
     assert.equal(classifyMasterProbe(null), 'unknown')
+  })
+})
+
+describe('resolveShardReadyWaitSec', () => {
+  const original = process.env.GSH_SHARD_READY_WAIT_SEC
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.GSH_SHARD_READY_WAIT_SEC
+    }
+    else {
+      process.env.GSH_SHARD_READY_WAIT_SEC = original
+    }
+  })
+
+  /**
+   * 上限必须给足：36 个 Mod 的分片在 2 核机上冷启动要两分多钟。
+   * 等不够就放洞穴进来，两个加载峰值会重新叠在一起——正是被 OOM 杀掉的那次。
+   */
+  it('默认上限足以覆盖多 Mod 分片的冷启动', () => {
+    delete process.env.GSH_SHARD_READY_WAIT_SEC
+    assert.ok(resolveShardReadyWaitSec() >= 600)
+  })
+
+  it('允许用环境变量覆盖', () => {
+    process.env.GSH_SHARD_READY_WAIT_SEC = '1200'
+    assert.equal(resolveShardReadyWaitSec(), 1200)
+  })
+
+  it('非法值退回默认上限', () => {
+    process.env.GSH_SHARD_READY_WAIT_SEC = 'abc'
+    assert.ok(resolveShardReadyWaitSec() >= 600)
+    process.env.GSH_SHARD_READY_WAIT_SEC = '-5'
+    assert.ok(resolveShardReadyWaitSec() >= 600)
   })
 })
 

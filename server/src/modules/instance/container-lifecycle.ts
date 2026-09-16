@@ -50,8 +50,21 @@ import { describeSystemdExitReason, resolveShardMemoryCapMb } from '../../infra/
 
 /** 主世界分片互联端口（cluster.ini [SHARD] master_port）；读不到时退回 DST 默认值 */
 const DEFAULT_DST_MASTER_PORT = 10888
-/** 等待主世界就绪的默认上限（秒）。36 个 Mod 在 2 核机上单分片加载约需 2–3 分钟 */
-const DEFAULT_SHARD_READY_WAIT_SEC = 300
+/**
+ * 等待主世界就绪的默认上限（秒）。
+ *
+ * 给足余量：36 个 Mod 的分片在 2 核机上冷启动要两分多钟，多 Mod 存档更久。
+ * 上限拉长没有副作用——主世界的分片端口一打开就立即返回，等待只用来卡住洞穴；
+ * 真正有害的是「等不够就放洞穴进来」，那会让两个加载峰值重新叠在一起。
+ */
+const DEFAULT_SHARD_READY_WAIT_SEC = 900
+
+/** 就绪等待上限；可用 GSH_SHARD_READY_WAIT_SEC 覆盖（小机器上 Mod 特别多时可再调大） */
+export function resolveShardReadyWaitSec(): number {
+  const raw = process.env.GSH_SHARD_READY_WAIT_SEC?.trim()
+  const parsed = raw ? Number(raw) : Number.NaN
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_SHARD_READY_WAIT_SEC
+}
 
 export type ConsoleCommandShard = 'master' | 'caves'
 
@@ -446,7 +459,7 @@ export async function waitForMasterShardReady(
   instanceId: string,
   masterRef: ContainerRef,
   masterPort: number,
-  waitSec = DEFAULT_SHARD_READY_WAIT_SEC,
+  waitSec = resolveShardReadyWaitSec(),
 ): Promise<MasterReadyOutcome> {
   const runtime = getContainerRuntime()
   const startAt = Date.now()
@@ -718,7 +731,7 @@ async function startCavesAfterMasterReady(
     if (readiness.kind === 'timed-out') {
       instanceConsoleLogStore.appendSystem(
         input.instanceId,
-        `等待主世界就绪超时（${DEFAULT_SHARD_READY_WAIT_SEC} 秒），仍继续启动洞穴分片；若洞穴反复重连失败请检查主世界日志`,
+        `等待主世界就绪超时（${resolveShardReadyWaitSec()} 秒），仍继续启动洞穴分片；若洞穴反复重连失败请检查主世界日志`,
         'caves',
       )
     }

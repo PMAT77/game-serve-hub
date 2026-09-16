@@ -2,6 +2,13 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.8] - 2026-09-17
+
+### Fixed
+
+- **重新启动或停止实例后，等待中的洞穴启动任务会被作废**：主世界就绪要等好几分钟，这期间你若又点了一次停止或重新启动，旧任务醒来会照样把洞穴拉起来，还会挂上一个再也停不掉的日志跟随。现在每个实例带一个启动代号，停止、删除与重新启动都会让等待中的任务作废，并把已经起来的残留分片收掉。
+- **分片单元文件已用 Debian 12 自带的 systemd 252 跑过 `systemd-analyze verify`**：`MemoryHigh`、`MemorySwapMax`、`StartLimit*`、`StandardOutput=append:`、`CPUQuota` 的写法与所在分区全部合法。systemd 只要有一条指令写错分区就会把**整个** unit 判成非法、实例一个都起不来，因此这条验证是必须的；对应的分区约定也已固化成测试。
+
 ## [0.6.7] - 2026-09-17
 
 ### Fixed

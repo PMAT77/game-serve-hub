@@ -2,6 +2,12 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.10] - 2026-09-17
+
+### Fixed
+
+- **分片被杀时不再只给一句「进程被信号终止」**：整机内存被吃穿时，内核报的是 `global_oom`，而 systemd 看到的只是一次 SIGKILL——`Result` 是 `signal` 而不是 `oom-kill`，于是最可能的原因拿到了最没用的提示，排查又得回到 SSH。现在进程被信号终止或非零退出时会结合宿主机内存状况补一句可执行的判断：没有 swap 就直接指出「加载整套 Mod 时很容易被内核 OOM 杀掉，建议执行 `gsh setup-swap`」，内存确实接近耗尽时按当前余量提示，内存充裕时不硬扯到 OOM。
+
 ## [0.6.9] - 2026-09-17
 
 ### Fixed

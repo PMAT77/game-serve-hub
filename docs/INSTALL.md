@@ -13,6 +13,8 @@ Native 路线不安装、也不调用 Docker，与 Docker 路线不互相迁移�
 
 **环境要求**：Debian 12 或 Ubuntu 22.04 / 24.04（只支持 apt 系列）；内存最低约 4 GiB，洞穴与中等 Mod 建议 6 GiB+（档位与预设见 [MEMORY.md](MEMORY.md)，安装器默认自动选档）；根分区至少 4 GiB 空闲，另外要为离线镜像包（约 227 MB）与导入后的本地镜像（约 560 MB，导入完成后包可删除）、游戏本体（数 GB）与存档备份预留空间；root 或 sudo。
 
+> **4 GiB 机器请先执行 `sudo gsh setup-swap`**：分片加载整套 Mod 时内存会短时冲高，物理内存不足会让内核在加载途中直接杀掉分片，表现为「实例显示运行中但大厅搜不到」。启动前的内存守卫按「分片数 ×（512 MiB + 每个启用中的 Mod 32 MiB）」估算，并把可用 swap 计入可回收余量；不够时会直接拒绝启动并给出建议，而不是启动到一半失败。详见 [MEMORY.md](MEMORY.md)。
+
 > Windows 不受支持；本地开发见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ### 两种模式怎么选

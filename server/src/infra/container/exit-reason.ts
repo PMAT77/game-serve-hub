@@ -1,17 +1,10 @@
 import { resolveDstContainerResourceLimits } from './dst-container-resources'
-import { readHostMemoryAvailableMb, readHostSwapFreeMb } from './host-resource-guard'
+import type { HostMemoryReading } from './host-resource-guard'
+import { readHostMemoryReading } from './host-resource-guard'
 
-export interface HostMemorySnapshot {
-  availableMb: number | null
-  swapFreeMb: number | null
-}
-
-/** 读取宿主机内存快照；无 /proc 的环境（Windows 原生）返回 null 字段 */
-export function readHostMemorySnapshot(): HostMemorySnapshot {
-  return {
-    availableMb: readHostMemoryAvailableMb(),
-    swapFreeMb: readHostSwapFreeMb(),
-  }
+/** 读取宿主机内存快照，供退出原因的补充判断使用 */
+export function readHostMemorySnapshot(): HostMemoryReading {
+  return readHostMemoryReading()
 }
 
 /**
@@ -25,7 +18,7 @@ export function readHostMemorySnapshot(): HostMemorySnapshot {
  * 只用面板读得到的 /proc/meminfo 给出稳定、可执行的判断：
  * 没配 swap 时，多 Mod 加载被 OOM 杀掉几乎是唯一解释。
  */
-export function describeMemoryHint(memory: HostMemorySnapshot | undefined): string | null {
+export function describeMemoryHint(memory: HostMemoryReading | undefined): string | null {
   if (!memory) {
     return null
   }
@@ -48,7 +41,7 @@ export function describeMemoryHint(memory: HostMemorySnapshot | undefined): stri
 export function describeSystemdExitReason(
   result: string | undefined,
   memoryCapMb?: number,
-  memory?: HostMemorySnapshot,
+  memory?: HostMemoryReading,
 ): string | null {
   switch (result) {
     case 'oom-kill':
@@ -73,7 +66,7 @@ export function describeSystemdExitReason(
   }
 }
 
-function withMemoryHint(base: string, memory: HostMemorySnapshot | undefined): string {
+function withMemoryHint(base: string, memory: HostMemoryReading | undefined): string {
   const hint = describeMemoryHint(memory)
   return hint ? `${base}；${hint}` : base
 }

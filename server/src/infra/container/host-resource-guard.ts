@@ -29,18 +29,45 @@ export interface DstStartMemoryContext {
   modCount?: number
 }
 
+/**
+ * 从 `/proc/meminfo` 文本里取某个字段的 KB 值。
+ *
+ * 抽成纯函数是为了能用**真实样本**测试：开发机是 Windows，没有 /proc，此前
+ * 「读真实内存 → 判断是否放行」这条生产路径一次都没被执行过——字段名拼错或
+ * 解析出 null 都会被当成「没有 swap」，直接变成一次误拒绝。
+ */
+export function parseMeminfoValueKb(content: string, field: string): number | null {
+  const line = content.split('\n').find(item => item.startsWith(`${field}:`))
+  if (!line) {
+    return null
+  }
+  const match = line.match(/(\d+)/)
+  return match ? Number(match[1]) : null
+}
+
 function readProcMeminfoKb(field: string): number | null {
   try {
-    const content = fs.readFileSync('/proc/meminfo', 'utf8')
-    const line = content.split('\n').find(item => item.startsWith(`${field}:`))
-    if (!line) {
-      return null
-    }
-    const match = line.match(/(\d+)/)
-    return match ? Number(match[1]) : null
+    return parseMeminfoValueKb(fs.readFileSync('/proc/meminfo', 'utf8'), field)
   }
   catch {
     return null
+  }
+}
+
+/** 一次读取的宿主机内存快照，作为守卫判定的输入（可注入以便测试） */
+export interface HostMemoryReading {
+  availableMb: number | null
+  /** 仅用于失败说明里的「总内存约 N MiB」提示，因此可省略 */
+  totalMb?: number | null
+  swapFreeMb: number | null
+}
+
+/** 读取真实 /proc/meminfo；无 /proc 的环境（Windows 原生）返回 null 字段 */
+export function readHostMemoryReading(): HostMemoryReading {
+  return {
+    availableMb: kbToMb(readProcMeminfoKb('MemAvailable')),
+    totalMb: kbToMb(readProcMeminfoKb('MemTotal')),
+    swapFreeMb: kbToMb(readProcMeminfoKb('SwapFree')),
   }
 }
 
@@ -208,11 +235,10 @@ function buildHostMemoryPressureFailure(
 export function assessHostMemoryForHeavyOperation(
   operation: HeavyHostOperation,
   context: DstStartMemoryContext = {},
+  reading: HostMemoryReading = readHostMemoryReading(),
 ): HostMemoryPressureResult {
+  const { availableMb, totalMb, swapFreeMb } = reading
   const requiredMb = resolveMinHostAvailableMbForOperation(operation, context)
-  const availableMb = readHostMemoryAvailableMb()
-  const totalMb = readHostMemoryTotalMb()
-  const swapFreeMb = readHostSwapFreeMb()
   if (availableMb === null) {
     return { ok: true, availableMb: null, requiredMb }
   }
@@ -221,5 +247,5 @@ export function assessHostMemoryForHeavyOperation(
     return { ok: true, availableMb, requiredMb }
   }
   const capMb = resolveSteamcmdContainerMemoryCapMb('app-update')
-  return buildHostMemoryPressureFailure(availableMb, requiredMb, totalMb, capMb, swapFreeMb, context)
+  return buildHostMemoryPressureFailure(availableMb, requiredMb, totalMb ?? null, capMb, swapFreeMb, context)
 }

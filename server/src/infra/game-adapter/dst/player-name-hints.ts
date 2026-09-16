@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { PLAYER_KU_ID_SOURCE } from '../../../../../shared/constants/player'
 import type { ShardId } from '../../../../../shared/contracts/shard'
 import { DST_ONLINE_PLAYER_LIST_ITEM_MARKER } from './online-players'
 import { resolveShardRoot } from './shard-layout'
@@ -45,11 +46,11 @@ const TRAILING_NOISE_PATTERN = /\s+(?:has |have |joined|left |disconnected|from 
  * 会被 trim 掉（`...KU_x`）——那种情况按"有 ID 无名字"处理。
  */
 const PANEL_ITEM_PATTERN = new RegExp(
-  `${DST_ONLINE_PLAYER_LIST_ITEM_MARKER}[0-9a-f]+:(KU_[A-Za-z0-9_]{1,64})(?:\\t(.*))?$`,
+  `${DST_ONLINE_PLAYER_LIST_ITEM_MARKER}[0-9a-f]+:(${PLAYER_KU_ID_SOURCE})(?:\\t(.*))?$`,
 )
 
 /** 部分服务器版本会打印 `Client authenticated: (KU_xxx) 名字` */
-const AUTHENTICATED_PATTERN = /client authenticated:?\s*\(?(KU_[A-Za-z0-9_]{1,64})\)?(.*)$/i
+const AUTHENTICATED_PATTERN = new RegExp(`client authenticated:?\\s*\\(?(${PLAYER_KU_ID_SOURCE})\\)?(.*)$`, 'i')
 
 /** 清洗候选名字：空、过长、纯数字/时间戳、带路径的一律不算名字 */
 function sanitizeName(candidate: string): string {

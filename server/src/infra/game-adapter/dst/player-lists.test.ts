@@ -34,6 +34,8 @@ describe('player-lists', () => {
     assert.equal(normalizeKuId('KU_abc123'), 'KU_abc123')
     assert.equal(normalizeKuId('  KU_abc123  '), 'KU_abc123')
     assert.equal(normalizeKuId('KU_abc123 备注文字'), 'KU_abc123')
+    // 实测真实 userid 含 `-`（KU_3rpxG-xy）：字符集漏掉它，这个账号就加不进任何名单
+    assert.equal(normalizeKuId('KU_3rpxG-xy'), 'KU_3rpxG-xy')
     assert.equal(normalizeKuId('ku_lowercase'), null)
     assert.equal(normalizeKuId('steamid64'), null)
     assert.equal(normalizeKuId(''), null)

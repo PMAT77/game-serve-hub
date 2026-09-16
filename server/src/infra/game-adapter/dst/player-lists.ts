@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { PLAYER_KU_ID_PATTERN } from '../../../../../shared/constants/player'
 import type { PlayerListEntry, PlayerListKind } from '../../../../../shared/contracts/player'
 import { backupFile, writeFileAtomic } from './atomic-write'
 
@@ -10,8 +11,6 @@ export const PLAYER_LIST_FILE_NAMES: Record<PlayerListKind, string> = {
 }
 
 export const PLAYER_LIST_MAX_ENTRIES = 500
-
-const KU_ID_PATTERN = /^KU_[A-Za-z0-9_]{1,64}$/
 
 export function resolvePlayerListPath(clusterRoot: string, kind: PlayerListKind): string {
   return path.join(clusterRoot, PLAYER_LIST_FILE_NAMES[kind])
@@ -25,7 +24,7 @@ export function resolvePlayerListPath(clusterRoot: string, kind: PlayerListKind)
  */
 export function normalizeKuId(rawLine: string): string | null {
   const token = rawLine.trim().split(/\s+/)[0] ?? ''
-  return KU_ID_PATTERN.test(token) ? token : null
+  return PLAYER_KU_ID_PATTERN.test(token) ? token : null
 }
 
 /** 按首次出现顺序去重，比对时忽略大小写，保留原有书写形式 */
@@ -90,7 +89,7 @@ export function validatePlayerListEntries(entries: PlayerListEntry[]): string[] 
     errors.push(`名单条目不能超过 ${PLAYER_LIST_MAX_ENTRIES} 条`)
   }
   for (const entry of entries) {
-    if (!KU_ID_PATTERN.test(entry.kuId.trim())) {
+    if (!PLAYER_KU_ID_PATTERN.test(entry.kuId.trim())) {
       errors.push(`玩家 ID 无效：${entry.kuId}`)
     }
   }

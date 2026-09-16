@@ -10,7 +10,7 @@ import apiCluster from '@/api/modules/cluster'
 import apiPlayer from '@/api/modules/player'
 import { instanceSupportsDstRoom } from '@/composables/useGameInstance'
 import { statusTagType } from '@/constants/statusDictionary'
-import { routeToDstPlayerList, routeToDstRoomSettings } from '@/navigation/game-routes'
+import { routeToDstPlayerList } from '@/navigation/game-routes'
 import { getInstanceState } from '@/views/node/instance/instanceDisplay'
 
 defineOptions({
@@ -248,10 +248,6 @@ function goBack() {
   router.push(routeToDstPlayerList())
 }
 
-function goRoomSettings() {
-  router.push(routeToDstRoomSettings(instanceId.value))
-}
-
 onMounted(() => {
   pageActive = true
   void reloadAll()
@@ -296,9 +292,6 @@ watch(instanceId, () => {
           </NTag>
         </div>
         <div class="flex flex-wrap gap-2">
-          <NButton size="small" secondary @click="goRoomSettings">
-            房间设置
-          </NButton>
           <NButton size="small" secondary :loading="rosterLoading" @click="reloadAll">
             刷新
           </NButton>

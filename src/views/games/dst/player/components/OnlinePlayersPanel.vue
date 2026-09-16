@@ -38,6 +38,8 @@ const groups = computed(() => {
     running: roster.shards[shard].running,
     queried: roster.shards[shard].players !== null,
     players: roster.players.filter(player => player.shard === shard),
+    /** 有人却列不出来的数量：游戏没给出可用 ID */
+    unlistedCount: roster.shards[shard].unlistedCount,
   }))
 })
 
@@ -54,11 +56,20 @@ const emptyDescription = computed(() => {
   if (roster.partial) {
     return '这次没能取到完整的在线玩家，稍后会自动重试'
   }
+  if (roster.unlistedPlayerCount > 0) {
+    // 人数与实例详情页同源（游戏侧读数）：这里确实有人，只是拿不到可列的 ID
+    return `房间里有 ${roster.unlistedPlayerCount} 人在线，但游戏没有给出可用的玩家 ID，列不出来`
+  }
   return '当前没有玩家在线'
 })
 
 function displayName(player: PlayerOnlineEntry): string {
   return player.name.trim() || '（未取名）'
+}
+
+/** 没有 Klei 账号的玩家可能拿不到 ID，别显示成空白让人以为是渲染坏了 */
+function displayId(player: PlayerOnlineEntry): string {
+  return player.kuId.trim() || '游戏未给出 ID'
 }
 </script>
 
@@ -94,6 +105,9 @@ function displayName(player: PlayerOnlineEntry): string {
           <p v-else-if="!group.queried" class="text-xs text-muted-foreground">
             这次没取到{{ group.label }}的玩家列表，稍后会自动重试。
           </p>
+          <p v-else-if="group.players.length === 0 && group.unlistedCount > 0" class="text-xs text-muted-foreground">
+            {{ group.label }}有 {{ group.unlistedCount }} 人在线，但游戏没有给出可用的玩家 ID，列不出来。
+          </p>
           <p v-else-if="group.players.length === 0" class="text-xs text-muted-foreground">
             {{ group.label }}当前没有玩家。
           </p>
@@ -107,27 +121,36 @@ function displayName(player: PlayerOnlineEntry): string {
               <div class="min-w-0">
                 <p class="text-sm truncate">
                   {{ displayName(player) }}
+                  <NTag v-if="!player.kleiAccount" size="tiny" :bordered="false" class="ml-1">
+                    临时身份
+                  </NTag>
                 </p>
                 <p class="font-mono text-xs text-muted-foreground truncate">
-                  {{ player.kuId }}
+                  {{ displayId(player) }}
+                </p>
+                <p v-if="!player.kleiAccount" class="text-xs text-muted-foreground">
+                  没有 Klei 账号（离线或局域网进来的），ID 每次进服都会变：可以踢出，不能封禁或加入名单
                 </p>
               </div>
               <NSpace :size="8" class="flex-wrap">
                 <NButton size="small" :disabled="acting" @click="emit('kick', player)">
                   踢出
                 </NButton>
-                <NButton size="small" type="error" secondary :disabled="acting" @click="emit('ban', player)">
+                <NButton size="small" type="error" secondary :disabled="acting || !player.kleiAccount" @click="emit('ban', player)">
                   封禁
                 </NButton>
-                <NButton size="small" quaternary :disabled="acting" @click="emit('addToList', { player, kind: 'whitelist' })">
+                <NButton size="small" quaternary :disabled="acting || !player.kleiAccount" @click="emit('addToList', { player, kind: 'whitelist' })">
                   加入白名单
                 </NButton>
-                <NButton size="small" quaternary :disabled="acting" @click="emit('addToList', { player, kind: 'admin' })">
+                <NButton size="small" quaternary :disabled="acting || !player.kleiAccount" @click="emit('addToList', { player, kind: 'admin' })">
                   设为管理员
                 </NButton>
               </NSpace>
             </li>
           </ul>
+          <p v-if="group.queried && group.players.length > 0 && group.unlistedCount > 0" class="mt-2 text-xs text-muted-foreground">
+            另有 {{ group.unlistedCount }} 人游戏没有给出可用的玩家 ID，无法在这里列出。
+          </p>
         </section>
       </div>
     </NSpin>

@@ -105,8 +105,8 @@ describe('parseDstOnlinePlayerList', () => {
     ], TOKEN), {
       count: 2,
       players: [
-        { kuId: 'KU_aaa', name: '玩家甲' },
-        { kuId: 'KU_bbb', name: '玩家乙' },
+        { kuId: 'KU_aaa', name: '玩家甲', kleiAccount: true, key: 'ku_aaa' },
+        { kuId: 'KU_bbb', name: '玩家乙', kleiAccount: true, key: 'ku_bbb' },
       ],
     })
   })
@@ -135,7 +135,7 @@ describe('parseDstOnlinePlayerList', () => {
       `[00:56:49]: ${itemLine('KU_aaa', '玩家甲')}`,
       `[00:56:49]: ${END_LINE}`,
     ], TOKEN)
-    assert.deepEqual(parsed?.players, [{ kuId: 'KU_aaa', name: '玩家甲' }])
+    assert.deepEqual(parsed?.players, [{ kuId: 'KU_aaa', name: '玩家甲', kleiAccount: true, key: 'ku_aaa' }])
   })
 
   it('returns null when the end marker never arrives', () => {
@@ -158,15 +158,73 @@ describe('parseDstOnlinePlayerList', () => {
     ], TOKEN), null)
   })
 
-  it('drops entities whose userid is not a Klei id but keeps the reported count', () => {
+  it('keeps a player whose userid is not a Klei id, flagged as a temporary identity', () => {
+    // 离线 / 局域网进来的路人没有 Klei 账号，userid 形状不受面板控制。
+    // 早先这里直接丢弃，导致「人数按 #AllPlayers 算上他、明细里却没有他」。
     const parsed = parseDstOnlinePlayerList([
       beginLine(2),
-      itemLine('not-a-ku-id', '异常实体'),
+      itemLine('not-a-ku-id', '路人'),
       itemLine('KU_bbb', '玩家乙'),
       END_LINE,
     ], TOKEN)
     assert.equal(parsed?.count, 2)
-    assert.deepEqual(parsed?.players.map(player => player.kuId), ['KU_bbb'])
+    assert.deepEqual(parsed?.players, [
+      { kuId: 'not-a-ku-id', name: '路人', kleiAccount: false, key: 'not-a-ku-id' },
+      { kuId: 'KU_bbb', name: '玩家乙', kleiAccount: true, key: 'ku_bbb' },
+    ])
+  })
+
+  it('keeps players the game gave no id for, with a unique key each', () => {
+    // 空 userid 不能拿空串当 key：多人会互相覆盖，列表只剩一条
+    const parsed = parseDstOnlinePlayerList([
+      beginLine(2),
+      itemLine('', '路人甲'),
+      itemLine('', '路人乙'),
+      END_LINE,
+    ], TOKEN)
+    assert.equal(parsed?.count, 2)
+    assert.deepEqual(parsed?.players.map(player => player.kuId), ['', ''])
+    assert.deepEqual(parsed?.players.map(player => player.key), ['unidentified-1', 'unidentified-2'])
+    assert.deepEqual(parsed?.players.map(player => player.kleiAccount), [false, false])
+  })
+
+  it('ignores the echo of the panel query command', () => {
+    // 游戏会把面板下发的整行 Lua 回显到日志里，它同样带着三个标记；
+    // 回显行的 ID 段是源码片段（含引号与空格），不能被当成玩家
+    const echo = `[00:01:02]: ${buildDstOnlinePlayersCommand(TOKEN)}`
+    const parsed = parseDstOnlinePlayerList([
+      echo,
+      beginLine(1),
+      itemLine('KU_aaa', '玩家甲'),
+      END_LINE,
+    ], TOKEN)
+    assert.equal(parsed?.count, 1)
+    assert.deepEqual(parsed?.players.map(player => player.kuId), ['KU_aaa'])
+  })
+
+  it('does not let the echoed end marker cut the list short', () => {
+    // 回显行里的 END 若被当真，解析会在半路收工，后面的玩家全都丢掉
+    const echo = `[00:01:02]: ${buildDstOnlinePlayersCommand(TOKEN)}`
+    const parsed = parseDstOnlinePlayerList([
+      beginLine(2),
+      itemLine('KU_aaa', '玩家甲'),
+      echo,
+      itemLine('KU_bbb', '玩家乙'),
+      END_LINE,
+    ], TOKEN)
+    assert.deepEqual(parsed?.players.map(player => player.kuId), ['KU_aaa', 'KU_bbb'])
+  })
+
+  it('treats a Klei id containing a dash as a Klei account', () => {
+    // 实测真实 userid 形如 KU_3rpxG-xy：base64url 风格，含 `-`
+    const parsed = parseDstOnlinePlayerList([
+      beginLine(1),
+      itemLine('KU_3rpxG-xy', '一颗奶糖啊'),
+      END_LINE,
+    ], TOKEN)
+    assert.deepEqual(parsed?.players, [
+      { kuId: 'KU_3rpxG-xy', name: '一颗奶糖啊', kleiAccount: true, key: 'ku_3rpxg-xy' },
+    ])
   })
 
   it('de-duplicates a player reported twice', () => {
@@ -194,13 +252,21 @@ describe('parseDstOnlinePlayerList', () => {
       `${DST_ONLINE_PLAYER_LIST_ITEM_MARKER}${TOKEN}:KU_aaa`,
       END_LINE,
     ], TOKEN)
-    assert.deepEqual(parsed?.players, [{ kuId: 'KU_aaa', name: '' }])
+    assert.deepEqual(parsed?.players, [{ kuId: 'KU_aaa', name: '', kleiAccount: true, key: 'ku_aaa' }])
   })
 })
 
 describe('resolvePlayerLocation', () => {
-  const inMaster = { shard: 'master' as const, players: [{ kuId: 'KU_aaa', name: '甲' }] }
-  const inCaves = { shard: 'caves' as const, players: [{ kuId: 'KU_bbb', name: '乙' }] }
+  const inMaster = {
+    shard: 'master' as const,
+    players: [{ kuId: 'KU_aaa', name: '甲', kleiAccount: true, key: 'ku_aaa' }],
+    count: 1,
+  }
+  const inCaves = {
+    shard: 'caves' as const,
+    players: [{ kuId: 'KU_bbb', name: '乙', kleiAccount: true, key: 'ku_bbb' }],
+    count: 1,
+  }
 
   it('locates a player in the shard that reports him', () => {
     assert.deepEqual(resolvePlayerLocation([inMaster, inCaves], 'KU_bbb'), {
@@ -218,16 +284,16 @@ describe('resolvePlayerLocation', () => {
 
   it('reports offline only when every shard answered', () => {
     assert.deepEqual(resolvePlayerLocation([
-      { shard: 'master', players: [] },
-      { shard: 'caves', players: [] },
+      { shard: 'master', players: [], count: 0 },
+      { shard: 'caves', players: [], count: 0 },
     ], 'KU_aaa'), { status: 'offline', shard: null })
   })
 
   it('never claims offline when a shard failed to answer', () => {
     // 洞穴没答上来时，人完全可能就在洞穴里
     assert.deepEqual(resolvePlayerLocation([
-      { shard: 'master', players: [] },
-      { shard: 'caves', players: null },
+      { shard: 'master', players: [], count: 0 },
+      { shard: 'caves', players: null, count: null },
     ], 'KU_aaa'), { status: 'unknown', shard: null })
   })
 

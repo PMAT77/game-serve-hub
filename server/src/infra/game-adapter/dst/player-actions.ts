@@ -1,7 +1,19 @@
 import { randomBytes } from 'node:crypto'
+import { PLAYER_KU_ID_PATTERN } from '../../../../../shared/constants/player'
 
-const KU_ID_PATTERN = /^KU_[A-Za-z0-9_]{1,64}$/
 const TOKEN_PATTERN = /^[0-9a-f]{1,16}$/
+
+/**
+ * 可以安全拼进 Lua 字符串字面量的玩家 ID 字符集。
+ *
+ * 比 Klei ID 宽：离线或局域网进来的玩家没有 Klei 账号，拿的是游戏临时分配的 ID，
+ * 形状不受面板控制，而踢出这类玩家同样要拼命令。宽出去的只是字符种类，
+ * **绝不放行引号、反斜杠、空格、控制字符与换行** —— 这个约束的全部意义就是挡住
+ * 「把外部字符串原样塞进 Lua 代码」，那等于给了调用方一条任意 Lua 执行的通道。
+ *
+ * 封禁（要写黑名单长期生效）与移出世界仍只收严格 Klei ID：临时 ID 每次进服都会变。
+ */
+const COMMAND_USER_ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/
 
 /** 面板自检标记：游戏执行到面板写进去的命令时，会把这行原样打印出来 */
 export const DST_CONSOLE_PING_MARKER = 'GSH_PING:'
@@ -26,12 +38,13 @@ export const DST_CONSOLE_CLIENT_MARKER = 'GSH_CLIENT:'
  * 玩家一动不动，游戏还不会报任何错。官方脚本用 `performance == nil`
  * 过滤掉占位条目（见 c_listplayers / UserToClient），这里照做。
  *
- * 只接受严格形状的 KU ID 再用它拼命令：非法输入直接抛错，不会退化成
+ * 拼命令前一律过 assertCommandUserId：非法输入直接抛错，不会退化成
  * 「把面板收到的字符串原样塞进 Lua 代码」——那等于给了调用方一条
- * 任意 Lua 执行的通道。
+ * 任意 Lua 执行的通道。这里接受的字符集比 Klei ID 宽（离线玩家也要能踢出），
+ * 但仍然排除了引号、反斜杠与控制字符。
  */
 export function buildKickCommand(kuId: string): string {
-  const id = assertKuId(kuId, '踢出')
+  const id = assertCommandUserId(kuId, '踢出')
   return `for _,c in ipairs(TheNet:GetClientTable() or {}) do if c.userid=="${id}" and c.performance==nil then TheNet:Kick(c.userid) end end`
 }
 
@@ -91,7 +104,7 @@ export function parseConsoleHostUserId(lines: string[], token: string): string |
   const pattern = new RegExp(`${DST_CONSOLE_HOST_MARKER}${escapeRegExp(token)}:(\\S+)`)
   for (const rawLine of lines) {
     const match = rawLine.match(pattern)
-    if (match && KU_ID_PATTERN.test(match[1])) {
+    if (match && PLAYER_KU_ID_PATTERN.test(match[1])) {
       return match[1]
     }
   }
@@ -156,7 +169,16 @@ function escapeRegExp(text: string): string {
 
 function assertKuId(kuId: string, action: string): string {
   const trimmed = kuId.trim()
-  if (!KU_ID_PATTERN.test(trimmed)) {
+  if (!PLAYER_KU_ID_PATTERN.test(trimmed)) {
+    throw new Error(`玩家 ID 无效，无法${action}`)
+  }
+  return trimmed
+}
+
+/** 踢出用的校验：字符集比 Klei ID 宽，但同样不允许任何能逃出字符串字面量的字符 */
+function assertCommandUserId(kuId: string, action: string): string {
+  const trimmed = kuId.trim()
+  if (!COMMAND_USER_ID_PATTERN.test(trimmed)) {
     throw new Error(`玩家 ID 无效，无法${action}`)
   }
   return trimmed
@@ -172,5 +194,10 @@ function assertToken(token: string): string {
 
 /** 与 buildKickCommand 同一套校验，供调用方在拼命令前先做业务判断 */
 export function isValidKuId(kuId: string): boolean {
-  return KU_ID_PATTERN.test(kuId.trim())
+  return PLAYER_KU_ID_PATTERN.test(kuId.trim())
+}
+
+/** 与 buildKickCommand 同一套校验：能拼进踢出命令的 ID 才是可操作的 */
+export function isSafeCommandUserId(kuId: string): boolean {
+  return COMMAND_USER_ID_PATTERN.test(kuId.trim())
 }

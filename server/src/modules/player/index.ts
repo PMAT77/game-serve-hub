@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import {
   playerActionPayloadSchema,
+  playerKickPayloadSchema,
   playerListQuerySchema,
   playerListSavePayloadSchema,
   playerProfileNotePayloadSchema,
@@ -30,6 +31,8 @@ import {
   createConsoleToken,
   hasConsolePing,
   isRoomOwner,
+  isSafeCommandUserId,
+  isValidKuId,
   parseClientRows,
   parseConsoleHostUserId,
 } from '../../infra/game-adapter/dst/player-actions'
@@ -81,6 +84,14 @@ const PLAYER_RESOLVE_MESSAGES = {
  */
 const PROBE_TIMEOUT_MS = 2500
 
+/**
+ * 在线玩家总览（周期性展示）的查询超时。
+ *
+ * 与操作探测分开：这里没人盯着等，宁可多等一会儿，也别把「有人在线」报成「没人」。
+ * 实例详情页与玩家管理页共用这一个值，两处的结果才可能一致。
+ */
+const ROSTER_TIMEOUT_MS = 4000
+
 /** 命令下发后等一小会儿再复查，给游戏进程处理命令的时间 */
 const RECHECK_DELAY_MS = 900
 
@@ -110,6 +121,28 @@ const ACTION_FEEDBACK_POLL_MS = 150
  * 就当通道不可用，直接告诉管理员重启面板，而不是让他一遍遍点踢出。
  */
 const PING_TIMEOUT_MS = 1500
+
+/**
+ * 查询某个实例的在线玩家总览（地上 + 洞穴）。
+ *
+ * 实例详情页与玩家管理页共用这一条路径。
+ *
+ * 各查各的代价是两个页面的口径会漂：详情页只查地上、人数按游戏侧读数，
+ * 玩家页查两个分片、人数按明细条数——于是「详情说 1 人在线、玩家页说没人」
+ * 与「人在洞穴时详情少算一个」会同时出现。合成一条路径后口径不可能再分叉。
+ */
+export async function queryInstanceOnlineRoster(instance: ResolvedLocalDstInstance): Promise<PlayerOnlineRosterDto> {
+  const plans = await planShardQueries(instance)
+  const snapshots = await queryOnlineSnapshots(instance.id, plans, ROSTER_TIMEOUT_MS)
+  // 玩家在线时是名字最可靠的来源，顺手写进档案，名单以后就能按名字显示
+  await rememberOnlineNames(instance.id, snapshots)
+  return buildPlayerRoster({
+    instanceId: instance.id,
+    plans,
+    snapshots,
+    maxPlayers: getClusterConfig(instance).maxPlayers,
+  })
+}
 
 /**
  * player 模块：DST 玩家名单（adminlist.txt / blocklist.txt / whitelist.txt）、
@@ -197,16 +230,7 @@ export function registerPlayerModule(app: FastifyInstance) {
       return resolved.error
     }
     try {
-      const plans = await planShardQueries(resolved.instance)
-      const snapshots = await queryOnlineSnapshots(resolved.instance.id, plans, PROBE_TIMEOUT_MS)
-      await rememberOnlineNames(resolved.instance.id, snapshots)
-      const config = getClusterConfig(resolved.instance)
-      return success(buildPlayerRoster({
-        instanceId: resolved.instance.id,
-        plans,
-        snapshots,
-        maxPlayers: config.maxPlayers,
-      }), request)
+      return success(await queryInstanceOnlineRoster(resolved.instance), request)
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '读取在线玩家失败'
@@ -319,11 +343,22 @@ export function registerPlayerModule(app: FastifyInstance) {
     if (authError) {
       return authError
     }
-    const body = playerActionPayloadSchema.safeParse(request.body ?? {})
+    const body = playerKickPayloadSchema.safeParse(request.body ?? {})
     if (!body.success) {
       return businessError('请求参数无效', request)
     }
     const { instanceId, kuId } = body.data
+    /**
+     * 踢出比封禁宽松：离线 / 局域网进来的路人没有 Klei 账号，ID 形状不受面板控制，
+     * 但清场同样需要踢得掉他。所以这里只要求「能安全拼进 Lua 命令」——
+     * 拼不进去的一律拒绝，绝不把未校验的字符串交给命令层。
+     */
+    if (!kuId.trim()) {
+      return businessError('游戏没有给出这个玩家的 ID，无法踢出', request)
+    }
+    if (!isSafeCommandUserId(kuId)) {
+      return businessError('这个玩家的 ID 形状异常，面板无法安全地下发踢出命令', request)
+    }
     const resolved = await resolveLocalDstInstance(instanceId, request, { messages: PLAYER_RESOLVE_MESSAGES })
     if (!resolved.ok) {
       return resolved.error
@@ -430,6 +465,12 @@ export function registerPlayerModule(app: FastifyInstance) {
     }
     const body = playerActionPayloadSchema.safeParse(request.body ?? {})
     if (!body.success) {
+      // 封禁要写进黑名单长期生效，只有稳定的 Klei ID 才有意义；
+      // 临时身份（离线 / 局域网玩家）每次进服 ID 都会变，写进去拦不住任何人
+      const rawKuId = (request.body as { kuId?: unknown } | undefined)?.kuId
+      if (typeof rawKuId === 'string' && rawKuId.trim() && !isValidKuId(rawKuId)) {
+        return businessError('这个玩家不是 Klei 账号，封禁对他无效：临时身份的 ID 每次进服都会变', request)
+      }
       return businessError('请求参数无效', request)
     }
     const { instanceId, kuId } = body.data
@@ -562,7 +603,8 @@ async function queryOnlineSnapshots(
     : []
   return plans.map((plan) => {
     const found = queried.find(item => item.shard === plan.shard)
-    return found ?? { shard: plan.shard, players: [] }
+    // 未运行的分片按「确实没人在线」处理（进程都没了）；count 也用 0 与之对齐
+    return found ?? { shard: plan.shard, players: [], count: 0 }
   })
 }
 
@@ -589,7 +631,11 @@ async function attachProfileNames(instanceId: string, entries: PlayerListEntry[]
  * 所以探测到的名字要立刻落库，否则名单里只剩一串 ID。
  */
 async function rememberOnlineNames(instanceId: string, snapshots: DstShardOnlineSnapshot[]): Promise<void> {
-  const players = snapshots.flatMap(snapshot => snapshot.players ?? [])
+  // 只记 Klei 账号：离线 / 局域网的临时 ID 每次进服都会变，写进档案只会留下
+  // 永远对不上人的垃圾条目，还会污染「按游戏名搜索」的结果
+  const players = snapshots
+    .flatMap(snapshot => snapshot.players ?? [])
+    .filter(player => player.kleiAccount && player.kuId.length > 0)
   if (players.length === 0) {
     return
   }

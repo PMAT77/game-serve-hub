@@ -1,13 +1,31 @@
 import { z } from 'zod'
+import { PLAYER_KU_ID_PATTERN } from '../constants/player'
 import { instanceIdSchema } from './instance'
 
 /** DST 玩家名单文件：管理员、封禁、白名单 */
 export const playerListKindSchema = z.enum(['admin', 'block', 'whitelist'])
 export type PlayerListKind = z.infer<typeof playerListKindSchema>
 
-/** Klei 用户 ID，形如 KU_xxxxx；大小写按原样保留，去重与比对时忽略大小写 */
-export const playerKuIdSchema = z.string().trim().regex(/^KU_[A-Za-z0-9_]{1,64}$/)
+/**
+ * Klei 用户 ID，形如 `KU_3rpxG-xy`；大小写按原样保留，去重与比对时忽略大小写。
+ *
+ * 字符集定义在 shared/constants/player.ts：名单校验、在线身份判定与命令拼装
+ * 共用同一份，写散在多处迟早会漂——曾经就漏掉 `-`，把真实账号判成了非法 ID。
+ */
+export const playerKuIdSchema = z.string().trim().regex(PLAYER_KU_ID_PATTERN)
 export type PlayerKuId = z.infer<typeof playerKuIdSchema>
+
+/**
+ * 游戏给出的原始玩家 ID（在线玩家明细用）。
+ *
+ * 只有 Klei 账号才是 `KU_xxxxx`。离线或局域网进来的玩家没有 Klei 账号，
+ * 拿到的是游戏临时分配的 ID，形状不受面板控制，甚至可能为空字符串。
+ * 这类玩家可以列出、可以踢出，但不能加入名单或封禁：ID 每次进服都会变。
+ *
+ * 注意这条放宽只作用于「读回来展示」，名单写入与封禁仍然只认 playerKuIdSchema。
+ */
+export const playerOnlineIdSchema = z.string().trim().max(128)
+export type PlayerOnlineId = z.infer<typeof playerOnlineIdSchema>
 
 /** DST 的地上 / 洞穴分片 */
 export const playerShardSchema = z.enum(['master', 'caves'])
@@ -61,9 +79,14 @@ export type PlayerListSaveResult = z.infer<typeof playerListSaveResultSchema>
 
 /** 一个在线玩家，含他当前所在的世界（地上 / 洞穴） */
 export const playerOnlineEntrySchema = z.object({
-  kuId: playerKuIdSchema,
+  /** 游戏给出的原始 ID；非 Klei 账号可能为空字符串 */
+  kuId: playerOnlineIdSchema,
   name: z.string(),
   shard: playerShardSchema,
+  /** 是否 Klei 账号：只有为 true 时这个 ID 才稳定到能写进名单或用于封禁 */
+  kleiAccount: z.boolean(),
+  /** 本次查询内唯一，供列表 key 与操作定位；ID 为空的条目由解析器分配序号 */
+  key: z.string().min(1),
 })
 export type PlayerOnlineEntry = z.infer<typeof playerOnlineEntrySchema>
 
@@ -74,6 +97,15 @@ const playerShardSnapshotSchema = z.object({
   configured: z.boolean(),
   /** null 表示这次没取到（查询超时、日志被挤掉），与空数组含义不同 */
   players: z.array(playerOnlineEntrySchema).nullable(),
+  /** 该分片上报的在线人数（游戏侧 #AllPlayers 读数）；null 表示这次没查到 */
+  count: z.number().int().nonnegative().nullable(),
+  /**
+   * 有人却列不出来的数量（count 多于明细条数）。
+   *
+   * 游戏没给出可用 ID 时人数照算、明细为空，界面必须说明，否则会出现
+   * 「概览说 1 人在线、列表说没人」这种自相矛盾的画面。
+   */
+  unlistedCount: z.number().int().nonnegative(),
 })
 
 /**
@@ -93,6 +125,8 @@ export const playerOnlineRosterSchema = z.object({
     caves: playerShardSnapshotSchema,
   }),
   players: z.array(playerOnlineEntrySchema),
+  /** 各分片合计「有人却列不出来」的数量；大于 0 时界面要说明原因 */
+  unlistedPlayerCount: z.number().int().nonnegative(),
   partial: z.boolean(),
 })
 export type PlayerOnlineRosterDto = z.infer<typeof playerOnlineRosterSchema>
@@ -138,8 +172,11 @@ export type PlayerProfileSyncResult = z.infer<typeof playerProfileSyncResultSche
 /**
  * 踢出 / 封禁的目标玩家。
  *
- * 只按 Klei 用户 ID 指定，不接受玩家名：名字可重复、可在游戏内改名，
- * 按名字操作存在误伤别人的可能。名字只用于界面选择，选择后仍然落到 ID。
+ * 只按 ID 指定，不接受玩家名：名字可重复、可在游戏内改名，按名字操作存在误伤
+ * 别人的可能。名字只用于界面选择，选择后仍然落到 ID。
+ *
+ * 这份载荷给**封禁**用，因此只收 Klei ID：黑名单是要长期生效的文件条目，
+ * 临时身份的 ID 每次进服都会变，写进去没有意义。踢出用 playerKickPayloadSchema。
  */
 export const playerActionPayloadSchema = z.object({
   instanceId: instanceIdSchema,
@@ -148,6 +185,21 @@ export const playerActionPayloadSchema = z.object({
   shard: playerShardSchema.optional(),
 })
 export type PlayerActionPayload = z.infer<typeof playerActionPayloadSchema>
+
+/**
+ * 踢出目标。
+ *
+ * 比封禁宽松：踢出只按当下的 userid 匹配一次连接，非 Klei 账号的玩家
+ * （离线 / 局域网进来的路人）也该能被清场。服务端在拼命令前还会再做一次
+ * 安全字符集校验，见 player-actions.ts 的 isSafeCommandUserId。
+ */
+export const playerKickPayloadSchema = z.object({
+  instanceId: instanceIdSchema,
+  kuId: playerOnlineIdSchema.min(1),
+  /** 目标玩家所在的分片；省略时由服务端在两个分片里探测 */
+  shard: playerShardSchema.optional(),
+})
+export type PlayerKickPayload = z.infer<typeof playerKickPayloadSchema>
 
 export const playerKickResultSchema = z.object({
   isSuccess: z.literal(true),

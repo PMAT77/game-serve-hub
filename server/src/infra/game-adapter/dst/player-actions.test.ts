@@ -12,6 +12,7 @@ import {
   createConsoleToken,
   hasConsolePing,
   isRoomOwner,
+  isSafeCommandUserId,
   isValidKuId,
   parseClientRows,
   parseConsoleHostUserId,
@@ -50,14 +51,40 @@ describe('buildKickCommand', () => {
     assert.throws(() => buildKickCommand('KU_abc" .. os.execute("rm -rf /") .. "'))
   })
 
-  it('rejects ids that do not look like a Klei user id', () => {
-    assert.throws(() => buildKickCommand('player'))
+  it('accepts non-Klei ids as long as they are safe to embed', () => {
+    // 离线 / 局域网进来的路人没有 Klei 账号，ID 形状不受面板控制，但清场同样要踢得掉
+    assert.match(buildKickCommand('player'), /c\.userid=="player"/)
+    assert.match(buildKickCommand('Player_3'), /c\.userid=="Player_3"/)
     assert.throws(() => buildKickCommand(''))
-    assert.throws(() => buildKickCommand('ku_abc'))
+  })
+
+  it('still rejects anything that could escape the Lua string literal', () => {
+    assert.throws(() => buildKickCommand('a b'))
+    assert.throws(() => buildKickCommand('a\\b'))
+    assert.throws(() => buildKickCommand('a\nb'))
+    assert.throws(() => buildKickCommand('a\tb'))
   })
 
   it('rejects an id longer than the accepted shape', () => {
     assert.throws(() => buildKickCommand(`KU_${'a'.repeat(65)}`))
+  })
+})
+
+describe('isSafeCommandUserId', () => {
+  it('accepts Klei ids and the temporary ids handed to offline players', () => {
+    assert.equal(isSafeCommandUserId('KU_Mjne0Map'), true)
+    assert.equal(isSafeCommandUserId('Player_3'), true)
+    assert.equal(isSafeCommandUserId('1'), true)
+  })
+
+  it('rejects anything that could escape a Lua string literal', () => {
+    assert.equal(isSafeCommandUserId(''), false)
+    assert.equal(isSafeCommandUserId('a b'), false)
+    assert.equal(isSafeCommandUserId('a"b'), false)
+    assert.equal(isSafeCommandUserId('a\\b'), false)
+    assert.equal(isSafeCommandUserId('a\'b'), false)
+    assert.equal(isSafeCommandUserId('a\nb'), false)
+    assert.equal(isSafeCommandUserId('a'.repeat(65)), false)
   })
 })
 
@@ -203,6 +230,8 @@ describe('isValidKuId', () => {
   it('accepts Klei user ids', () => {
     assert.equal(isValidKuId('KU_abc123'), true)
     assert.equal(isValidKuId('  KU_abc123  '), true)
+    // 实测真实 userid 含 `-`（KU_3rpxG-xy）：漏掉它会把真实账号判成非法 ID
+    assert.equal(isValidKuId('KU_3rpxG-xy'), true)
   })
 
   it('rejects anything else', () => {

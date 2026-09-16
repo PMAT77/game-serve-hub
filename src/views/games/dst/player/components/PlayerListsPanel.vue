@@ -17,6 +17,9 @@ import {
 import { computed, reactive, ref, watch } from 'vue'
 import apiInstance from '@/api/modules/instance'
 import apiPlayer from '@/api/modules/player'
+import { routeToDstRoomSettings } from '@/navigation/game-routes'
+import { PLAYER_KU_ID_PATTERN } from '../../../../../../shared/constants/player'
+import { splitRoomSettingsLinks, WHITELIST_DISABLED_WARNING } from '../playerListWarning'
 
 const props = defineProps<{
   instanceId: string
@@ -40,7 +43,10 @@ defineOptions({
 const message = useMessage()
 const dialog = useDialog()
 
-const KU_ID_PATTERN = /^KU_[A-Za-z0-9_]{1,64}$/i
+// 判断输入的是不是一串玩家 ID（而不是游戏名）。字符集与后端共用同一份：
+// Klei userid 含 `-`（实测 KU_3rpxG-xy），漏掉它这类 ID 会被当成游戏名去搜索，
+// 永远加不进名单。这里额外忽略大小写，容忍手输的小写 ku_。
+const KU_ID_PATTERN = new RegExp(PLAYER_KU_ID_PATTERN.source, 'i')
 
 const LIST_META: { kind: PlayerListKind, label: string, hint: string }[] = [
   { kind: 'admin', label: '管理员', hint: '管理员可在游戏内使用控制台命令。' },
@@ -74,6 +80,13 @@ const whitelistDisabled = computed(() => whitelistSlots.value <= 0)
 /** 白名单没启用时不该再往里加人：加了也不生效，先去把预留位填成大于 0 */
 function whitelistBlocked(kind: PlayerListKind): boolean {
   return kind === 'whitelist' && whitelistDisabled.value
+}
+
+const router = useRouter()
+
+/** 点警告里的「房间设置」直接进这个实例的房间设置页 */
+function goRoomSettings() {
+  router.push(routeToDstRoomSettings(props.instanceId))
 }
 
 const keyword = ref('')
@@ -408,7 +421,22 @@ defineExpose({ loadAll })
           :bordered="false"
           class="mb-3"
         >
-          白名单当前未启用：白名单预留位为 0。请到「房间管理 → 房间设置」把预留位填成大于 0 的数字并保存。
+          <template
+            v-for="(segment, segmentIndex) in splitRoomSettingsLinks(WHITELIST_DISABLED_WARNING)"
+            :key="segmentIndex"
+          >
+            <NButton
+              v-if="segment.link"
+              text
+              type="primary"
+              size="tiny"
+              class="align-baseline px-0.5"
+              @click="goRoomSettings"
+            >
+              {{ segment.text }}
+            </NButton>
+            <template v-else>{{ segment.text }}</template>
+          </template>
         </NAlert>
 
         <div class="flex flex-wrap items-center gap-2">
@@ -462,9 +490,6 @@ defineExpose({ loadAll })
 
         <p class="mt-2 text-xs text-muted-foreground">
           {{ item.hint }}
-          <template v-if="!lists[item.kind].fileExists && !lists[item.kind].loading">
-            当前还没有任何条目。
-          </template>
         </p>
 
         <NSpin :show="lists[item.kind].loading" class="mt-3 block">

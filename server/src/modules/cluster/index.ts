@@ -16,9 +16,8 @@ import {
   getClusterConfig,
   saveClusterConfig,
 } from '../../infra/game-adapter/dst/cluster-service'
-import { queryDstOnlinePlayers } from '../../infra/game-adapter/dst/online-players'
-import { isInstanceContainerRunning } from '../instance/container-lifecycle'
 import { injectRestartInstance } from '../instance/inject-restart'
+import { queryInstanceOnlineRoster } from '../player'
 import { businessError, success } from '../../shared/http/response'
 import { requirePermission } from '../system/auth'
 
@@ -81,16 +80,29 @@ export function registerClusterModule(app: FastifyInstance) {
       return resolved.error
     }
     try {
-      const config = getClusterConfig(resolved.instance)
-      const running = await isInstanceContainerRunning(instanceId)
-      // 一次查询同时给出人数与明细；查不到时两者都为 null（「不知道」而非「没人在线」）
-      const online = running ? await queryDstOnlinePlayers(instanceId) : null
+      /**
+       * 与玩家管理页共用同一条查询路径（地上 + 洞穴）。
+       *
+       * 以前这里只查地上、且直接按游戏侧读数报人数：玩家走进洞穴时详情页会少算一个，
+       * 而玩家管理页查两个分片——两个页面就此对不上。共用之后口径不会再分叉。
+       */
+      const roster = await queryInstanceOnlineRoster(resolved.instance)
       return success({
         instanceId,
-        running,
-        onlinePlayerCount: online?.count ?? null,
-        players: online?.players ?? null,
-        maxPlayers: config.maxPlayers,
+        running: roster.running,
+        onlinePlayerCount: roster.onlinePlayerCount,
+        // 完全没取到时给 null（「不知道」），与空数组「确实没人」区分开
+        players: roster.onlinePlayerCount === null
+          ? null
+          : roster.players.map(player => ({
+              kuId: player.kuId,
+              name: player.name,
+              kleiAccount: player.kleiAccount,
+              key: player.key,
+            })),
+        unlistedPlayerCount: roster.unlistedPlayerCount,
+        partial: roster.partial,
+        maxPlayers: roster.maxPlayers,
       }, request)
     }
     catch (error) {

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { PLAYER_KU_ID_PATTERN } from '../../../../../shared/constants/player'
 import type { DstConsoleShard } from '../../../shared/instance/dst-container-command-port'
 import { getDstContainerCommandPort } from '../../../shared/instance/dst-container-command-port'
 import { instanceConsoleLogStore } from '../../../shared/instance-runtime/console-log-store'
@@ -16,11 +17,14 @@ export const DST_ONLINE_PLAYER_LIST_END_MARKER = 'GSH_PLAYER_LIST_END:'
  */
 const LOG_TAIL_LINES = 200
 
-const KU_ID_PATTERN = /^KU_[A-Za-z0-9_]{1,64}$/
-
 export interface DstOnlinePlayer {
+  /** 游戏给出的原始 ID；非 Klei 账号（离线 / 局域网玩家）可能是别的形状，也可能为空 */
   kuId: string
   name: string
+  /** Klei 账号：只有它为 true 时，ID 才稳定到能写进名单或用于封禁 */
+  kleiAccount: boolean
+  /** 本次查询内唯一，供列表 key 与操作定位；ID 为空时按出现顺序编号 */
+  key: string
 }
 
 export interface DstOnlinePlayerList {
@@ -96,9 +100,17 @@ export function parseDstOnlinePlayerList(
   queryToken: string,
 ): DstOnlinePlayerList | null {
   const tokenPart = escapeRegExp(queryToken)
-  const beginPattern = new RegExp(`${DST_ONLINE_PLAYER_LIST_BEGIN_MARKER}${tokenPart}:(\\d+)`)
+  /**
+   * 标记行必须落在行尾。
+   *
+   * 面板下发的那行 Lua 源码会被游戏原样回显到日志里，里面同样含这三个标记
+   * （`... end print("GSH_PLAYER_LIST_END:token")`）。不加行尾约束，
+   * 回显行会被当成真的 END，解析在半路就收工；BEGIN 也一并约束，
+   * 免得 `#AllPlayers` 之类的字样凑出一个假读数。
+   */
+  const beginPattern = new RegExp(`${DST_ONLINE_PLAYER_LIST_BEGIN_MARKER}${tokenPart}:(\\d+)\\s*$`)
   const itemPattern = new RegExp(`${DST_ONLINE_PLAYER_LIST_ITEM_MARKER}${tokenPart}:(.*)$`)
-  const endPattern = new RegExp(`${DST_ONLINE_PLAYER_LIST_END_MARKER}${tokenPart}`)
+  const endPattern = new RegExp(`${DST_ONLINE_PLAYER_LIST_END_MARKER}${tokenPart}\\s*$`)
 
   let count: number | null = null
   let closed = false
@@ -118,12 +130,32 @@ export function parseDstOnlinePlayerList(
       const tabIndex = payload.indexOf('\t')
       const kuId = (tabIndex === -1 ? payload : payload.slice(0, tabIndex)).trim()
       const name = tabIndex === -1 ? '' : payload.slice(tabIndex + 1).trim()
-      // userid 缺失或形状不对的实体（例如非玩家实体）直接跳过，
-      // 但会让 players.length 少于 BEGIN 的读数，界面以 count 显示人数
-      if (KU_ID_PATTERN.test(kuId) && !seen.has(kuId.toLowerCase())) {
-        seen.add(kuId.toLowerCase())
-        players.push({ kuId, name })
+      /**
+       * 命令回显行也带着 ITEM 标记：面板下发的整行 Lua 源码会被游戏回显到日志里，
+       * 它的 ID 段是 `" .. tostring(player.userid) .. "`——含引号与空格。
+       * 真实条目的 ID 段是游戏给的 userid，不可能出现这些字符，据此把回显挡在外面。
+       */
+      if (/["\s]/.test(kuId)) {
+        continue
       }
+      /**
+       * 非 Klei 账号也列出来。
+       *
+       * 离线或局域网进来的玩家没有 Klei 账号，userid 形状不受面板控制，可能为空。
+       * 早先这里只收 KU_ 形状，结果是「人数按 #AllPlayers 算上他、明细里却没有他」——
+       * 用户看到「实例详情说 1 人在线、房间玩家页说没人」。
+       * 能不能长期管理另由 kleiAccount 表达；拼命令前的字符集校验在 player-actions.ts。
+       *
+       * ID 为空时不能拿空串当 key（多人会互相覆盖），按出现顺序编号兜底。
+       */
+      const key = kuId ? kuId.toLowerCase() : `unidentified-${players.length + 1}`
+      if (kuId && seen.has(key)) {
+        continue
+      }
+      if (kuId) {
+        seen.add(key)
+      }
+      players.push({ kuId, name, kleiAccount: PLAYER_KU_ID_PATTERN.test(kuId), key })
       continue
     }
 
@@ -274,6 +306,14 @@ export interface DstShardOnlineSnapshot {
   shard: DstConsoleShard
   /** null 表示这个分片这次没查到（未运行、超时或日志被挤掉），与空数组含义不同 */
   players: DstOnlinePlayer[] | null
+  /**
+   * 该分片上报的人数（#AllPlayers 读数）。
+   *
+   * 必须跟着 players 一起往上带：人数含那些「游戏没给出可用 ID、列不出来」的玩家，
+   * 只按 players.length 统计会让各页面人数对不上（详情页 1 人、玩家页 0 人）。
+   * players 为 null 时它是 null。
+   */
+  count: number | null
 }
 
 /**
@@ -311,7 +351,7 @@ export async function queryShardsOnlinePlayers(
       shard,
       ...(options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     }).catch(() => null)
-    return { shard, players: list?.players ?? null }
+    return { shard, players: list?.players ?? null, count: list?.count ?? null }
   }))
 }
 

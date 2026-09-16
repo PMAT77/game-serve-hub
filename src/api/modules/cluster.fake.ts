@@ -53,14 +53,18 @@ export default defineFakeRoute([
         data: {
           instanceId,
           running,
-          onlinePlayerCount: running ? 2 : null,
-          // fake 也给出明细，开发模式下「在线玩家」卡片才有内容可看
+          onlinePlayerCount: running ? 3 : null,
+          // fake 也给出明细，开发模式下「在线玩家」卡片才有内容可看；
+          // 其中一位是离线 / 局域网进来的路人（游戏临时给 ID），用来核对「临时身份」的呈现
           players: running
             ? [
-                { kuId: 'KU_fake0001', name: '玩家甲' },
-                { kuId: 'KU_fake0002', name: '玩家乙' },
+                { kuId: 'KU_fake0001', name: '玩家甲', kleiAccount: true, key: 'ku_fake0001' },
+                { kuId: 'KU_fake0002', name: '玩家乙', kleiAccount: true, key: 'ku_fake0002' },
+                { kuId: 'Player_3', name: '路人', kleiAccount: false, key: 'player_3' },
               ]
             : null,
+          unlistedPlayerCount: 0,
+          partial: false,
           maxPlayers: existing?.maxPlayers ?? 6,
         },
       }

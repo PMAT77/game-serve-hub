@@ -1,6 +1,7 @@
 import type {
   PlayerActionPayload,
   PlayerBanResult,
+  PlayerKickPayload,
   PlayerKickResult,
   PlayerListDto,
   PlayerListKind,
@@ -16,6 +17,7 @@ import api from '../index'
 export type {
   PlayerActionPayload,
   PlayerBanResult,
+  PlayerKickPayload,
   PlayerKickResult,
   PlayerKuId,
   PlayerListDto,
@@ -47,6 +49,7 @@ export default {
     instanceId,
   }) as Promise<{ data: PlayerProfileSyncResult }>,
   saveProfileNote: (payload: PlayerProfileNotePayload) => api.put('app/instance/players/profiles/note', payload) as Promise<{ data: PlayerProfileSearchResult }>,
-  kickPlayer: (payload: PlayerActionPayload) => api.post('app/instance/players/kick', payload) as Promise<{ data: PlayerKickResult }>,
+  // 踢出比封禁宽松：非 Klei 账号的玩家（离线 / 局域网的路人）也要能清场
+  kickPlayer: (payload: PlayerKickPayload) => api.post('app/instance/players/kick', payload) as Promise<{ data: PlayerKickResult }>,
   banPlayer: (payload: PlayerActionPayload) => api.post('app/instance/players/ban', payload) as Promise<{ data: PlayerBanResult }>,
 }

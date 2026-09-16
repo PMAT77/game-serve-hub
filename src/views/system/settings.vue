@@ -317,7 +317,8 @@ async function downloadUpdate() {
     faToast.success(res.data.message)
     await loadUpdateStatus({ silent: true })
     updatePollFailures = 0
-    if (res.data.status === 'updating') {
+    // 后端返回值是主判据；再兜一层刚读到的最新状态，接口口径变化时界面不会停在原地
+    if (res.data.status === 'updating' || updateStatus.value?.updating) {
       updatePoller.start()
     }
   }
@@ -349,7 +350,8 @@ async function installUpdate() {
     faToast.success(res.data.message)
     await loadUpdateStatus({ silent: true })
     updatePollFailures = 0
-    if (res.data.status === 'updating') {
+    // 后端返回值是主判据；再兜一层刚读到的最新状态，接口口径变化时界面不会停在原地
+    if (res.data.status === 'updating' || updateStatus.value?.updating) {
       updatePoller.start()
     }
   }

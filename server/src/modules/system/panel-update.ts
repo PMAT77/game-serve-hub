@@ -1373,9 +1373,12 @@ async function downloadNativeTarget(input: {
       return true
     }
 
+    // 与镜像下载同构：一进入下载循环就切到 downloading。界面只在这个阶段渲染
+    // 「已下载 x MB / y MB」，「更新已下载」提示也把它当作前一阶段 ——
+    // 少了这一步，Native 更新包会把进度与完成提示一起吞掉。
     updateRuntime({
-      phase: 'preparing',
-      message: '正在检查磁盘空间…',
+      phase: 'downloading',
+      message: '正在下载更新包，请勿关闭面板',
       downloadBytes: 0,
       downloadTotalBytes: null,
     })

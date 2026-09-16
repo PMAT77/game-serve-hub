@@ -7,11 +7,12 @@ import {
   buildNativeLauncherScript,
   buildNativeSystemdUnit,
   formatUnitLoadDiagnostic,
+  NativeSystemdRuntime,
   readFileTailLines,
   resolveNativeUnitState,
   resolveShardCpuQuotaPercent,
 } from './native-systemd-runtime'
-import type { ShardContainerSpec } from './types'
+import type { ContainerRef, LogLine, ShardContainerSpec } from './types'
 
 function buildSpec(): ShardContainerSpec {
   return {
@@ -346,5 +347,111 @@ describe('生成的 unit 指令落在正确分区', () => {
     const sections = parseUnitSections(buildNativeSystemdUnit(buildSpec(), LAUNCHER, CONSOLE_LOG))
     assert.equal(sections.Service!.StandardOutput, `append:${CONSOLE_LOG}`)
     assert.equal(sections.Service!.StandardError, `append:${CONSOLE_LOG}`)
+  })
+})
+
+async function collectLines(iterable: AsyncIterable<LogLine>): Promise<string[]> {
+  const out: string[] = []
+  for await (const line of iterable) {
+    out.push(line.text)
+  }
+  return out
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 8000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return
+    }
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error('等待条件超时')
+}
+
+/**
+ * 分片日志是面板控制台的唯一来源，也是「不用再 SSH 才能看到游戏输出」的全部依赖。
+ *
+ * 线上原先走 `journalctl --user-unit`，而面板以 gsh 用户跑在系统服务里、不在
+ * systemd-journal 组内，必然报权限不足——控制台一条游戏输出都没有。改成直接读
+ * systemd 追加的日志文件后，这段跟随逻辑就成了关键路径，必须有测试兜住。
+ */
+describe('NativeSystemdRuntime.logs 读取分片日志文件', () => {
+  const tempDirs: string[] = []
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  function setup() {
+    const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-native-logs-'))
+    tempDirs.push(runtimeDir)
+    const runtime = new NativeSystemdRuntime({
+      runtimeDir,
+      unitDir: path.join(runtimeDir, 'units'),
+    })
+    const ref: ContainerRef = { id: 'gsh-test-master.service', name: 'gsh-test-master' }
+    const logPath = path.join(runtimeDir, 'console-logs', 'gsh-test-master.log')
+    fs.mkdirSync(path.dirname(logPath), { recursive: true })
+    return { runtime, ref, logPath }
+  }
+
+  it('日志文件不存在时返回空而不是抛错', async () => {
+    const { runtime, ref } = setup()
+    assert.deepEqual(await collectLines(runtime.logs(ref, { tail: 10 })), [])
+  })
+
+  it('非跟随模式只取最后 N 行，并跳过空行', async () => {
+    const { runtime, ref, logPath } = setup()
+    fs.writeFileSync(logPath, 'one\n\ntwo\nthree\n')
+    assert.deepEqual(await collectLines(runtime.logs(ref, { tail: 2 })), ['two', 'three'])
+  })
+
+  it('跟随模式先吐出已有尾部，再增量吐出追加内容', async () => {
+    const { runtime, ref, logPath } = setup()
+    fs.writeFileSync(logPath, 'first\n')
+    const controller = new AbortController()
+    const seen: string[] = []
+    const task = (async () => {
+      for await (const line of runtime.logs(ref, { follow: true, tail: 1, signal: controller.signal })) {
+        seen.push(line.text)
+      }
+    })()
+    await waitUntil(() => seen.length >= 1)
+    fs.appendFileSync(logPath, 'second\n')
+    await waitUntil(() => seen.length >= 2)
+    controller.abort()
+    await task
+    assert.deepEqual(seen, ['first', 'second'])
+  })
+
+  it('日志被轮转或截断后从文件头重新读取', async () => {
+    const { runtime, ref, logPath } = setup()
+    fs.writeFileSync(logPath, 'before-rotation\n')
+    const controller = new AbortController()
+    const seen: string[] = []
+    const task = (async () => {
+      for await (const line of runtime.logs(ref, { follow: true, tail: 1, signal: controller.signal })) {
+        seen.push(line.text)
+      }
+    })()
+    await waitUntil(() => seen.length >= 1)
+    // 模拟 createShardContainer 的轮转：文件被换小，旧 offset 已经越过文件末尾
+    fs.writeFileSync(logPath, 'after\n')
+    await waitUntil(() => seen.length >= 2)
+    controller.abort()
+    await task
+    assert.deepEqual(seen, ['before-rotation', 'after'])
+  })
+
+  it('已经 abort 的 signal 不会再启动跟随', async () => {
+    const { runtime, ref, logPath } = setup()
+    fs.writeFileSync(logPath, 'boot\n')
+    const controller = new AbortController()
+    controller.abort()
+    const seen = await collectLines(runtime.logs(ref, { follow: true, tail: 1, signal: controller.signal }))
+    assert.deepEqual(seen, ['boot'])
   })
 })

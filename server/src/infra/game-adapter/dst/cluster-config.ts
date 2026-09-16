@@ -177,5 +177,15 @@ export function buildDstLaunchArgs(storageRoot: string, shardFolder: 'Master' | 
     '-shard',
     shardFolder,
     '-console',
+    /**
+     * 面板已经用 SteamCMD 把 Mod 下载好并落位到 ugc_mods，游戏不必再联网核对一遍。
+     *
+     * 少了这个参数，DST 每次启动都会照着 dedicated_server_mods_setup.lua 的清单去创意工坊
+     * 校验/抓取：Mod 一多就把 CPU、带宽与磁盘 IO 同时占满，小机器上直接陷入
+     * 「启动 → 超时 → 崩溃 → 重启」的循环，玩家始终连不上；同一份存档在别的面板上能跑、
+     * 在这里跑不动，差别就在这一行。跳过之后 DST 只加载 modoverrides.lua 里列出的 Mod，
+     * 而那里只会出现已就绪（文件已落位）的条目。
+     */
+    '-skip_update_server_mods',
   ]
 }

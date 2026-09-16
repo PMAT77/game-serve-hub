@@ -109,13 +109,36 @@ describe('classifyMasterProbe', () => {
     }), 'restart-loop')
   })
 
-  it('把已经重启过的主世界判成崩溃循环', () => {
+  it('把我们启动之后又崩过的主世界判成崩溃循环', () => {
     assert.equal(classifyMasterProbe({
       id: 'gsh-x-master.service',
       name: 'gsh-x-master',
       running: true,
-      restarts: 2,
+      restarts: 3,
       exitResult: 'oom-kill',
+    }, 1), 'restart-loop')
+  })
+
+  /**
+   * 关键：重启计数与「本次启动时的基线」比较，而不是与 0 比较。
+   * systemd 是否在显式启动时清零 `NRestarts` 是实现细节，赌错一次就会让每次正常启动
+   * 都被误判成崩溃循环而中止。
+   */
+  it('沿用历史重启计数不算崩溃（基线之上的才算）', () => {
+    assert.equal(classifyMasterProbe({
+      id: 'gsh-x-master.service',
+      name: 'gsh-x-master',
+      running: true,
+      restarts: 5,
+    }, 5), 'healthy')
+  })
+
+  it('基线为 0 时任何非零重启计数都算崩溃', () => {
+    assert.equal(classifyMasterProbe({
+      id: 'gsh-x-master.service',
+      name: 'gsh-x-master',
+      running: true,
+      restarts: 1,
     }), 'restart-loop')
   })
 

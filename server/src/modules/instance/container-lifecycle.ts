@@ -304,7 +304,7 @@ async function startSingleShardContainer(
   spec: ShardContainerSpec,
   gameDstImage: string,
   runtimeMode: 'docker' | 'native',
-): Promise<{ ok: true, ref: ContainerRef } | { ok: false, message: string }> {
+): Promise<{ ok: true, ref: ContainerRef, inspect: ContainerInspect } | { ok: false, message: string }> {
   let ref: ContainerRef
   try {
     ref = await runtime.createShardContainer(spec)
@@ -328,7 +328,7 @@ async function startSingleShardContainer(
     const hint = logTail || '分片启动后立即退出，请检查安装目录与分片配置'
     return { ok: false, message: hint }
   }
-  return { ok: true, ref }
+  return { ok: true, ref, inspect }
 }
 
 async function stopAndRemoveShard(runtime: ContainerRuntime, ref: ContainerRef | undefined) {
@@ -429,15 +429,25 @@ export type MasterProbeVerdict = 'healthy' | 'unknown' | 'stopped' | 'restart-lo
  * `unknown`（问不到运行时）必须继续等：user bus 抖动一次就判崩溃会误伤正常启动。
  * `restart-loop` 必须判失败：`Restart=on-failure` 的重启窗口里单元仍算「在运行」，
  * 只按这一条判断就会白等满上限、然后照样把洞穴拉起来占内存。
+ *
+ * 重启计数一律与**本次启动时的基线**比较，而不是与 0 比较：systemd 是否在显式启动时
+ * 把 `NRestarts` 清零是实现细节，赌错一次就会让每次正常启动都被误判成崩溃循环而中止。
+ * 基线比较只关心「我们启动它之后有没有崩过」，与清零语义无关。
  */
-export function classifyMasterProbe(snapshot: ContainerInspect | null): MasterProbeVerdict {
+export function classifyMasterProbe(
+  snapshot: ContainerInspect | null,
+  baselineRestarts = 0,
+): MasterProbeVerdict {
   if (!snapshot) {
     return 'unknown'
   }
   if (!snapshot.running) {
     return 'stopped'
   }
-  if (snapshot.restarting || (snapshot.restarts ?? 0) > 0) {
+  if (snapshot.restarting) {
+    return 'restart-loop'
+  }
+  if ((snapshot.restarts ?? 0) > baselineRestarts) {
     return 'restart-loop'
   }
   return 'healthy'
@@ -460,6 +470,7 @@ export async function waitForMasterShardReady(
   masterRef: ContainerRef,
   masterPort: number,
   waitSec = resolveShardReadyWaitSec(),
+  baselineRestarts = 0,
 ): Promise<MasterReadyOutcome> {
   const runtime = getContainerRuntime()
   const startAt = Date.now()
@@ -477,7 +488,7 @@ export async function waitForMasterShardReady(
       // 问不到运行时（user bus 抖动等）：当作还活着，继续等，别误判成崩溃
       snapshot = null
     }
-    const verdict = classifyMasterProbe(snapshot)
+    const verdict = classifyMasterProbe(snapshot, baselineRestarts)
     if (verdict === 'stopped') {
       const reason = describeSystemdExitReason(snapshot?.exitResult, resolveShardMemoryCapMb())
       return {
@@ -675,6 +686,7 @@ export async function startInstanceContainer(
       masterRef: ref,
       cavesSpec,
       generation: bumpCavesStartGeneration(input.instanceId),
+      baselineRestarts: masterStart.inspect.restarts ?? 0,
       startCaves: async () => {
         const result = await startSingleShardContainer(runtime, cavesSpec, gameDstImage, runtimeMode)
         return result.ok ? { ok: true as const, ref: result.ref } : { ok: false as const, message: `洞穴：${result.message}` }
@@ -719,6 +731,8 @@ async function startCavesAfterMasterReady(
     cavesSpec: ShardContainerSpec
     /** 本次启动的代号；与当前代号不一致说明用户已重新启动或停止，任务应作废 */
     generation: number
+    /** 本次启动主世界时的重启计数基线：只关心「我们启动它之后有没有崩过」 */
+    baselineRestarts: number
     startCaves: () => Promise<{ ok: true, ref: ContainerRef } | { ok: false, message: string }>
   },
 ): Promise<void> {
@@ -746,6 +760,8 @@ async function startCavesAfterMasterReady(
       input.instanceId,
       input.masterRef,
       readClusterMasterPort(input.installPath),
+      resolveShardReadyWaitSec(),
+      input.baselineRestarts,
     )
     if (stale()) {
       app.log.info({ instanceId: input.instanceId }, '实例已被重新启动或停止，放弃本次洞穴启动')

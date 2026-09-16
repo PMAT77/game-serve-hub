@@ -46,7 +46,7 @@ import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-l
 import { getGameInstanceById, listInstanceMods, updateGameInstanceRuntime } from '../../shared/db/index'
 import { resolveClusterPaths } from '../../infra/game-adapter/dst/cluster-service'
 import { parseClusterIni } from '../../infra/game-adapter/dst/cluster-ini'
-import { describeSystemdExitReason, resolveShardMemoryCapMb } from '../../infra/container/exit-reason'
+import { describeSystemdExitReason, readHostMemorySnapshot, resolveShardMemoryCapMb } from '../../infra/container/exit-reason'
 
 /** 主世界分片互联端口（cluster.ini [SHARD] master_port）；读不到时退回 DST 默认值 */
 const DEFAULT_DST_MASTER_PORT = 10888
@@ -490,14 +490,14 @@ export async function waitForMasterShardReady(
     }
     const verdict = classifyMasterProbe(snapshot, baselineRestarts)
     if (verdict === 'stopped') {
-      const reason = describeSystemdExitReason(snapshot?.exitResult, resolveShardMemoryCapMb())
+      const reason = describeSystemdExitReason(snapshot?.exitResult, resolveShardMemoryCapMb(), readHostMemorySnapshot())
       return {
         kind: 'stopped',
         detail: reason ? `主世界分片在加载途中退出：${reason}` : '主世界分片在加载途中退出',
       }
     }
     if (verdict === 'restart-loop') {
-      const reason = describeSystemdExitReason(snapshot?.exitResult, resolveShardMemoryCapMb())
+      const reason = describeSystemdExitReason(snapshot?.exitResult, resolveShardMemoryCapMb(), readHostMemorySnapshot())
       return {
         kind: 'restart-loop',
         detail: `主世界分片反复重启（已重启 ${snapshot?.restarts ?? 0} 次）${reason ? `，最近一次退出：${reason}` : ''}`,

@@ -37,7 +37,7 @@ import {
 import { formatInstallLogContent } from '../../shared/instance-install/log-format'
 import { isSteamcmdAppUpdateBusy } from '../../infra/container/steamcmd-app-update-queue'
 import { isSteamcmdImagePresent } from '../../infra/container'
-import { describeSystemdExitReason, resolveShardMemoryCapMb } from '../../infra/container/exit-reason'
+import { describeSystemdExitReason, readHostMemorySnapshot, resolveShardMemoryCapMb } from '../../infra/container/exit-reason'
 import {
   buildDstStartBlockedMessage,
   diagnoseDstInstallReadiness,
@@ -252,7 +252,7 @@ async function warnInstanceRestartLoop(
   if (restarts <= 0) {
     return
   }
-  const reason = describeSystemdExitReason(snapshot.exitResult, resolveShardMemoryCapMb())
+  const reason = describeSystemdExitReason(snapshot.exitResult, resolveShardMemoryCapMb(), readHostMemorySnapshot())
   const message = [
     `实例进程反复重启（已重启 ${restarts} 次）`,
     reason ? `，最近一次退出：${reason}` : '',

@@ -159,7 +159,10 @@ async function submitEditor() {
   const config: Record<string, string> = {}
   for (const key of editorFields.value) {
     const value = editorFieldRefs[key]?.value.trim() ?? ''
-    if (value || isConfigured(key)) {
+    // 留空表示保留原值，所以空值不进请求体：后端把「未提供的键」当保留原值、
+    // 把「显式空字符串」当清除该键。此前这里连空值一起提交，编辑时留空会把
+    // 已配置字段悄悄清掉，必填项则直接报「缺少必填配置」而存不下去。
+    if (value) {
       config[key] = value
     }
   }

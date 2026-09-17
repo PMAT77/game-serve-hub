@@ -44,6 +44,7 @@ import { isSteamcmdRuntimeReady, resolveRuntimeStatus } from '../../infra/runtim
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
 import { getGameInstanceById, listInstanceMods, updateGameInstanceRuntime } from '../../shared/db/index'
 import { resolveClusterPaths } from '../../infra/game-adapter/dst/cluster-service'
+import { resolveShardRoot } from '../../infra/game-adapter/dst/shard-layout'
 import { parseClusterIni } from '../../infra/game-adapter/dst/cluster-ini'
 import { describeSystemdExitReason, readHostMemorySnapshot, resolveShardMemoryCapMb } from '../../infra/container/exit-reason'
 
@@ -75,23 +76,68 @@ export function resolveShardReadyWaitSec(): number {
 const SHARD_PORT_EARLY_BIND_GRACE_SEC = 60
 
 /**
- * 主世界控制台里「世界已经起来」的标记。
+ * 主世界「世界已经加载完、分片网络即将启动」的标记。
  *
- * 这两个是 DST 自己打印的行，仓库其它地方（player-actions / player-name-hints）也把它们
- * 当作已知标记使用。找不到任何标记时不会误判成就绪——调用方会退回「端口已绑定且已过宽限期」。
+ * 这两行**取自线上真实成功的分片日志**（用户提供的完整 server_log.txt）：
+ *   [00:02:49]: Reconstructing topology
+ *   [00:02:50]: About to start a shard with these settings:
+ *               ShardRole: SECONDARY
+ *   [00:02:50]: [Shard] Connecting to master...
+ *
+ * 不要凭想象往里加标记：先前猜的 `Sim paused` / `[Shard] Listen` / `Starting master server`
+ * 在那份完整日志里一个都不存在，猜错的结果就是「等满超时」而非报错，极难发现。
  */
-const MASTER_READY_MARKER = /Sim (?:paused|unpaused)|\[Shard\].*[Ll]isten|Starting master server/i
+const MASTER_READY_MARKER = /About to start a shard with these settings|Reconstructing topology/
 
-/** 主世界分片是否已经打印过世界就绪的标记 */
-export function hasMasterReadyMarker(instanceId: string): boolean {
+/** 读文件尾部若干字节；日志可达数百 KB，只关心结尾 */
+function readTailText(filePath: string, maxBytes = 64 * 1024): string {
+  let descriptor: number | undefined
   try {
-    return instanceConsoleLogStore
-      .listLogs(instanceId)
-      .some(line => line.stream === 'stdout' && (line.shard == null || line.shard === 'master') && MASTER_READY_MARKER.test(line.text))
+    const size = fs.statSync(filePath).size
+    if (size === 0) {
+      return ''
+    }
+    const start = size > maxBytes ? size - maxBytes : 0
+    descriptor = fs.openSync(filePath, 'r')
+    const buffer = Buffer.allocUnsafe(size - start)
+    const read = fs.readSync(descriptor, buffer, 0, buffer.length, start)
+    return buffer.subarray(0, read).toString('utf8')
   }
   catch {
+    return ''
+  }
+  finally {
+    if (descriptor !== undefined) {
+      fs.closeSync(descriptor)
+    }
+  }
+}
+
+/**
+ * 主世界分片是否已经打印过世界就绪的标记。
+ *
+ * 两个来源都看，因为它们的可靠性不同：
+ *   1. 面板采集到控制台的行——依赖 systemd 的 stdout 采集链路，链路断了就永远匹配不到；
+ *   2. **DST 自己写的 `server_log.txt`**——面板从实例目录直接读，不依赖任何采集链路，
+ *      而且该文件每次分片启动都会被重写，天然只包含「本轮」的日志，不会匹配到上一轮的旧标记。
+ */
+export function hasMasterReadyMarker(instanceId: string, installPath?: string): boolean {
+  try {
+    const hit = instanceConsoleLogStore
+      .listLogs(instanceId)
+      .some(line => line.stream === 'stdout' && (line.shard == null || line.shard === 'master') && MASTER_READY_MARKER.test(line.text))
+    if (hit) {
+      return true
+    }
+  }
+  catch {
+    // 控制台存储不可用不影响下面的文件判定
+  }
+  if (!installPath) {
     return false
   }
+  const logPath = path.join(resolveShardRoot(installPath, 'master'), 'server_log.txt')
+  return MASTER_READY_MARKER.test(readTailText(logPath))
 }
 
 export type ConsoleCommandShard = 'master' | 'caves'
@@ -493,6 +539,7 @@ export async function waitForMasterShardReady(
   instanceId: string,
   masterRef: ContainerRef,
   masterPort: number,
+  installPath: string,
   waitSec = resolveShardReadyWaitSec(),
   baselineRestarts = 0,
 ): Promise<MasterReadyOutcome> {
@@ -516,7 +563,7 @@ export async function waitForMasterShardReady(
       // 端口绑得太早说明 DST 可能在进程启动早期就占住了它，此时还不能断定世界已加载完，
       // 必须等到控制台里出现世界就绪的标记；晚绑定（超过宽限）则说明它随世界初始化一起起来。
       const portElapsedSec = (portBoundAt - startAt) / 1000
-      if (portElapsedSec > SHARD_PORT_EARLY_BIND_GRACE_SEC || hasMasterReadyMarker(instanceId)) {
+      if (portElapsedSec > SHARD_PORT_EARLY_BIND_GRACE_SEC || hasMasterReadyMarker(instanceId, installPath)) {
         return { kind: 'ready' }
       }
     }
@@ -802,6 +849,7 @@ async function startCavesAfterMasterReady(
       input.instanceId,
       input.masterRef,
       readClusterMasterPort(input.installPath),
+      input.installPath,
       resolveShardReadyWaitSec(),
       input.baselineRestarts,
     )

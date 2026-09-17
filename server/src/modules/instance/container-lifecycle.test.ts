@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, afterEach, describe, it } from 'node:test'
 import { resolveDockerStatus } from '../../infra/docker.ts'
+import { resolveShardRoot } from '../../infra/game-adapter/dst/shard-layout.ts'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store.ts'
 import {
   bumpCavesStartGeneration,
@@ -261,17 +262,53 @@ describe('hasMasterReadyMarker', () => {
     return `inst-marker-${Date.now()}-${Math.round(Math.random() * 1e6)}`
   }
 
-  it('主世界打印世界就绪标记后判定为已就绪', () => {
-    const instanceId = freshInstanceId()
-    assert.equal(hasMasterReadyMarker(instanceId), false)
-    instanceConsoleLogStore.appendDockerLine(instanceId, '[00:03:12]: Sim paused', 'master')
-    assert.equal(hasMasterReadyMarker(instanceId), true)
+  /** 用户提供的真实成功日志片段：世界加载完成、分片网络即将启动 */
+  const REAL_READY_LOG = [
+    '[00:02:49]: Reconstructing topology\t',
+    '[00:02:49]: \t...Sorting points\t',
+    '[00:02:49]: \t...Done!\t',
+    '[00:02:50]: 1 uploads added to server. From server_temp',
+    '[00:02:50]: About to start a shard with these settings:',
+    '[00:02:50]:   ShardName: Master',
+    '[00:02:50]:   ShardRole: MASTER',
+    '[00:02:50]:   MasterPort: 10888',
+    '',
+  ].join('\n')
+
+  function writeShardLog(installPath: string, content: string): void {
+    const dir = resolveShardRoot(installPath, 'master')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'server_log.txt'), content)
+  }
+
+  /**
+   * 就绪标记必须同时能从 DST 自己写的 server_log.txt 里认出来——面板从实例目录直接读，
+   * 不依赖 systemd 的 stdout 采集链路。线上控制台里看不到游戏输出时，这条是唯一的判据。
+   */
+  it('从主世界自己的 server_log.txt 认出世界已就绪（真实日志片段）', () => {
+    const installPath = createTempDir()
+    writeShardLog(installPath, REAL_READY_LOG)
+    assert.equal(hasMasterReadyMarker('inst-not-used', installPath), true)
   })
 
-  it('洞穴分片打印的同样一行不算主世界就绪', () => {
-    const instanceId = freshInstanceId()
-    instanceConsoleLogStore.appendDockerLine(instanceId, '[00:00:01]: Sim paused', 'caves')
-    assert.equal(hasMasterReadyMarker(instanceId), false)
+  it('世界还在加载时不认（只有 Mod 注册行）', () => {
+    const installPath = createTempDir()
+    writeShardLog(installPath, '[00:00:30]: Mod: workshop-1 (X)\t  Registering prefabs\t\n')
+    assert.equal(hasMasterReadyMarker('inst-not-used', installPath), false)
+  })
+
+  it('日志文件不存在时不认（不抛错）', () => {
+    assert.equal(hasMasterReadyMarker('inst-not-used', createTempDir()), false)
+  })
+
+  /**
+   * 回归：就绪标记最初是凭想象写的（`Sim paused` / `[Shard] Listen` / `Starting master server`），
+   * 而用户提供的完整成功日志里**一个都不存在**。猜错不会报错，只会一路等到超时，极难发现。
+   */
+  it('不再把猜出来的 Sim paused 当成就绪标记', () => {
+    const installPath = createTempDir()
+    writeShardLog(installPath, '[00:00:01]: Sim paused\n[00:00:02]: Sim unpaused\n')
+    assert.equal(hasMasterReadyMarker('inst-not-used', installPath), false)
   })
 
   it('面板自己写的系统提示不算就绪标记', () => {
@@ -280,9 +317,9 @@ describe('hasMasterReadyMarker', () => {
     assert.equal(hasMasterReadyMarker(instanceId), false)
   })
 
-  it('洞穴分片的日志不会被误当成主世界就绪', () => {
+  it('洞穴分片打印的同一行不算主世界就绪', () => {
     const instanceId = freshInstanceId()
-    instanceConsoleLogStore.appendDockerLine(instanceId, '[00:00:02]: [Shard] Listening on 11000', 'caves')
+    instanceConsoleLogStore.appendDockerLine(instanceId, '[00:02:50]: About to start a shard with these settings:', 'caves')
     assert.equal(hasMasterReadyMarker(instanceId), false)
   })
 })

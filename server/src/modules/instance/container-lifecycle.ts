@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { HostMemoryPressureFailure } from '../../infra/container/host-resource-guard'
 import fs from 'node:fs'
-import net from 'node:net'
 import path from 'node:path'
 import { resolveDockerStatus } from '../../infra/docker'
 import { createDockerClient } from '../../infra/docker-connect'
@@ -21,7 +20,7 @@ import {
   buildDstStartBlockedMessage,
   diagnoseDstInstallReadiness,
 } from '../../infra/game-adapter/dst/install-readiness'
-import { validateShardPortsForStart } from '../../infra/game-adapter/dst/port-conflict'
+import { findHostUdpPortConflicts, validateShardPortsForStart } from '../../infra/game-adapter/dst/port-conflict'
 import {
   buildDstCavesShardContainerSpec,
   buildDstMasterShardContainerSpec,
@@ -64,6 +63,35 @@ export function resolveShardReadyWaitSec(): number {
   const raw = process.env.GSH_SHARD_READY_WAIT_SEC?.trim()
   const parsed = raw ? Number(raw) : Number.NaN
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_SHARD_READY_WAIT_SEC
+}
+
+/**
+ * 分片端口早于这个秒数就被占用时，不认为世界已经加载完，必须再等到控制台出现就绪标记。
+ *
+ * DST 的分片网络是在世界初始化过程中建立的，正常情况下端口出现得比较晚；一旦它出现得过早，
+ * 说明「端口被占用」只能证明进程起来了，不能证明能接客。60 秒足够区分这两种情形：
+ * 多 Mod 大存档的冷启动远不止 60 秒。
+ */
+const SHARD_PORT_EARLY_BIND_GRACE_SEC = 60
+
+/**
+ * 主世界控制台里「世界已经起来」的标记。
+ *
+ * 这两个是 DST 自己打印的行，仓库其它地方（player-actions / player-name-hints）也把它们
+ * 当作已知标记使用。找不到任何标记时不会误判成就绪——调用方会退回「端口已绑定且已过宽限期」。
+ */
+const MASTER_READY_MARKER = /Sim (?:paused|unpaused)|\[Shard\].*[Ll]isten|Starting master server/i
+
+/** 主世界分片是否已经打印过世界就绪的标记 */
+export function hasMasterReadyMarker(instanceId: string): boolean {
+  try {
+    return instanceConsoleLogStore
+      .listLogs(instanceId)
+      .some(line => line.stream === 'stdout' && (line.shard == null || line.shard === 'master') && MASTER_READY_MARKER.test(line.text))
+  }
+  catch {
+    return false
+  }
 }
 
 export type ConsoleCommandShard = 'master' | 'caves'
@@ -387,20 +415,16 @@ export function readClusterMasterPort(installPath: string): number {  try {
   }
 }
 
-/** 单次 TCP 连通探测：主世界完成 Lua 初始化、分片监听端口打开后才会接受连接 */
-function probeTcpPort(port: number, timeoutMs = 1000): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.connect({ host: '127.0.0.1', port })
-    const finish = (ok: boolean) => {
-      socket.removeAllListeners()
-      socket.destroy()
-      resolve(ok)
-    }
-    socket.setTimeout(timeoutMs)
-    socket.once('connect', () => finish(true))
-    socket.once('timeout', () => finish(false))
-    socket.once('error', () => finish(false))
-  })
+/**
+ * 主世界的分片互联端口是否已被占用。
+ *
+ * **必须是 UDP**：DST 的端口全是 UDP（仓库里既有的端口冲突探测 `findHostUdpPortConflicts`
+ * 用的就是 `dgram.createSocket('udp4')`）。此处原先用 TCP `net.connect` 探测，
+ * TCP 连一个只监听 UDP 的端口会被内核直接回 RST，探测永远返回 false——
+ * 线上表现为「房间已经能进、控制台却一路报主世界仍在加载」，直到 900 秒超时兜底才启动洞穴。
+ */
+export function isShardPortBound(port: number): Promise<boolean> {
+  return findHostUdpPortConflicts([port]).then(conflicts => conflicts.includes(port))
 }
 
 /**
@@ -476,9 +500,25 @@ export async function waitForMasterShardReady(
   const startAt = Date.now()
   const deadline = startAt + waitSec * 1000
   let lastHeartbeat = startAt
+  let portBoundAt: number | null = null
   while (Date.now() < deadline) {
-    if (await probeTcpPort(masterPort)) {
-      return { kind: 'ready' }
+    if (await isShardPortBound(masterPort)) {
+      if (portBoundAt === null) {
+        portBoundAt = Date.now()
+        // 把「端口是什么时候起来的」写进控制台：它同时是给用户看的进度，
+        // 也是判断「端口是否早于世界加载就绑定」的唯一现场证据。
+        instanceConsoleLogStore.appendSystem(
+          instanceId,
+          `主世界已监听分片端口 ${masterPort}（启动后 ${Math.round((portBoundAt - startAt) / 1000)} 秒），就绪后启动洞穴分片`,
+          'master',
+        )
+      }
+      // 端口绑得太早说明 DST 可能在进程启动早期就占住了它，此时还不能断定世界已加载完，
+      // 必须等到控制台里出现世界就绪的标记；晚绑定（超过宽限）则说明它随世界初始化一起起来。
+      const portElapsedSec = (portBoundAt - startAt) / 1000
+      if (portElapsedSec > SHARD_PORT_EARLY_BIND_GRACE_SEC || hasMasterReadyMarker(instanceId)) {
+        return { kind: 'ready' }
+      }
     }
     let snapshot: ContainerInspect | null = null
     try {
@@ -509,7 +549,9 @@ export async function waitForMasterShardReady(
       const waited = Math.round((now - startAt) / 1000)
       instanceConsoleLogStore.appendSystem(
         instanceId,
-        `主世界仍在加载（已等待 ${waited} 秒），就绪后再启动洞穴分片`,
+        portBoundAt === null
+          ? `主世界仍在加载（已等待 ${waited} 秒，尚未监听到分片端口），就绪后再启动洞穴分片`
+          : `主世界已监听端口但仍在加载世界（已等待 ${waited} 秒），就绪后再启动洞穴分片`,
         'master',
       )
     }

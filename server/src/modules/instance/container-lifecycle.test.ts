@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict'
+import dgram from 'node:dgram'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, afterEach, describe, it } from 'node:test'
 import { resolveDockerStatus } from '../../infra/docker.ts'
+import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store.ts'
 import {
   bumpCavesStartGeneration,
   classifyMasterProbe,
   ensureContainerRuntimeReady,
+  hasMasterReadyMarker,
   isCurrentCavesStartGeneration,
   isHealthyRuntimeForResurrect,
+  isShardPortBound,
   readClusterMasterPort,
   resolveShardReadyWaitSec,
 } from './container-lifecycle.ts'
@@ -213,6 +217,73 @@ describe('resolveShardReadyWaitSec', () => {  const original = process.env.GSH_S
     assert.ok(resolveShardReadyWaitSec() >= 600)
     process.env.GSH_SHARD_READY_WAIT_SEC = '-5'
     assert.ok(resolveShardReadyWaitSec() >= 600)
+  })
+})
+
+async function bindUdpPort(): Promise<{ port: number, close: () => void }> {
+  const socket = dgram.createSocket('udp4')
+  await new Promise<void>((resolve, reject) => {
+    socket.once('error', reject)
+    socket.bind(0, '0.0.0.0', () => resolve())
+  })
+  return { port: socket.address().port, close: () => socket.close() }
+}
+
+/**
+ * 回归：DST 的端口全是 UDP。此处原先用 TCP `net.connect` 探测分片端口，
+ * TCP 连一个只监听 UDP 的端口会被内核直接回 RST，探测永远返回 false——
+ * 线上表现为「房间已经能进、控制台却一路报主世界仍在加载」，
+ * 直到 900 秒超时兜底才启动洞穴（洞穴因此白等 15 分钟）。
+ *
+ * 下面第一个用例在旧实现下必然失败：UDP 端口已被占用，TCP 探测却会返回 false。
+ */
+describe('isShardPortBound', () => {
+  it('UDP 端口被占用时判定为已绑定', async () => {
+    const held = await bindUdpPort()
+    try {
+      assert.equal(await isShardPortBound(held.port), true)
+    }
+    finally {
+      held.close()
+    }
+  })
+
+  it('端口空闲时判定为未绑定', async () => {
+    const probe = await bindUdpPort()
+    const port = probe.port
+    probe.close()
+    assert.equal(await isShardPortBound(port), false)
+  })
+})
+
+describe('hasMasterReadyMarker', () => {
+  function freshInstanceId(): string {
+    return `inst-marker-${Date.now()}-${Math.round(Math.random() * 1e6)}`
+  }
+
+  it('主世界打印世界就绪标记后判定为已就绪', () => {
+    const instanceId = freshInstanceId()
+    assert.equal(hasMasterReadyMarker(instanceId), false)
+    instanceConsoleLogStore.appendDockerLine(instanceId, '[00:03:12]: Sim paused', 'master')
+    assert.equal(hasMasterReadyMarker(instanceId), true)
+  })
+
+  it('洞穴分片打印的同样一行不算主世界就绪', () => {
+    const instanceId = freshInstanceId()
+    instanceConsoleLogStore.appendDockerLine(instanceId, '[00:00:01]: Sim paused', 'caves')
+    assert.equal(hasMasterReadyMarker(instanceId), false)
+  })
+
+  it('面板自己写的系统提示不算就绪标记', () => {
+    const instanceId = freshInstanceId()
+    instanceConsoleLogStore.appendSystem(instanceId, '主世界仍在加载（已等待 30 秒），就绪后再启动洞穴分片', 'master')
+    assert.equal(hasMasterReadyMarker(instanceId), false)
+  })
+
+  it('洞穴分片的日志不会被误当成主世界就绪', () => {
+    const instanceId = freshInstanceId()
+    instanceConsoleLogStore.appendDockerLine(instanceId, '[00:00:02]: [Shard] Listening on 11000', 'caves')
+    assert.equal(hasMasterReadyMarker(instanceId), false)
   })
 })
 

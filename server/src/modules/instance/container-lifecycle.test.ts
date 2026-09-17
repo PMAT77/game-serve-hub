@@ -262,16 +262,29 @@ describe('hasMasterReadyMarker', () => {
     return `inst-marker-${Date.now()}-${Math.round(Math.random() * 1e6)}`
   }
 
-  /** 用户提供的真实成功日志片段：世界加载完成、分片网络即将启动 */
-  const REAL_READY_LOG = [
+  /** 用户服务器上主世界日志的真实片段：世界加载完成、分片端口已在监听 */
+  const REAL_MASTER_READY_LOG = [
+    '[00:01:22]: 1 uploads added to server. From server_temp',
+    '[00:01:22]: About to start a shard with these settings:',
+    '[00:01:22]:   ShardName: Master',
+    '[00:01:22]:   ShardID: 1',
+    '[00:01:22]:   ShardRole: MASTER',
+    '[00:01:22]:   MasterBind: 127.0.0.1',
+    '[00:01:22]:   MasterPort: 10888',
+    '[00:01:22]: [Shard] Starting master server',
+    '[00:01:22]: [Shard] Shard server started on port: 10888',
+    '[00:01:22]: Telling Client our new session identifier: 47AE3E80A26892DF',
+    '[00:02:20]: Validating portal[3] <-> 1244824001[3] (inactive)',
+    '',
+  ].join('\n')
+
+  /** 同一台机器上洞穴分片的真实片段（列在这里是为了说明：两个分片打印的行并不相同） */
+  const REAL_CAVES_READY_LOG = [
     '[00:02:49]: Reconstructing topology\t',
-    '[00:02:49]: \t...Sorting points\t',
     '[00:02:49]: \t...Done!\t',
-    '[00:02:50]: 1 uploads added to server. From server_temp',
     '[00:02:50]: About to start a shard with these settings:',
-    '[00:02:50]:   ShardName: Master',
-    '[00:02:50]:   ShardRole: MASTER',
-    '[00:02:50]:   MasterPort: 10888',
+    '[00:02:50]:   ShardRole: SECONDARY',
+    '[00:02:50]: [Shard] Connecting to master...',
     '',
   ].join('\n')
 
@@ -283,11 +296,17 @@ describe('hasMasterReadyMarker', () => {
 
   /**
    * 就绪标记必须同时能从 DST 自己写的 server_log.txt 里认出来——面板从实例目录直接读，
-   * 不依赖 systemd 的 stdout 采集链路。线上控制台里看不到游戏输出时，这条是唯一的判据。
+   * 不依赖 systemd 的 stdout 采集链路。控制台里看不到游戏输出时，这条是唯一的判据。
    */
-  it('从主世界自己的 server_log.txt 认出世界已就绪（真实日志片段）', () => {
+  it('从主世界自己的 server_log.txt 认出世界已就绪（真实主世界日志片段）', () => {
     const installPath = createTempDir()
-    writeShardLog(installPath, REAL_READY_LOG)
+    writeShardLog(installPath, REAL_MASTER_READY_LOG)
+    assert.equal(hasMasterReadyMarker('inst-not-used', installPath), true)
+  })
+
+  it('洞穴分片的就绪行同样能认出（同一套标记要覆盖两种分片）', () => {
+    const installPath = createTempDir()
+    writeShardLog(installPath, REAL_CAVES_READY_LOG)
     assert.equal(hasMasterReadyMarker('inst-not-used', installPath), true)
   })
 
@@ -302,10 +321,10 @@ describe('hasMasterReadyMarker', () => {
   })
 
   /**
-   * 回归：就绪标记最初是凭想象写的（`Sim paused` / `[Shard] Listen` / `Starting master server`），
-   * 而用户提供的完整成功日志里**一个都不存在**。猜错不会报错，只会一路等到超时，极难发现。
+   * 回归：就绪标记最初是凭想象写的（`Sim paused` / `[Shard] Listen`），
+   * 而线上真实日志里并不存在这些行。猜错不会报错，只会一路等到超时，极难发现。
    */
-  it('不再把猜出来的 Sim paused 当成就绪标记', () => {
+  it('不把猜出来的 Sim paused 当成就绪标记', () => {
     const installPath = createTempDir()
     writeShardLog(installPath, '[00:00:01]: Sim paused\n[00:00:02]: Sim unpaused\n')
     assert.equal(hasMasterReadyMarker('inst-not-used', installPath), false)

@@ -76,18 +76,22 @@ export function resolveShardReadyWaitSec(): number {
 const SHARD_PORT_EARLY_BIND_GRACE_SEC = 60
 
 /**
- * 主世界「世界已经加载完、分片网络即将启动」的标记。
+ * 主世界「世界已经加载完、分片端口已经在监听」的标记。
  *
- * 这两行**取自线上真实成功的分片日志**（用户提供的完整 server_log.txt）：
- *   [00:02:49]: Reconstructing topology
- *   [00:02:50]: About to start a shard with these settings:
- *               ShardRole: SECONDARY
- *   [00:02:50]: [Shard] Connecting to master...
+ * 每一条都注明是在**哪一份真实日志**里核实的。教训：上一轮拿洞穴的日志去否定
+ * `Starting master server`，而它只出现在主世界的日志里——两个分片打印的行并不相同，
+ * 用错日志会得出相反的结论。三个标记都取自用户服务器上的真实输出：
  *
- * 不要凭想象往里加标记：先前猜的 `Sim paused` / `[Shard] Listen` / `Starting master server`
- * 在那份完整日志里一个都不存在，猜错的结果就是「等满超时」而非报错，极难发现。
+ *   主世界日志（server_log.txt / 面板采集的 console-logs）：
+ *     [00:01:22]: About to start a shard with these settings:
+ *     [00:01:22]:   ShardRole: MASTER
+ *     [00:01:22]: [Shard] Starting master server
+ *     [00:01:22]: [Shard] Shard server started on port: 10888   ← 最精确：端口已在监听
+ *   洞穴日志（同一台机器、完整成功的一次运行）：
+ *     [00:02:49]: Reconstructing topology
+ *     [00:02:50]: About to start a shard with these settings:
  */
-const MASTER_READY_MARKER = /About to start a shard with these settings|Reconstructing topology/
+const MASTER_READY_MARKER = /Shard server started on port|About to start a shard with these settings|Reconstructing topology/
 
 /** 读文件尾部若干字节；日志可达数百 KB，只关心结尾 */
 function readTailText(filePath: string, maxBytes = 64 * 1024): string {

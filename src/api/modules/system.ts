@@ -9,12 +9,10 @@ import type {
   PanelUpdateApplyRequest,
   PanelUpdateApplyResponse,
   PanelUpdateStatus,
-  SteamcmdConfigPayload,
   SteamcmdConfigResponse,
   SelfCheckItem,
   SelfCheckReport,
   SelfCheckStatus,
-  SystemSuccessResponse,
 } from '../../../shared/contracts/system'
 import api from '../index'
 
@@ -32,7 +30,6 @@ export type {
   SelfCheckItem,
   SelfCheckReport,
   SelfCheckStatus,
-  SteamcmdConfigPayload,
   SteamcmdConfigResponse,
 }
 
@@ -50,9 +47,9 @@ export default {
     params: { keyword },
   }) as Promise<{ data: DirectoryItem[] }>,
   getSteamcmdConfig: () => api.get('app/system/steamcmd/config') as Promise<{ data: SteamcmdConfigResponse }>,
-  saveSteamcmdConfig: (data: SteamcmdConfigPayload) => api.post('app/system/steamcmd/config', data) as Promise<{
-    data: SystemSuccessResponse
-  }>,
+  // 没有 saveSteamcmdConfig：`POST app/system/steamcmd/config` 会用服务端配置覆盖请求体里的
+  // steamcmdPath 与 installRoot（见 server/src/modules/system/index.ts），从这里发出去只会得到
+  // 「保存成功但数值不变」。SteamCMD 面板内配置保持只读，要让它可写需先改后端不再覆盖请求体。
   installSteamcmd: () => api.post('app/system/steamcmd/install'),
   installGameDstImage: () => api.post('app/system/game-dst/install'),
   getPanelUpdateStatus: () => api.get('app/system/panel-update/status') as Promise<{ data: PanelUpdateStatus }>,

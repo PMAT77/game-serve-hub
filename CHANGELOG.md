@@ -2,6 +2,13 @@
 
 本文件记录面向用户的版本变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.12] - 2026-09-17
+
+### Fixed
+
+- **就绪标记改用真实日志里存在的行，并直接读 DST 自己写的 `server_log.txt`**：上一版引入的「端口绑定过早」兜底判据里，标记是凭想象写的（`Sim paused` / `[Shard] Listen` / `Starting master server`），而线上完整成功的分片日志里**一个都不存在**——标记猜错不会报错，只会一路等到超时，极难发现。现在改用真实存在的两行：`Reconstructing topology`（世界加载完成）与 `About to start a shard with these settings:`（分片网络即将启动，主世界与洞穴都会打印）。
+- **就绪判定不再依赖控制台采集链路**：标记同时从 DST 自己写的 `server_log.txt` 读取，该文件每次分片启动都会被重写，天然只包含本轮日志。面板从实例目录直接读得到，因此即使控制台看不到游戏输出（stdout 采集异常），就绪判定依然有效。
+
 ## [0.6.11] - 2026-09-17
 
 ### Fixed

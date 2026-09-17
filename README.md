@@ -58,7 +58,7 @@ B 站系列视频按「先能装通、再能用好」的顺序录制，只演示
 
 ## 快速开始
 
-当前为 `v0.6.13` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
+当前为 `v0.6.14` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
 
 > **4 GiB 内存的机器请先加 swap**：分片加载整套 Mod 时内存会短时冲高，4 GiB 物理内存同时承载主世界与洞穴会很紧张。执行 `sudo gsh setup-swap` 创建 2 GiB swapfile（同时设置 `vm.swappiness=20`）即可；启动前的内存守卫会按「分片数 ×（512 MiB + 每个 Mod 32 MiB）」估算并把可用 swap 计入余量，不够时直接拒绝启动并给出建议，而不是启动到一半被内核杀掉。
 
@@ -78,14 +78,14 @@ B 站系列视频按「先能装通、再能用好」的顺序录制，只演示
 > Native 模式不拉取任何容器镜像，不需要这一步。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.6.13/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.6.14/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 ### Native systemd 模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.6.13/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.6.14/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -96,7 +96,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.6.13/scrip
 若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位（`--mode` 按你选的模式改）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.6.13/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.6.14/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 

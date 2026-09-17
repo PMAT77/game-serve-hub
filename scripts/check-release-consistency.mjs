@@ -24,6 +24,9 @@ const requiredReferences = new Map([
   ['README.md', [tag]],
   ['docs/INSTALL.md', [tag]],
   ['docs/DST_TUTORIAL.md', [tag]],
+  // SECURITY.md 的「验证发布包」一节给出的是 releases/download/<tag>/install-<tag>.sh：
+  // 不在清单里时它会静默停在旧版本，用户照着下载到的是上一个 Release
+  ['SECURITY.md', [`releases/download/${tag}/install-${tag}.sh`]],
   // RELEASE.md 自称「四者必须一致」，却不在校验范围内，上一版就是它把版本号写错还一路放行
   ['docs/RELEASE.md', [`"version": "${version}"`, tag]],
   ['CHANGELOG.md', [`## [${version}]`]],

@@ -8,7 +8,9 @@ export const nodeResourceSnapshotSchema = z.object({
   }),
   memory: z.object({
     totalGb: z.number().nonnegative(),
+    /** 已用 = 总量 − 可用；Linux 下的「可用」是 MemAvailable（含可回收的 page cache） */
     usedGb: z.number().nonnegative(),
+    /** 可用内存（Linux 下为 MemAvailable），不是 MemFree —— 后者会把 page cache 算成已用 */
     freeGb: z.number().nonnegative(),
     usageRate: z.number().min(0).max(100),
   }),

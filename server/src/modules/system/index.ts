@@ -25,7 +25,8 @@ import { buildHostMemoryGuidance } from '../../../../shared/host-memory-guidance
 import {
   readHostMemoryAvailableMb,
   readHostMemoryTotalMb,
-} from '../../infra/container/host-resource-guard.ts'
+  readProcMeminfoKb,
+} from '../../shared/proc-meminfo'
 import {
   isAllowedBrowsePath,
   isReadableDirectoryPath,
@@ -78,6 +79,8 @@ import {
   getCachedWindowsQueueMetrics,
   getCpuUsageRate,
   getDiskUsage,
+  resolveMemoryUsage,
+  resolveSwapUsage,
   warmSystemMetricsCaches,
 } from './metrics'
 import {
@@ -511,6 +514,13 @@ export function registerSystemModule(app: FastifyInstance) {
       freeGb: number
       usageRate: number
       availableGb: number | null
+      /** 未配置交换区时为 null —— 与「配置了但已用满」必须能区分开 */
+      swap: {
+        totalGb: number
+        usedGb: number
+        freeGb: number
+        usageRate: number
+      } | null
     }
     memoryGuidance: import('../../../../shared/contracts/host-memory-guidance.ts').HostMemoryGuidancePayload
     disk: {
@@ -538,9 +548,10 @@ export function registerSystemModule(app: FastifyInstance) {
     const cpuUsageRate = getCpuUsageRate()
     const loadAvg = os.loadavg()
     const totalMem = os.totalmem()
-    const freeMem = os.freemem()
-    const usedMem = totalMem - freeMem
-    const memoryUsageRate = Number(((usedMem / totalMem) * 100).toFixed(2))
+    // 与节点卡片、通知阈值、启动守卫同口径：已用 = 总量 − MemAvailable
+    const memory = resolveMemoryUsage(totalMem, readProcMeminfoKb('MemAvailable'))
+    const memoryUsageRate = memory.usageRate
+    const swap = resolveSwapUsage(readProcMeminfoKb('SwapTotal'), readProcMeminfoKb('SwapFree'))
     const hostTotalMb = readHostMemoryTotalMb()
     const hostAvailableMb = readHostMemoryAvailableMb()
     const memoryGuidance = buildHostMemoryGuidance({
@@ -598,11 +609,12 @@ export function registerSystemModule(app: FastifyInstance) {
       },
       load,
       memory: {
-        totalGb: Number((totalMem / 1024 / 1024 / 1024).toFixed(2)),
-        usedGb: Number((usedMem / 1024 / 1024 / 1024).toFixed(2)),
-        freeGb: Number((freeMem / 1024 / 1024 / 1024).toFixed(2)),
-        usageRate: memoryUsageRate,
+        totalGb: memory.totalGb,
+        usedGb: memory.usedGb,
+        freeGb: memory.freeGb,
+        usageRate: memory.usageRate,
         availableGb,
+        swap,
       },
       memoryGuidance,
       disk: diskUsage,

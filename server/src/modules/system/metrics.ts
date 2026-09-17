@@ -7,16 +7,22 @@ import { execPowerShellAsync } from '../../infra/powershell'
 import {
   clampPercent,
   collectHostResourceSnapshot,
+  ensureCpuSamplerStarted,
   getCpuUsageRate,
   getDiskUsage,
+  resolveMemoryUsage,
+  resolveSwapUsage,
   toGb,
 } from '../../shared/host-metrics'
 
 export {
   clampPercent,
   collectHostResourceSnapshot,
+  ensureCpuSamplerStarted,
   getCpuUsageRate,
   getDiskUsage,
+  resolveMemoryUsage,
+  resolveSwapUsage,
   toGb,
 }
 export type { HostResourceSnapshot } from '../../shared/host-metrics'
@@ -353,6 +359,8 @@ export function warmSystemMetricsCaches() {
     return
   }
   getCachedPanelVersion()
+  // CPU 采样固定在后台跑：节点卡片、监控台与阈值告警读同一个窗口，不再互相偷窗口
+  ensureCpuSamplerStarted()
   startSlowMetricsRefreshLoops()
   startNetworkRealtimeSampler()
 }

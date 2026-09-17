@@ -1,5 +1,12 @@
 import type { HostMemoryPressureData } from '../../../../shared/contracts/host-memory-pressure'
-import fs from 'node:fs'
+import {
+  kbToMb,
+  parseMeminfoValueKb,
+  readHostMemoryAvailableMb,
+  readHostMemoryTotalMb,
+  readHostSwapFreeMb,
+  readProcMeminfoKb,
+} from '../../shared/proc-meminfo'
 import { resolveDstContainerResourceLimits } from './dst-container-resources'
 import { resolveSteamcmdContainerMemoryCapMb } from './steamcmd-container-resources'
 
@@ -29,31 +36,6 @@ export interface DstStartMemoryContext {
   modCount?: number
 }
 
-/**
- * 从 `/proc/meminfo` 文本里取某个字段的 KB 值。
- *
- * 抽成纯函数是为了能用**真实样本**测试：开发机是 Windows，没有 /proc，此前
- * 「读真实内存 → 判断是否放行」这条生产路径一次都没被执行过——字段名拼错或
- * 解析出 null 都会被当成「没有 swap」，直接变成一次误拒绝。
- */
-export function parseMeminfoValueKb(content: string, field: string): number | null {
-  const line = content.split('\n').find(item => item.startsWith(`${field}:`))
-  if (!line) {
-    return null
-  }
-  const match = line.match(/(\d+)/)
-  return match ? Number(match[1]) : null
-}
-
-function readProcMeminfoKb(field: string): number | null {
-  try {
-    return parseMeminfoValueKb(fs.readFileSync('/proc/meminfo', 'utf8'), field)
-  }
-  catch {
-    return null
-  }
-}
-
 /** 一次读取的宿主机内存快照，作为守卫判定的输入（可注入以便测试） */
 export interface HostMemoryReading {
   availableMb: number | null
@@ -69,13 +51,6 @@ export function readHostMemoryReading(): HostMemoryReading {
     totalMb: kbToMb(readProcMeminfoKb('MemTotal')),
     swapFreeMb: kbToMb(readProcMeminfoKb('SwapFree')),
   }
-}
-
-function kbToMb(value: number | null): number | null {
-  if (value === null || !Number.isFinite(value)) {
-    return null
-  }
-  return Math.round(value / 1024)
 }
 
 function parsePositiveMbEnv(key: string): number | undefined {
@@ -160,17 +135,15 @@ export function resolveMinHostAvailableMbForOperation(
   }
 }
 
-export function readHostMemoryAvailableMb(): number | null {
-  return kbToMb(readProcMeminfoKb('MemAvailable'))
-}
-
-/** 可回收的 swap 余量：MemoryHigh 触发的换页要靠它兜底，没有 swap 时内核只能直接杀进程 */
-export function readHostSwapFreeMb(): number | null {
-  return kbToMb(readProcMeminfoKb('SwapFree'))
-}
-
-export function readHostMemoryTotalMb(): number | null {
-  return kbToMb(readProcMeminfoKb('MemTotal'))
+/**
+ * 内存口径与 `/proc/meminfo` 解析统一放在 `shared/proc-meminfo`，这里只做转发，
+ * 保持 `host-resource-guard` 既有导出面（调用方与测试一直从这里取）。
+ */
+export {
+  parseMeminfoValueKb,
+  readHostMemoryAvailableMb,
+  readHostMemoryTotalMb,
+  readHostSwapFreeMb,
 }
 
 export type HostMemoryPressureFailure = {

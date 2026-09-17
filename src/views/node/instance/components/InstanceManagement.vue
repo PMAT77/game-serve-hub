@@ -630,7 +630,7 @@ function renderInstanceCpuColumn(row: InstanceItem) {
     'span',
     {
       class: 'text-sm',
-      title: '该实例的 CPU 占用',
+      title: '该实例主世界进程的 CPU 占用（100% 表示占满一个核心）',
     },
     formatCpuPercent(metrics.cpuUsageRate),
   )
@@ -645,7 +645,7 @@ function renderInstanceMemoryColumn(row: InstanceItem) {
     'span',
     {
       class: 'text-sm',
-      title: '该实例占用的内存',
+      title: '该实例主世界进程占用的内存',
     },
     formatMemoryMb(metrics?.memoryMb),
   )
@@ -1275,11 +1275,11 @@ onBeforeUnmount(() => {
           </div>
           <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
             <div>
-              <dt class="text-muted-foreground">CPU</dt>
+              <dt class="text-muted-foreground">CPU（单核基准）</dt>
               <dd>{{ formatCpuPercent(getMetricsForInstance(instance.id)?.cpuUsageRate) }}</dd>
             </div>
             <div>
-              <dt class="text-muted-foreground">内存</dt>
+              <dt class="text-muted-foreground">内存（主世界进程）</dt>
               <dd>{{ getMetricsForInstance(instance.id)?.memoryMb == null ? '—' : formatMemoryMb(getMetricsForInstance(instance.id)?.memoryMb ?? 0) }}</dd>
             </div>
             <div>

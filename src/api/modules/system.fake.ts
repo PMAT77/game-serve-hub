@@ -116,6 +116,12 @@ export default defineFakeRoute([
           freeGb: 9.8,
           usageRate: 38.75,
           availableGb: 9.5,
+          swap: {
+            totalGb: 2,
+            usedGb: 0.4,
+            freeGb: 1.6,
+            usageRate: 20,
+          },
         },
         memoryGuidance: {
           tier: 'large',

@@ -18,10 +18,11 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0))
 }
 
+const cpuCores = computed(() => Math.max(1, props.info?.cpu?.cores ?? 1))
+
 const normalizedLoad = computed(() => {
   const oneMinuteLoad = props.info?.load?.oneMinute ?? 0
-  const cores = Math.max(1, props.info?.cpu?.cores ?? 1)
-  return oneMinuteLoad / cores
+  return oneMinuteLoad / cpuCores.value
 })
 
 const hasLoadData = computed(() => Boolean(props.info?.load))
@@ -84,7 +85,12 @@ const loadStatusColor = computed(() => {
         </template>
       </div>
       <div class="text-xs text-muted-foreground mt-1">
-        归一化占用率 {{ loadPercent.toFixed(2) }}%
+        <template v-if="isWindowsSyntheticLoad">
+          归一化占用率 {{ loadPercent.toFixed(2) }}%
+        </template>
+        <template v-else>
+          归一化占用率 {{ loadPercent.toFixed(2) }}%（1 分钟负载 ÷ {{ cpuCores }} 核）
+        </template>
       </div>
     </div>
   </div>

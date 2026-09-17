@@ -43,8 +43,30 @@ const NATIVE_UNIT_START_LIMIT_BURST = 3
 const NATIVE_LOG_POLL_MS = 500
 /** 读取日志尾部时最多回溯的字节数，避免大文件整份读进内存 */
 const NATIVE_LOG_TAIL_MAX_BYTES = 512 * 1024
-/** 分片日志文件上限；超过就在下次启动时轮转，避免无限增长 */
-const NATIVE_CONSOLE_LOG_MAX_BYTES = 16 * 1024 * 1024
+
+/**
+ * 每次启动前把上一轮的分片日志挪到 `.prev.log`，让本轮从空文件开始。
+ *
+ * 分片日志是 systemd `append:` 累积写入、跨重启保留的（这正是「上一轮的崩溃现场还在」的来源）。
+ * 但控制台的日志跟随在启动时会**先吐文件尾部 100 行**，不轮转就会出两个问题：
+ *   1. 新实例一启动，控制台先显示上一轮的输出，分不清是哪一次的；
+ *   2. 那 100 行会进入面板的内存控制台，其中的就绪标记（`Shard server started on port`）
+ *      是**上一轮**的。若上一轮进程尚未完全退出、分片端口仍被占用，就绪判定会在 t≈0
+ *      通过门 1，再命中这条陈旧标记通过门 2 —— 洞穴于是会在主世界还在加载时被放行，
+ *      「两个分片同时加载」的整机 OOM 风险原样回来。
+ * 轮转后两边都干净，上一轮的现场仍完整保留在 `.prev.log` 里。
+ */
+export function rotateConsoleLogFile(consoleLogPath: string): void {
+  if (readFileSize(consoleLogPath) === 0) {
+    return
+  }
+  try {
+    fs.renameSync(consoleLogPath, `${consoleLogPath}.prev.log`)
+  }
+  catch {
+    // 轮转失败不阻断启动：systemd 的 append 模式会继续追加到原文件
+  }
+}
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -341,22 +363,6 @@ export class NativeSystemdRuntime implements ContainerRuntime {
     }
   }
 
-  /**
-   * 分片日志轮转：文件超过上限时把当前内容挪到 .1，避免无限增长。
-   * 用 rename 而不是截断，这样上一轮崩溃的现场还能留下来。
-   */
-  private rotateConsoleLog(consoleLogPath: string): void {
-    if (readFileSize(consoleLogPath) < NATIVE_CONSOLE_LOG_MAX_BYTES) {
-      return
-    }
-    try {
-      fs.renameSync(consoleLogPath, `${consoleLogPath}.1`)
-    }
-    catch {
-      // 轮转失败不阻断启动：systemd 的 append 模式会继续追加到原文件
-    }
-  }
-
   /** 跑命令并尽量取回输出：systemd-analyze/systemctl 判失败时原因都在 stdout/stderr 里 */
   private async captureOutput(command: string, args: string[], timeoutMs: number): Promise<string | undefined> {
     try {
@@ -432,7 +438,7 @@ export class NativeSystemdRuntime implements ContainerRuntime {
     fs.mkdirSync(paths.serviceDir, { recursive: true, mode: 0o700 })
     fs.mkdirSync(this.options.unitDir, { recursive: true, mode: 0o700 })
     fs.mkdirSync(path.dirname(paths.consoleLogPath), { recursive: true, mode: 0o700 })
-    this.rotateConsoleLog(paths.consoleLogPath)
+    rotateConsoleLogFile(paths.consoleLogPath)
     writeFileAtomic(paths.launcherPath, buildNativeLauncherScript(spec, paths.fifoPath), 0o700)
     writeFileAtomic(paths.unitPath, buildNativeSystemdUnit(spec, paths.launcherPath, paths.consoleLogPath), 0o600)
     await this.recordUnitVerify(paths.unitPath)

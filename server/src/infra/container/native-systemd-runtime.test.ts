@@ -11,6 +11,7 @@ import {
   readFileTailLines,
   resolveNativeUnitState,
   resolveShardCpuQuotaPercent,
+  rotateConsoleLogFile,
 } from './native-systemd-runtime'
 import type { ContainerRef, LogLine, ShardContainerSpec } from './types'
 
@@ -279,6 +280,57 @@ describe('readFileTailLines', () => {
 
   it('空文件返回空数组', () => {
     assert.deepEqual(readFileTailLines(writeLog(''), 10), [])
+  })
+})
+
+/**
+ * 分片日志跨重启累积（systemd `append:`），而控制台的日志跟随在启动时会先吐文件尾部 100 行。
+ * 不轮转的话，新实例一启动就先显示上一轮的输出，而且那 100 行里的就绪标记是上一轮的——
+ * 若上一轮进程尚未完全退出、分片端口仍被占用，就绪判定会据此在 t≈0 就放行洞穴。
+ */
+describe('rotateConsoleLogFile', () => {
+  const tempDirs: string[] = []
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  function writeLog(content: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsh-rotate-'))
+    tempDirs.push(dir)
+    const filePath = path.join(dir, 'shard.log')
+    fs.writeFileSync(filePath, content)
+    return filePath
+  }
+
+  it('把上一轮内容挪到 .prev.log，本轮从空文件开始', () => {
+    const filePath = writeLog('上一轮的输出\n[Shard] Shard server started on port: 10888\n')
+    rotateConsoleLogFile(filePath)
+    assert.equal(fs.existsSync(filePath), false, '原文件应被挪走，好让 systemd 重新创建')
+    assert.equal(
+      fs.readFileSync(`${filePath}.prev.log`, 'utf8'),
+      '上一轮的输出\n[Shard] Shard server started on port: 10888\n',
+    )
+  })
+
+  it('文件不存在时不抛错', () => {
+    rotateConsoleLogFile(path.join(os.tmpdir(), `gsh-missing-${Date.now()}`, 'shard.log'))
+  })
+
+  it('空文件不产生 .prev.log', () => {
+    const filePath = writeLog('')
+    rotateConsoleLogFile(filePath)
+    assert.equal(fs.existsSync(`${filePath}.prev.log`), false)
+  })
+
+  it('重复轮转时覆盖上一份 .prev.log，不会堆出一串备份', () => {
+    const filePath = writeLog('第一轮\n')
+    rotateConsoleLogFile(filePath)
+    fs.writeFileSync(filePath, '第二轮\n')
+    rotateConsoleLogFile(filePath)
+    assert.equal(fs.readFileSync(`${filePath}.prev.log`, 'utf8'), '第二轮\n')
   })
 })
 

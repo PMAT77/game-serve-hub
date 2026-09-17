@@ -37,6 +37,54 @@ Game Server Hub 支持 **Docker 与 Native systemd 双运行时**。下文的档
 
 ---
 
+## swap：4 GiB 机器几乎是必做
+
+**DST 的内存占用是尖峰型的。** 世界跑起来之后单分片大约 1–1.2 GiB，但**启动时要把整套 Mod 与世界读一遍**，峰值可以到 2 GiB 上下（实测：36 个 Mod 的主世界分片峰值 `anon-rss` 2026 MiB）。4 GiB 的机器装得下稳态，**装不下这个尖峰**——内核会在加载途中直接杀掉分片，`dmesg` 里是：
+
+```
+Out of memory: Killed process ... (dontstarve_dedi) anon-rss:2075120kB
+```
+
+**表现出来不是「内存不足」，而是「实例显示运行中、大厅却搜不到、也进不去」**，很容易误判成别的问题。
+
+swap 就是给这个尖峰准备的落点：内存紧张时把冷数据挪到硬盘，尖峰过去再换回来。它不是「让机器变慢」，而是「让尖峰有地方落」。
+
+```bash
+sudo gsh setup-swap
+```
+
+它会创建 2 GiB 的 swapfile（`/swapfile-gsh`）、写进 `/etc/fstab`（**重启后仍然有效**），并设置 `vm.swappiness=20`（优先用内存、必要时才换出）与 `vm.min_free_kbytes=100000`。**做一次即可**，之后升级面板、重启实例都不用再管。
+
+**为什么要手动**：创建 swap 需要 root，而面板以普通用户 `gsh` 运行（这是有意的安全设计，面板不应是 root），所以这一步只能由你执行一次。
+
+确认是否已生效：
+
+```bash
+swapon --show     # 有输出即已生效；没有任何输出说明还没配
+```
+
+### 面板会替你挡一道
+
+启动前按「分片数 ×（512 MiB + 每个启用中的 Mod 32 MiB）」估算峰值，并把**可用 swap 计入可回收余量**。不够时**直接拒绝启动**并提示执行 `gsh setup-swap`，而不是启动到一半被内核杀掉。确需强制放行可在 `panel.env` 设 `GSH_HOST_MIN_AVAILABLE_MB=0`（小内存机慎用）。
+
+加了 swap 仍被拒绝时，按顺序考虑：
+
+1. 把 swap 加到 4 GiB。注意 **`setup-swap` 在已有 swap 时不会做任何改动**（它检测到系统已有 swap 就直接返回），要先关掉旧的再重建：
+
+   ```bash
+   sudo swapoff /swapfile-gsh
+   sudo rm -f /swapfile-gsh
+   sudo sed -i '\#^/swapfile-gsh #d' /etc/fstab
+   sudo GSH_SWAP_SIZE=4G gsh setup-swap
+   ```
+
+2. 关闭洞穴分片——单分片峰值约为双分片的一半
+3. 减少订阅的 Mod——占用与 Mod 数量近似线性
+
+关闭洞穴后单分片通常不需要 swap 即可启动（单分片估算约 2 GiB，4 GiB 机器放得下），这是内存最紧张时的保底方案。
+
+---
+
 ## panel.env 预设
 
 仓库提供三档可选配置（**非默认强制**）：
@@ -104,6 +152,16 @@ sudo docker compose --env-file panel.env -f docker-compose.yml -f docker-compose
 ---
 
 ## 运维排查
+
+**实例起不来，或「显示运行中但大厅搜不到／进不去」**——先排除内存尖峰，三条命令：
+
+```bash
+free -h                                          # 看 available 还有多少
+swapon --show                                    # 没有输出说明还没配 swap → sudo gsh setup-swap
+sudo dmesg -T | grep -iE 'killed process|oom'    # 有输出即确实被内核 OOM 杀掉
+```
+
+面板的实例详情会直接写出原因（如「内存不足被系统终止（该分片上限 N MiB）」「主世界分片反复重启（已重启 N 次）」），一般不用登录服务器判断。分片自己的输出（含完整启动与报错）在实例目录的 `klei-storage/DoNotStarveTogether/Cluster_1/<Master|Caves>/server_log.txt`，面板控制台也能看到。
 
 ```bash
 free -h

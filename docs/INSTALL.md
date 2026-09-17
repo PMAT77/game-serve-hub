@@ -417,6 +417,16 @@ sudo userdel -r gsh                     # 确认不再需要 gsh 用户时执行
 
 看实例日志；常见为 token 失效、Mod 下载不全、内存不足（exit 137 多为 OOM）。详见 [DST_TUTORIAL.md](DST_TUTORIAL.md)。
 
+**若怀疑是内存**：DST 的内存占用是尖峰型的，世界跑起来后单分片约 1 GiB，但**启动加载整套 Mod 时峰值可达 2 GiB 上下**——4 GiB 机器装得下稳态却装不下尖峰，内核会在加载途中直接杀掉分片。**先执行一次 `sudo gsh setup-swap` 加 2 GiB swap**，绝大多数小内存机的启动失败都能解决：
+
+```bash
+swapon --show                                   # 没有输出说明还没配 swap
+sudo gsh setup-swap                             # 创建 2 GiB swapfile，重启后仍有效
+sudo dmesg -T | grep -iE 'killed process|oom'   # 有输出即确实被内核 OOM 杀掉
+```
+
+面板的实例详情会直接写明原因（如「内存不足被系统终止（该分片上限 N MiB）」），一般无需登录服务器判断。原理与容量建议见 [MEMORY.md](MEMORY.md)。
+
 ### 玩家看不到或连不上服务器（开服时）
 
 放行 UDP `10999`/`8766`/`12346`；确认房间未勾选「离线」模式；集群配置见 [DST_TUTORIAL.md](DST_TUTORIAL.md)。

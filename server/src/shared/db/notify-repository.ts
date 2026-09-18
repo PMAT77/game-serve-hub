@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { asc, eq } from 'drizzle-orm'
 import { notifyChannels, systemSettings } from './schema/index'
 import { ensureDb, nowIso } from './connection'
+import { NOTIFY_CHANNEL_TYPES } from '../../../../shared/contracts/notify'
 import type {
   CreateNotifyChannelInput,
   DbNotifyChannel,
@@ -11,7 +12,12 @@ import type {
   UpdateNotifyChannelInput,
 } from './types'
 
-const CHANNEL_TYPES: DbNotifyChannelType[] = ['dingtalk', 'wecom', 'feishu', 'serverchan', 'pushplus']
+/**
+ * 渠道类型一律取自共享契约的唯一真源（`shared/contracts/notify.ts`）。
+ * 此处曾自写一份只含五种类型的列表：Telegram 与通用 Webhook 落库后再读出会被
+ * 改写成钉钉，界面显示正常、实际永远发不出消息。
+ */
+const CHANNEL_TYPES: readonly string[] = NOTIFY_CHANNEL_TYPES
 const HEALTH_STATUSES: DbNotifyHealthStatus[] = ['healthy', 'failing']
 
 const DEFAULT_NOTIFY_SETTINGS: DbNotifySettings = {
@@ -25,7 +31,10 @@ const DEFAULT_NOTIFY_SETTINGS: DbNotifySettings = {
 }
 
 function normalizeType(type: string | null | undefined): DbNotifyChannelType {
-  return CHANNEL_TYPES.includes(type as DbNotifyChannelType) ? type as DbNotifyChannelType : 'dingtalk'
+  const candidate = type ?? ''
+  return CHANNEL_TYPES.includes(candidate)
+    ? candidate as DbNotifyChannelType
+    : 'dingtalk'
 }
 
 function normalizeHealth(status: string | null | undefined): DbNotifyHealthStatus {

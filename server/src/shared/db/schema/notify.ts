@@ -6,7 +6,7 @@ import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
  */
 export const notifyChannels = sqliteTable('notify_channels', {
   id: text('id').primaryKey(),
-  /** dingtalk / wecom / feishu / serverchan / pushplus */
+  /** 取值见 shared/contracts/notify.ts 的 NOTIFY_CHANNEL_TYPES（七种：钉钉/企微/飞书/Server酱/PushPlus/Webhook/Telegram） */
   type: text('type').notNull(),
   name: text('name').notNull(),
   /** JSON 序列化的渠道配置（webhookUrl/secret/sendKey 等），返回前端时脱敏 */

@@ -1,7 +1,14 @@
 import { z } from 'zod'
 
-/** 通知渠道类型（国内直连可达优先，另含通用 Webhook 与 Telegram） */
-export const notifyChannelTypeSchema = z.enum(['dingtalk', 'wecom', 'feishu', 'serverchan', 'pushplus', 'webhook', 'telegram'])
+/**
+ * 通知渠道类型（国内直连可达优先，另含通用 Webhook 与 Telegram）。
+ *
+ * 这是渠道类型的唯一真源：数据库层、仓储层与界面都必须从这里取，
+ * 不允许各写一份列表——曾经仓储层自写了一份五种的列表，导致 Telegram 与
+ * 通用 Webhook 落库后被改写成钉钉，显示正常但永不发送。
+ */
+export const NOTIFY_CHANNEL_TYPES = ['dingtalk', 'wecom', 'feishu', 'serverchan', 'pushplus', 'webhook', 'telegram'] as const
+export const notifyChannelTypeSchema = z.enum(NOTIFY_CHANNEL_TYPES)
 export type NotifyChannelType = z.infer<typeof notifyChannelTypeSchema>
 
 export const notifyHealthStatusSchema = z.enum(['healthy', 'failing'])

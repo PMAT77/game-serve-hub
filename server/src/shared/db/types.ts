@@ -1,3 +1,5 @@
+import type { NotifyChannelType } from '../../../../shared/contracts/notify'
+
 export interface SessionTokenBundle {
   accessToken: string
   refreshToken: string
@@ -222,7 +224,8 @@ export interface CreateBackupInput {
   createdBy?: string
 }
 
-export type DbNotifyChannelType = 'dingtalk' | 'wecom' | 'feishu' | 'serverchan' | 'pushplus' | 'webhook' | 'telegram'
+/** 与共享契约同源，数据库层不再自写一份渠道类型列表 */
+export type DbNotifyChannelType = NotifyChannelType
 export type DbNotifyHealthStatus = 'healthy' | 'failing'
 
 export interface DbNotifyChannel {

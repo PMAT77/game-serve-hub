@@ -133,7 +133,7 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 
 ## 路线 C：Native 海外机器（一个命令装完）
 
-面板由系统级 `game-server-hub.service` 管理，游戏分片由 `gsh` 用户的 systemd 服务管理，日志进 journald。不安装 Docker，也不使用 tmux、screen 与 PM2。
+面板由系统级 `game-server-hub.service` 管理，游戏分片由 `gsh` 用户的 systemd 服务管理（面板自身的日志用 `journalctl -u game-server-hub.service` 查看，分片日志直接写入实例目录下的控制台日志文件，可在面板里查看与下载）。不安装 Docker，也不使用 tmux、screen 与 PM2。
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.6.14/scripts/install.linux.sh" \

@@ -37,7 +37,7 @@
       —— 已由 `pnpm run release:verify`（scripts/check-release-consistency.mjs）强制校验，失配会直接给出新摘要
 [ ] 同步全部版本引用（清单见 `scripts/check-release-consistency.mjs` 的 `requiredReferences`；镜像 tag 会逐条比对，残留旧版本即失败）
 [ ] pnpm run release:check 本地通过（release:verify + docs:check + check:gsh + lint + lint:ox + lint:copy + test:unit + check:installer + build）
-[ ] 文档：新增 / 改名文档已同步 docs/README.md 索引；界面相关改动同步更新 docs/images 截图与 docs/VIDEO.md 的分集画面标注
+[ ] 文档：新增 / 改名文档已同步 docs/README.md 索引；界面相关改动同步更新 docs/images 截图（视频画面标注属内部运营信息，见 `docs_local/`，不随仓库发布）
 [ ] PR 合并后 CI 绿色
 [ ] git tag v0.x.y && git push origin v0.x.y
 [ ] 首次发布后：在 GHCR Package settings 的 Manage Actions access 授予本仓库写权限（否则 candidate 清理会 403）

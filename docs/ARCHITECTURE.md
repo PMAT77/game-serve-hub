@@ -111,7 +111,7 @@ Docker Adapter 可以继续用容器 ID 作为运行时引用；Native Adapter �
 - 使用 `loginctl enable-linger gsh` 保证用户服务在无人登录时仍可运行。
 - 用户服务文件存放在 `~gsh/.config/systemd/user/`，实例配置和 FIFO 存放在受控的数据目录。
 
-禁止使用 tmux、screen 或 PM2。日志统一进入 journald；资源限制使用 systemd 的 `MemoryMax`、`CPUQuota` 等能力。
+禁止使用 tmux、screen 或 PM2。日志分两处：面板服务本身进 journald（`journalctl -u game-server-hub.service`），分片日志由 systemd 用 `StandardOutput=append:` 直接追加到实例目录下的控制台日志文件——不用 `journalctl --user-unit` 采集，是因为面板以 `gsh` 用户跑在系统服务里、不在 `systemd-journal` 组内，那条路在线上必然报权限错误。资源限制使用 systemd 的 `MemoryHigh`、`MemorySwapMax`、`CPUQuota` 与 `StartLimit*` 等能力。
 
 游戏控制台通过权限受控的命名管道写入进程标准输入，不依赖交互式终端。
 

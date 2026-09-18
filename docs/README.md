@@ -6,8 +6,7 @@
 
 | 你是谁 | 建议顺序 |
 | --- | --- |
-| 想先看视频 | [视频教程](VIDEO.md) → 根 [README](../README.md) |
-| 第一次接触本项目 | [根 README](../README.md) → [安装指南](INSTALL.md) → [DST 开服教程](DST_TUTORIAL.md) |
+| 第一次接触本项目 | 根 [README](../README.md) → [安装指南](INSTALL.md) → [DST 开服教程](DST_TUTORIAL.md) |
 | 已部署，要日常运维 | [安装指南](INSTALL.md)（升级 / 回滚 / 卸载 / 排错）→ [内存档位](MEMORY.md) → [术语表](GLOSSARY.md) |
 | 想参与开发 | [开发指南](DEVELOPMENT.md) → [架构与产品边界](ARCHITECTURE.md) → [贡献流程](../CONTRIBUTING.md) |
 | 维护者 / 发布负责人 | [发布流程](RELEASE.md) → [镜像发布与副本校验](IMAGE_DISTRIBUTION.md) |
@@ -16,7 +15,6 @@
 
 | 文档 | 说明 |
 | --- | --- |
-| [VIDEO.md](VIDEO.md) | 视频教程系列：分集与状态、观看路线、录制与素材规范、当前不提供的能力 |
 | [INSTALL.md](INSTALL.md) | Linux 生产安装（Docker / Native 双模式）、升级、回滚、卸载、运维与故障排查 |
 | [DST_TUTORIAL.md](DST_TUTORIAL.md) | 服主视角从零开服：端口放行、面板操作、房间世界、控制台、玩家管理与在线玩家、备份与计划任务 |
 | [MEMORY.md](MEMORY.md) | 宿主机内存档位（4 / 6 / 8 GiB）、洞穴与 Mod 建议、`panel.env` 预设 |

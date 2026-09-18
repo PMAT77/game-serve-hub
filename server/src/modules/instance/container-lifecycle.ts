@@ -409,21 +409,33 @@ async function startSingleShardContainer(
   return { ok: true, ref, inspect }
 }
 
-async function stopAndRemoveShard(runtime: ContainerRuntime, ref: ContainerRef | undefined) {
+function describeLifecycleError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * 停止并移除分片。
+ *
+ * 两步都是 best-effort：失败不能阻断停机流程，否则一个卡住的容器会让实例永远停在
+ * 「停止中」。但失败不再完全静默 —— 停止失败意味着分片可能仍在运行，而面板会继续
+ * 往下走到「已停止」，控制台必须留下痕迹，否则「界面说停了、进程其实还在跑」不会
+ * 被任何人看到（日志目录不可写这类成因另由环境自检覆盖）。
+ */
+async function stopAndRemoveShard(runtime: ContainerRuntime, ref: ContainerRef | undefined, instanceId: string) {
   if (!ref) {
     return
   }
   try {
     await runtime.stop(ref, 15)
   }
-  catch {
-    // best-effort
+  catch (error) {
+    instanceConsoleLogStore.appendSystem(instanceId, `停止分片失败：${describeLifecycleError(error)}，面板将继续尝试清理`)
   }
   try {
     await runtime.remove(ref)
   }
-  catch {
-    // best-effort
+  catch (error) {
+    instanceConsoleLogStore.appendSystem(instanceId, `移除分片失败：${describeLifecycleError(error)}`)
   }
 }
 
@@ -835,7 +847,7 @@ async function startCavesAfterMasterReady(
     if (stale()) {
       return
     }
-    await stopAndRemoveShard(runtime, input.masterRef)
+    await stopAndRemoveShard(runtime, input.masterRef, input.instanceId)
     instanceConsoleLogStore.appendSystem(input.instanceId, message, 'caves')
     await updateGameInstanceRuntime(input.instanceId, {
       status: 'error',
@@ -879,7 +891,7 @@ async function startCavesAfterMasterReady(
     if (stale()) {
       // 洞穴是在代号变更之后才起来的：立刻收掉，别留下没人管的残留分片与日志跟随
       if (cavesStart.ok) {
-        await stopAndRemoveShard(runtime, cavesStart.ref)
+        await stopAndRemoveShard(runtime, cavesStart.ref, input.instanceId)
       }
       return
     }
@@ -906,11 +918,11 @@ export async function stopInstanceContainer(instanceId: string): Promise<void> {
   if (cavesRef) {
     instanceConsoleLogStore.appendSystem(instanceId, '正在停止并移除洞穴分片以释放内存')
   }
-  await stopAndRemoveShard(runtime, cavesRef)
+  await stopAndRemoveShard(runtime, cavesRef, instanceId)
   if (masterRef) {
     instanceConsoleLogStore.appendSystem(instanceId, '正在停止并移除主世界分片以释放内存')
   }
-  await stopAndRemoveShard(runtime, masterRef)
+  await stopAndRemoveShard(runtime, masterRef, instanceId)
   if (masterRef) {
     instanceConsoleLogStore.appendSystem(instanceId, '实例运行时已删除')
   }
@@ -942,10 +954,10 @@ export async function removeInstanceContainer(instanceId: string): Promise<void>
   stopLogFollow(instanceId)
   const runtime = getContainerRuntime()
   const cavesRef = await resolveCavesContainerRef(instanceId)
-  await stopAndRemoveShard(runtime, cavesRef)
+  await stopAndRemoveShard(runtime, cavesRef, instanceId)
   const masterRef = await resolveInstanceContainerRef(instanceId)
   if (masterRef) {
-    await stopAndRemoveShard(runtime, masterRef)
+    await stopAndRemoveShard(runtime, masterRef, instanceId)
     instanceConsoleLogStore.appendSystem(instanceId, '实例运行时已删除')
   }
   await runtime.removeShardNetwork(instanceId)

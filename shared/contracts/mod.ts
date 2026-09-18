@@ -5,6 +5,14 @@ export type ModInstanceStatus = 'pending_install' | 'running' | 'stopped' | 'ins
 
 export type ModInstallStatus = 'pending' | 'ready' | 'failed'
 
+/**
+ * Mod 版本状态（面板不显示「版本号」，只回答「是不是工坊上的最新版」）：
+ * - outdated：工坊上的最新版本时间晚于本机内容 → 需要更新
+ * - up_to_date：两侧时间一致
+ * - unknown：缺一侧信息（从未检查、本机清单缺失、工坊上找不到该 Mod）→ 不能判定
+ */
+export type ModUpdateStatus = 'outdated' | 'up_to_date' | 'unknown'
+
 export interface ModItemDto {
   id: string
   workshopId: string
@@ -17,6 +25,13 @@ export interface ModItemDto {
   version: string | null
   installStatus: ModInstallStatus
   installError: string | null
+  /** 本机已下载内容对应的工坊版本时间（ISO）；未知为 null */
+  localUpdatedAt: string | null
+  /** 工坊上的最新版本时间（ISO）；未知为 null */
+  remoteUpdatedAt: string | null
+  /** 最近一次版本检查时间（ISO）；从未检查为 null */
+  updateCheckedAt: string | null
+  updateStatus: ModUpdateStatus
   dependencyIds: string[]
   missingDependencyIds: string[]
   dependentModIds: string[]
@@ -81,6 +96,36 @@ export interface ModReorderResult {
   saved: true
   riskTip: string | null
   mods: ModItemDto[]
+}
+
+/** 单个 Mod 的版本检查结果 */
+export interface ModUpdateInfo {
+  workshopId: string
+  /** 工坊标题；取不到时为 null（调用方用它回填面板里的名字） */
+  title: string | null
+  updateStatus: ModUpdateStatus
+  localUpdatedAt: string | null
+  remoteUpdatedAt: string | null
+  /** 无法判定时的原因；可判定时为 null */
+  reason: string | null
+}
+
+export interface ModUpdateCheckSummary {
+  total: number
+  outdated: number
+  upToDate: number
+  unknown: number
+}
+
+export interface ModUpdateCheckResult {
+  instanceId: string
+  checkedAt: string
+  /** 工坊元数据是否全部取到；false 表示有批次失败，结果按已取到的部分计算 */
+  upstreamOk: boolean
+  /** upstreamOk 为 false 时的提示 */
+  message: string | null
+  summary: ModUpdateCheckSummary
+  items: ModUpdateInfo[]
 }
 
 export interface ModDeleteResult {
@@ -306,6 +351,12 @@ export const modBatchUpdatePayloadSchema = z.object({
   workshopIds: z.array(workshopIdSchema).min(1).max(512),
 })
 export type ModBatchUpdatePayload = z.infer<typeof modBatchUpdatePayloadSchema>
+
+export const modUpdateCheckPayloadSchema = z.object({
+  /** 为 true 时忽略缓存与上次检查时间，强制重新问一次 Steam */
+  force: z.boolean().optional(),
+})
+export type ModUpdateCheckPayload = z.infer<typeof modUpdateCheckPayloadSchema>
 
 export const modConfigPayloadSchema = z.object({
   options: z.record(

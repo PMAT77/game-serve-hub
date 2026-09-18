@@ -206,6 +206,9 @@ function mapDbInstanceMod(row: {
   version: string | null
   installStatus: string
   installError: string | null
+  localUpdatedAt: string | null
+  remoteUpdatedAt: string | null
+  updateCheckedAt: string | null
   config: string | null
   createdAt: string
   updatedAt: string
@@ -241,6 +244,9 @@ export async function listInstanceMods(instanceId: string): Promise<DbInstanceMo
       version: instanceMods.version,
       installStatus: instanceMods.installStatus,
       installError: instanceMods.installError,
+      localUpdatedAt: instanceMods.localUpdatedAt,
+      remoteUpdatedAt: instanceMods.remoteUpdatedAt,
+      updateCheckedAt: instanceMods.updateCheckedAt,
       config: instanceMods.config,
       createdAt: instanceMods.createdAt,
       updatedAt: instanceMods.updatedAt,
@@ -265,6 +271,9 @@ export async function getInstanceModByWorkshopId(instanceId: string, workshopId:
       version: instanceMods.version,
       installStatus: instanceMods.installStatus,
       installError: instanceMods.installError,
+      localUpdatedAt: instanceMods.localUpdatedAt,
+      remoteUpdatedAt: instanceMods.remoteUpdatedAt,
+      updateCheckedAt: instanceMods.updateCheckedAt,
       config: instanceMods.config,
       createdAt: instanceMods.createdAt,
       updatedAt: instanceMods.updatedAt,
@@ -289,6 +298,9 @@ export async function upsertInstanceMod(input: {
   version?: string | null
   installStatus?: 'pending' | 'ready' | 'failed'
   installError?: string | null
+  localUpdatedAt?: string | null
+  remoteUpdatedAt?: string | null
+  updateCheckedAt?: string | null
   config?: string | null
 }): Promise<DbInstanceMod> {
   const { drizzleDb } = ensureDb()
@@ -304,6 +316,16 @@ export async function upsertInstanceMod(input: {
   const config = typeof input.config === 'undefined'
     ? undefined
     : (input.config?.trim() || null)
+  // 版本时间：undefined = 保留库中原值（订阅/补齐不覆盖检查结果），显式 null = 清空
+  const localUpdatedAt = typeof input.localUpdatedAt === 'undefined'
+    ? undefined
+    : (input.localUpdatedAt?.trim() || null)
+  const remoteUpdatedAt = typeof input.remoteUpdatedAt === 'undefined'
+    ? undefined
+    : (input.remoteUpdatedAt?.trim() || null)
+  const updateCheckedAt = typeof input.updateCheckedAt === 'undefined'
+    ? undefined
+    : (input.updateCheckedAt?.trim() || null)
   await drizzleDb
     .insert(instanceMods)
     .values({
@@ -317,6 +339,9 @@ export async function upsertInstanceMod(input: {
       version: input.version?.trim() || null,
       installStatus,
       installError: installError ?? null,
+      localUpdatedAt: localUpdatedAt ?? null,
+      remoteUpdatedAt: remoteUpdatedAt ?? null,
+      updateCheckedAt: updateCheckedAt ?? null,
       config: config ?? null,
       createdAt: now,
       updatedAt: now,
@@ -331,6 +356,9 @@ export async function upsertInstanceMod(input: {
         version: input.version?.trim() || null,
         installStatus,
         ...(typeof installError !== 'undefined' ? { installError } : {}),
+        ...(typeof localUpdatedAt !== 'undefined' ? { localUpdatedAt } : {}),
+        ...(typeof remoteUpdatedAt !== 'undefined' ? { remoteUpdatedAt } : {}),
+        ...(typeof updateCheckedAt !== 'undefined' ? { updateCheckedAt } : {}),
         ...(typeof config !== 'undefined' ? { config } : {}),
         updatedAt: now,
       },
@@ -353,6 +381,9 @@ export async function updateInstanceModByWorkshopId(
     version?: string | null
     installStatus?: 'pending' | 'ready' | 'failed'
     installError?: string | null
+    localUpdatedAt?: string | null
+    remoteUpdatedAt?: string | null
+    updateCheckedAt?: string | null
     config?: string | null
   },
 ): Promise<DbInstanceMod | undefined> {
@@ -365,6 +396,9 @@ export async function updateInstanceModByWorkshopId(
     version?: string | null
     installStatus?: 'pending' | 'ready' | 'failed'
     installError?: string | null
+    localUpdatedAt?: string | null
+    remoteUpdatedAt?: string | null
+    updateCheckedAt?: string | null
     config?: string | null
     updatedAt: string
   } = {
@@ -390,6 +424,15 @@ export async function updateInstanceModByWorkshopId(
   }
   if (typeof patch.installError !== 'undefined') {
     payload.installError = patch.installError?.trim() || null
+  }
+  if (typeof patch.localUpdatedAt !== 'undefined') {
+    payload.localUpdatedAt = patch.localUpdatedAt?.trim() || null
+  }
+  if (typeof patch.remoteUpdatedAt !== 'undefined') {
+    payload.remoteUpdatedAt = patch.remoteUpdatedAt?.trim() || null
+  }
+  if (typeof patch.updateCheckedAt !== 'undefined') {
+    payload.updateCheckedAt = patch.updateCheckedAt?.trim() || null
   }
   if (typeof patch.config !== 'undefined') {
     payload.config = patch.config?.trim() || null

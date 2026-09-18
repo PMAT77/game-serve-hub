@@ -5,7 +5,7 @@ import { NAlert, NButton, NDataTable, NEmpty, NSelect, NTag, NTooltip, useMessag
 import { computed, h, ref, watch } from 'vue'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import apiMod from '@/api/modules/mod'
-import { MOD_ENABLED_STATUS, MOD_INSTALL_STATUS, statusTagType } from '@/constants/statusDictionary'
+import { MOD_ENABLED_STATUS, MOD_INSTALL_STATUS, MOD_UPDATE_STATUS, statusTagType } from '@/constants/statusDictionary'
 import { useInstanceModState } from '@/composables/useInstanceModState'
 
 type ModEnabledFilter = 'all' | 'enabled' | 'disabled'
@@ -64,6 +64,20 @@ const installedColumns: DataTableColumns<ModItemDto> = [
     key: 'installStatus',
     width: 110,
     render: row => renderInstallStatus(row),
+  },
+  {
+    // 只做展示：更新在「Mod 管理」页执行，这里让服主一眼看到哪个 Mod 需要更新
+    title: '版本',
+    key: 'updateStatus',
+    width: 100,
+    render: (row) => {
+      const state = MOD_UPDATE_STATUS[row.updateStatus]
+      return h(
+        NTag,
+        { size: 'small', bordered: false, type: statusTagType(state.tone) },
+        { default: () => state.label },
+      )
+    },
   },
   {
     title: '开关状态',

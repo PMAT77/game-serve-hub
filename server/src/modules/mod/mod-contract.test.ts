@@ -4,6 +4,7 @@ import {
   modConfigPayloadSchema,
   modInstallPayloadSchema,
   modReorderPayloadSchema,
+  modUpdateCheckPayloadSchema,
   steamModListQuerySchema,
 } from '../../../../shared/contracts/mod'
 
@@ -32,5 +33,11 @@ describe('mod API contracts', () => {
     assert.equal(modConfigPayloadSchema.safeParse({ options: { a: [1] } }).success, false)
     assert.equal(modConfigPayloadSchema.safeParse({ options: { a: { nested: 1 } } }).success, false)
     assert.equal(modConfigPayloadSchema.safeParse({ options: { '': 1 } }).success, false)
+  })
+
+  it('accepts an empty or forced mod update check payload only', () => {
+    assert.deepEqual(modUpdateCheckPayloadSchema.parse({}), {})
+    assert.deepEqual(modUpdateCheckPayloadSchema.parse({ force: true }), { force: true })
+    assert.equal(modUpdateCheckPayloadSchema.safeParse({ force: 'yes' }).success, false)
   })
 })

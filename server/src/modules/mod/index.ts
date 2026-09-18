@@ -11,6 +11,7 @@ import type {
   ModListDto,
   ModMutationResult,
   ModReorderResult,
+  ModUpdateCheckResult,
   SteamModSort,
   SteamModTrendDays,
   SteamModListQueryResult,
@@ -29,6 +30,7 @@ import {
   modUpdatePayloadSchema,
   modReorderPayloadSchema,
   modBatchUpdatePayloadSchema,
+  modUpdateCheckPayloadSchema,
   modConfigPayloadSchema,
   modInstallJobsQuerySchema,
 } from '../../../../shared/contracts/mod'
@@ -46,6 +48,7 @@ import {
 import { LOCAL_NODE_ID, resolveLocalDstInstance } from '../../shared/dst/local-dst-instance'
 import type { ModReadinessResult } from './mod-readiness-service'
 import { reconcileInstanceModReadiness } from './mod-readiness-service'
+import { checkInstanceModUpdates, resolveModUpdateStatus, scheduleModUpdateChecks } from './mod-update-service'
 import { syncInstanceModFilesFromDb } from './mod-file-sync-service'
 import { fetchDstSteamWorkshopMods, fetchWorkshopFileDetail, fetchWorkshopPreviewImages, fetchWorkshopRatings, isSteamWorkshopFetchError, scheduleWarmSteamWorkshopModCache } from '../../infra/game-adapter/dst/steam-workshop'
 import {
@@ -221,6 +224,17 @@ function getRuntimeRiskTip(instanceStatus: ModListDto['instanceStatus']): string
   return '实例运行中修改 Mod 可能导致玩家同步失败，建议在停服窗口执行并重启实例。'
 }
 
+/** 明显不是 Mod 名字的脏值：展示时一律回落为 workshop-<id>，真实名称由「检查更新」按工坊标题补回 */
+const UNRESOLVED_MOD_NAME_PATTERN = /^(null|undefined|nil|nan|false|true)$/i
+
+function resolveDisplayModName(name: string | null | undefined, workshopId: string): string {
+  const trimmed = name?.trim() ?? ''
+  if (!trimmed || UNRESOLVED_MOD_NAME_PATTERN.test(trimmed)) {
+    return `workshop-${workshopId}`
+  }
+  return trimmed
+}
+
 function toDto(
   mod: Awaited<ReturnType<typeof listInstanceMods>>[number],
   dependencyMap: Record<string, string[]>,
@@ -235,7 +249,7 @@ function toDto(
   return {
     id: mod.id,
     workshopId: mod.workshopId,
-    name: mod.name,
+    name: resolveDisplayModName(mod.name, mod.workshopId),
     previewImage: mod.previewImage,
     rating: ratingMap.get(mod.workshopId) ?? null,
     enabled: mod.enabled,
@@ -243,6 +257,10 @@ function toDto(
     version: mod.version,
     installStatus: mod.installStatus,
     installError: mod.installError,
+    localUpdatedAt: mod.localUpdatedAt,
+    remoteUpdatedAt: mod.remoteUpdatedAt,
+    updateCheckedAt: mod.updateCheckedAt,
+    updateStatus: resolveModUpdateStatus(mod.localUpdatedAt, mod.remoteUpdatedAt),
     dependencyIds,
     missingDependencyIds,
     dependentModIds,
@@ -396,6 +414,8 @@ function logModReadinessResult(app: FastifyInstance, instanceId: string, result:
 export function registerModModule(app: FastifyInstance) {
   app.addHook('onReady', async () => {
     scheduleWarmSteamWorkshopModCache()
+    // 版本徽标要保持新鲜：与游戏服务端更新检查同节奏，后台定期问一次创意工坊
+    scheduleModUpdateChecks(app)
     const instances = await listGameInstances({ nodeId: LOCAL_NODE_ID })
     for (const instance of instances) {
       if (instance.gameCode !== DST_APP_ID) {
@@ -550,6 +570,49 @@ export function registerModModule(app: FastifyInstance) {
         installed: subscribeStatus === 'ready',
       }
       return success(payload, request)
+    }
+    catch (error) {
+      const normalized = normalizeSteamWorkshopError(error)
+      return businessError(normalized.message, request, undefined, normalized.data)
+    }
+  })
+
+  app.post('/app/instances/:instanceId/mods/check-updates', async (request): Promise<ApiSuccessResponse<ModUpdateCheckResult> | ApiErrorResponse> => {
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
+    if (authError) {
+      return authError
+    }
+    const parsedParams = modInstanceParamsSchema.safeParse(request.params)
+    const parsedBody = modUpdateCheckPayloadSchema.safeParse(request.body ?? {})
+    if (!parsedParams.success || !parsedBody.success) {
+      return businessError('请求参数无效', request)
+    }
+    const instanceId = parsedParams.data.instanceId
+    const resolved = await resolveLocalDstInstance(instanceId, request, {
+      messages: {
+        wrongNode: '当前仅支持本地节点实例 Mod 管理',
+        wrongGame: '当前仅支持 DST 实例 Mod 管理',
+        missingInstallPath: '实例安装目录不存在，请先完成安装',
+      },
+    })
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    try {
+      const outcome = await checkInstanceModUpdates({
+        instanceId,
+        installPath: resolved.instance.installPath,
+        force: parsedBody.data.force === true,
+      })
+      if (outcome.renamed.length > 0) {
+        app.log.info({ instanceId, renamed: outcome.renamed }, '已按创意工坊标题补齐 Mod 名称')
+      }
+      // Steam 一条都没取到时明确报错，前端据此提示「沿用上次结果」而不是当成「全部最新」
+      if (!outcome.upstreamOk && outcome.metadataResolved === 0) {
+        return businessError(outcome.message ?? '无法连接 Steam 创意工坊，请检查服务器网络或代理设置后重试', request)
+      }
+      const { renamed: _renamed, metadataResolved: _metadataResolved, ...result } = outcome
+      return success(result, request)
     }
     catch (error) {
       const normalized = normalizeSteamWorkshopError(error)

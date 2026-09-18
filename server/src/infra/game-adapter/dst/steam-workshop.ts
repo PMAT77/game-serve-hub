@@ -39,6 +39,12 @@ const CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_CACHE_TTL_MS', 2 * 6
 const STALE_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_STALE_TTL_MS', 30 * 60 * 1000)
 const WORKSHOP_DETAIL_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_DETAIL_CACHE_TTL_MS', 5 * 60 * 1000)
 const WORKSHOP_RATING_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATING_CACHE_TTL_MS', 10 * 60 * 1000)
+/** Mod 元数据（标题/缩略图/版本时间）缓存：版本检测与名称补全共用同一份响应 */
+const WORKSHOP_METADATA_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_METADATA_CACHE_TTL_MS', 10 * 60 * 1000)
+/** GetPublishedFileDetails 单次请求的 ID 上限，超过则分批串行 */
+const WORKSHOP_METADATA_BATCH_SIZE = readPositiveIntEnv('GSH_STEAM_WORKSHOP_METADATA_BATCH_SIZE', 100)
+/** 单次调用的分批上限，防止异常大的清单把请求拖成几十次串行 */
+const WORKSHOP_METADATA_MAX_BATCHES = readPositiveIntEnv('GSH_STEAM_WORKSHOP_METADATA_MAX_BATCHES', 10)
 const RATE_LIMIT_WINDOW_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATE_LIMIT_WINDOW_MS', 1000)
 const RATE_LIMIT_PER_KEY = IS_UNIT_TEST
   ? 100_000
@@ -2011,6 +2017,121 @@ export async function fetchWorkshopPreviewImages(workshopIds: string[]): Promise
   return result
 }
 
+/** 工坊单条元数据：名称、缩略图、最新版本时间（ISO）与体积 */
+export interface WorkshopModMetadata {
+  /** 工坊标题；查询不到时为 null */
+  title: string | null
+  previewImage: string | null
+  /** time_updated 转 ISO；上游未返回时为 null */
+  updatedAt: string | null
+  fileSize: number | null
+}
+
+const EMPTY_WORKSHOP_METADATA: WorkshopModMetadata = {
+  title: null,
+  previewImage: null,
+  updatedAt: null,
+  fileSize: null,
+}
+
+const workshopMetadataCache = new Map<string, { value: WorkshopModMetadata, expiresAt: number }>()
+
+function mapPublishedFileDetailToMetadata(item: PublishedFileDetailItem): WorkshopModMetadata {
+  return {
+    title: item.title?.trim() || null,
+    previewImage: item.preview_url?.trim() || null,
+    updatedAt: unixSecondsToIso(item.time_updated),
+    fileSize: typeof item.file_size === 'number' && Number.isFinite(item.file_size) ? item.file_size : null,
+  }
+}
+
+/**
+ * 批量取工坊元数据（名称/缩略图/最新版本时间），供 Mod 名称回填与「是否有更新」判定使用。
+ *
+ * 分两件事：命中的条目走内存缓存（默认 10 分钟），未命中的按 100 个一批调用公开的
+ * GetPublishedFileDetails。**单批失败不抛错**：已取到的条目照常返回，`ok:false` 让调用方
+ * 决定是沿用旧状态还是提示用户；失败批次里查不到的条目不会被写成「工坊上没有该 Mod」。
+ */
+export async function fetchWorkshopModMetadata(
+  workshopIds: string[],
+  options?: { force?: boolean },
+): Promise<{ ok: boolean, message?: string, items: Map<string, WorkshopModMetadata> }> {
+  const uniqueIds = [...new Set(workshopIds.map(id => id.trim()).filter(Boolean))]
+  const items = new Map<string, WorkshopModMetadata>()
+  if (uniqueIds.length === 0) {
+    return { ok: true, items }
+  }
+
+  const now = Date.now()
+  const pendingIds: string[] = []
+  for (const workshopId of uniqueIds) {
+    const cached = workshopMetadataCache.get(workshopId)
+    if (!options?.force && cached && cached.expiresAt > now) {
+      items.set(workshopId, cached.value)
+      continue
+    }
+    pendingIds.push(workshopId)
+  }
+  if (pendingIds.length === 0) {
+    return { ok: true, items }
+  }
+
+  const batches: string[][] = []
+  for (let index = 0; index < pendingIds.length; index += WORKSHOP_METADATA_BATCH_SIZE) {
+    batches.push(pendingIds.slice(index, index + WORKSHOP_METADATA_BATCH_SIZE))
+  }
+  const truncated = batches.length > WORKSHOP_METADATA_MAX_BATCHES
+  const plannedBatches = truncated ? batches.slice(0, WORKSHOP_METADATA_MAX_BATCHES) : batches
+
+  let failedMessage: string | undefined
+  let failed = truncated
+  if (truncated) {
+    failedMessage = 'Mod 数量超出单次检查上限，本次只检查了前一部分'
+  }
+
+  for (const batch of plannedBatches) {
+    const batchIds = new Set(batch)
+    try {
+      const responseItems = await requestPublishedFileDetails(batch, { locale: DEFAULT_MOD_CONTENT_LOCALE })
+      const found = new Set<string>()
+      for (const item of responseItems) {
+        const workshopId = item.publishedfileid?.trim()
+        if (!workshopId || !batchIds.has(workshopId)) {
+          continue
+        }
+        const metadata = mapPublishedFileDetailToMetadata(item)
+        found.add(workshopId)
+        items.set(workshopId, metadata)
+        workshopMetadataCache.set(workshopId, {
+          value: metadata,
+          expiresAt: Date.now() + WORKSHOP_METADATA_CACHE_TTL_MS,
+        })
+      }
+      // 工坊上确实没有这些 ID（已下架/私密）：缓存这个结论，但只在批次成功时才敢下
+      for (const workshopId of batch) {
+        if (found.has(workshopId)) {
+          continue
+        }
+        items.set(workshopId, EMPTY_WORKSHOP_METADATA)
+        workshopMetadataCache.set(workshopId, {
+          value: EMPTY_WORKSHOP_METADATA,
+          expiresAt: Date.now() + WORKSHOP_METADATA_CACHE_TTL_MS,
+        })
+      }
+    }
+    catch (error) {
+      failed = true
+      failedMessage = failedMessage
+        ?? sanitizeSteamUserFacingMessage(
+          error instanceof Error ? error.message : '',
+          STEAM_UPSTREAM_USER_MESSAGE,
+        )
+    }
+  }
+
+  return failed ? { ok: false, message: failedMessage, items } : { ok: true, items }
+}
+
 export async function fetchWorkshopRatings(workshopIds: string[]): Promise<Map<string, number | null>> {
   const uniqueIds = [...new Set(workshopIds.map(id => id.trim()).filter(Boolean))]
   const result = new Map<string, number | null>()
@@ -2095,6 +2216,7 @@ function resetSteamWorkshopRuntimeForTests() {
   steamBackgroundRefreshing.clear()
   workshopDetailCache.clear()
   workshopRatingCache.clear()
+  workshopMetadataCache.clear()
   perKeyRequestBuckets.clear()
   globalRequestBucket.length = 0
   steamCircuitState.failedCount = 0

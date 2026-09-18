@@ -163,6 +163,12 @@ export interface DbInstanceMod {
   version: string | null
   installStatus: 'pending' | 'ready' | 'failed'
   installError: string | null
+  /** 本机已下载内容对应的工坊版本时间（ISO）；未知为 null */
+  localUpdatedAt: string | null
+  /** 工坊上的最新版本时间（ISO）；未知为 null */
+  remoteUpdatedAt: string | null
+  /** 最近一次版本检查时间（ISO）；从未检查为 null */
+  updateCheckedAt: string | null
   /** JSON 序列化的 modoverrides.lua configuration_options；null = 未配置 */
   config: string | null
   createdAt: string

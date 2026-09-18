@@ -19,7 +19,7 @@ import { isInstallableGameInstance } from '@/composables/useGameInstance'
 import { useInstanceModState } from '@/composables/useInstanceModState'
 import ModConfigModal from '@/views/games/dst/mod/components/ModConfigModal.vue'
 import { routeToDstModDetail, routeToDstWorldSettings, routeToNodeInstance } from '@/navigation/game-routes'
-import { MOD_INSTALL_STATUS } from '@/constants/statusDictionary'
+import { MOD_INSTALL_STATUS, MOD_UPDATE_STATUS } from '@/constants/statusDictionary'
 import { getInstanceState } from '@/views/node/instance/instanceDisplay'
 
 defineOptions({
@@ -61,6 +61,10 @@ interface SteamModMeta {
 const loadingInstances = ref(false)
 const loadingSteam = ref(false)
 const loadingInstalled = ref(false)
+/** 「检查更新」进行中：期间禁用按钮，避免并发打 Steam */
+const checkingUpdates = ref(false)
+/** 「重试全部失败」进行中 */
+const retryingFailedMods = ref(false)
 const unsubscribingWorkshopIds = ref<Set<string>>(new Set())
 const checkedRowKeys = ref<Array<string | number>>([])
 const batchUpdating = ref(false)
@@ -233,13 +237,119 @@ const subscribedEmptyDescription = computed(() => {
   return '暂无已订阅 Mod'
 })
 const subscribedTabCount = computed(() => installedMods.value.length)
+/** 已订阅 Mod 的概览：就绪 / 下载中 / 失败，导入存档后可据此一眼看出「有没有下全」 */
+const subscribedSummary = computed(() => {
+  const total = installedMods.value.length
+  const pending = installedMods.value.filter(mod =>
+    mod.installStatus === 'pending' || isPendingWorkshop(mod.workshopId),
+  ).length
+  const failed = installedMods.value.filter(mod =>
+    mod.installStatus === 'failed' && !isPendingWorkshop(mod.workshopId),
+  ).length
+  const outdated = installedMods.value.filter(mod => mod.updateStatus === 'outdated').length
+  const unidentified = installedMods.value.filter(mod => !isModNameIdentified(mod)).length
+  return { total, pending, failed, outdated, unidentified, ready: total - pending - failed }
+})
 const selectedUpdatableMods = computed(() =>
   installedMods.value.filter(mod =>
-    checkedRowKeys.value.includes(mod.workshopId)
-    && mod.installStatus !== 'pending'
-    && !isPendingWorkshop(mod.workshopId),
+    checkedRowKeys.value.includes(mod.workshopId) && isModUpdatable(mod),
   ),
 )
+
+/**
+ * 列表上方的提示：优先说「有 Mod 没识别出名称」，其次是「还没检查过版本」。
+ * 两者都指向同一个动作——「检查更新」，它会按创意工坊信息同时补全名称与版本状态。
+ */
+const modCheckHint = computed(() => {
+  const { unidentified } = subscribedSummary.value
+  if (unidentified > 0) {
+    return `有 ${unidentified} 个 Mod 没识别出名称，点「检查更新」可按创意工坊信息补全。`
+  }
+  const neverChecked = installedMods.value.filter(mod => !mod.updateCheckedAt).length
+  if (neverChecked > 0) {
+    return `有 ${neverChecked} 个 Mod 还没检查过版本，点「检查更新」可确认是否最新。`
+  }
+  return null
+})
+
+/** 明显不是 Mod 名字的脏值：这些名字要在列表里标出来并引导用户去「检查更新」补全 */
+const UNIDENTIFIED_MOD_NAME_PATTERN = /^(null|undefined|nil|nan|false|true)$/i
+
+/** 名称是否已识别：服务端会把无法识别的名字兜底成 workshop-<id> */
+function isModNameIdentified(mod: ModItemDto): boolean {
+  const name = mod.name?.trim() ?? ''
+  return Boolean(name)
+    && name !== `workshop-${mod.workshopId}`
+    && !UNIDENTIFIED_MOD_NAME_PATTERN.test(name)
+}
+
+/** 最近一次版本检查时间（取全列表最新的一条），用于工具条上的「上次检查 X 前」 */
+const lastUpdateCheckedAt = computed(() => {
+  let latest = ''
+  let latestMs = 0
+  for (const mod of installedMods.value) {
+    const parsed = mod.updateCheckedAt ? Date.parse(mod.updateCheckedAt) : Number.NaN
+    if (Number.isFinite(parsed) && parsed > latestMs) {
+      latestMs = parsed
+      latest = mod.updateCheckedAt ?? ''
+    }
+  }
+  return latest
+})
+
+/** 只有「创意工坊上有新版本」的 Mod 才给「更新」入口；未知状态另给「重新下载」兜底 */
+function isModUpdatable(mod: ModItemDto): boolean {
+  return mod.installStatus === 'ready'
+    && mod.updateStatus === 'outdated'
+    && !isPendingWorkshop(mod.workshopId)
+}
+
+function canRedownloadMod(mod: ModItemDto): boolean {
+  return mod.installStatus === 'ready'
+    && mod.updateStatus === 'unknown'
+    && !isPendingWorkshop(mod.workshopId)
+}
+
+function modUpdateTagType(status: ModItemDto['updateStatus']): 'default' | 'success' | 'warning' {
+  if (status === 'outdated') return 'warning'
+  return status === 'up_to_date' ? 'success' : 'default'
+}
+
+/** 无法判断版本的原因提示：让「未检查」与「查不到」区分开，而不是笼统一句不知道 */
+function modUpdateTooltip(mod: ModItemDto): string {
+  if (mod.updateStatus === 'outdated') {
+    return '创意工坊上有更新的版本，点「更新」重新下载后再重启实例'
+  }
+  if (mod.updateStatus === 'up_to_date') {
+    return `已是最新版本${mod.updateCheckedAt ? `（检查于 ${formatCheckedAt(mod.updateCheckedAt)}）` : ''}`
+  }
+  if (mod.installStatus !== 'ready') {
+    return 'Mod 尚未下载完成，暂不判断版本'
+  }
+  if (!mod.updateCheckedAt) {
+    return '尚未检查版本，点「检查更新」可从创意工坊判断是否最新'
+  }
+  return '创意工坊或本机缺少该 Mod 的版本信息，无法判断（可重新下载）'
+}
+
+function formatCheckedAt(iso: string): string {
+  const parsed = Date.parse(iso)
+  if (!Number.isFinite(parsed)) {
+    return '-'
+  }
+  const diffMinutes = Math.floor((Date.now() - parsed) / 60000)
+  if (diffMinutes < 1) {
+    return '刚刚'
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} 分钟前`
+  }
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) {
+    return `${diffHours} 小时前`
+  }
+  return `${Math.floor(diffHours / 24)} 天前`
+}
 
 function resolveMarketSubscribeStatus(row: SteamModListQueryResultItem): ModInstallStatus | null {
   if (row.subscribeStatus) {
@@ -600,7 +710,16 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
     title: 'Mod 名称',
     key: 'name',
     minWidth: 220,
-    render: row => row.name,
+    render: (row) => {
+      if (isModNameIdentified(row)) {
+        return row.name
+      }
+      // 名称没认出来时明确标出来，而不是显示一串看不出所以然的占位名
+      return h('div', { class: 'flex items-center gap-2' }, [
+        h('span', { class: 'text-muted-foreground' }, `workshop-${row.workshopId}`),
+        h(NTag, { size: 'tiny', bordered: false, type: 'warning' }, { default: () => '未识别名称' }),
+      ])
+    },
   },
   {
     title: '评价',
@@ -613,6 +732,24 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
     key: 'workshopId',
     width: 150,
     render: row => row.workshopId,
+  },
+  {
+    title: '版本',
+    key: 'updateStatus',
+    width: 120,
+    render: (row) => {
+      const descriptor = MOD_UPDATE_STATUS[row.updateStatus]
+      const tag = h(
+        NTag,
+        { size: 'small', bordered: false, type: modUpdateTagType(row.updateStatus) },
+        { default: () => descriptor.label },
+      )
+      return h(
+        NTooltip,
+        { trigger: 'hover' },
+        { trigger: () => tag, default: () => modUpdateTooltip(row) },
+      )
+    },
   },
   {
     title: '状态',
@@ -659,26 +796,44 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
     width: 400,
     render: (row, index) => h('div', { class: 'flex items-center gap-3' }, [
       ...(row.installStatus === 'ready'
-        ? [h(
-            NButton,
-            {
-              size: 'tiny',
-              disabled: !hasSelectedInstance.value || isPendingWorkshop(row.workshopId),
-              class: 'w-14',
-              onClick: () => void updateInstalledMod(row),
-            },
-            { default: () => '更新' },
-          ),
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              disabled: !hasSelectedInstance.value || isPendingWorkshop(row.workshopId),
-              class: 'w-14',
-              onClick: () => openModConfig(row),
-            },
-            { default: () => '配置' },
-          )]
+        ? [
+            // 「更新」只在创意工坊确实有新版本时出现，否则这个按钮点下去毫无意义
+            ...(isModUpdatable(row)
+              ? [h(
+                  NButton,
+                  {
+                    size: 'tiny',
+                    type: 'primary',
+                    disabled: !hasSelectedInstance.value || isPendingWorkshop(row.workshopId),
+                    class: 'w-14',
+                    onClick: () => void updateInstalledMod(row),
+                  },
+                  { default: () => '更新' },
+                )]
+              : []),
+            // 版本无法判断时留一个出口：重新下载一次，让本机内容与工坊对齐
+            ...(canRedownloadMod(row)
+              ? [h(
+                  NButton,
+                  {
+                    size: 'tiny',
+                    disabled: !hasSelectedInstance.value || isPendingWorkshop(row.workshopId),
+                    class: 'w-16',
+                    onClick: () => void updateInstalledMod(row),
+                  },
+                  { default: () => '重新下载' },
+                )]
+              : []),
+            h(
+              NButton,
+              {
+                size: 'tiny',
+                disabled: !hasSelectedInstance.value || isPendingWorkshop(row.workshopId),
+                class: 'w-14',
+                onClick: () => openModConfig(row),
+              },
+              { default: () => '配置' },
+            )]
         : []),
       h(
         NButton,
@@ -769,7 +924,8 @@ async function loadInstalledMods() {
   }
   loadingInstalled.value = true
   try {
-    const response = await apiMod.getModList(selectedInstanceId.value)
+    // 补缩略图：导入存档带进来的 Mod 本地没有图，服务端按创意工坊 ID 补齐后落库，只补缺的那些
+    const response = await apiMod.getModList(selectedInstanceId.value, { enrich: 'previews' })
     installedMods.value = response.data.mods
     riskTipBanner.value = response.data.riskTip?.trim() || null
     void restoreInstallJobs({
@@ -934,17 +1090,19 @@ async function updateInstalledMod(row: ModItemDto) {
   }
 }
 
-/** 批量更新选中的 Mod：订阅入列，后台逐个重新下载 */
-async function batchUpdateSelectedMods() {
-  const targets = selectedUpdatableMods.value
-  if (!selectedInstanceId.value || targets.length === 0 || batchUpdating.value) {
+/**
+ * 批量更新：订阅入列，后台逐个重新下载。
+ * 只接受「创意工坊上有新版本」的 Mod，避免把更新按钮做成对任何 Mod 都能按的空操作。
+ */
+async function runBatchUpdate(workshopIds: string[], options?: { skippedCount?: number }) {
+  if (!selectedInstanceId.value || workshopIds.length === 0 || batchUpdating.value) {
     return
   }
-  const skippedCount = checkedRowKeys.value.length - targets.length
+  const skippedCount = options?.skippedCount ?? 0
   batchUpdating.value = true
   try {
     const response = await apiMod.batchUpdateMods(selectedInstanceId.value, {
-      workshopIds: targets.map(mod => mod.workshopId),
+      workshopIds,
     })
     const downloadingIds = response.data
       .filter(job => job.status === 'downloading')
@@ -954,6 +1112,7 @@ async function batchUpdateSelectedMods() {
     })
     const notFoundCount = response.data.filter(job => job.status === 'not_found').length
     message.success('已开始更新 ' + downloadingIds.length + ' 个 Mod，可在列表中查看进度')
+    message.info('更新完成后需重启实例才会在游戏里生效')
     if (notFoundCount > 0) {
       message.warning(notFoundCount + ' 个 Mod 不存在，已跳过')
     }
@@ -961,6 +1120,7 @@ async function batchUpdateSelectedMods() {
       message.info(skippedCount + ' 个 Mod 正在下载中，本次已跳过')
     }
     checkedRowKeys.value = []
+    await loadInstalledMods()
   }
   catch (error: unknown) {
     if (isAuthUnauthorizedError(error)) {
@@ -970,6 +1130,102 @@ async function batchUpdateSelectedMods() {
   }
   finally {
     batchUpdating.value = false
+  }
+}
+
+/** 批量更新选中的 Mod：只处理其中确实有新版本的 */
+async function batchUpdateSelectedMods() {
+  const selected = installedMods.value.filter(mod => checkedRowKeys.value.includes(mod.workshopId))
+  const targets = selected.filter(mod => isModUpdatable(mod))
+  const skippedCount = selected.length - targets.length
+  if (targets.length === 0) {
+    message.info('选中的 Mod 没有可更新的版本，先点「检查更新」确认')
+    return
+  }
+  await runBatchUpdate(targets.map(mod => mod.workshopId), { skippedCount })
+}
+
+/** 一键更新全部有新版本的 Mod */
+async function updateAllOutdatedMods() {
+  const targets = installedMods.value.filter(mod => isModUpdatable(mod))
+  if (targets.length === 0) {
+    message.info('当前没有需要更新的 Mod')
+    return
+  }
+  await runBatchUpdate(targets.map(mod => mod.workshopId))
+}
+
+/** 全部重试失败的 Mod：导入存档后一次性把没下全的补齐 */
+async function retryAllFailedMods() {
+  if (!selectedInstanceId.value) {
+    return
+  }
+  const targets = installedMods.value.filter(mod =>
+    mod.installStatus === 'failed' && !isPendingWorkshop(mod.workshopId),
+  )
+  if (targets.length === 0) {
+    return
+  }
+  retryingFailedMods.value = true
+  try {
+    for (const mod of targets) {
+      await installMod({
+        workshopId: mod.workshopId,
+        name: mod.name,
+        previewImage: mod.previewImage ?? undefined,
+      }, {
+        onTerminal: job => void handleInstallJobTerminal(job),
+      })
+    }
+    message.success(`已重新排队下载 ${targets.length} 个 Mod，可在列表中查看进度`)
+  }
+  catch (error: unknown) {
+    if (isAuthUnauthorizedError(error)) {
+      return
+    }
+    message.error(getErrorMessage(error, '重新下载失败，请稍后重试'))
+  }
+  finally {
+    retryingFailedMods.value = false
+  }
+}
+
+/** 检查更新：判断哪些 Mod 不是创意工坊上的最新版，顺带按工坊标题补全名称与缩略图 */
+async function checkModUpdates() {
+  if (!selectedInstanceId.value || checkingUpdates.value) {
+    return
+  }
+  checkingUpdates.value = true
+  try {
+    const response = await apiMod.checkModUpdates(selectedInstanceId.value, { force: true })
+    await loadInstalledMods()
+    const { summary, upstreamOk, message: upstreamMessage } = response.data
+    if (summary.outdated > 0) {
+      notification.info({
+        title: `发现 ${summary.outdated} 个 Mod 有新版本`,
+        content: '点列表里的「更新」或工具条的「全部更新」，更新完成后重启实例生效。',
+        duration: 8000,
+      })
+    }
+    else if (summary.unknown === summary.total && summary.total > 0) {
+      message.warning(upstreamMessage?.trim() || '暂时无法判断 Mod 版本，请稍后重试')
+    }
+    else {
+      message.success('当前 Mod 都是创意工坊上的最新版本')
+    }
+    if (!upstreamOk && upstreamMessage?.trim() && summary.unknown < summary.total) {
+      message.warning(upstreamMessage.trim())
+    }
+  }
+  catch (error: unknown) {
+    if (isAuthUnauthorizedError(error)) {
+      return
+    }
+    // 取不到工坊信息时不动已有状态：明确告诉用户「沿用上次结果」而不是当成已是最新
+    message.error(getErrorMessage(error, '检查 Mod 更新失败，已沿用上次结果'))
+  }
+  finally {
+    checkingUpdates.value = false
   }
 }
 
@@ -1153,6 +1409,10 @@ function ensurePendingInInstalledList(item: Pick<SteamModListQueryResultItem, 'w
     version: null,
     installStatus: 'pending',
     installError: null,
+    localUpdatedAt: null,
+    remoteUpdatedAt: null,
+    updateCheckedAt: null,
+    updateStatus: 'unknown',
     dependencyIds: [],
     missingDependencyIds: [],
     dependentModIds: [],
@@ -1588,21 +1848,59 @@ onMounted(async () => {
               已订阅 ({{ subscribedTabCount }})
             </template>
             <div class="flex h-full min-h-0 flex-col">
-              <div v-if="!isMobileMode" class="flex shrink-0 items-center gap-3 pb-2">
-                <span class="text-xs text-muted-foreground">
-                  已选 {{ checkedRowKeys.length }} 项
-                </span>
+              <div v-if="!isMobileMode" class="flex shrink-0 flex-wrap items-center gap-3 pb-2">
+                <NButton
+                  size="small"
+                  :loading="checkingUpdates"
+                  :disabled="!hasSelectedInstance || installedMods.length === 0"
+                  @click="checkModUpdates"
+                >
+                  检查更新
+                </NButton>
                 <NButton
                   size="small"
                   type="primary"
                   secondary
                   :loading="batchUpdating"
+                  :disabled="subscribedSummary.outdated === 0"
+                  @click="updateAllOutdatedMods"
+                >
+                  全部更新 ({{ subscribedSummary.outdated }})
+                </NButton>
+                <NButton
+                  v-if="checkedRowKeys.length > 0"
+                  size="small"
+                  secondary
+                  :loading="batchUpdating"
                   :disabled="selectedUpdatableMods.length === 0"
                   @click="batchUpdateSelectedMods"
                 >
-                  批量更新
+                  更新选中 ({{ selectedUpdatableMods.length }})
                 </NButton>
+                <NButton
+                  v-if="subscribedSummary.failed > 0"
+                  size="small"
+                  type="warning"
+                  secondary
+                  :loading="retryingFailedMods"
+                  @click="retryAllFailedMods"
+                >
+                  重试全部失败 ({{ subscribedSummary.failed }})
+                </NButton>
+                <span class="text-xs text-muted-foreground">
+                  共 {{ subscribedSummary.total }} · 就绪 {{ subscribedSummary.ready }} · 下载中 {{ subscribedSummary.pending }} · 失败 {{ subscribedSummary.failed }}
+                  <template v-if="lastUpdateCheckedAt"> · 上次检查 {{ formatCheckedAt(lastUpdateCheckedAt) }}</template>
+                </span>
               </div>
+              <NAlert
+                v-if="!isMobileMode && modCheckHint"
+                class="mb-2 shrink-0"
+                type="info"
+                :bordered="false"
+                closable
+              >
+                {{ modCheckHint }}
+              </NAlert>
               <NDataTable
                 v-if="!isMobileMode"
                 :key="`subscribed-${selectedInstanceId}`"
@@ -1616,7 +1914,7 @@ onMounted(async () => {
                 :checked-row-keys="checkedRowKeys"
                 class="dst-mod-table min-h-0 flex-1"
                 flex-height
-                :scroll-x="1180"
+                :scroll-x="1310"
                 @update:checked-row-keys="(keys: Array<string | number>) => checkedRowKeys = keys"
               >
                 <template #empty>
@@ -1626,6 +1924,40 @@ onMounted(async () => {
                 </template>
               </NDataTable>
               <div v-else class="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1" :aria-busy="loadingInstalled">
+                <div class="flex flex-wrap gap-2">
+                  <NButton
+                    size="small"
+                    :loading="checkingUpdates"
+                    :disabled="!hasSelectedInstance || installedMods.length === 0"
+                    @click="checkModUpdates"
+                  >
+                    检查更新
+                  </NButton>
+                  <NButton
+                    v-if="subscribedSummary.outdated > 0"
+                    size="small"
+                    type="primary"
+                    secondary
+                    :loading="batchUpdating"
+                    @click="updateAllOutdatedMods"
+                  >
+                    全部更新 ({{ subscribedSummary.outdated }})
+                  </NButton>
+                  <NButton
+                    v-if="subscribedSummary.failed > 0"
+                    size="small"
+                    type="warning"
+                    secondary
+                    :loading="retryingFailedMods"
+                    @click="retryAllFailedMods"
+                  >
+                    重试失败 ({{ subscribedSummary.failed }})
+                  </NButton>
+                </div>
+                <p class="text-xs text-muted-foreground">
+                  共 {{ subscribedSummary.total }} · 就绪 {{ subscribedSummary.ready }} · 下载中 {{ subscribedSummary.pending }} · 失败 {{ subscribedSummary.failed }}
+                  <template v-if="lastUpdateCheckedAt"> · 上次检查 {{ formatCheckedAt(lastUpdateCheckedAt) }}</template>
+                </p>
                 <NEmpty v-if="!loadingInstalled && installedMods.length === 0" size="small" :description="subscribedEmptyDescription" />
                 <article
                   v-for="(mod, modIndex) in installedMods"
@@ -1642,9 +1974,17 @@ onMounted(async () => {
                       class="shrink-0 rounded"
                     />
                     <div class="min-w-0 flex-1">
-                      <h3 class="line-clamp-2 font-medium">{{ mod.name }}</h3>
+                      <h3 class="line-clamp-2 font-medium">
+                        {{ mod.name }}
+                        <NTag v-if="!isModNameIdentified(mod)" class="ml-1" size="tiny" :bordered="false" type="warning">
+                          未识别名称
+                        </NTag>
+                      </h3>
                       <p class="mt-1 text-xs text-muted-foreground">Workshop ID: {{ mod.workshopId }}</p>
                       <NRate v-if="mod.rating != null" class="mt-1" readonly allow-half size="small" :value="mod.rating" />
+                      <p class="mt-1 text-xs text-muted-foreground">
+                        版本：{{ MOD_UPDATE_STATUS[mod.updateStatus].label }}
+                      </p>
                     </div>
                     <NTag size="small" :bordered="false" :type="subscribedStatusType(mod)">
                       {{ subscribedStatusLabel(mod) }}
@@ -1653,12 +1993,21 @@ onMounted(async () => {
                   <p v-if="mod.installError" class="text-sm text-rose-600 dark:text-rose-400">{{ mod.installError }}</p>
                   <div class="flex gap-2">
                     <NButton
-                      v-if="mod.installStatus === 'ready'"
+                      v-if="isModUpdatable(mod)"
                       class="flex-1"
+                      type="primary"
                       :disabled="!hasSelectedInstance || isPendingWorkshop(mod.workshopId)"
                       @click="updateInstalledMod(mod)"
                     >
                       更新
+                    </NButton>
+                    <NButton
+                      v-else-if="canRedownloadMod(mod)"
+                      class="flex-1"
+                      :disabled="!hasSelectedInstance || isPendingWorkshop(mod.workshopId)"
+                      @click="updateInstalledMod(mod)"
+                    >
+                      重新下载
                     </NButton>
                     <NButton
                       v-if="mod.installStatus === 'ready'"

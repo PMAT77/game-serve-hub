@@ -97,6 +97,19 @@ export function collectMissingWorkshopIds(installPath: string, workshopIds: stri
   return normalizeWorkshopIds(workshopIds).filter(workshopId => !isDstWorkshopModPresent(installPath, workshopId))
 }
 
+/**
+ * 该交给 SteamCMD 的 id 列表：订阅/补齐只下缺的，强制更新则原样交给 SteamCMD
+ * （由它自己比对工坊清单决定是否真的重新下载）。
+ */
+export function resolveWorkshopDownloadIds(
+  installPath: string,
+  workshopIds: string[],
+  options?: { force?: boolean },
+): string[] {
+  const requestedIds = normalizeWorkshopIds(workshopIds)
+  return options?.force ? requestedIds : collectMissingWorkshopIds(installPath, requestedIds)
+}
+
 export function formatModDownloadFailureMessage(output: string): string {
   const text = output.trim()
   if (!text) {
@@ -119,11 +132,21 @@ export async function downloadDstWorkshopMods(input: {
   hostInstallPath: string
   workshopIds: string[]
   instanceId: string
+  /**
+   * 为 true 时忽略「本机已有内容」，把请求的 id 全部交给 SteamCMD 重新校验下载。
+   *
+   * 更新已订阅 Mod 必须走这条路：SteamCMD 自己会比对工坊清单，内容已是最新时是一次
+   * 廉价空跑，有新版本时才会真正重新下载。为 false（订阅/补齐）时保持短路，
+   * 避免对已就绪的 Mod 白跑一次 SteamCMD。
+   */
+  force?: boolean
   onLogLine?: (line: string) => void
   onAwaitingSteamcmdLock?: () => void | Promise<void>
   onDownloadStart?: () => void | Promise<void>
 }): Promise<{ ok: boolean, error?: string }> {
-  const missingIds = collectMissingWorkshopIds(input.hostInstallPath, input.workshopIds)
+  const missingIds = resolveWorkshopDownloadIds(input.hostInstallPath, input.workshopIds, {
+    force: input.force,
+  })
   if (missingIds.length === 0) {
     return { ok: true }
   }

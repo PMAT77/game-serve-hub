@@ -145,6 +145,13 @@ export const MOD_ENABLED_STATUS: Record<'enabled' | 'disabled', StatusDescriptor
   disabled: { label: '已关闭', tone: 'neutral', icon: 'i-lucide:toggle-left' },
 }
 
+/** Mod 版本状态：只回答「是不是创意工坊上的最新版」，unknown 表示信息不足，绝不显示成「已是最新」 */
+export const MOD_UPDATE_STATUS: Record<'outdated' | 'up_to_date' | 'unknown', StatusDescriptor> = {
+  outdated: { label: '有新版本', tone: 'warning', icon: 'i-lucide:arrow-up-circle' },
+  up_to_date: { label: '已是最新', tone: 'success', icon: 'i-lucide:badge-check' },
+  unknown: { label: '未检查', tone: 'neutral', icon: 'i-lucide:help-circle' },
+}
+
 /* -------------------------------- 洞穴功能 -------------------------------- */
 
 export const CAVES_FEATURE_STATUS: Record<'off' | 'on' | 'error', StatusDescriptor> = {

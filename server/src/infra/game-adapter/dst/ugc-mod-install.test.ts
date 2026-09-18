@@ -179,6 +179,25 @@ describe('ensureDstUgcModLayout', () => {
     assert.equal(fs.existsSync(path.join(targetDir, 'leftover.txt')), false)
   })
 
+  it('replaces already-installed content when refresh is set (update path)', async () => {
+    const installPath = createInstallPath()
+    const sourceDir = writeSteamappsSource(installPath, '777')
+    await ensureDstUgcModLayout(installPath, ['777'])
+    const targetDir = resolveDstUgcModDir(installPath, 'Master', '777')
+    assert.equal(fs.readFileSync(path.join(targetDir, 'modinfo.lua'), 'utf8').includes('Mod 777'), true)
+
+    // SteamCMD 更新后的新内容 + 上一版残留文件，refresh 必须整目录替换而不是跳过
+    fs.writeFileSync(path.join(sourceDir, 'modinfo.lua'), 'name = "Mod 777 v2"\n')
+    fs.writeFileSync(path.join(targetDir, 'obsolete.lua'), '-- old\n')
+
+    const outcomes = await ensureDstUgcModLayout(installPath, ['777'], { refresh: true })
+
+    assert.deepEqual(outcomes, [{ workshopId: '777', status: 'installed' }])
+    assert.equal(fs.readFileSync(path.join(targetDir, 'modinfo.lua'), 'utf8').includes('Mod 777 v2'), true)
+    assert.equal(fs.existsSync(path.join(targetDir, 'obsolete.lua')), false)
+    assert.deepEqual(listTempResidue(installPath), [])
+  })
+
   it('installs into both shards when caves is configured', async () => {
     const installPath = createInstallPath()
     writeCavesShardConfig(installPath)

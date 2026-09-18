@@ -7,6 +7,7 @@ import {
   __steamWorkshopTestUtils,
   fetchDstSteamWorkshopMods,
   fetchWorkshopFileDetail,
+  fetchWorkshopModMetadata,
   getSteamWorkshopMetricsSnapshot,
 } from './steam-workshop.ts'
 
@@ -496,5 +497,100 @@ describe('fetchWorkshopFileDetail', () => {
     assert.equal(__steamWorkshopTestUtils.resolveItemRating({
       star_rating: -1,
     }), null)
+  })
+})
+
+describe('fetchWorkshopModMetadata', () => {
+  function mockPublishedFileDetails(
+    items: Array<{ id: string, title?: string, preview?: string, updated?: number, size?: number }>,
+    options?: { status?: number, onRequest?: (body: string) => void },
+  ) {
+    let requestCount = 0
+    globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+      requestCount += 1
+      options?.onRequest?.(String(init?.body ?? ''))
+      if (options?.status && options.status !== 200) {
+        return new Response('nope', { status: options.status })
+      }
+      return new Response(JSON.stringify({
+        response: {
+          publishedfiledetails: items.map(item => ({
+            publishedfileid: item.id,
+            result: 1,
+            title: item.title,
+            preview_url: item.preview,
+            time_updated: item.updated,
+            file_size: item.size,
+          })),
+        },
+      }), { status: 200 })
+    }
+    return () => requestCount
+  }
+
+  it('maps title, preview image and version time per workshop id', async () => {
+    const requests = mockPublishedFileDetails([
+      { id: '111', title: ' 空格 Mod ', preview: 'https://example.com/a.png', updated: 1_800_000_000, size: 2048 },
+      { id: '222', title: '', updated: undefined },
+    ])
+    const result = await fetchWorkshopModMetadata(['111', '222', '111'])
+    assert.equal(result.ok, true)
+    assert.equal(requests(), 1)
+    assert.equal(result.items.get('111')?.title, '空格 Mod')
+    assert.equal(result.items.get('111')?.previewImage, 'https://example.com/a.png')
+    assert.equal(result.items.get('111')?.updatedAt, new Date(1_800_000_000 * 1000).toISOString())
+    assert.equal(result.items.get('111')?.fileSize, 2048)
+    // 上游没给标题/版本时间 → null（版本判定会落到「未知」而不是「已最新」）
+    assert.equal(result.items.get('222')?.title, null)
+    assert.equal(result.items.get('222')?.updatedAt, null)
+  })
+
+  it('caches results until force is requested', async () => {
+    const requests = mockPublishedFileDetails([{ id: '333', title: 'Cached Mod', updated: 1_700_000_000 }])
+    await fetchWorkshopModMetadata(['333'])
+    await fetchWorkshopModMetadata(['333'])
+    assert.equal(requests(), 1)
+    await fetchWorkshopModMetadata(['333'], { force: true })
+    assert.equal(requests(), 2)
+  })
+
+  it('splits oversized id lists into multiple batches', async () => {
+    const requests = mockPublishedFileDetails([{ id: '1', title: 'Batch Mod', updated: 1_700_000_000 }])
+    const ids = Array.from({ length: 205 }, (_value, index) => String(index + 1))
+    const result = await fetchWorkshopModMetadata(ids)
+    assert.equal(requests(), 3)
+    assert.equal(result.ok, true)
+  })
+
+  it('keeps the batch result when one batch fails and reports upstream failure', async () => {
+    let calls = 0
+    globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+      calls += 1
+      if (calls > 1) {
+        return new Response('boom', { status: 503 })
+      }
+      const body = String(init?.body ?? '')
+      const firstId = /publishedfileids\[0\]=(\d+)/.exec(body)?.[1] ?? '1'
+      return new Response(JSON.stringify({
+        response: {
+          publishedfiledetails: [{ publishedfileid: firstId, result: 1, title: 'Part Mod', time_updated: 1_800_000_000 }],
+        },
+      }), { status: 200 })
+    }
+    const ids = Array.from({ length: 150 }, (_value, index) => String(index + 1))
+    const result = await fetchWorkshopModMetadata(ids)
+    assert.equal(result.ok, false)
+    assert.equal(Boolean(result.message), true)
+    // 成功的批次照常返回，失败批次不写入「查无此 Mod」的结论
+    assert.equal(result.items.get('1')?.title, 'Part Mod')
+    assert.equal(result.items.has('101'), false)
+  })
+
+  it('returns an empty successful result for empty input', async () => {
+    const requests = mockPublishedFileDetails([])
+    const result = await fetchWorkshopModMetadata([])
+    assert.equal(result.ok, true)
+    assert.equal(result.items.size, 0)
+    assert.equal(requests(), 0)
   })
 })

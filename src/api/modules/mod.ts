@@ -10,6 +10,8 @@ import type {
   ModMutationResult,
   ModReorderPayload,
   ModReorderResult,
+  ModUpdateCheckPayload,
+  ModUpdateCheckResult,
   SteamModListQueryResult,
   SteamModDetailDto,
   ModContentLocale,
@@ -38,6 +40,11 @@ export type {
   ModMutationResult,
   ModReorderPayload,
   ModReorderResult,
+  ModUpdateCheckPayload,
+  ModUpdateCheckResult,
+  ModUpdateCheckSummary,
+  ModUpdateInfo,
+  ModUpdateStatus,
   SteamModListQueryResultItem,
   SteamModListMeta,
   SteamModListQueryResult,
@@ -114,6 +121,8 @@ export default {
     api.post(`app/instances/${instanceId}/mods/install`, payload) as Promise<{ data: ModInstallJobDto }>,
   batchUpdateMods: (instanceId: string, payload: ModBatchUpdatePayload) =>
     api.post(`app/instances/${instanceId}/mods/batch-update`, payload) as Promise<{ data: ModInstallJobDto[] }>,
+  checkModUpdates: (instanceId: string, payload?: ModUpdateCheckPayload) =>
+    api.post(`app/instances/${instanceId}/mods/check-updates`, payload ?? {}) as Promise<{ data: ModUpdateCheckResult }>,
   getModInstallJob: (instanceId: string, workshopId: string) =>
     api.get(`app/instances/${instanceId}/mods/install-jobs/${workshopId}`) as Promise<{ data: ModInstallJobDto }>,
   listModInstallJobs: (instanceId: string, workshopIds?: string[]) =>

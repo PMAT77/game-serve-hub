@@ -6,6 +6,7 @@ import { afterEach, describe, it } from 'node:test'
 import { strToU8, zipSync } from 'fflate'
 import { resolveDstSteamWorkshopModDir } from '../../infra/game-adapter/dst/mod-download'
 import { resolveDstUgcModDir } from '../../infra/game-adapter/dst/ugc-mod-install'
+import { resolveWorkshopManifestPath } from '../../infra/game-adapter/dst/workshop-manifest'
 import type { DbInstanceMod } from '../../shared/db/index'
 import {
   resetModFileSyncDbHooksForTest,
@@ -38,6 +39,9 @@ function createMockMod(input: Partial<DbInstanceMod> & Pick<DbInstanceMod, 'inst
     version: input.version ?? null,
     installStatus: input.installStatus ?? 'ready',
     installError: input.installError ?? null,
+    localUpdatedAt: input.localUpdatedAt ?? null,
+    remoteUpdatedAt: input.remoteUpdatedAt ?? null,
+    updateCheckedAt: input.updateCheckedAt ?? null,
     config: input.config ?? null,
     createdAt: input.createdAt ?? now,
     updatedAt: input.updatedAt ?? now,
@@ -55,6 +59,24 @@ function writeWorkshopMod(installPath: string, workshopId: string) {
   const modDir = resolveDstSteamWorkshopModDir(installPath, workshopId)
   fs.mkdirSync(modDir, { recursive: true })
   fs.writeFileSync(path.join(modDir, 'modinfo.lua'), 'name = "Test Mod"\n')
+}
+
+/** 写入 SteamCMD 清单条目：本机内容对应的工坊版本时间 */
+function writeWorkshopManifest(installPath: string, workshopId: string, timeupdated: number) {
+  const manifestPath = resolveWorkshopManifestPath(installPath)
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true })
+  fs.writeFileSync(manifestPath, [
+    '"AppWorkshop"',
+    '{',
+    '\t"WorkshopItemsInstalled"',
+    '\t{',
+    `\t\t"${workshopId}"`,
+    '\t\t{',
+    `\t\t\t"timeupdated"\t\t"${timeupdated}"`,
+    '\t\t}',
+    '\t}',
+    '}',
+  ].join('\n'))
 }
 
 function installDbHooks() {
@@ -235,6 +257,94 @@ describe('mod-download-service', () => {
     assert.equal(upsertCalls.some(call => call.installStatus === 'pending'), true)
     assert.equal(listedMods[0]?.installStatus, 'ready')
     assert.equal(listedMods[0]?.enabled, true)
+  })
+
+  it('records the installed workshop version after a forced update', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    writeWorkshopMod(installPath, '66666')
+    writeWorkshopManifest(installPath, '66666', 1_800_000_000)
+    listedMods = [createMockMod({
+      instanceId: 'instance-e',
+      workshopId: '66666',
+      name: 'Updated Mod',
+      installStatus: 'ready',
+    })]
+    setModDownloadExecutorForTest(async () => ({ ok: true }))
+
+    await enqueueModDownload({
+      instanceId: 'instance-e',
+      installPath,
+      payload: { workshopId: '66666', name: 'Updated Mod' },
+      force: true,
+    })
+    await waitForModInstallJob('instance-e', '66666')
+
+    const readyCall = upsertCalls.find(call => call.installStatus === 'ready')
+    const versionIso = new Date(1_800_000_000 * 1000).toISOString()
+    // 本机内容对应的工坊版本时间来自 SteamCMD 清单，更新后必须重新入账
+    assert.equal(readyCall?.localUpdatedAt, versionIso)
+    // 刚更新过即代表已是最新，避免紧接着又被判成「未知」
+    assert.equal(readyCall?.remoteUpdatedAt, versionIso)
+    assert.ok(readyCall?.updateCheckedAt)
+  })
+
+  it('coalesces other missing mods into one download call', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    listedMods = [
+      createMockMod({ instanceId: 'instance-f', workshopId: '100', name: 'Pending A', installStatus: 'pending' }),
+      createMockMod({ instanceId: 'instance-f', workshopId: '200', name: 'Pending B', installStatus: 'pending' }),
+      createMockMod({ instanceId: 'instance-f', workshopId: '300', name: 'Ready C', installStatus: 'ready' }),
+    ]
+    writeWorkshopMod(installPath, '300')
+    const downloadBatches: string[][] = []
+    setModDownloadExecutorForTest(async (input) => {
+      downloadBatches.push([...input.workshopIds])
+      for (const workshopId of input.workshopIds) {
+        writeWorkshopMod(installPath, workshopId)
+      }
+      return { ok: true }
+    })
+
+    await enqueueModDownload({
+      instanceId: 'instance-f',
+      installPath,
+      payload: { workshopId: '100', name: 'Pending A' },
+    })
+    await waitForModInstallJob('instance-f', '100')
+
+    // 一次 SteamCMD 覆盖两个缺失 Mod；已就绪的 300 不参与
+    assert.deepEqual(downloadBatches, [['100', '200']])
+    assert.equal(getModInstallJob('instance-f', '100').status, 'success')
+    assert.equal(listedMods.find(mod => mod.workshopId === '100')?.installStatus, 'ready')
+    assert.equal(listedMods.find(mod => mod.workshopId === '200')?.installStatus, 'ready')
+  })
+
+  it('keeps the primary job successful when a coalesced mod is still missing', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    listedMods = [
+      createMockMod({ instanceId: 'instance-g', workshopId: '111', name: 'Pending A', installStatus: 'pending' }),
+      createMockMod({ instanceId: 'instance-g', workshopId: '222', name: 'Pending B', installStatus: 'pending' }),
+    ]
+    setModDownloadExecutorForTest(async () => {
+      // 只下到了主 Mod，222 仍缺失
+      writeWorkshopMod(installPath, '111')
+      return { ok: true }
+    })
+
+    await enqueueModDownload({
+      instanceId: 'instance-g',
+      installPath,
+      payload: { workshopId: '111', name: 'Pending A' },
+    })
+    await waitForModInstallJob('instance-g', '111')
+
+    assert.equal(getModInstallJob('instance-g', '111').status, 'success')
+    assert.equal(listedMods.find(mod => mod.workshopId === '111')?.installStatus, 'ready')
+    // 顺带下载失败的 Mod 只影响它自己，等待下一次重试
+    assert.equal(listedMods.find(mod => mod.workshopId === '222')?.installStatus, 'failed')
   })
 
   it('deduplicates in-flight download jobs for the same workshop id', async () => {

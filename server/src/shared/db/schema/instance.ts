@@ -49,6 +49,12 @@ export const instanceMods = sqliteTable('instance_mods', {
   previewImage: text('preview_image'),
   installStatus: text('install_status').notNull().default('ready'),
   installError: text('install_error'),
+  /** 本机已下载内容对应的工坊版本时间（ISO）；未知为 null */
+  localUpdatedAt: text('local_updated_at'),
+  /** 工坊上的最新版本时间（ISO）；未知为 null */
+  remoteUpdatedAt: text('remote_updated_at'),
+  /** 最近一次版本检查时间（ISO）；从未检查为 null */
+  updateCheckedAt: text('update_checked_at'),
   config: text('config'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),

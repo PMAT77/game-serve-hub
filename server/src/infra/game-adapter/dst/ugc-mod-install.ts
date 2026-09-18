@@ -131,11 +131,15 @@ async function installModIntoDirectory(source: ModSource, targetDir: string): Pr
 /**
  * 将已下载的创意工坊 Mod 落位到 DST 的 ugc_mods 目录（幂等）。
  * 单个 Mod 失败只影响该 Mod，不抛出异常。
+ *
+ * `refresh` 用于「更新已订阅 Mod」：SteamCMD 刚下载了新版本，目标目录里还是旧内容，
+ * 此时必须重新落位，否则 DST 加载的仍是旧版本（源目录与目标目录都在本地，重新复制
+ * 比再下一次便宜得多）。落位依旧是「临时目录 + 原子改名」，DST 不会读到半成品。
  */
 export async function ensureDstUgcModLayout(
   installPath: string,
   workshopIds: string[],
-  options: { shardFolders?: DstShardFolder[] } = {},
+  options: { shardFolders?: DstShardFolder[], refresh?: boolean } = {},
 ): Promise<UgcModInstallOutcome[]> {
   const normalizedIds = [...new Set(workshopIds.map(id => id.trim()).filter(Boolean))]
   if (normalizedIds.length === 0) {
@@ -154,9 +158,11 @@ export async function ensureDstUgcModLayout(
   const sourceCache = new Map<string, ModSource | null>()
 
   for (const workshopId of normalizedIds) {
-    const pendingShards = shardFolders.filter(
-      shardFolder => !hasModInfoFile(resolveDstUgcModDir(installPath, shardFolder, workshopId)),
-    )
+    const pendingShards = options.refresh
+      ? shardFolders
+      : shardFolders.filter(
+          shardFolder => !hasModInfoFile(resolveDstUgcModDir(installPath, shardFolder, workshopId)),
+        )
     if (pendingShards.length === 0) {
       outcomes.push({ workshopId, status: 'skipped' })
       continue

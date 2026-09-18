@@ -10,6 +10,7 @@ import {
   formatModDownloadFailureMessage,
   isDstWorkshopModPresent,
   resolveDstSteamWorkshopModDir,
+  resolveWorkshopDownloadIds,
 } from './mod-download'
 
 const tempDirs: string[] = []
@@ -79,6 +80,16 @@ describe('mod-download', () => {
       collectMissingWorkshopIds(installPath, ['111', '222', '222']),
       ['222'],
     )
+  })
+
+  it('keeps already-present ids when force is set (update path)', () => {
+    const installPath = createInstallPath()
+    writeModMarker(installPath, '111', 'steamapps')
+    // 非强制：已就绪的 Mod 不必再走 SteamCMD
+    assert.deepEqual(resolveWorkshopDownloadIds(installPath, ['111', '222']), ['222'])
+    // 强制更新：已就绪的 Mod 也必须交给 SteamCMD 重新校验，否则「更新」按钮永远不下载
+    assert.deepEqual(resolveWorkshopDownloadIds(installPath, ['111', '222'], { force: true }), ['111', '222'])
+    assert.deepEqual(resolveWorkshopDownloadIds(installPath, [' 111 ', '111'], { force: true }), ['111'])
   })
 
   it('formats common download failure messages', () => {

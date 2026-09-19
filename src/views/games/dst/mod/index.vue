@@ -752,7 +752,7 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
     },
   },
   {
-    title: '状态',
+    title: '安装状态',
     key: 'installStatus',
     width: 130,
     render: (row) => {
@@ -763,15 +763,18 @@ const subscribedColumns: DataTableColumns<ModItemDto> = [
       const type = pending ? 'warning' : row.installStatus === 'failed' ? 'error' : 'success'
       const tag = h(NTag, { size: 'small', bordered: false, type }, { default: () => label })
       const errorText = row.installError?.trim()
-      if (!errorText) {
-        return tag
-      }
+      // 文件状态与「启用」是两件事：无论如何都要能悬停看懂，出错时优先说原因
+      const tooltipText = errorText
+        ? (errorText.length > 160 ? `${errorText.slice(0, 160)}…` : errorText)
+        : (label === MOD_INSTALL_STATUS.ready.label
+            ? 'Mod 文件已下载并放入服务器目录；是否在游戏里生效看「启用」开关'
+            : 'Mod 文件尚未就绪，就绪后才能启用')
       return h(
         NTooltip,
         { trigger: 'hover' },
         {
           trigger: () => tag,
-          default: () => errorText.length > 160 ? `${errorText.slice(0, 160)}…` : errorText,
+          default: () => tooltipText,
         },
       )
     },

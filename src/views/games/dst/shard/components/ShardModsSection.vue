@@ -47,12 +47,23 @@ const filteredInstalledMods = computed(() => {
   })
 })
 
+/** 安装状态 = Mod 文件在不在服务器上；是否生效由右边的「开关状态」决定，标签里再说一遍只会打架 */
 function renderInstallStatus(row: ModItemDto) {
   const state = MOD_INSTALL_STATUS[row.installStatus]
-  return h(
+  const tag = h(
     NTag,
     { size: 'small', bordered: false, type: statusTagType(state.tone) },
     { default: () => state.label },
+  )
+  return h(
+    NTooltip,
+    { trigger: 'hover' },
+    {
+      trigger: () => tag,
+      default: () => (row.installStatus === 'ready'
+        ? 'Mod 文件已下载并放入服务器目录；是否在游戏里生效看「开关状态」'
+        : (row.installError?.trim() || 'Mod 文件尚未就绪，就绪后才能开启')),
+    },
   )
 }
 

@@ -134,9 +134,16 @@ export function resolveShardDisplayStatus(shard: ShardDisplayFacts | null | unde
 
 /* ---------------------------------- 模组 ---------------------------------- */
 
+/**
+ * Mod 安装状态：只回答「文件在不在服务器上」。
+ *
+ * 与「开关状态」是两件事：文件没就绪，开关根本点不动；文件就绪了，还要在世界设置里开启才会被
+ * 游戏加载。这里不再写「待开启」之类的后缀——开关状态紧挨着它单独成列，写在标签里会自相矛盾
+ * （已开启的行显示「待开启」）。开启引导放在订阅成功的提示里。
+ */
 export const MOD_INSTALL_STATUS: Record<'pending' | 'ready' | 'failed', StatusDescriptor> = {
   pending: { label: '下载中', tone: 'info', icon: 'i-lucide:download' },
-  ready: { label: '已下载·待开启', tone: 'success', icon: 'i-lucide:package-check' },
+  ready: { label: '已就绪', tone: 'success', icon: 'i-lucide:package-check' },
   failed: { label: '下载失败', tone: 'error', icon: 'i-lucide:download-x' },
 }
 

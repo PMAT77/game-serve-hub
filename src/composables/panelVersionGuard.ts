@@ -8,7 +8,7 @@
  * 这里只回答一个问题：页面里跑的这份前端，和正在提供服务的面板是不是同一个版本。
  */
 
-/** 统一版本写法：去掉 v 前缀与空白，便于 package.json（0.6.15）与 Release tag（v0.6.15）互比 */
+/** 统一版本写法：去掉 v 前缀与空白，便于 package.json 的数字版本与 Release tag 的 vX.Y.Z 互比 */
 export function normalizePanelVersion(value: string | null | undefined): string {
   return (value ?? '').trim().replace(/^v/i, '')
 }

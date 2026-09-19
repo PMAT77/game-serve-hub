@@ -13,6 +13,7 @@ const args = [
   'server/src/**/*.test.ts',
   'scripts/**/*.test.ts',
   'src/api/**/*.test.ts',
+  'src/composables/**/*.test.ts',
   'src/views/**/*.test.ts',
 ]
 

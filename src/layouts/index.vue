@@ -14,6 +14,7 @@ import SubSidebar from './components/SubSidebar/index.vue'
 import Topbar from './components/Topbar/index.vue'
 import LinkView from './components/views/link.vue'
 import { usePanelUpdateNotifier } from '@/composables/usePanelUpdateNotifier'
+import { usePanelVersionGuard } from '@/composables/usePanelVersionGuard'
 import { useScheduleRunNotifier } from '@/composables/useScheduleRunNotifier'
 
 defineOptions({
@@ -23,6 +24,8 @@ defineOptions({
 const routeInfo = useRoute()
 
 usePanelUpdateNotifier()
+// 面板升级后旧标签页仍跑旧脚本：这里负责把它喊出来（只提示，不自动刷新）
+usePanelVersionGuard()
 useScheduleRunNotifier()
 
 const appSettingsStore = useAppSettingsStore()

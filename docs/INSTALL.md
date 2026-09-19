@@ -292,6 +292,8 @@ sudo cat /var/lib/game-server-hub/admin-credentials.txt
 
 下载不中断面板，可以提前挑个空闲时段下载、之后再安装。也可以按[阶段二](#阶段二导入离线镜像包)先手动 `docker load`，回到本页点「下载更新」会跳过下载直接进入「立即安装」。按钮置灰时用面板给出的 `sudo gsh update`。
 
+> **安装完成后请刷新浏览器页面**（Ctrl/Cmd+Shift+R）。面板已经在跑的标签页里仍是升级前的界面脚本，不刷新会继续看到旧界面；管理端也会在检测到版本不一致时提示「页面还是旧版本」，点提示里的「刷新页面」即可。
+
 重建动作由一个临时的 updater 容器完成，它需要镜像里有 `docker` CLI 与 compose 插件。v0.3.10 起统一镜像自带这两样，面板会优先用**本地已有的目标镜像 / 当前面板镜像**当 updater 运行时，因此离线环境也能完成更新，不再去 Docker Hub 拉 `docker:27-cli`。若你所在网络要求固定某个 updater 镜像（例如内网制品库里的同等镜像），在 `panel.env` 里设置 `GSH_PANEL_UPDATER_IMAGE` 即可。
 
 > 从 v0.3.9 及更早版本升到 v0.3.10：旧镜像不含 docker CLI，且本机也没有 `docker:27-cli` 时，面板内更新会失败并提示；按路线 B 用离线镜像包升到 v0.3.10 一次，之后面板内更新即可离线完成。
@@ -306,6 +308,7 @@ sudo cat /var/lib/game-server-hub/admin-credentials.txt
 - 只允许升级：目标版本必须高于当前版本，同版本重装与降级都会被拒绝（因此「同一个版本号重新发布了内容」这种情况在 Native 下请用安装脚本重装）。
 - 失败会自动回滚：`current` 切回上一个 release、`panel.env` 恢复更新前的副本、面板以旧版本重新提供服务，并在界面上给出失败原因；执行器被中断（重启、超时）也会留下明确的失败状态，不会让界面一直停在「更新中」。
 - 更新期间面板会短暂无法访问（通常 1-3 分钟，取决于服务器到 GitHub 的网速与系统包状态），游戏实例不受影响。
+- **安装完成后请刷新浏览器页面**（Ctrl/Cmd+Shift+R）：还在跑的标签页里是升级前的界面脚本。管理端检测到版本不一致时会提示「页面还是旧版本」，点提示里的「刷新页面」即可。
 - 排障：`sudo journalctl -u game-server-hub-update.service -n 100` 看后台程序日志；每次更新的完整安装日志在 `/var/lib/game-server-hub/panel-update/.root/update.log`（root 私有），更新状态在 `/var/lib/game-server-hub/panel-update/state.json`。
 
 不想走面板时，随时可以用目标版本重跑安装器，效果与面板内更新一致（安装器同样会校验、切换并回滚）：

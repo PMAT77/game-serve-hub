@@ -65,6 +65,8 @@ export default defineConfig(({ mode, command }) => {
     define: {
       __SYSTEM_INFO__: JSON.stringify({
         pkg: {
+          // 页面自身的构建版本：与后端 /health 的 release.version 比对，识别「标签页还跑着旧界面」
+          version: pkg.version,
           dependencies: pkg.dependencies,
           devDependencies: pkg.devDependencies,
         },

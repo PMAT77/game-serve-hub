@@ -38,6 +38,7 @@ declare global {
   const mapWritableState: typeof import('pinia').mapWritableState
   const markRaw: typeof import('vue').markRaw
   const nextTick: typeof import('vue').nextTick
+  const normalizePanelVersion: typeof import('../composables/panelVersionGuard').normalizePanelVersion
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
   const onBeforeRouteLeave: typeof import('vue-router').onBeforeRouteLeave
@@ -57,9 +58,11 @@ declare global {
   const promptPasswordChangeIfNeeded: typeof import('../composables/app/password-change-prompt').promptPasswordChangeIfNeeded
   const provide: typeof import('vue').provide
   const reactive: typeof import('vue').reactive
+  const readBuiltPanelVersion: typeof import('../composables/panelVersionGuard').readBuiltPanelVersion
   const readonly: typeof import('vue').readonly
   const ref: typeof import('vue').ref
   const resolveComponent: typeof import('vue').resolveComponent
+  const resolvePanelVersionMismatch: typeof import('../composables/panelVersionGuard').resolvePanelVersionMismatch
   const setActivePinia: typeof import('pinia').setActivePinia
   const setMapStoreSuffix: typeof import('pinia').setMapStoreSuffix
   const shallowReactive: typeof import('vue').shallowReactive
@@ -101,6 +104,7 @@ declare global {
   const useNarrowFormLayout: typeof import('../composables/useNarrowFormLayout').useNarrowFormLayout
   const useOperationState: typeof import('../composables/useOperationState').useOperationState
   const usePanelUpdateNotifier: typeof import('../composables/usePanelUpdateNotifier').usePanelUpdateNotifier
+  const usePanelVersionGuard: typeof import('../composables/usePanelVersionGuard').usePanelVersionGuard
   const usePollingTask: typeof import('../composables/usePollingTask').usePollingTask
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
@@ -118,6 +122,9 @@ declare global {
   // @ts-ignore
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
+  // @ts-ignore
+  export type { PanelVersionMismatch } from '../composables/panelVersionGuard'
+  import('../composables/panelVersionGuard')
   // @ts-ignore
   export type { ModInstallHandlers } from '../composables/useInstanceModState'
   import('../composables/useInstanceModState')

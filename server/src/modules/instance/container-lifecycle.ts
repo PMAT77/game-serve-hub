@@ -67,11 +67,13 @@ export function resolveShardReadyWaitSec(): number {
 }
 
 /**
- * 分片端口早于这个秒数就被占用时，不认为世界已经加载完，必须再等到控制台出现就绪标记。
+ * 分片端口早于这个秒数就被占用时，不认为世界已经加载完。
  *
  * DST 的分片网络是在世界初始化过程中建立的，正常情况下端口出现得比较晚；一旦它出现得过早，
  * 说明「端口被占用」只能证明进程起来了，不能证明能接客。60 秒足够区分这两种情形：
  * 多 Mod 大存档的冷启动远不止 60 秒。
+ *
+ * 这里只约束**端口这条辅助判据**：主判据是 `hasMasterReadyMarker()`，命中即放行，与端口无关。
  */
 const SHARD_PORT_EARLY_BIND_GRACE_SEC = 60
 
@@ -484,21 +486,23 @@ export function readClusterMasterPort(installPath: string): number {  try {
  * 用的就是 `dgram.createSocket('udp4')`）。此处原先用 TCP `net.connect` 探测，
  * TCP 连一个只监听 UDP 的端口会被内核直接回 RST，探测永远返回 false——
  * 线上表现为「房间已经能进、控制台却一路报主世界仍在加载」，直到 900 秒超时兜底才启动洞穴。
+ *
+ * **但 UDP 也不是充分条件**：bind 探测的是「调用方所在网络命名空间」里的占用情况，而
+ * `master_port` 是 `cluster.ini [SHARD]` 的分片互联端口，只在实例容器网络内监听、从不发布到
+ * 宿主机，面板容器里探测必然为空。因此它只是把握度较高的辅助判据，主判据必须是
+ * `hasMasterReadyMarker()`（见 `waitForMasterShardReady`）。
  */
 export function isShardPortBound(port: number): Promise<boolean> {
   return findHostUdpPortConflicts([port]).then(conflicts => conflicts.includes(port))
 }
 
 /**
- * 等主世界就绪后再拉起洞穴。
+ * 等待主世界就绪的结果。
  *
- * 两个分片同时加载时，各自都要把整套 Mod 与世界读一遍：2 核 4G 机器上两个峰值叠在
- * 一起会触发整机 OOM（线上实测主世界 anon-rss 已达 2.0 GiB 时被内核杀掉），而洞穴
- * 此时连不上主世界，只会反复报 `Connection to master failed`，最后两个分片都白跑。
- * 主世界先跑完，洞穴再加载时页缓存已经热了，整机峰值只剩原来的一个多一点。
+ * 为什么要等：两个分片同时加载会把整机内存吃穿（见 `waitForMasterShardReady`）。
  */
 export type MasterReadyOutcome =
-  /** 主世界分片端口已可连接，洞穴可以起来了 */
+  /** 已确认世界加载完成（就绪标记，或同命名空间下已过宽限期的端口），洞穴可以起来了 */
   | { kind: 'ready' }
   /** 等满上限仍未就绪：照常启动洞穴，但要在控制台说明原因 */
   | { kind: 'timed-out' }
@@ -547,6 +551,8 @@ export function classifyMasterProbe(
  * 此时连不上主世界，只会反复报 `Connection to master failed`，最后两个分片都白跑。
  * 主世界先跑完，洞穴再加载时页缓存已经热了，整机峰值只剩原来的一个多一点。
  *
+ * 就绪判据以 DST 自己写的 `server_log.txt` 标记为主，端口探测只作辅助——理由见函数内注释。
+ *
  * 崩溃循环必须当成失败：`Restart=on-failure` 的重启窗口里单元仍算「在运行」，
  * 若只按这一条判断就会白等满上限、然后照样把洞穴拉起来占内存。
  */
@@ -565,6 +571,23 @@ export async function waitForMasterShardReady(
   let lastHeartbeat = startAt
   let portBoundAt: number | null = null
   while (Date.now() < deadline) {
+    // 首选判据：DST 自己写的世界就绪标记（`server_log.txt`，或面板采集到的同一行）。
+    //
+    // 它不依赖任何网络命名空间，因此容器模式与 native 模式都成立。端口探测**不能**当主判据：
+    // `master_port` 是 `cluster.ini [SHARD]` 的分片互联端口，只在实例容器的网络里监听、
+    // 从不发布到宿主机（发布的是 `server.ini` 的三个游戏端口），面板容器里 bind 它必然成功，
+    // 于是「端口已被占用」永远为 false——只按端口判断会让 Docker 模式一路等到上限，
+    // 表现为「房间能进、控制台却一直报『尚未监听到分片端口』」。
+    if (hasMasterReadyMarker(instanceId, installPath)) {
+      instanceConsoleLogStore.appendSystem(
+        instanceId,
+        `主世界已加载完成（启动后 ${Math.round((Date.now() - startAt) / 1000)} 秒），就绪后启动洞穴分片`,
+        'master',
+      )
+      return { kind: 'ready' }
+    }
+    // 端口探测降级为辅助判据：只在「面板与游戏处于同一网络命名空间」（native 同机进程）
+    // 时才探测得到，用于兜住就绪标记读不到（实例目录权限异常等）的情形。
     if (await isShardPortBound(masterPort)) {
       if (portBoundAt === null) {
         portBoundAt = Date.now()
@@ -576,10 +599,10 @@ export async function waitForMasterShardReady(
           'master',
         )
       }
-      // 端口绑得太早说明 DST 可能在进程启动早期就占住了它，此时还不能断定世界已加载完，
-      // 必须等到控制台里出现世界就绪的标记；晚绑定（超过宽限）则说明它随世界初始化一起起来。
+      // 端口绑得太早说明 DST 可能在进程启动早期就占住了它，此时还不能断定世界已加载完；
+      // 晚绑定（超过宽限）则说明它随世界初始化一起起来。
       const portElapsedSec = (portBoundAt - startAt) / 1000
-      if (portElapsedSec > SHARD_PORT_EARLY_BIND_GRACE_SEC || hasMasterReadyMarker(instanceId, installPath)) {
+      if (portElapsedSec > SHARD_PORT_EARLY_BIND_GRACE_SEC) {
         return { kind: 'ready' }
       }
     }
@@ -613,7 +636,7 @@ export async function waitForMasterShardReady(
       instanceConsoleLogStore.appendSystem(
         instanceId,
         portBoundAt === null
-          ? `主世界仍在加载（已等待 ${waited} 秒，尚未监听到分片端口），就绪后再启动洞穴分片`
+          ? `主世界仍在加载（已等待 ${waited} 秒，尚未看到世界就绪标记），就绪后再启动洞穴分片`
           : `主世界已监听端口但仍在加载世界（已等待 ${waited} 秒），就绪后再启动洞穴分片`,
         'master',
       )

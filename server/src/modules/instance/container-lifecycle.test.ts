@@ -4,7 +4,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, afterEach, describe, it } from 'node:test'
+import type { FastifyInstance } from 'fastify'
 import { resolveDockerStatus } from '../../infra/docker.ts'
+import type { ContainerRef } from '../../infra/container/types.ts'
 import { resolveShardRoot } from '../../infra/game-adapter/dst/shard-layout.ts'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store.ts'
 import {
@@ -17,6 +19,7 @@ import {
   isShardPortBound,
   readClusterMasterPort,
   resolveShardReadyWaitSec,
+  waitForMasterShardReady,
 } from './container-lifecycle.ts'
 
 const tempDirs: string[] = []
@@ -340,6 +343,79 @@ describe('hasMasterReadyMarker', () => {
     const instanceId = freshInstanceId()
     instanceConsoleLogStore.appendDockerLine(instanceId, '[00:02:50]: About to start a shard with these settings:', 'caves')
     assert.equal(hasMasterReadyMarker(instanceId), false)
+  })
+})
+
+/**
+ * 回归：`master_port` 是 `cluster.ini [SHARD]` 的分片互联端口，只在实例容器的网络里监听，
+ * **从不发布到宿主机**（发布的是 `server.ini` 的三个游戏端口）。因此在 Docker 模式下，
+ * 面板容器里 bind 它必然成功——「端口已被占用」这条判据永远不成立。
+ *
+ * 就绪判定此前把 `hasMasterReadyMarker()` 写在「端口已探测到」分支里面，于是标记永远不会被
+ * 检查。实测表现：主世界 57 秒就打印 `Sim paused`、房间能进，控制台却一路报
+ * 「主世界仍在加载（…尚未监听到分片端口）」，直到 900 秒超时兜底才启动洞穴。
+ */
+describe('waitForMasterShardReady', () => {
+  const fakeApp = {
+    log: { warn() {}, info() {}, error() {} },
+  } as unknown as FastifyInstance
+  const masterRef = { id: 'test-master-container', name: 'test-master-container' } as ContainerRef
+
+  /** 用户服务器上主世界的真实片段：世界加载完成 */
+  const REAL_MASTER_READY_LOG = [
+    '[00:00:54]: Reconstructing topology\t',
+    '[00:00:54]: [Shard] Shard server started on port: 10888',
+    '[00:00:57]: Sim paused',
+    '',
+  ].join('\n')
+
+  function freshInstanceId(): string {
+    return `inst-ready-${Date.now()}-${Math.round(Math.random() * 1e6)}`
+  }
+
+  function writeMasterLog(installPath: string, content: string): void {
+    const dir = resolveShardRoot(installPath, 'master')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'server_log.txt'), content)
+  }
+
+  async function freeUdpPort(): Promise<number> {
+    const held = await bindUdpPort()
+    const port = held.port
+    held.close()
+    return port
+  }
+
+  it('端口探测不到时靠主世界自己的就绪标记立即放行（Docker 模式）', async () => {
+    const installPath = createTempDir()
+    writeMasterLog(installPath, REAL_MASTER_READY_LOG)
+    const port = await freeUdpPort()
+    const startedAt = Date.now()
+    const outcome = await waitForMasterShardReady(fakeApp, freshInstanceId(), masterRef, port, installPath, 900, 0)
+    assert.equal(outcome.kind, 'ready')
+    // 旧实现下这里会一直等到上限（15 分钟），用例必然超时
+    assert.ok(Date.now() - startedAt < 5000, '就绪标记命中时应立即返回，不再等满上限')
+  })
+
+  it('世界还在加载时不放行', async () => {
+    const installPath = createTempDir()
+    writeMasterLog(installPath, '[00:00:30]: Mod: workshop-1 (X)\t  Registering prefabs\t\n')
+    const port = await freeUdpPort()
+    const outcome = await waitForMasterShardReady(fakeApp, freshInstanceId(), masterRef, port, installPath, 1, 0)
+    assert.notEqual(outcome.kind, 'ready')
+  })
+
+  it('端口已绑定但早于宽限期时仍不放行（避免与世界加载撞在一起）', async () => {
+    const installPath = createTempDir()
+    const held = await bindUdpPort()
+    try {
+      const outcome = await waitForMasterShardReady(fakeApp, freshInstanceId(), masterRef, held.port, installPath, 1, 0)
+      // 唯一要证明的是「端口刚绑定不等于世界就绪」；此时运行时快照如何不影响这个判定
+      assert.notEqual(outcome.kind, 'ready')
+    }
+    finally {
+      held.close()
+    }
   })
 })
 

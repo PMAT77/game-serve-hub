@@ -49,4 +49,5 @@ interface ImportMetaEnv {
    * 启用假数据（仅开发环境）
    */
   readonly VITE_USE_FAKE: boolean
+  readonly VITE_DEV_WEB_PORT: number
 }

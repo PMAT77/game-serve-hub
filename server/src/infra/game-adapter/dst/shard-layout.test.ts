@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { ensureDstClusterConfig } from './cluster-config'
-import { isCavesShardConfigured, isShardWorldGenerated, resolveShardSaveDir } from './shard-layout'
+import { isCavesShardConfigured, isShardWorldGenerated, removeShardSaveDir, resolveShardSaveDir } from './shard-layout'
 
 const tempDirs: string[] = []
 
@@ -40,5 +40,28 @@ describe('shard-layout', () => {
     fs.mkdirSync(saveDir, { recursive: true })
     fs.writeFileSync(path.join(saveDir, 'session'), '1')
     assert.equal(isShardWorldGenerated(installPath, 'master'), true)
+  })
+
+  it('removeShardSaveDir discards one world without touching the other shard', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { gamePort: 10999 })
+    for (const shardId of ['master', 'caves'] as const) {
+      const sessionDir = path.join(resolveShardSaveDir(installPath, shardId), 'session', 's1')
+      fs.mkdirSync(sessionDir, { recursive: true })
+      fs.writeFileSync(path.join(sessionDir, 'level'), 'x')
+    }
+    assert.equal(isShardWorldGenerated(installPath, 'master'), true)
+    assert.equal(isShardWorldGenerated(installPath, 'caves'), true)
+
+    removeShardSaveDir(installPath, 'master')
+    // 存档清空后世界回到「未生成」，下次启动时游戏会重新生成地图
+    assert.equal(isShardWorldGenerated(installPath, 'master'), false)
+    assert.equal(isShardWorldGenerated(installPath, 'caves'), true)
+  })
+
+  it('removeShardSaveDir tolerates a shard that never generated a world', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { gamePort: 10999 })
+    assert.doesNotThrow(() => removeShardSaveDir(installPath, 'caves'))
   })
 })

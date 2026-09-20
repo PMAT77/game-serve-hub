@@ -15,6 +15,7 @@ import {
   resolveShardWorldgenPath,
 } from './shard-layout'
 import { parseWorldgenOverride } from './worldgen-override'
+import { readWorldSeeds } from './panel-config-meta'
 const tempDirs: string[] = []
 
 function makeTempInstall(): string {
@@ -209,5 +210,55 @@ describe('shard-service', () => {
       }),
       /已生成/,
     )
+  })
+
+  it('saves, keeps, clears and validates the world seed', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { instanceName: 'Test', gamePort: 10999 })
+    const instance = makeInstance(installPath)
+    const base = {
+      instanceId: instance.id,
+      shard: 'master' as const,
+      serverPort: 10999,
+      steamAuthPort: 8766,
+      steamMasterPort: 12346,
+      worldgenPreset: 'SURVIVAL_TOGETHER' as const,
+    }
+
+    saveShardConfig(instance, { ...base, worldSeed: '1608382646' })
+    assert.deepEqual(readWorldSeeds(installPath), { master: '1608382646' })
+
+    // 省略字段 = 不变更（与其余差异提交字段一致）
+    saveShardConfig(instance, { ...base })
+    assert.deepEqual(readWorldSeeds(installPath), { master: '1608382646' })
+
+    assert.throws(() => saveShardConfig(instance, { ...base, worldSeed: '12a' }), /位数字/)
+    assert.deepEqual(readWorldSeeds(installPath), { master: '1608382646' })
+
+    // null = 清除，回到游戏随机
+    saveShardConfig(instance, { ...base, worldSeed: null })
+    assert.deepEqual(readWorldSeeds(installPath), {})
+  })
+
+  it('allows changing the world seed after the world is generated', () => {
+    const installPath = makeTempInstall()
+    ensureDstClusterConfig(installPath, { gamePort: 10999 })
+    const instance = makeInstance(installPath)
+    const saveDir = resolveShardSaveDir(installPath, 'master')
+    fs.mkdirSync(saveDir, { recursive: true })
+    fs.writeFileSync(path.join(saveDir, 'session'), 'x')
+    assert.equal(isShardWorldGenerated(installPath, 'master'), true)
+
+    // 种子只在下一次生成地图时被读取，与地图生成参数不同，不设「世界已生成」闸门
+    saveShardConfig(instance, {
+      instanceId: instance.id,
+      shard: 'master',
+      serverPort: 10999,
+      steamAuthPort: 8766,
+      steamMasterPort: 12346,
+      worldgenPreset: 'SURVIVAL_TOGETHER',
+      worldSeed: '777',
+    })
+    assert.deepEqual(readWorldSeeds(installPath), { master: '777' })
   })
 })

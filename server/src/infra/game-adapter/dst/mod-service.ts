@@ -3,6 +3,9 @@ import path from 'node:path'
 import { backupFile, writeFileAtomic } from './atomic-write'
 import { ensureClusterDirectory, resolveClusterPaths } from './cluster-service'
 import { buildLuaConfigurationOptionsInline } from './mod-config'
+import { readWorldSeeds } from './panel-config-meta'
+import { resolveDstUgcShardFolders, type DstShardFolder } from './ugc-mod-install'
+import { ensureWorldSeedModLayout, toWorldSeedModName } from './world-seed'
 
 const MOD_SETUP_FILE_NAME = 'dedicated_server_mods_setup.lua'
 const MOD_OVERRIDES_FILE_NAME = 'modoverrides.lua'
@@ -48,21 +51,34 @@ function buildModSetupContent(mods: DstModEntry[]): string {
   return `${lines.join('\n')}${lines.length > 0 ? '\n' : ''}`
 }
 
-function buildModOverridesContent(mods: DstModEntry[]): string {
+function buildModOverridesContent(mods: DstModEntry[], extraRows: string[] = []): string {
   const sorted = [...mods]
     .filter(mod => mod.workshopId.trim())
     .sort((a, b) => a.loadOrder - b.loadOrder || a.workshopId.localeCompare(b.workshopId, 'en'))
-  if (sorted.length === 0) {
-    return 'return {}\n'
-  }
   const rows = sorted.map((mod) => {
     const configInline = buildLuaConfigurationOptionsInline(mod.configurationOptions ?? {})
     return `  ["${toWorkshopKey(mod.workshopId)}"]={ enabled=${mod.enabled ? 'true' : 'false'}${configInline} },`
   })
-  return ['return {', ...rows, '}'].join('\n') + '\n'
+  const allRows = [...rows, ...extraRows]
+  if (allRows.length === 0) {
+    return 'return {}\n'
+  }
+  return ['return {', ...allRows, '}'].join('\n') + '\n'
 }
 
-function writeModOverridesByShard(installPath: string, content: string) {
+/**
+ * 世界种子由面板内置 Mod 承载，这里只负责按分片注入启用条目。
+ * 它不进 dedicated_server_mods_setup.lua：那个文件是给 SteamCMD 拉取创意工坊内容用的，
+ * 内置 Mod 的文件由面板自己落位，列进去只会让游戏去工坊找一份并不存在的 Mod。
+ */
+function buildWorldSeedModRow(): string {
+  return `  ["${toWorldSeedModName()}"]={ enabled=true },`
+}
+
+function writeModOverridesByShard(
+  installPath: string,
+  buildContent: (shardFolder: DstShardFolder) => string,
+) {
   const { clusterRoot } = resolveClusterPaths(installPath)
   const masterDir = path.join(clusterRoot, 'Master')
   const cavesDir = path.join(clusterRoot, 'Caves')
@@ -70,10 +86,10 @@ function writeModOverridesByShard(installPath: string, content: string) {
   fs.mkdirSync(cavesDir, { recursive: true })
   const masterModOverridesPath = path.join(masterDir, MOD_OVERRIDES_FILE_NAME)
   backupFile(masterModOverridesPath)
-  writeFileAtomic(masterModOverridesPath, content)
+  writeFileAtomic(masterModOverridesPath, buildContent('Master'))
   const cavesModOverridesPath = path.join(cavesDir, MOD_OVERRIDES_FILE_NAME)
   backupFile(cavesModOverridesPath)
-  writeFileAtomic(cavesModOverridesPath, content)
+  writeFileAtomic(cavesModOverridesPath, buildContent('Caves'))
 }
 
 function writeDedicatedServerModSetup(installPath: string, content: string) {
@@ -131,5 +147,16 @@ export function writeInstanceModFiles(installPath: string, mods: DstModEntry[]) 
   writeDedicatedServerModSetup(installPath, modSetupContent)
   // 兼容已有目录结构，继续同步到 Cluster 根目录，便于历史数据排查。
   writeClusterModSetup(installPath, modSetupContent)
-  writeModOverridesByShard(installPath, buildModOverridesContent(mods))
+  // 世界种子（面板内置 Mod）：先落位文件、再按分片注入启用条目，两件事必须一起做，
+  // 否则会出现"启用了但文件不在"或"文件在但没启用"的不一致状态。
+  const seedFolders = ensureWorldSeedModLayout(
+    installPath,
+    resolveDstUgcShardFolders(installPath),
+    readWorldSeeds(installPath),
+  )
+  writeModOverridesByShard(installPath, shardFolder =>
+    buildModOverridesContent(
+      mods,
+      seedFolders.includes(shardFolder) ? [buildWorldSeedModRow()] : [],
+    ))
 }

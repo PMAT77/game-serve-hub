@@ -27,6 +27,7 @@ import {
   parseModOverridesEntries,
 } from '../../infra/game-adapter/dst/mod-config'
 import { isDstWorkshopModPresent } from '../../infra/game-adapter/dst/mod-download'
+import { isWorldSeedModId } from '../../infra/game-adapter/dst/world-seed'
 import {
   buildServerIni,
   defaultCavesServerIniFields,
@@ -214,13 +215,21 @@ function resolveShardDir(clusterPath: string, shard: 'Master' | 'Caves'): string
   return fs.existsSync(shardDir) ? shardDir : undefined
 }
 
-/** 解析源 modoverrides.lua 的 Mod 条目：Master 优先，Master 缺失时退回 Caves */
+/**
+ * 解析源 modoverrides.lua 的 Mod 条目：Master 优先，Master 缺失时退回 Caves。
+ *
+ * 面板内置的世界种子 Mod 会随源档一起出现在 modoverrides.lua 里，但它不是玩家订阅的
+ * 创意工坊 Mod：留着会被当成一条"未下载"的订阅排进下载队列并永远失败，因此在源头滤掉。
+ */
 function readSourceModEntries(clusterPath: string) {
-  const masterEntries = parseModOverridesEntries(path.join(clusterPath, 'Master', 'modoverrides.lua'))
+  const readEntries = (shard: 'Master' | 'Caves') =>
+    parseModOverridesEntries(path.join(clusterPath, shard, 'modoverrides.lua'))
+      .filter(entry => !isWorldSeedModId(entry.workshopId))
+  const masterEntries = readEntries('Master')
   if (masterEntries.length > 0) {
     return masterEntries
   }
-  return parseModOverridesEntries(path.join(clusterPath, 'Caves', 'modoverrides.lua'))
+  return readEntries('Caves')
 }
 
 function buildCandidateDetail(candidate: ClusterCandidate): { detail: {

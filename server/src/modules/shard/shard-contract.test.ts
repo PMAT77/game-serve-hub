@@ -48,4 +48,20 @@ describe('shard API contracts', () => {
       worldRuleOverrides: { 'invalid-key': 'more' },
     }).success, false)
   })
+
+  it('accepts omitted, cleared and numeric world seeds, rejects anything else', () => {
+    // 省略 = 不变更；null = 清除；数字串 = 指定种子
+    assert.equal(shardSavePayloadSchema.safeParse(validMasterPayload).success, true)
+    assert.equal(shardSavePayloadSchema.safeParse({ ...validMasterPayload, worldSeed: null }).success, true)
+    assert.equal(shardSavePayloadSchema.safeParse({ ...validMasterPayload, worldSeed: '1608382646' }).success, true)
+    assert.equal(shardSavePayloadSchema.safeParse({ ...validMasterPayload, worldSeed: '0' }).success, true)
+
+    for (const worldSeed of ['', '12a', '1.5', '-1', '1'.repeat(16), ' 123']) {
+      assert.equal(
+        shardSavePayloadSchema.safeParse({ ...validMasterPayload, worldSeed }).success,
+        false,
+        `worldSeed 应被拒绝：${JSON.stringify(worldSeed)}`,
+      )
+    }
+  })
 })

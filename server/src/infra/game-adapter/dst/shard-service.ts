@@ -49,8 +49,12 @@ import {
 import {
   isPanelMasterWorldSaved,
   markPanelMasterWorldSaved,
+  readObservedWorldSeed,
   readPanelConfigMeta,
+  readWorldSeeds,
+  writeWorldSeed,
 } from './panel-config-meta'
+import { validateWorldSeed } from './world-seed'
 import type { ServerIniFields } from './server-ini'
 
 const SHARD_DISPLAY: Record<ShardId, string> = {
@@ -146,6 +150,7 @@ function buildShardSummary(
   let worldgenPreset: ShardWorldgenPreset | null = null
   let savedOverrides: Record<string, string> | null = null
   let worldGenerated = false
+  const observedSeed = readObservedWorldSeed(installPath, shardId)
   if (configured) {
     const fields = readShardIniFields(installPath, shardId)
     if (fields) {
@@ -167,6 +172,13 @@ function buildShardSummary(
     steamMasterPort,
     worldgenPreset,
     overrides: savedOverrides,
+    worldSeed: readWorldSeeds(installPath)[shardId] ?? null,
+    /**
+     * 当前世界的真实种子：来自实例运行期间的读取记录，停服后依然在。
+     * 记录已过时（世界被重新生成过、新种子还没读到）时按「尚未读到」处理——
+     * 宁可暂时不显示，也不把上一个世界的种子当成当前世界的。
+     */
+    currentWorldSeed: observedSeed && !observedSeed.stale ? observedSeed.seed : null,
     worldGenerated,
     isMaster: shardId === 'master',
     panelSaved: shardId === 'master' && isPanelMasterWorldSaved(panelMeta),
@@ -272,6 +284,13 @@ export function saveShardConfig(instance: DbGameInstance, payload: ShardSavePayl
   if (patchError) {
     throw new Error(patchError)
   }
+  // 种子校验放在任何写盘之前，避免"文件已改一半才发现参数非法"
+  if (payload.worldSeed !== undefined && payload.worldSeed !== null) {
+    const seedError = validateWorldSeed(payload.worldSeed)
+    if (seedError) {
+      throw new Error(seedError)
+    }
+  }
   const iniPath = resolveShardServerIniPath(installPath, shardId)
   const worldgenPath = resolveShardWorldgenPath(installPath, shardId)
   backupFile(iniPath)
@@ -287,6 +306,17 @@ export function saveShardConfig(instance: DbGameInstance, payload: ShardSavePayl
   )
   if (shardId === 'master') {
     markPanelMasterWorldSaved(installPath)
+  }
+  /**
+   * 世界种子存在面板自己的元数据里，不写进 worldgenoverride.lua 的 overrides：
+   * 那个键空间属于 DST 世界设置，塞入未知键会被游戏判为无效选项。
+   *
+   * 与地图生成参数不同，这里**不做**「世界已生成」闸门：种子只在下一次生成地图时被读取，
+   * 用户改完配合「重置世界」即可生效，界面上有对应说明；硬锁反而会让想换地图的人
+   * 先被迫去删存档。真正的落位与启用由随后的一次 Mod 文件同步完成。
+   */
+  if (payload.worldSeed !== undefined) {
+    writeWorldSeed(installPath, shardId, payload.worldSeed ?? null)
   }
   return { saved: true, restarted: false }
 }

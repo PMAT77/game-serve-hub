@@ -40,6 +40,16 @@ const worldOverridesSchema = z.record(overrideKeySchema, overrideValueSchema).re
   '世界规则项不能超过 128 条',
 )
 
+/**
+ * 世界种子：1–15 位数字。
+ *
+ * 游戏的默认种子是 6 位（os.time() 反转后取前 6 位），社区流传与分享的种子多为 10 位；
+ * 上限 15 位是为了让数值稳定落在双精度可精确表示的范围内（2^53），避免写入 Lua 后取整走样。
+ */
+export const worldSeedPattern = /^\d{1,15}$/
+export const worldSeedSchema = z.string().regex(worldSeedPattern, '世界种子只能是 1–15 位数字')
+export type WorldSeed = z.infer<typeof worldSeedSchema>
+
 export const shardInstanceQuerySchema = z.object({
   instanceId: instanceIdSchema,
 })
@@ -55,6 +65,13 @@ export const shardSummarySchema = z.object({
   worldgenPreset: shardWorldgenPresetSchema.nullable(),
   /** 本分片已保存的世界配置覆盖项（真源：worldgenoverride.lua 的 overrides） */
   overrides: z.record(z.string(), z.string()).nullable(),
+  /** 面板记录的世界种子；null 表示留空（由游戏自己随机） */
+  worldSeed: worldSeedSchema.nullable(),
+  /**
+   * 当前世界的真实种子：实例运行期间向游戏问到的 `TheWorld.meta.seed`（与存档记录一致）。
+   * null 表示暂时没有可信的值——从未读到，或世界刚被重新生成、新种子还没读到。
+   */
+  currentWorldSeed: worldSeedSchema.nullable(),
   worldGenerated: z.boolean(),
   isMaster: z.boolean(),
   panelSaved: z.boolean(),
@@ -86,6 +103,11 @@ export const shardSavePayloadSchema = z.object({
   worldgenPreset: shardWorldgenPresetSchema,
   worldRuleOverrides: worldOverridesSchema.optional(),
   worldgenOverrides: worldOverridesSchema.optional(),
+  /**
+   * 世界种子：写入该分片下次生成地图时使用的种子；null 表示清除（回到随机）。
+   * 省略该字段表示不变更，与其余差异提交字段语义一致。
+   */
+  worldSeed: worldSeedSchema.nullable().optional(),
   restart: z.boolean().optional(),
 }).superRefine((payload, context) => {
   const isValidMasterPreset = payload.shard === 'master'
@@ -173,3 +195,51 @@ export const shardMaintenanceResultSchema = z.object({
   backupWarning: z.string().nullable(),
 })
 export type ShardMaintenanceResult = z.infer<typeof shardMaintenanceResultSchema>
+
+/** 主动读取当前世界真实种子：需要实例（及目标分片）正在运行 */
+export const shardReadWorldSeedPayloadSchema = z.object({
+  instanceId: instanceIdSchema,
+  shard: shardIdSchema,
+})
+export type ShardReadWorldSeedPayload = z.infer<typeof shardReadWorldSeedPayloadSchema>
+
+export const shardWorldSeedProbeSchema = z.object({
+  instanceId: instanceIdSchema,
+  shard: shardIdSchema,
+  /** 是否从游戏读到了真实种子 */
+  available: z.boolean(),
+  /** 游戏记录的真实种子（游戏内的 TheWorld.meta.seed）；读不到时为 null */
+  seed: worldSeedSchema.nullable(),
+  /** 读取时间（ISO）；读不到时为 null，此时沿用面板此前记录的值 */
+  recordedAt: z.string().nullable(),
+  /** 读不到时的说明（实例未运行、世界尚未加载完等） */
+  message: z.string().nullable(),
+})
+export type ShardWorldSeedProbe = z.infer<typeof shardWorldSeedProbeSchema>
+
+/**
+ * 按填写的种子重置世界并重新启动实例。
+ *
+ * 与「重置世界」（把命令发给运行中的游戏）不同：这条路径要求实例**已停止**，
+ * 由面板清掉该分片的存档，再启动实例让游戏按新的种子生成地图。
+ */
+export const shardResetWorldWithSeedPayloadSchema = z.object({
+  instanceId: instanceIdSchema,
+  shard: shardIdSchema,
+  /** 世界种子；null 或省略表示由游戏随机 */
+  worldSeed: worldSeedSchema.nullable().optional(),
+})
+export type ShardResetWorldWithSeedPayload = z.infer<typeof shardResetWorldWithSeedPayloadSchema>
+
+export const shardResetWorldWithSeedResultSchema = z.object({
+  accepted: z.literal(true),
+  /** 安全备份 ID；未备份或备份失败时为 null */
+  backupId: z.string().nullable(),
+  /** 备份失败的说明：备份失败不阻断操作，但必须如实告知 */
+  backupWarning: z.string().nullable(),
+  /** 是否已成功拉起实例（世界在启动时按新种子生成） */
+  restarted: z.boolean(),
+  /** 存档已重置但启动失败时的说明；此时手动启动即可 */
+  restartWarning: z.string().nullable(),
+})
+export type ShardResetWorldWithSeedResult = z.infer<typeof shardResetWorldWithSeedResultSchema>

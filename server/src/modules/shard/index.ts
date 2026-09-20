@@ -2,7 +2,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import {
   shardInstanceQuerySchema,
+  shardReadWorldSeedPayloadSchema,
   shardResetWorldPayloadSchema,
+  shardResetWorldWithSeedPayloadSchema,
   shardRollbackPayloadSchema,
   shardSavePayloadSchema,
   shardSnapshotsQuerySchema,
@@ -11,9 +13,11 @@ import type {
   ShardInitCavesResult,
   ShardListDto,
   ShardMaintenanceResult,
+  ShardResetWorldWithSeedResult,
   ShardSavePayload,
   ShardSaveResult,
   ShardSnapshotsDto,
+  ShardWorldSeedProbe,
 } from '../../../../shared/contracts/shard'
 import { NODE_INSTANCE_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import { resolveLocalDstInstance } from '../../shared/dst/local-dst-instance'
@@ -23,7 +27,9 @@ import {
   saveShardConfig,
 } from '../../infra/game-adapter/dst/shard-service'
 import { listShardSnapshots, readMaxSnapshots } from '../../infra/game-adapter/dst/world-maintenance'
-import { resetShardWorld, rollbackShard } from './world-maintenance-service'
+import { probeWorldSeed, scheduleWorldSeedProbes } from '../console/world-seed-probe'
+import { syncInstanceModFilesFromDb } from '../mod/mod-file-sync-service'
+import { resetShardWorld, resetShardWorldWithSeed, rollbackShard } from './world-maintenance-service'
 import { injectRestartInstance } from '../instance/inject-restart'
 import { isInstanceContainerRunning } from '../instance/container-lifecycle'
 import { businessError, success } from '../../shared/http/response'
@@ -65,6 +71,12 @@ export function registerShardModule(app: FastifyInstance) {
     }
     try {
       const data = await getShardList(resolved.instance)
+      // 世界种子只能在实例运行期间从游戏里读到：拿到实例状态时顺带在后台补读一次
+      // （不阻塞本次响应）。这样"跑过一次"的世界即使之后停服，也能显示它真实的种子。
+      scheduleWorldSeedProbes(
+        resolved.instance,
+        data.clusterShardEnabled ? ['master', 'caves'] : ['master'],
+      )
       return success(data, request)
     }
     catch (error) {
@@ -114,6 +126,17 @@ export function registerShardModule(app: FastifyInstance) {
     }
     try {
       const result = saveShardConfig(resolved.instance, payload)
+      // 世界种子由面板内置的 Mod 承载：保存后立刻同步一次 Mod 文件，让内置 Mod 内容与
+      // 服务器 Mod 清单反映最新种子。失败只记日志——种子已落在面板元数据里，
+      // 实例启动前的同步会再来一次，不会丢。
+      if (payload.worldSeed !== undefined) {
+        try {
+          await syncInstanceModFilesFromDb(resolved.instance.id, resolved.instance.installPath)
+        }
+        catch (error) {
+          app.log.warn({ instanceId, error }, '保存世界种子后同步 Mod 文件失败，将在实例启动时重试')
+        }
+      }
       if (payload.restart) {
         const restartError = await restartInstance(app, request, instanceId)
         if (restartError) {
@@ -125,6 +148,39 @@ export function registerShardModule(app: FastifyInstance) {
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '保存世界配置失败'
+      return businessError(message, request)
+    }
+  })
+
+  /**
+   * 读取当前世界的真实种子。
+   *
+   * 种子由游戏生成并记在存档里，只能向正在运行的分片询问（TheWorld.meta.seed）；
+   * 读到后写进面板元数据，因此实例停服后页面依然显示得到。
+   */
+  app.post('/app/instance/shards/read-world-seed', async (request): Promise<ApiSuccessResponse<ShardWorldSeedProbe> | ApiErrorResponse> => {
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
+    if (authError) {
+      return authError
+    }
+    const body = shardReadWorldSeedPayloadSchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const resolved = await resolveLocalDstInstance(body.data.instanceId, request, { messages: SHARD_RESOLVE_MESSAGES })
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    try {
+      const probe = await probeWorldSeed({
+        instanceId: resolved.instance.id,
+        shard: body.data.shard,
+        installPath: resolved.instance.installPath,
+      })
+      return success(probe, request)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '读取当前世界种子失败'
       return businessError(message, request)
     }
   })
@@ -192,6 +248,44 @@ export function registerShardModule(app: FastifyInstance) {
     }
     for (const warning of outcome.warnings) {
       app.log.warn({ instanceId: resolved.instance.id, shard: payload.shard, warning }, '世界回档提示')
+    }
+    return success(outcome.result, request)
+  })
+
+  /**
+   * 按填写的种子重置世界并重新启动实例。
+   *
+   * 与下面的「重置世界」（发给运行中的游戏）不同：这条路径要求实例已停止，
+   * 由面板清掉该分片存档，再启动实例让游戏按新种子生成地图。
+   */
+  app.post('/app/instance/shards/reset-world-with-seed', async (request): Promise<ApiSuccessResponse<ShardResetWorldWithSeedResult> | ApiErrorResponse> => {
+    const authError = await requirePermission(request, NODE_INSTANCE_MANAGE_PERMISSION)
+    if (authError) {
+      return authError
+    }
+    const body = shardResetWorldWithSeedPayloadSchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    const resolved = await resolveLocalDstInstance(body.data.instanceId, request, { messages: SHARD_RESOLVE_MESSAGES })
+    if (!resolved.ok) {
+      return resolved.error
+    }
+    const outcome = await resetShardWorldWithSeed({
+      app,
+      request,
+      instance: resolved.instance,
+      shard: body.data.shard,
+      worldSeed: body.data.worldSeed ?? null,
+    })
+    if (!outcome.ok) {
+      return businessError(outcome.message, request)
+    }
+    for (const warning of outcome.warnings) {
+      app.log.warn(
+        { instanceId: body.data.instanceId, shard: body.data.shard, warning },
+        '按种子重置世界提示',
+      )
     }
     return success(outcome.result, request)
   })

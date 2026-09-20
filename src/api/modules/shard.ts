@@ -3,10 +3,12 @@ import type {
   ShardInitCavesResult,
   ShardListDto,
   ShardMaintenanceResult,
+  ShardResetWorldWithSeedResult,
   ShardRollbackPayload,
   ShardSavePayload,
   ShardSaveResult,
   ShardSnapshotsDto,
+  ShardWorldSeedProbe,
 } from '../../../shared/contracts/shard'
 import api from '../index'
 
@@ -15,6 +17,7 @@ export type {
   ShardContainerStatus,
   ShardListDto,
   ShardMaintenanceResult,
+  ShardResetWorldWithSeedResult,
   ShardRollbackPayload,
   ShardSavePayload,
   ShardSaveResult,
@@ -22,6 +25,7 @@ export type {
   ShardSnapshotsDto,
   ShardSummaryDto,
   ShardInitCavesResult,
+  ShardWorldSeedProbe,
   CavesWorldgenPreset,
   MasterWorldgenPreset,
 } from '../../../shared/contracts/shard'
@@ -36,6 +40,12 @@ export default {
     params: { instanceId },
   }) as Promise<{ data: ShardInitCavesResult }>,
   saveShardConfig: (payload: ShardSavePayload) => api.put('app/instance/shards', payload) as Promise<{ data: ShardSaveResult }>,
+  /** 向正在运行的分片询问当前世界的真实种子（读到后会被面板记录下来） */
+  readWorldSeed: (payload: { instanceId: string, shard: ShardId }) =>
+    api.post('app/instance/shards/read-world-seed', payload) as Promise<{ data: ShardWorldSeedProbe }>,
+  /** 按填写的种子重置世界并重新启动实例（要求实例已停止） */
+  resetWorldWithSeed: (payload: { instanceId: string, shard: ShardId, worldSeed: string | null }) =>
+    api.post('app/instance/shards/reset-world-with-seed', payload) as Promise<{ data: ShardResetWorldWithSeedResult }>,
   getShardSnapshots: (instanceId: string, shard: ShardId) => api.get('app/instance/shards/snapshots', {
     params: { instanceId, shard },
   }) as Promise<{ data: ShardSnapshotsDto }>,

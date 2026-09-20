@@ -20,6 +20,8 @@ function defaultShardList(instanceId: string): ShardListDto {
         steamMasterPort: 12346,
         worldgenPreset: 'SURVIVAL_TOGETHER',
         overrides: { day: 'default', krampus: 'default', world_size: 'default' },
+        worldSeed: null,
+        currentWorldSeed: null,
         worldGenerated: false,
         isMaster: true,
         panelSaved: false,
@@ -35,6 +37,8 @@ function defaultShardList(instanceId: string): ShardListDto {
         steamMasterPort: null,
         worldgenPreset: null,
         overrides: null,
+        worldSeed: null,
+        currentWorldSeed: null,
         worldGenerated: false,
         isMaster: false,
         panelSaved: false,
@@ -97,6 +101,9 @@ export default defineFakeRoute([
         shard.steamAuthPort = payload.steamAuthPort
         shard.steamMasterPort = payload.steamMasterPort
         shard.worldgenPreset = payload.worldgenPreset
+        if (payload.worldSeed !== undefined) {
+          shard.worldSeed = payload.worldSeed
+        }
         const merged = {
           ...shard.overrides,
           ...payload.worldRuleOverrides,
@@ -115,6 +122,52 @@ export default defineFakeRoute([
       }
       shardStore.set(payload.instanceId, list)
       return { error: '', status: 1, data: { saved: true, restarted: Boolean(payload.restart) } }
+    },
+  },
+  {
+    url: '/fake/app/instance/shards/read-world-seed',
+    method: 'post',
+    response: ({ body }) => {
+      const payload = body as { instanceId: string, shard: 'master' | 'caves' }
+      return {
+        error: '',
+        status: 1,
+        data: {
+          instanceId: payload.instanceId,
+          shard: payload.shard,
+          available: false,
+          seed: null,
+          recordedAt: null,
+          message: '开发假数据：没有运行中的实例，读不到世界种子',
+        },
+      }
+    },
+  },
+  {
+    url: '/fake/app/instance/shards/reset-world-with-seed',
+    method: 'post',
+    response: ({ body }) => {
+      const payload = body as { instanceId: string, shard: 'master' | 'caves', worldSeed?: string | null }
+      const list = shardStore.get(payload.instanceId) ?? defaultShardList(payload.instanceId)
+      const shard = list.shards.find(s => s.id === payload.shard)
+      if (shard) {
+        // 模拟：种子写回面板记录，世界回到"尚未生成"，当前种子等待重新读取
+        shard.worldSeed = payload.worldSeed ?? null
+        shard.currentWorldSeed = null
+        shard.worldGenerated = false
+      }
+      shardStore.set(payload.instanceId, list)
+      return {
+        error: '',
+        status: 1,
+        data: {
+          accepted: true,
+          backupId: null,
+          backupWarning: null,
+          restarted: true,
+          restartWarning: null,
+        },
+      }
     },
   },
 ])

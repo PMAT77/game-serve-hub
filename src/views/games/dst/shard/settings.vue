@@ -93,6 +93,9 @@ const masterWorldRules = ref<Record<string, string>>({})
 const cavesWorldRules = ref<Record<string, string>>({})
 const masterWorldgenConfig = ref<Record<string, string>>({})
 const cavesWorldgenConfig = ref<Record<string, string>>({})
+/** 世界种子输入：空串表示留空（由游戏随机），只在生成地图时被读取 */
+const masterWorldSeed = ref('')
+const cavesWorldSeed = ref('')
 
 /** 服务端当前已保存的世界规则快照，用于保存时做差异提交（未修改项不下发） */
 const persistedMasterOverrides = ref<Record<string, string>>({})
@@ -130,6 +133,8 @@ function buildFormSnapshot(): string {
     cavesWorldRules: cavesWorldRules.value,
     masterWorldgenConfig: masterWorldgenConfig.value,
     cavesWorldgenConfig: cavesWorldgenConfig.value,
+    masterWorldSeed: masterWorldSeed.value,
+    cavesWorldSeed: cavesWorldSeed.value,
   })
 }
 
@@ -141,8 +146,22 @@ useUnsavedChangesGuard(formDirty)
 const currentShardId = computed<ShardId>(() => (mainTab.value === 'caves' ? 'caves' : 'master'))
 
 const clusterShardEnabled = computed(() => Boolean(shardList.value?.clusterShardEnabled))
+const instanceRunning = computed(() => shardList.value?.instanceStatus === 'running')
 const masterShard = computed(() => shardList.value?.shards.find(s => s.id === 'master'))
 const cavesShard = computed(() => shardList.value?.shards.find(s => s.id === 'caves'))
+
+/**
+ * 种子输入框显示的值：改过就用改后的值，没改过就显示当前世界的种子。
+ * 这样界面上只有一个「世界种子」，它既回答"现在是什么"，也是下次重置要用的值。
+ */
+const masterSeedDisplay = computed(() => masterWorldSeed.value || masterShard.value?.currentWorldSeed || '')
+const cavesSeedDisplay = computed(() => cavesWorldSeed.value || cavesShard.value?.currentWorldSeed || '')
+/** 正在读取当前世界种子的分片 */
+const readingShards = ref<ShardId[]>([])
+/** 正在按新种子重置世界的分片 */
+const resettingShards = ref<ShardId[]>([])
+/** 本次进入页面已经自动尝试过读取的分片：避免反复打扰游戏进程 */
+const autoProbedShards = new Set<ShardId>()
 
 /**
  * 顶部只承载「现在需要处理」的信息：异常警告，以及实例运行中这条会影响保存行为的条件提示。
@@ -181,6 +200,8 @@ function resetLocalWorldRules() {
   cavesWorldRules.value = {}
   masterWorldgenConfig.value = {}
   cavesWorldgenConfig.value = {}
+  masterWorldSeed.value = ''
+  cavesWorldSeed.value = ''
   persistedMasterOverrides.value = {}
   persistedCavesOverrides.value = {}
 }
@@ -189,11 +210,13 @@ function applyShardToForm(shard: ShardSummaryDto) {
   const persisted = { ...shard.overrides }
   if (shard.id === 'master') {
     persistedMasterOverrides.value = persisted
+    masterWorldSeed.value = shard.worldSeed ?? ''
     applyLeveldataOverridesFromServer(masterWorldRules.value, 'rules', 'master', shard.overrides)
     applyLeveldataOverridesFromServer(masterWorldgenConfig.value, 'worldgen', 'master', shard.overrides)
   }
   else {
     persistedCavesOverrides.value = persisted
+    cavesWorldSeed.value = shard.worldSeed ?? ''
     applyLeveldataOverridesFromServer(cavesWorldRules.value, 'rules', 'caves', shard.overrides)
     applyLeveldataOverridesFromServer(cavesWorldgenConfig.value, 'worldgen', 'caves', shard.overrides)
   }
@@ -230,6 +253,8 @@ async function loadConfig() {
       applyShardToForm(shard)
     }
     savedSnapshot.value = buildFormSnapshot()
+    // 实例在运行、但当前世界的种子还没记录过：进页面就自动补读一次
+    void autoProbeMissingSeeds()
   }
   catch {
     message.error('加载世界配置失败，请确认实例已安装后重试')
@@ -238,6 +263,12 @@ async function loadConfig() {
   finally {
     loading.value = false
   }
+}
+
+/** 世界种子：输入框显示的值（含回落到当前世界种子）；空串 = 留空（随机） */
+function resolveWorldSeedPayload(shard: ShardId): string | null {
+  const raw = (shard === 'master' ? masterSeedDisplay.value : cavesSeedDisplay.value).trim()
+  return raw === '' ? null : raw
 }
 
 function buildSavePayload(shard: ShardId, restart: boolean): ShardSavePayload {
@@ -252,6 +283,7 @@ function buildSavePayload(shard: ShardId, restart: boolean): ShardSavePayload {
     steamAuthPort: form.steamAuthPort,
     steamMasterPort: form.steamMasterPort,
     worldgenPreset: form.worldgenPreset,
+    worldSeed: resolveWorldSeedPayload(shard),
     worldRuleOverrides: buildLeveldataOverridesPayload(
       shard,
       'rules',
@@ -286,6 +318,9 @@ function describePayloadIssues(payload: ShardSavePayload): string | null {
     if (path === 'worldgenPreset') {
       return issue.message
     }
+    if (path === 'worldSeed') {
+      return '世界种子只能是 1–15 位数字'
+    }
     if (path.endsWith('Port')) {
       return '端口须为 1–65535 的整数，请检查网络设置'
     }
@@ -296,6 +331,113 @@ function describePayloadIssues(payload: ShardSavePayload): string | null {
 
 function getSaveOperation(shard: ShardId, restart: boolean): ShardSaveOperation {
   return `${shard}:${restart ? 'restart' : 'save'}`
+}
+
+/**
+ * 读取当前世界的真实种子。
+ *
+ * 种子由游戏生成并记在存档里，只能向正在运行的分片询问；读到后面板会把它记下来，
+ * 因此实例停服后这一栏依然显示得到。成功后只更新该分片的两个字段，
+ * 不重载整页配置——否则会把用户还没保存的改动冲掉。
+ */
+async function readCurrentWorldSeed(shard: ShardId) {
+  if (readingShards.value.includes(shard) || !instanceRunning.value) {
+    return
+  }
+  readingShards.value = [...readingShards.value, shard]
+  try {
+    const response = await apiShard.readWorldSeed({ instanceId: instanceId.value, shard })
+    const probe = response.data
+    if (probe.available && probe.seed) {
+      const target = shardList.value?.shards.find(item => item.id === shard)
+      if (target) {
+        target.currentWorldSeed = probe.seed
+      }
+      message.success(`当前世界种子：${probe.seed}`)
+    }
+    else {
+      message.warning(probe.message ?? '暂时没读到当前世界的种子')
+    }
+  }
+  catch (error: unknown) {
+    message.error(error instanceof Error ? error.message : '读取当前世界种子失败')
+  }
+  finally {
+    readingShards.value = readingShards.value.filter(item => item !== shard)
+  }
+}
+
+/**
+ * 实例运行中又还没有种子记录时，进页面就自动补读一次（串行，避免两条查询互相干扰）。
+ * 只补读"还没有值"的分片；读不到就安静结束，用户仍可点「读取」重试。
+ */
+async function autoProbeMissingSeeds() {
+  if (!instanceRunning.value) {
+    return
+  }
+  for (const shard of shardList.value?.shards ?? []) {
+    if (shard.currentWorldSeed || autoProbedShards.has(shard.id)) {
+      continue
+    }
+    autoProbedShards.add(shard.id)
+    await readCurrentWorldSeed(shard.id)
+  }
+}
+
+/**
+ * 按输入框里的种子重置世界：二次确认后交给面板删存档并启动实例。
+ *
+ * 与「世界维护」里的重置世界（把命令发给运行中的游戏）不同，这条路径要求实例已停止。
+ */
+function confirmResetWorldWithSeed(shard: ShardId) {
+  if (resettingShards.value.includes(shard) || instanceRunning.value) {
+    return
+  }
+  const seed = (shard === 'master' ? masterSeedDisplay.value : cavesSeedDisplay.value).trim()
+  const shardLabel = shard === 'master' ? '地上世界' : '洞穴世界'
+  dialog.warning({
+    title: `重置${shardLabel}？`,
+    content: () => h('div', { class: 'space-y-2 text-sm' }, [
+      h('p', '当前世界会被丢弃，面板会先自动创建一份安全备份。'),
+      h('p', seed ? `新地图使用种子 ${seed}。` : '种子留空，新地图由游戏随机生成。'),
+      h('p', '重置后会立即启动实例，首次生成地图需要几分钟。'),
+    ]),
+    positiveText: '重置并启动',
+    negativeText: '取消',
+    onPositiveClick: () => resetWorldWithSeed(shard, seed),
+  })
+}
+
+async function resetWorldWithSeed(shard: ShardId, seed: string) {
+  resettingShards.value = [...resettingShards.value, shard]
+  try {
+    const response = await apiShard.resetWorldWithSeed({
+      instanceId: instanceId.value,
+      shard,
+      worldSeed: seed === '' ? null : seed,
+    })
+    const result = response.data
+    if (result.restartWarning) {
+      notification.warning({
+        title: '世界已重置，但实例没启动起来',
+        content: result.restartWarning,
+        duration: 0,
+      })
+    }
+    else {
+      message.success('已按新种子重置世界，实例正在启动')
+    }
+    if (result.backupWarning) {
+      notification.warning({ title: '安全备份未成功', content: result.backupWarning, duration: 0 })
+    }
+    await loadConfig()
+  }
+  catch (error: unknown) {
+    message.error(error instanceof Error ? error.message : '重置世界失败')
+  }
+  finally {
+    resettingShards.value = resettingShards.value.filter(item => item !== shard)
+  }
 }
 
 /** 底部按钮各自只反映自己的动作：只有当前分片正在执行的那一个动作显示 loading */
@@ -578,9 +720,17 @@ onActivated(() => {
                   <ShardWorldgenSection
                     v-model="masterForm.worldgenPreset"
                     v-model:worldgen-config="masterWorldgenConfig"
+                    :world-seed="masterSeedDisplay"
                     shard="master"
                     shard-folder="Master"
+                    :current-world-seed="masterShard?.currentWorldSeed ?? null"
+                    :instance-running="instanceRunning"
+                    :reading="readingShards.includes('master')"
+                    :resetting="resettingShards.includes('master')"
                     :world-generated="masterShard?.worldGenerated"
+                    @update:world-seed="masterWorldSeed = $event"
+                    @read="readCurrentWorldSeed('master')"
+                    @reset="confirmResetWorldWithSeed('master')"
                   />
                 </NTabPane>
 
@@ -661,9 +811,17 @@ onActivated(() => {
                     <ShardWorldgenSection
                       v-model="cavesForm.worldgenPreset"
                       v-model:worldgen-config="cavesWorldgenConfig"
+                      :world-seed="cavesSeedDisplay"
                       shard="caves"
                       shard-folder="Caves"
+                      :current-world-seed="cavesShard?.currentWorldSeed ?? null"
+                      :instance-running="instanceRunning"
+                      :reading="readingShards.includes('caves')"
+                      :resetting="resettingShards.includes('caves')"
                       :world-generated="cavesShard?.worldGenerated"
+                      @update:world-seed="cavesWorldSeed = $event"
+                      @read="readCurrentWorldSeed('caves')"
+                      @reset="confirmResetWorldWithSeed('caves')"
                     />
                   </NTabPane>
 

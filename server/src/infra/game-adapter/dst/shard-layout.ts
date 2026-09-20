@@ -50,6 +50,16 @@ export function isShardWorldGenerated(installPath: string, shardId: ShardId): bo
   }
 }
 
+/**
+ * 丢弃分片的世界存档。
+ *
+ * 面板「按种子重置世界」用它：存档清空后，游戏下次启动时会重新生成地图
+ * （从而用上面刚落位的种子）。调用方必须先确认实例已停止。
+ */
+export function removeShardSaveDir(installPath: string, shardId: ShardId): void {
+  fs.rmSync(resolveShardSaveDir(installPath, shardId), { recursive: true, force: true })
+}
+
 export function isMasterShardConfigured(installPath: string): boolean {
   return fs.existsSync(resolveMasterServerIniPath(installPath))
 }

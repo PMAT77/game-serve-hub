@@ -7,6 +7,7 @@ import { buildSteamcmdWorkshopDownloadArgs } from '../../container/steamcmd-args
 import { DST_CLUSTER_NAME, DST_WORKSHOP_APP_ID } from './constants'
 import {
   collectMissingWorkshopIds,
+  detectWorkshopDownloadFailure,
   formatModDownloadFailureMessage,
   isDstWorkshopModPresent,
   resolveDstSteamWorkshopModDir,
@@ -97,6 +98,16 @@ describe('mod-download', () => {
     assert.match(formatModDownloadFailureMessage('Access Denied'), /无法下载/)
     assert.match(formatModDownloadFailureMessage('Missing file permissions'), /权限/)
     assert.match(formatModDownloadFailureMessage(''), /网络/)
+  })
+
+  it('detects SteamCMD failures that still exit with code 0', () => {
+    // 退出码为 0 但日志已报错：旧文件还在盘上，光看文件存在性会把它当成更新成功
+    assert.ok(detectWorkshopDownloadFailure('ERROR! Failed to download workshop item 12345'))
+    assert.ok(detectWorkshopDownloadFailure('ERROR! Access Denied'))
+    assert.ok(detectWorkshopDownloadFailure('No subscription'))
+    // 正常日志不能被误判
+    assert.equal(detectWorkshopDownloadFailure('Success. Downloaded item 12345 to "/game/steamapps/workshop/content/322330/12345"'), null)
+    assert.equal(detectWorkshopDownloadFailure(''), null)
   })
 })
 

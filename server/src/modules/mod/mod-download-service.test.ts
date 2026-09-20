@@ -5,6 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 import { strToU8, zipSync } from 'fflate'
 import { resolveDstSteamWorkshopModDir } from '../../infra/game-adapter/dst/mod-download'
+import type { WorkshopModMetadata } from '../../infra/game-adapter/dst/steam-workshop'
 import { resolveDstUgcModDir } from '../../infra/game-adapter/dst/ugc-mod-install'
 import { resolveWorkshopManifestPath } from '../../infra/game-adapter/dst/workshop-manifest'
 import type { DbInstanceMod } from '../../shared/db/index'
@@ -28,6 +29,9 @@ const tempDirs: string[] = []
 const upsertCalls: Array<Record<string, unknown>> = []
 const updateCalls: Array<Record<string, unknown>> = []
 let listedMods: DbInstanceMod[] = []
+/** 工坊侧「最新版本时间」：null 表示这次取不到（离线/被墙） */
+let workshopUpdatedAtIso: string | null = null
+let workshopMetadataCalls = 0
 
 function createMockMod(input: Partial<DbInstanceMod> & Pick<DbInstanceMod, 'instanceId' | 'workshopId' | 'name'>): DbInstanceMod {
   const now = new Date().toISOString()
@@ -42,6 +46,7 @@ function createMockMod(input: Partial<DbInstanceMod> & Pick<DbInstanceMod, 'inst
     localUpdatedAt: input.localUpdatedAt ?? null,
     remoteUpdatedAt: input.remoteUpdatedAt ?? null,
     updateCheckedAt: input.updateCheckedAt ?? null,
+    loadedCopyStale: input.loadedCopyStale ?? false,
     config: input.config ?? null,
     createdAt: input.createdAt ?? now,
     updatedAt: input.updatedAt ?? now,
@@ -85,6 +90,22 @@ function installDbHooks() {
       listedMods.filter(mod => mod.instanceId === instanceId && mod.installStatus === 'ready'),
   })
   setModDownloadDbHooksForTest({
+    // 下载完成后面板会核对一次工坊版本时间：测试里不打真实网络
+    fetchWorkshopModMetadata: async (workshopIds: string[]) => {
+      workshopMetadataCalls += 1
+      const items = new Map<string, WorkshopModMetadata>()
+      if (workshopUpdatedAtIso) {
+        for (const workshopId of workshopIds) {
+          items.set(workshopId, {
+            title: null,
+            previewImage: null,
+            updatedAt: workshopUpdatedAtIso,
+            fileSize: null,
+          })
+        }
+      }
+      return { ok: true, items }
+    },
     getInstanceModByWorkshopId: async (_instanceId: string, workshopId: string) =>
       listedMods.find(mod => mod.workshopId === workshopId),
     listInstanceMods: async () => listedMods,
@@ -139,6 +160,8 @@ afterEach(() => {
   upsertCalls.length = 0
   updateCalls.length = 0
   listedMods = []
+  workshopUpdatedAtIso = null
+  workshopMetadataCalls = 0
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true })
   }
@@ -264,6 +287,7 @@ describe('mod-download-service', () => {
     const installPath = createInstallPath()
     writeWorkshopMod(installPath, '66666')
     writeWorkshopManifest(installPath, '66666', 1_800_000_000)
+    workshopUpdatedAtIso = new Date(1_800_000_000 * 1000).toISOString()
     listedMods = [createMockMod({
       instanceId: 'instance-e',
       workshopId: '66666',
@@ -282,11 +306,73 @@ describe('mod-download-service', () => {
 
     const readyCall = upsertCalls.find(call => call.installStatus === 'ready')
     const versionIso = new Date(1_800_000_000 * 1000).toISOString()
-    // 本机内容对应的工坊版本时间来自 SteamCMD 清单，更新后必须重新入账
+    // 本机内容对应的版本时间来自内容凭据（这里是 SteamCMD 清单），更新后必须重新入账
     assert.equal(readyCall?.localUpdatedAt, versionIso)
-    // 刚更新过即代表已是最新，避免紧接着又被判成「未知」
+    // 远端写的是工坊给出的时间，不再把本机时间复制给远端自证「已是最新」
     assert.equal(readyCall?.remoteUpdatedAt, versionIso)
     assert.ok(readyCall?.updateCheckedAt)
+    // 下载并重新落位后游戏加载的就是这份内容：陈旧标记必须被清掉
+    assert.equal(readyCall?.loadedCopyStale, false)
+    assert.equal(workshopMetadataCalls, 1)
+  })
+
+  it('keeps the version evidence instead of stamping the download time', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    writeWorkshopMod(installPath, '66667')
+    const contentFile = path.join(resolveDstSteamWorkshopModDir(installPath, '66667'), 'modinfo.lua')
+    // 内容文件的时间就是本机内容的落地时间：这里模拟「盘上那份其实是旧版本」
+    const staleStamp = new Date('2025-01-01T00:00:00.000Z')
+    fs.utimesSync(contentFile, staleStamp, staleStamp)
+    listedMods = [createMockMod({
+      instanceId: 'instance-h',
+      workshopId: '66667',
+      name: 'Stale Mod',
+      installStatus: 'ready',
+    })]
+    setModDownloadExecutorForTest(async () => ({ ok: true }))
+
+    await enqueueModDownload({
+      instanceId: 'instance-h',
+      installPath,
+      payload: { workshopId: '66667', name: 'Stale Mod' },
+      force: true,
+    })
+    await waitForModInstallJob('instance-h', '66667')
+
+    const readyCall = upsertCalls.find(call => call.installStatus === 'ready')
+    assert.equal(readyCall?.localUpdatedAt, '2025-01-01T00:00:00.000Z')
+    // 工坊取不到就什么都不写：绝不拿「刚下载的时刻」冒充版本时间
+    assert.equal(readyCall?.remoteUpdatedAt, undefined)
+    assert.equal(readyCall?.updateCheckedAt, undefined)
+  })
+
+  it('does not claim up to date when the workshop already moved past the local content', async () => {
+    installDbHooks()
+    const installPath = createInstallPath()
+    writeWorkshopMod(installPath, '66668')
+    // 本机内容对应工坊的旧版本，而工坊已经有更新的版本：这次更新没有真正生效
+    writeWorkshopManifest(installPath, '66668', 1_800_000_000)
+    workshopUpdatedAtIso = new Date(1_800_086_400 * 1000).toISOString()
+    listedMods = [createMockMod({
+      instanceId: 'instance-i',
+      workshopId: '66668',
+      name: 'Not Applied',
+      installStatus: 'ready',
+    })]
+    setModDownloadExecutorForTest(async () => ({ ok: true }))
+
+    await enqueueModDownload({
+      instanceId: 'instance-i',
+      installPath,
+      payload: { workshopId: '66668', name: 'Not Applied' },
+      force: true,
+    })
+    await waitForModInstallJob('instance-i', '66668')
+
+    const readyCall = upsertCalls.find(call => call.installStatus === 'ready')
+    assert.equal(readyCall?.localUpdatedAt, new Date(1_800_000_000 * 1000).toISOString())
+    assert.equal(readyCall?.remoteUpdatedAt, workshopUpdatedAtIso)
   })
 
   it('coalesces other missing mods into one download call', async () => {

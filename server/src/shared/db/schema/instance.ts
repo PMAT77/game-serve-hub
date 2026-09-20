@@ -55,6 +55,11 @@ export const instanceMods = sqliteTable('instance_mods', {
   remoteUpdatedAt: text('remote_updated_at'),
   /** 最近一次版本检查时间（ISO）；从未检查为 null */
   updateCheckedAt: text('update_checked_at'),
+  /**
+   * 游戏实际加载的副本（ugc_mods）比已下载内容旧：DST 只读 ugc_mods，
+   * 落位被跳过时「下载目录已最新、游戏里还是旧内容」会同时成立，需要重新下载/重新落位。
+   */
+  loadedCopyStale: integer('loaded_copy_stale').notNull().default(0),
   config: text('config'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),

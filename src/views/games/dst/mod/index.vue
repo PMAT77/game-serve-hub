@@ -18,6 +18,7 @@ import apiMod from '@/api/modules/mod'
 import { isInstallableGameInstance } from '@/composables/useGameInstance'
 import { useInstanceModState } from '@/composables/useInstanceModState'
 import ModConfigModal from '@/views/games/dst/mod/components/ModConfigModal.vue'
+import { resolveModUpdateCheckNotice } from '@/views/games/dst/mod/modUpdateCheckPresentation'
 import { routeToDstModDetail, routeToDstWorldSettings, routeToNodeInstance } from '@/navigation/game-routes'
 import { MOD_INSTALL_STATUS, MOD_UPDATE_STATUS } from '@/constants/statusDictionary'
 import { getInstanceState } from '@/views/node/instance/instanceDisplay'
@@ -1202,22 +1203,28 @@ async function checkModUpdates() {
   try {
     const response = await apiMod.checkModUpdates(selectedInstanceId.value, { force: true })
     await loadInstalledMods()
-    const { summary, upstreamOk, message: upstreamMessage } = response.data
-    if (summary.outdated > 0) {
-      notification.info({
-        title: `发现 ${summary.outdated} 个 Mod 有新版本`,
-        content: '点列表里的「更新」或工具条的「全部更新」，更新完成后重启实例生效。',
-        duration: 8000,
-      })
+    // 无法判断的 Mod 绝不能被说成「已是最新」：提示口径集中在 modUpdateCheckPresentation.ts
+    const notice = resolveModUpdateCheckNotice(response.data)
+    if (notice.kind === 'notification') {
+      const options = { title: notice.title ?? 'Mod 版本检查', content: notice.content, duration: 8000 }
+      if (notice.tone === 'warning') {
+        notification.warning(options)
+      }
+      else if (notice.tone === 'success') {
+        notification.success(options)
+      }
+      else {
+        notification.info(options)
+      }
     }
-    else if (summary.unknown === summary.total && summary.total > 0) {
-      message.warning(upstreamMessage?.trim() || '暂时无法判断 Mod 版本，请稍后重试')
+    else if (notice.tone === 'warning') {
+      message.warning(notice.content)
+    }
+    else if (notice.tone === 'success') {
+      message.success(notice.content)
     }
     else {
-      message.success('当前 Mod 都是创意工坊上的最新版本')
-    }
-    if (!upstreamOk && upstreamMessage?.trim() && summary.unknown < summary.total) {
-      message.warning(upstreamMessage.trim())
+      message.info(notice.content)
     }
   }
   catch (error: unknown) {

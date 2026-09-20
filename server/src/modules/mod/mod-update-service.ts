@@ -10,7 +10,8 @@ import fs from 'node:fs'
 import { DST_APP_ID } from '../../infra/game-adapter/dst/constants'
 import { resolveInstanceInstallPath } from '../../infra/game-adapter/dst/cluster-service'
 import { fetchWorkshopModMetadata } from '../../infra/game-adapter/dst/steam-workshop'
-import { readWorkshopInstalledItems, unixSecondsToIsoOrNull } from '../../infra/game-adapter/dst/workshop-manifest'
+import { resolveLocalModContentVersion } from '../../infra/game-adapter/dst/mod-content-version'
+import { readWorkshopInstalledItems } from '../../infra/game-adapter/dst/workshop-manifest'
 import { LOCAL_NODE_ID } from '../../shared/dst/local-dst-instance'
 import {
   listGameInstances,
@@ -24,12 +25,16 @@ import {
  * 面板用 `-skip_update_server_mods` 启动 DST，游戏侧永远不会自己更新 Mod，因此
  * 「服务器启用了一些老版本的 Mod、新玩家进不来」这类问题只能由面板发现并解决：
  *
- *  本机版本 = SteamCMD 清单 steamapps/workshop/appworkshop_322330.acf 里该条目的 timeupdated
+ *  本机版本 = 内容凭据：SteamCMD 清单 timeupdated，缺失时用内容文件的落地时间
  *  远端版本 = 公开接口 GetPublishedFileDetails 返回的 time_updated
  *
  * 两侧都是「版本时间」，远端更新即认定有新版本。比较用严格大于：误报的代价是用户多点一次
  * 「更新」（SteamCMD 校验后内容不变，状态随即回到已最新），漏报的代价是玩家进不了游戏。
- * 缺任一侧就老实回答「无法判定」，绝不猜成「已是最新」。
+ * 缺任一侧就老实回答「无法判定」，绝不猜成「已是最新」——尤其**绝不**拿「面板记录这份内容的
+ * 时间」顶上：记录时刻必然晚于当时的工坊版本，拿它比较等于恒定报「已是最新」。
+ *
+ * 内容凭据统一由 mod-content-version.ts 解析，那里还回答「游戏实际加载的那份（ugc_mods）
+ * 是否比已下载内容旧」——DST 专用服只读 ugc_mods，落位被跳过时两份内容会不一致。
  *
  * 同一次请求顺带把工坊标题与缩略图写回面板：导入存档后那些名字不对、没有图的 Mod，
  * 就是靠这一步被认出来的（面板没有重命名入口，工坊标题即权威名称）。
@@ -113,6 +118,7 @@ export function resolveModUpdateStatus(
 
 function resolveUnknownReason(input: {
   installStatus: DbInstanceMod['installStatus']
+  localUpdatedAt: string | null
   remoteUpdatedAt: string | null
   metadataKnown: boolean
 }): string | null {
@@ -125,7 +131,27 @@ function resolveUnknownReason(input: {
   if (input.installStatus !== 'ready') {
     return 'Mod 尚未下载完成，暂不判断版本'
   }
+  if (!input.localUpdatedAt) {
+    return '本机找不到该 Mod 的版本记录（SteamCMD 清单与内容文件都没有），无法判断版本，可点「重新下载」重新入账'
+  }
   return '本机没有该 Mod 的下载记录，无法判断版本（可重新下载）'
+}
+
+/** 游戏加载的副本比已下载内容旧：重新下载并由面板重新落位后，重启实例才会生效 */
+const STALE_LOADED_COPY_REASON = '游戏实际加载的 Mod 文件比已下载内容旧（落位没有跟上），需重新下载并由面板重新落位，重启实例后生效'
+
+/**
+ * 库里存着的状态：游戏加载的副本陈旧优先于时间比较。
+ *
+ * 这一条必须落库（`instance_mods.loaded_copy_stale`），否则「下载目录已最新、游戏里
+ * 还是旧内容」只存在于检查响应里，列表刷新后又按两个时间戳算出「已是最新」——
+ * 用户会看到「发现 1 个 Mod 有新版本」却找不到任何可更新的行。
+ */
+export function resolveStoredModUpdateStatus(mod: Pick<DbInstanceMod, 'loadedCopyStale' | 'localUpdatedAt' | 'remoteUpdatedAt'>): ModUpdateStatus {
+  if (mod.loadedCopyStale) {
+    return 'outdated'
+  }
+  return resolveModUpdateStatus(mod.localUpdatedAt, mod.remoteUpdatedAt)
 }
 
 function buildEmptyResult(instanceId: string): ModUpdateCheckOutcome {
@@ -153,22 +179,25 @@ function isCheckFresh(mods: DbInstanceMod[]): boolean {
   return latest > 0 && Date.now() - latest < MOD_UPDATE_CHECK_MIN_INTERVAL_MS
 }
 
+/** 沿用库中状态（未真正问 Steam）：不重新解析磁盘凭据，也不改判 */
 function buildItemsFromStoredState(mods: DbInstanceMod[]): ModUpdateInfo[] {
   return mods.map((mod) => {
-    const updateStatus = resolveModUpdateStatus(mod.localUpdatedAt, mod.remoteUpdatedAt)
+    const updateStatus = resolveStoredModUpdateStatus(mod)
     return {
       workshopId: mod.workshopId,
       title: null,
       updateStatus,
       localUpdatedAt: mod.localUpdatedAt,
       remoteUpdatedAt: mod.remoteUpdatedAt,
+      localVersionSource: null,
       reason: updateStatus === 'unknown'
         ? resolveUnknownReason({
             installStatus: mod.installStatus,
+            localUpdatedAt: mod.localUpdatedAt,
             remoteUpdatedAt: mod.remoteUpdatedAt,
             metadataKnown: true,
           })
-        : null,
+        : (mod.loadedCopyStale ? STALE_LOADED_COPY_REASON : null),
     }
   })
 }
@@ -209,6 +238,7 @@ export async function checkInstanceModUpdates(input: ModUpdateCheckInput): Promi
     }
   }
 
+  // 清单只读一次：逐个 Mod 重读重解析一份几百 KB 的 ACF 纯属浪费
   const installedItems = readWorkshopInstalledItems(input.installPath)
   const metadataResult = await fetchWorkshopModMetadataFn(mods.map(mod => mod.workshopId), {
     force: input.force === true,
@@ -222,31 +252,44 @@ export async function checkInstanceModUpdates(input: ModUpdateCheckInput): Promi
     const metadata: WorkshopModMetadata | undefined = metadataResult.items.get(mod.workshopId)
     // 取不到的条目保留原值：既不改状态，也不推进检查时间
     if (!metadata) {
+      const storedStatus = resolveStoredModUpdateStatus(mod)
       items.push({
         workshopId: mod.workshopId,
         title: null,
-        updateStatus: resolveModUpdateStatus(mod.localUpdatedAt, mod.remoteUpdatedAt),
+        updateStatus: storedStatus,
         localUpdatedAt: mod.localUpdatedAt,
         remoteUpdatedAt: mod.remoteUpdatedAt,
-        reason: resolveUnknownReason({
-          installStatus: mod.installStatus,
-          remoteUpdatedAt: mod.remoteUpdatedAt,
-          metadataKnown: false,
-        }),
+        localVersionSource: null,
+        reason: storedStatus === 'unknown'
+          ? resolveUnknownReason({
+              installStatus: mod.installStatus,
+              localUpdatedAt: mod.localUpdatedAt,
+              remoteUpdatedAt: mod.remoteUpdatedAt,
+              metadataKnown: false,
+            })
+          : (mod.loadedCopyStale ? STALE_LOADED_COPY_REASON : null),
       })
       continue
     }
 
-    const localUpdatedAt = unixSecondsToIsoOrNull(installedItems.get(mod.workshopId)?.timeupdated)
-      ?? mod.localUpdatedAt
-    const remoteUpdatedAt = metadata?.updatedAt ?? null
-    const updateStatus = resolveModUpdateStatus(localUpdatedAt, remoteUpdatedAt)
+    // 本机版本只认内容凭据：SteamCMD 清单优先，其次内容文件的落地时间。
+    // 两者都取不到就是没有依据，绝不拿库里「记录这份内容的时间」顶上——
+    // 记录时刻必然晚于当时的工坊版本，比较结果会恒定是「已是最新」。
+    const localVersion = resolveLocalModContentVersion(input.installPath, mod.workshopId, { installedItems })
+    const localUpdatedAt = localVersion.updatedAt
+    const remoteUpdatedAt = metadata.updatedAt ?? null
+    // 游戏实际加载的那份比已下载内容旧：内容本身没问题，但游戏读到的仍是旧版本
+    const updateStatus: ModUpdateStatus = localVersion.loadedCopyStale
+      ? 'outdated'
+      : resolveModUpdateStatus(localUpdatedAt, remoteUpdatedAt)
     metadataResolved += 1
 
     const patch: Parameters<UpdateInstanceModByWorkshopIdFn>[2] = {
       localUpdatedAt,
       remoteUpdatedAt,
       updateCheckedAt: checkedAt,
+      // 必须落库：列表由库里的状态渲染，只放进本次响应会变成「说有新版本却无从更新」
+      loadedCopyStale: localVersion.loadedCopyStale,
     }
     const workshopTitle = metadata?.title?.trim()
     if (workshopTitle && workshopTitle !== mod.name) {
@@ -269,13 +312,17 @@ export async function checkInstanceModUpdates(input: ModUpdateCheckInput): Promi
       updateStatus,
       localUpdatedAt,
       remoteUpdatedAt,
-      reason: updateStatus === 'unknown'
-        ? resolveUnknownReason({
-            installStatus: mod.installStatus,
-            remoteUpdatedAt,
-            metadataKnown: true,
-          })
-        : null,
+      localVersionSource: localVersion.source,
+      reason: localVersion.loadedCopyStale
+        ? STALE_LOADED_COPY_REASON
+        : (updateStatus === 'unknown'
+            ? resolveUnknownReason({
+                installStatus: mod.installStatus,
+                localUpdatedAt,
+                remoteUpdatedAt,
+                metadataKnown: true,
+              })
+            : null),
     })
   }
 

@@ -169,6 +169,8 @@ export interface DbInstanceMod {
   remoteUpdatedAt: string | null
   /** 最近一次版本检查时间（ISO）；从未检查为 null */
   updateCheckedAt: string | null
+  /** 游戏实际加载的副本（ugc_mods）比已下载内容旧：需要重新下载并重新落位 */
+  loadedCopyStale: boolean
   /** JSON 序列化的 modoverrides.lua configuration_options；null = 未配置 */
   config: string | null
   createdAt: string

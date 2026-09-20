@@ -98,6 +98,9 @@ export interface ModReorderResult {
   mods: ModItemDto[]
 }
 
+/** 本机版本时间的来源：SteamCMD 清单里的 timeupdated / 内容文件的落地时间 */
+export type ModUpdateLocalVersionSource = 'workshop-manifest' | 'content-mtime'
+
 /** 单个 Mod 的版本检查结果 */
 export interface ModUpdateInfo {
   workshopId: string
@@ -106,6 +109,8 @@ export interface ModUpdateInfo {
   updateStatus: ModUpdateStatus
   localUpdatedAt: string | null
   remoteUpdatedAt: string | null
+  /** 上面那个本机版本时间的来源；null 表示本次没取到任何内容凭据（对应「无法判定」） */
+  localVersionSource: ModUpdateLocalVersionSource | null
   /** 无法判定时的原因；可判定时为 null */
   reason: string | null
 }

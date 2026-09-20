@@ -45,10 +45,11 @@ import {
   readModDependencyMap,
   writeModDependencyMap,
 } from '../../infra/game-adapter/dst/mod-service'
+import { isWorldSeedModId } from '../../infra/game-adapter/dst/world-seed'
 import { LOCAL_NODE_ID, resolveLocalDstInstance } from '../../shared/dst/local-dst-instance'
 import type { ModReadinessResult } from './mod-readiness-service'
 import { reconcileInstanceModReadiness } from './mod-readiness-service'
-import { checkInstanceModUpdates, resolveModUpdateStatus, scheduleModUpdateChecks } from './mod-update-service'
+import { checkInstanceModUpdates, resolveStoredModUpdateStatus, scheduleModUpdateChecks } from './mod-update-service'
 import { syncInstanceModFilesFromDb } from './mod-file-sync-service'
 import { fetchDstSteamWorkshopMods, fetchWorkshopFileDetail, fetchWorkshopPreviewImages, fetchWorkshopRatings, isSteamWorkshopFetchError, scheduleWarmSteamWorkshopModCache } from '../../infra/game-adapter/dst/steam-workshop'
 import {
@@ -260,7 +261,7 @@ function toDto(
     localUpdatedAt: mod.localUpdatedAt,
     remoteUpdatedAt: mod.remoteUpdatedAt,
     updateCheckedAt: mod.updateCheckedAt,
-    updateStatus: resolveModUpdateStatus(mod.localUpdatedAt, mod.remoteUpdatedAt),
+    updateStatus: resolveStoredModUpdateStatus(mod),
     dependencyIds,
     missingDependencyIds,
     dependentModIds,
@@ -645,6 +646,10 @@ export function registerModModule(app: FastifyInstance) {
     const workshopId = normalizeWorkshopId(body.workshopId)
     if (!workshopId) {
       return businessError('创意工坊 ID 不能为空', request)
+    }
+    // 面板内置的世界种子 Mod 占用了这个 ID：允许订阅会把它的文件与面板落位的内容互相覆盖
+    if (isWorldSeedModId(workshopId)) {
+      return businessError('该创意工坊 ID 为面板保留，请换一个 Mod', request)
     }
     const job = await enqueueModDownload({
       instanceId,

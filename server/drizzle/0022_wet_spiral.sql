@@ -1,0 +1,1 @@
+ALTER TABLE `instance_mods` ADD `loaded_copy_stale` integer DEFAULT 0 NOT NULL;

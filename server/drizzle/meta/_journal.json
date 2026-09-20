@@ -155,6 +155,13 @@
       "when": 1789752988933,
       "tag": "0021_fast_azazel",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1789880902331,
+      "tag": "0022_wet_spiral",
+      "breakpoints": true
     }
   ]
 }

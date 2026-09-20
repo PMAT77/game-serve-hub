@@ -128,6 +128,25 @@ export function formatModDownloadFailureMessage(output: string): string {
   return tail ? `Mod 下载失败：${tail}` : 'Mod 下载失败，请稍后重试'
 }
 
+/**
+ * SteamCMD 会「失败但退出码为 0」：日志里已经写明下载失败，进程却正常退出。
+ * 只看退出码会把它当成更新成功——而本机旧文件仍在盘上，`collectMissingWorkshopIds`
+ * 同样看不出问题，于是旧内容被记成「已是最新」，真实的更新被永久漏掉。
+ *
+ * 这里只匹配强特征：命中即判失败。宁可报一次可重试的失败，也不谎报成功。
+ */
+const WORKSHOP_DOWNLOAD_FAILURE_PATTERN
+  = /No subscription|Access Denied|Invalid item|Missing file permissions|ERROR!\s*Failed to download|failed to download/i
+
+/** 命中失败特征时返回原始输出（交给 formatModDownloadFailureMessage 归类），未命中返回 null */
+export function detectWorkshopDownloadFailure(output: string): string | null {
+  const text = output.trim()
+  if (!text) {
+    return null
+  }
+  return WORKSHOP_DOWNLOAD_FAILURE_PATTERN.test(text) ? text : null
+}
+
 export async function downloadDstWorkshopMods(input: {
   hostInstallPath: string
   workshopIds: string[]
@@ -165,6 +184,15 @@ export async function downloadDstWorkshopMods(input: {
     return {
       ok: false,
       error: formatModDownloadFailureMessage(result.output),
+    }
+  }
+
+  // 退出码为 0 但日志里已经报错：旧文件还在盘上，文件存在性检查发现不了，必须单独拦下
+  const failureOutput = detectWorkshopDownloadFailure(result.output)
+  if (failureOutput) {
+    return {
+      ok: false,
+      error: formatModDownloadFailureMessage(failureOutput),
     }
   }
 

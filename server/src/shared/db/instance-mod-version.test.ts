@@ -89,4 +89,39 @@ describe('instance_mods version columns', () => {
     assert.equal(patched?.updateCheckedAt, patchCheckedAt)
     assert.equal(patched?.localUpdatedAt, localUpdatedAt)
   })
+
+  it('stores the stale-loaded-copy flag so the list can offer an update', async () => {
+    const instanceId = `inst-${randomUUID().slice(0, 8)}`
+
+    await upsertInstanceMod({
+      instanceId,
+      workshopId: '333',
+      name: '落位没跟上',
+      enabled: true,
+      loadOrder: 0,
+      loadedCopyStale: true,
+    })
+    const stored = await getInstanceModByWorkshopId(instanceId, '333')
+    assert.equal(stored?.loadedCopyStale, true)
+
+    // 重新落位后同一个标记必须能清掉，否则列表会永远挂着「有新版本」
+    const cleared = await updateInstanceModByWorkshopId(instanceId, '333', { loadedCopyStale: false })
+    assert.equal(cleared?.loadedCopyStale, false)
+    assert.equal((await listInstanceMods(instanceId))[0]?.loadedCopyStale, false)
+  })
+
+  it('defaults the stale flag to false for rows written without it', async () => {
+    const instanceId = `inst-${randomUUID().slice(0, 8)}`
+
+    await upsertInstanceMod({
+      instanceId,
+      workshopId: '444',
+      name: '普通 Mod',
+      enabled: true,
+      loadOrder: 0,
+    })
+
+    const stored = await getInstanceModByWorkshopId(instanceId, '444')
+    assert.equal(stored?.loadedCopyStale, false)
+  })
 })

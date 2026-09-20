@@ -10,7 +10,11 @@ import {
 } from '../../infra/game-adapter/dst/mod-service'
 import { resolveModDisplayName } from '../../infra/game-adapter/dst/mod-config'
 import { ensureDstUgcModLayout } from '../../infra/game-adapter/dst/ugc-mod-install'
-import { readWorkshopInstalledItem, unixSecondsToIsoOrNull } from '../../infra/game-adapter/dst/workshop-manifest'
+import { resolveLocalModContentVersion } from '../../infra/game-adapter/dst/mod-content-version'
+import type { LocalModContentVersion } from '../../infra/game-adapter/dst/mod-content-version'
+import { readWorkshopInstalledItems } from '../../infra/game-adapter/dst/workshop-manifest'
+import type { WorkshopInstalledItem } from '../../infra/game-adapter/dst/workshop-manifest'
+import { fetchWorkshopModMetadata } from '../../infra/game-adapter/dst/steam-workshop'
 import { syncInstanceModFilesFromDb } from './mod-file-sync-service'
 import { isPlaceholderModName, MISSING_MOD_CONTENT_ERROR } from './mod-readiness-service'
 import {
@@ -53,11 +57,13 @@ type ListInstanceModsFn = typeof listInstanceMods
 type GetInstanceModByWorkshopIdFn = typeof getInstanceModByWorkshopId
 type UpsertInstanceModFn = typeof upsertInstanceMod
 type UpdateInstanceModByWorkshopIdFn = typeof updateInstanceModByWorkshopId
+type FetchWorkshopModMetadataFn = typeof fetchWorkshopModMetadata
 
 let listInstanceModsFn: ListInstanceModsFn = listInstanceMods
 let getInstanceModByWorkshopIdFn: GetInstanceModByWorkshopIdFn = getInstanceModByWorkshopId
 let upsertInstanceModFn: UpsertInstanceModFn = upsertInstanceMod
 let updateInstanceModByWorkshopIdFn: UpdateInstanceModByWorkshopIdFn = updateInstanceModByWorkshopId
+let fetchWorkshopModMetadataFn: FetchWorkshopModMetadataFn = fetchWorkshopModMetadata
 
 function readPositiveIntEnv(key: string, fallback: number): number {
   const rawValue = process.env[key]
@@ -166,21 +172,52 @@ function resolvePersistedModName(installPath: string, workshopId: string, reques
 }
 
 /**
- * 本机已下载内容对应的工坊版本时间：优先读 SteamCMD 清单里的 timeupdated。
- * 强制更新后清单里未必立刻有条目（例如历史实例没有清单），此时按「刚下过最新版本」记当前时间，
- * 使状态不会卡在「无法判定」；下一次版本检查会以清单/工坊为准自动纠正。
+ * 本机已下载内容对应的版本：SteamCMD 清单优先，其次内容文件的落地时间。
+ *
+ * 两者都取不到就是「不知道」，**不**回落到当前时刻：记录时刻必然晚于当时的工坊版本，
+ * 拿它去比等于恒定得出「已是最新」，真正存在的旧版本会被漏报。
  */
-function resolveInstalledUpdatedAtIso(
+function resolveInstalledContentVersion(
   installPath: string,
   workshopId: string,
-  fallbackToNow: boolean,
-): string | null {
-  const item = readWorkshopInstalledItem(installPath, workshopId)
-  const fromManifest = unixSecondsToIsoOrNull(item?.timeupdated)
-  if (fromManifest) {
-    return fromManifest
+  installedItems?: Map<string, WorkshopInstalledItem>,
+): LocalModContentVersion {
+  return resolveLocalModContentVersion(
+    installPath,
+    workshopId,
+    installedItems ? { installedItems } : undefined,
+  )
+}
+
+/**
+ * 下载/校验完成后核对一次工坊当前版本时间，供写库时当「远端版本」。
+ *
+ * 这一步让状态立刻有据可依：刚经 SteamCMD 处理过的内容若仍早于工坊时间，说明这次
+ * 更新没有真正生效（SteamCMD 空跑、内容没换），状态会停在「有新版本」而不会被写成
+ * 「已是最新」。工坊取不到就什么都不写，留给下一次检查判定。
+ *
+ * 这里刻意**不**强制刷新：用户通常是先点「检查更新」再点「更新」，那份十分钟内的
+ * 结果正好可以复用，批量更新几十个 Mod 时不会变成几十次接口调用。
+ */
+async function fetchWorkshopUpdatedAtMap(workshopIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(workshopIds.map(id => id.trim()).filter(Boolean))]
+  const result = new Map<string, string>()
+  if (ids.length === 0) {
+    return result
   }
-  return fallbackToNow ? new Date().toISOString() : null
+  try {
+    const metadata = await fetchWorkshopModMetadataFn(ids)
+    for (const [workshopId, item] of metadata.items) {
+      const updatedAt = item.updatedAt?.trim()
+      if (updatedAt) {
+        result.set(workshopId, updatedAt)
+      }
+    }
+  }
+  catch {
+    // 工坊不可达不影响下载结果：状态留在「未检查」，等下一次检查
+  }
+  return result
 }
 
 async function persistSubscribedMod(input: ModDownloadJobInput) {
@@ -189,7 +226,8 @@ async function persistSubscribedMod(input: ModDownloadJobInput) {
   const mods = await listInstanceModsFn(instanceId)
   const existing = mods.find(mod => mod.workshopId === workshopId)
   const nextLoadOrder = existing ? existing.loadOrder : mods.length
-  const localUpdatedAt = resolveInstalledUpdatedAtIso(installPath, workshopId, input.force === true)
+  const localVersion = resolveInstalledContentVersion(installPath, workshopId)
+  const workshopUpdatedAt = (await fetchWorkshopUpdatedAtMap([workshopId])).get(workshopId) ?? null
   await upsertInstanceModFn({
     instanceId,
     workshopId,
@@ -202,10 +240,14 @@ async function persistSubscribedMod(input: ModDownloadJobInput) {
     version: payload.version?.trim() || null,
     installStatus: 'ready',
     installError: null,
-    ...(localUpdatedAt ? { localUpdatedAt } : {}),
-    // 强制更新成功即代表本机已是工坊上的最新版本，直接给出一致结论，免得紧接着再判成「未知」
-    ...(input.force === true && localUpdatedAt
-      ? { remoteUpdatedAt: localUpdatedAt, updateCheckedAt: new Date().toISOString() }
+    // 无凭据时显式写 null：宁可回答「不知道」，也不留下会被误当成「已是最新」的时刻
+    localUpdatedAt: localVersion.updatedAt,
+    // 刚下载并落位过，游戏加载的那份就是本次内容；依旧按磁盘实际比对，不假设成功
+    loadedCopyStale: localVersion.loadedCopyStale,
+    // 远端只写工坊给出的时间。本机内容是否已经追平它，由两侧时间比较得出，
+    // 不在这里复制本机时间自证「已是最新」。
+    ...(workshopUpdatedAt
+      ? { remoteUpdatedAt: workshopUpdatedAt, updateCheckedAt: new Date().toISOString() }
       : {}),
   })
   const dependencyMap = readModDependencyMap(installPath)
@@ -268,23 +310,34 @@ async function persistCoalescedReadyMods(input: ModDownloadJobInput, workshopIds
     return
   }
   const mods = await listInstanceModsFn(input.instanceId)
-  for (const workshopId of workshopIds) {
-    const mod = mods.find(item => item.workshopId === workshopId)
-    if (!mod || mod.installStatus === 'ready') {
-      continue
-    }
-    const localUpdatedAt = resolveInstalledUpdatedAtIso(input.installPath, workshopId, true)
+  const pending = workshopIds
+    .map(workshopId => mods.find(item => item.workshopId === workshopId))
+    .filter((mod): mod is (typeof mods)[number] => mod !== undefined && mod.installStatus !== 'ready')
+  if (pending.length === 0) {
+    return
+  }
+  // 这一批一起问一次工坊，避免每个 Mod 各打一次接口
+  const workshopUpdatedAtMap = await fetchWorkshopUpdatedAtMap(pending.map(mod => mod.workshopId))
+  // 清单同样只读一次：这批 Mod 共用同一份 appworkshop acf
+  const installedItems = readWorkshopInstalledItems(input.installPath)
+  for (const mod of pending) {
+    const localVersion = resolveInstalledContentVersion(input.installPath, mod.workshopId, installedItems)
+    const workshopUpdatedAt = workshopUpdatedAtMap.get(mod.workshopId) ?? null
     await upsertInstanceModFn({
       instanceId: input.instanceId,
-      workshopId,
-      name: resolvePersistedModName(input.installPath, workshopId, mod.name),
+      workshopId: mod.workshopId,
+      name: resolvePersistedModName(input.installPath, mod.workshopId, mod.name),
       previewImage: mod.previewImage,
       enabled: mod.enabled,
       loadOrder: mod.loadOrder,
       version: mod.version,
       installStatus: 'ready',
       installError: null,
-      ...(localUpdatedAt ? { localUpdatedAt } : {}),
+      localUpdatedAt: localVersion.updatedAt,
+      loadedCopyStale: localVersion.loadedCopyStale,
+      ...(workshopUpdatedAt
+        ? { remoteUpdatedAt: workshopUpdatedAt, updateCheckedAt: new Date().toISOString() }
+        : {}),
     })
   }
 }
@@ -632,6 +685,7 @@ export function setModDownloadDbHooksForTest(hooks: {
   getInstanceModByWorkshopId?: GetInstanceModByWorkshopIdFn
   upsertInstanceMod?: UpsertInstanceModFn
   updateInstanceModByWorkshopId?: UpdateInstanceModByWorkshopIdFn
+  fetchWorkshopModMetadata?: FetchWorkshopModMetadataFn
 }) {
   if (hooks.listInstanceMods) {
     listInstanceModsFn = hooks.listInstanceMods
@@ -645,6 +699,9 @@ export function setModDownloadDbHooksForTest(hooks: {
   if (hooks.updateInstanceModByWorkshopId) {
     updateInstanceModByWorkshopIdFn = hooks.updateInstanceModByWorkshopId
   }
+  if (hooks.fetchWorkshopModMetadata) {
+    fetchWorkshopModMetadataFn = hooks.fetchWorkshopModMetadata
+  }
 }
 
 export function resetModDownloadDbHooksForTest() {
@@ -652,4 +709,5 @@ export function resetModDownloadDbHooksForTest() {
   getInstanceModByWorkshopIdFn = getInstanceModByWorkshopId
   upsertInstanceModFn = upsertInstanceMod
   updateInstanceModByWorkshopIdFn = updateInstanceModByWorkshopId
+  fetchWorkshopModMetadataFn = fetchWorkshopModMetadata
 }

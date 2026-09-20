@@ -209,6 +209,7 @@ function mapDbInstanceMod(row: {
   localUpdatedAt: string | null
   remoteUpdatedAt: string | null
   updateCheckedAt: string | null
+  loadedCopyStale: number
   config: string | null
   createdAt: string
   updatedAt: string
@@ -222,6 +223,7 @@ function mapDbInstanceMod(row: {
     loadOrder: Number(row.loadOrder),
     installStatus,
     installError: row.installError?.trim() || null,
+    loadedCopyStale: Number(row.loadedCopyStale) === 1,
   }
 }
 
@@ -247,6 +249,7 @@ export async function listInstanceMods(instanceId: string): Promise<DbInstanceMo
       localUpdatedAt: instanceMods.localUpdatedAt,
       remoteUpdatedAt: instanceMods.remoteUpdatedAt,
       updateCheckedAt: instanceMods.updateCheckedAt,
+      loadedCopyStale: instanceMods.loadedCopyStale,
       config: instanceMods.config,
       createdAt: instanceMods.createdAt,
       updatedAt: instanceMods.updatedAt,
@@ -274,6 +277,7 @@ export async function getInstanceModByWorkshopId(instanceId: string, workshopId:
       localUpdatedAt: instanceMods.localUpdatedAt,
       remoteUpdatedAt: instanceMods.remoteUpdatedAt,
       updateCheckedAt: instanceMods.updateCheckedAt,
+      loadedCopyStale: instanceMods.loadedCopyStale,
       config: instanceMods.config,
       createdAt: instanceMods.createdAt,
       updatedAt: instanceMods.updatedAt,
@@ -301,6 +305,7 @@ export async function upsertInstanceMod(input: {
   localUpdatedAt?: string | null
   remoteUpdatedAt?: string | null
   updateCheckedAt?: string | null
+  loadedCopyStale?: boolean
   config?: string | null
 }): Promise<DbInstanceMod> {
   const { drizzleDb } = ensureDb()
@@ -326,6 +331,10 @@ export async function upsertInstanceMod(input: {
   const updateCheckedAt = typeof input.updateCheckedAt === 'undefined'
     ? undefined
     : (input.updateCheckedAt?.trim() || null)
+  // 游戏加载的副本是否陈旧：undefined = 保留库中原值，其余写入 0/1
+  const loadedCopyStale = typeof input.loadedCopyStale === 'undefined'
+    ? undefined
+    : (input.loadedCopyStale ? 1 : 0)
   await drizzleDb
     .insert(instanceMods)
     .values({
@@ -342,6 +351,7 @@ export async function upsertInstanceMod(input: {
       localUpdatedAt: localUpdatedAt ?? null,
       remoteUpdatedAt: remoteUpdatedAt ?? null,
       updateCheckedAt: updateCheckedAt ?? null,
+      loadedCopyStale: loadedCopyStale ?? 0,
       config: config ?? null,
       createdAt: now,
       updatedAt: now,
@@ -359,6 +369,7 @@ export async function upsertInstanceMod(input: {
         ...(typeof localUpdatedAt !== 'undefined' ? { localUpdatedAt } : {}),
         ...(typeof remoteUpdatedAt !== 'undefined' ? { remoteUpdatedAt } : {}),
         ...(typeof updateCheckedAt !== 'undefined' ? { updateCheckedAt } : {}),
+        ...(typeof loadedCopyStale !== 'undefined' ? { loadedCopyStale } : {}),
         ...(typeof config !== 'undefined' ? { config } : {}),
         updatedAt: now,
       },
@@ -384,6 +395,7 @@ export async function updateInstanceModByWorkshopId(
     localUpdatedAt?: string | null
     remoteUpdatedAt?: string | null
     updateCheckedAt?: string | null
+    loadedCopyStale?: boolean
     config?: string | null
   },
 ): Promise<DbInstanceMod | undefined> {
@@ -399,6 +411,7 @@ export async function updateInstanceModByWorkshopId(
     localUpdatedAt?: string | null
     remoteUpdatedAt?: string | null
     updateCheckedAt?: string | null
+    loadedCopyStale?: number
     config?: string | null
     updatedAt: string
   } = {
@@ -433,6 +446,9 @@ export async function updateInstanceModByWorkshopId(
   }
   if (typeof patch.updateCheckedAt !== 'undefined') {
     payload.updateCheckedAt = patch.updateCheckedAt?.trim() || null
+  }
+  if (typeof patch.loadedCopyStale !== 'undefined') {
+    payload.loadedCopyStale = patch.loadedCopyStale ? 1 : 0
   }
   if (typeof patch.config !== 'undefined') {
     payload.config = patch.config?.trim() || null

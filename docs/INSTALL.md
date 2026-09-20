@@ -129,6 +129,8 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 
 浏览器 `http://<服务器公网IP>:<PANEL_PORT>` 登录，首登强制改密。若之后「检查更新」超时，panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
 
+模组管理里的「检查更新」走的是 Steam 创意工坊接口（`https://api.steampowered.com`），在同样连不上 Steam 的网络里会一直取不到版本信息——面板此时会老实显示「无法判断版本」，不会谎报「已是最新」。要恢复判定，在 panel.env 追加 `GSH_STEAM_WEBAPI_BASE_URL` 指向一个可用的 Steam Web API 兼容反代（例如自建代理），再 `docker compose up -d panel` 重建面板即可；留空则使用官方地址。
+
 ---
 
 ## 路线 C：Native 海外机器（一个命令装完）

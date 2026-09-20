@@ -15,8 +15,8 @@
 
 **单一事实来源：**
 
-1. Git tag：`v0.6.16`
-2. `package.json` → `"version": "0.6.16"`
+1. Git tag：`v0.6.17`
+2. `package.json` → `"version": "0.6.17"`
 3. `CHANGELOG.md` → 对应章节
 4. GitHub Release 说明（镜像 tag 与升级指引）
 

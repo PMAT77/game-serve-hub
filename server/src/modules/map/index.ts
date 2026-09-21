@@ -105,16 +105,22 @@ export function registerMapModule(app: FastifyInstance) {
      *
      * 地形只能从活着的世界读：未运行时直接告诉用户"先启动实例"，比先返回 200、
      * 再让前端从"生成中"跳到"失败"诚实得多。
+     *
+     * 判断顺序也不能反：**先看实例在不在跑，再看运行时与镜像**。实例没跑时，
+     * 用户该看到的就是"实例未运行"这一句——"镜像未就绪"是面板的内部实现细节，
+     * 拿它没法行动；而且实例都没跑，根本没到需要镜像的那一步。
+     * （这个顺序是发布当天暴露的：版本号一 bump，新 tag 在镜像仓库上还不存在，
+     *   凡是先做镜像检查的路径都会先撞 404，把真正的原因盖掉。）
      */
-    const runtimeReady = await ensureContainerRuntimeReady()
-    if (!runtimeReady.ok) {
-      return businessError(runtimeReady.message ?? '容器运行时未就绪，无法导出地形', request)
-    }
     if (!await isShardRunning(instanceId, shard)) {
       return businessError(
         shard === 'caves' ? '洞穴分片未运行，无法导出地形' : '实例未运行，无法导出地形',
         request,
       )
+    }
+    const runtimeReady = await ensureContainerRuntimeReady()
+    if (!runtimeReady.ok) {
+      return businessError(runtimeReady.message ?? '容器运行时未就绪，无法导出地形', request)
     }
     const service = createMapService()
     const result = service.refresh({ instanceId, shard, force: force ?? false })

@@ -47,6 +47,7 @@ import ShardModsSection from './components/ShardModsSection.vue'
 import ShardWorldRulesSection from './components/ShardWorldRulesSection.vue'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ShardWorldgenSection from './components/ShardWorldgenSection.vue'
+import ShardMapPanel from './components/ShardMapPanel.vue'
 import {
   applyLeveldataOverridesFromServer,
   buildLeveldataOverridesPayload,
@@ -731,6 +732,14 @@ onActivated(() => {
                     @update:world-seed="masterWorldSeed = $event"
                     @read="readCurrentWorldSeed('master')"
                     @reset="confirmResetWorldWithSeed('master')"
+                  />
+                </NTabPane>
+
+                <NTabPane name="map" tab="地形图">
+                  <ShardMapPanel
+                    v-if="instanceId"
+                    :instance-id="instanceId"
+                    shard="master"
                   />
                 </NTabPane>
 

@@ -12,6 +12,8 @@ packages/*/dist/
 .artifacts/
 stats.html
 .native-*-probe/
+# 一次性探针的原始产物：报告要留档时复制进 docs_local/research/，原始输出不入库
+server/scripts/probe-output/
 
 # Internal documentation (not published in open-source repo)
 docs_local/

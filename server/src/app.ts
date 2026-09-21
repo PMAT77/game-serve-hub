@@ -9,6 +9,7 @@ import { registerClusterModule } from './modules/cluster'
 import { registerPlayerModule } from './modules/player'
 import { registerFilesModule } from './modules/files'
 import { registerShardModule } from './modules/shard'
+import { registerMapModule } from './modules/map'
 import { registerModModule } from './modules/mod'
 import { registerConsoleModule } from './modules/console'
 import { registerInstanceModule } from './modules/instance'
@@ -131,6 +132,7 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
   registerPlayerModule(app)
   registerFilesModule(app)
   registerShardModule(app)
+  registerMapModule(app)
   registerModModule(app)
   registerConsoleModule(app)
   registerBackupModule(app)

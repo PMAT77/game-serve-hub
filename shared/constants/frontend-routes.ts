@@ -9,5 +9,13 @@ export const FRONTEND_ROUTE_PATHS = {
   dstModDetail: '/games/dst/mods/:workshopId/detail',
   opsBackups: '/ops/backups',
   opsSchedules: '/ops-schedule/schedules',
+  /** 「系统设置」页：菜单 activeMenu 与页面路径都取它（页内 tab 不再有各自的路由） */
+  systemSettings: '/system/settings',
+  /** 旧地址别名：只用于把 `/system/notify` 重定向到系统设置页的通知渠道 tab */
   systemNotify: '/system/notify',
+  systemCommercial: '/system/commercial',
+  /** 「插件」主导航模块（页面路由，不再是系统设置组下的隐藏项） */
+  plugins: '/plugins',
+  /** 「商业支持与 Pro」主导航模块 */
+  commercial: '/commercial',
 } as const

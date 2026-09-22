@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 通知渠道（系统设置页的第二个 tab）。
+ *
+ * 这里只渲染内容，不套页面外壳：tab 头与页面标题由 `SystemSettingsTabs`
+ * 和 `settings.vue` 提供，所以本文件没有 `<FaPageMain>`，也没有自己的路由。
+ */
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import type { NotifyChannelItem, NotifyChannelType, NotifySettings } from '@/api/modules/notify'
 import { NButton, NDataTable, NEmpty, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch, NTag, NTooltip, useDialog } from 'naive-ui'
@@ -277,7 +283,7 @@ const columns = computed<DataTableColumns<NotifyChannelItem>>(() => [
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 p-4">
+  <div class="flex flex-col gap-4">
     <NForm label-placement="top" class="max-w-[560px]" @submit.prevent="saveSettings">
       <NFormItem label="通知总开关">
         <NSwitch v-model:value="settings.enabled" />

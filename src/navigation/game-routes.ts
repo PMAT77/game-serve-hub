@@ -3,6 +3,7 @@ import { FRONTEND_ROUTE_PATHS } from '../../shared/constants/frontend-routes'
 
 /** 与后端 menu-routes、auth 动态路由 name 保持一致 */
 export const ROUTE_NAMES = {
+  consoleMonitor: 'consoleMonitor',
   nodeInstance: 'nodeInstance',
   nodeInstanceDetail: 'nodeInstanceDetail',
   nodeInstanceConsole: 'nodeInstanceConsole',
@@ -15,9 +16,19 @@ export const ROUTE_NAMES = {
   dstModList: 'dstModList',
   dstModDetail: 'dstModDetail',
   opsBackups: 'opsBackups',
+  opsSchedules: 'opsSchedules',
+  // 系统设置：通知渠道是设置页的页内 tab，`systemNotify` 只用于旧地址 `/system/notify` 的重定向
+  systemSettings: 'systemSettings',
+  systemCommercial: 'systemCommercial',
+  systemPlugins: 'systemPlugins',
+  systemNotify: 'systemNotify',
 } as const
 
 export { FRONTEND_ROUTE_PATHS }
+
+export function routeToConsoleMonitor(): RouteLocationRaw {
+  return { name: ROUTE_NAMES.consoleMonitor }
+}
 
 export function routeToNodeInstance(): RouteLocationRaw {
   return { name: ROUTE_NAMES.nodeInstance }
@@ -72,4 +83,8 @@ export function routeToDstModDetail(workshopId: string, instanceId: string): Rou
 
 export function routeToOpsBackups(): RouteLocationRaw {
   return { name: ROUTE_NAMES.opsBackups }
+}
+
+export function routeToOpsSchedules(): RouteLocationRaw {
+  return { name: ROUTE_NAMES.opsSchedules }
 }

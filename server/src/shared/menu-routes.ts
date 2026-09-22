@@ -1,5 +1,12 @@
 import type { RouteMetaRaw } from '../../../packages/types/types'
 import { FRONTEND_ROUTE_PATHS } from '../../../shared/constants/frontend-routes'
+import {
+  NODE_INSTANCE_MANAGE_PERMISSION,
+  OPS_MANAGE_PERMISSION,
+  OPS_READ_PERMISSION,
+  SYSTEM_MANAGE_PERMISSION,
+  SYSTEM_READ_PERMISSION,
+} from '../../../shared/constants/permissions'
 
 /** 与前端 `vue-router` RouteMeta（RouteMetaRaw）对齐 */
 export type MenuRouteMeta = RouteMetaRaw & {
@@ -16,19 +23,35 @@ export interface MenuRouteItem {
   children?: MenuRouteItem[]
 }
 
-export const NODE_INSTANCE_MANAGE_PERMISSION = 'pages.node.instance:manage'
-export const SYSTEM_READ_PERMISSION = 'system:read'
-export const SYSTEM_MANAGE_PERMISSION = 'system:manage'
-export const OPS_READ_PERMISSION = 'ops:read'
-export const OPS_MANAGE_PERMISSION = 'ops:manage'
+/**
+ * 权限点定义在 `shared/constants/permissions.ts`（前端也要用同一份），
+ * 这里原样转出，避免既有 import 路径（`server/src/shared/menu-routes`）失效。
+ */
+export {
+  NODE_INSTANCE_MANAGE_PERMISSION,
+  OPS_MANAGE_PERMISSION,
+  OPS_READ_PERMISSION,
+  SYSTEM_MANAGE_PERMISSION,
+  SYSTEM_READ_PERMISSION,
+}
 
 /**
  * 后端驱动的动态菜单与路由（component 为 views/ 下相对路径）。
  *
  * 菜单组织约定（扁平化，杜绝「控制台>控制台>监控台」式同名嵌套）：
- * - 主导航（图标栏）每一项对应一个页面任务：监控台 / 实例管理 / 房间管理 / 世界管理 / 玩家管理 / 模组管理 / 系统设置；
- * - 页面路由挂在 Layout 容器下（component: 'Layout'），真实页面 `meta.menu: false` 使容器在菜单中呈现为可点击的单项；
- * - 容器用 redirect 指向真实页面；列表页 `meta.breadcrumb: false` 避免与容器标题重复；
+ * - 主导航（图标栏）每一项对应一个页面任务：监控台 / 实例管理 / 房间管理 / 世界管理 / 玩家管理 /
+ *   模组管理 / 备份与恢复 / 计划任务 / 商业支持与 Pro / 系统设置——
+ *   管理类三项排在最后：前八个是天天要点的，而「系统设置」改完就很少回来，放最末不挡常用项；
+ * - **插件模块暂时以 `menu: false` 隐藏**（页面与接口都在，只是不占主导航槽位），
+ *   待呈现打磨完再放开；它与「商业支持与 Pro」原本各占一个槽位，服务的是
+ *   "我要装什么、我需要什么支持"，与"面板怎么运行"不是同一件事；
+ * - 设置页（`system/settings.vue`）用页内 tab 收纳「通知渠道」与「操作记录」，因此系统设置组下只有一个页面；
+ * - **多页模块的页面挂在 Layout 容器下**（`component: 'Layout'`），页面自身 `meta.menu: false`，
+ *   使容器在菜单中呈现为可点击的单项；容器用 redirect 指向真实页面；
+ * - **仅有一个页面的模块不套容器**（当前的「系统设置」）：容器与它唯一的子页面同名时，图标栏已经写着这个名字，
+ *   二级导航又照 hover 的名称画一遍同样的文字，看起来就是两个「系统设置」。
+ *   直接以页面作模块入口后，侧边栏只剩图标栏那一处；页面自身保持 `menu: false`，否则二级导航会画出第二个同名项；
+ * - 列表页 `meta.breadcrumb: false` 避免与容器标题重复；
  * - 房间/世界/Mod 的设置页保持隐藏路由（menu: false），面包屑正常展示，activeMenu 归属列表项。
  */
 export const menuRouteList: MenuRouteItem[] = [
@@ -378,48 +401,110 @@ export const menuRouteList: MenuRouteItem[] = [
   },
   {
     meta: {
-      title: '系统设置',
-      icon: 'ri:settings-3-line',
+      title: '插件',
+      icon: 'ri:plug-line',
+      /**
+       * 暂时从侧边栏隐藏。
+       *
+       * 插件页（商店形态 + 插件包导入）本身是可用的，只是这一轮的呈现还要再打磨，
+       * 所以先把入口收起来。用 `menu: false` 而不是删掉路由，是为了**保留一条可回退的路**：
+       * 路由、接口、页面组件都留在原处，后续优化完删掉这一行就恢复成主导航项，
+       * 不需要重新接线（`menu-routes.test.ts` 钉住了「页面存在但不在菜单里」这个状态）。
+       *
+       * 副作用要清楚：插件页此后只能靠直接输地址到达。这正是隐藏的意图，
+       * 但别在任何地方留下指向它的链接——那会变成一个点了没反应的入口。
+       */
+      menu: false,
     },
     children: [
       {
-        path: '/system',
+        path: FRONTEND_ROUTE_PATHS.plugins,
         component: 'Layout',
-        name: 'system',
-        redirect: '/system/settings',
+        name: 'plugins',
+        redirect: FRONTEND_ROUTE_PATHS.plugins,
         meta: {
-          title: '系统设置',
-          icon: 'ri:settings-3-line',
+          title: '插件',
+          icon: 'ri:plug-line',
           auth: SYSTEM_MANAGE_PERMISSION,
         },
         children: [
           {
-            path: 'settings',
-            name: 'systemSettings',
-            component: 'system/settings.vue',
+            path: '',
+            name: 'systemPlugins',
+            component: 'system/plugins.vue',
             meta: {
-              title: '系统设置',
-              icon: 'ri:settings-4-line',
+              title: '插件',
+              icon: 'ri:plug-line',
               auth: SYSTEM_MANAGE_PERMISSION,
               menu: false,
               breadcrumb: false,
-              activeMenu: '/system',
-            },
-          },
-          {
-            path: 'notify',
-            name: 'systemNotify',
-            component: 'system/notify.vue',
-            meta: {
-              title: '通知渠道',
-              icon: 'ri:notification-3-line',
-              auth: SYSTEM_MANAGE_PERMISSION,
-              menu: false,
-              breadcrumb: false,
-              activeMenu: '/system',
+              activeMenu: FRONTEND_ROUTE_PATHS.plugins,
             },
           },
         ],
+      },
+    ],
+  },
+  {
+    meta: {
+      title: '商业支持与 Pro',
+      icon: 'ri:shield-star-line',
+    },
+    children: [
+      {
+        path: FRONTEND_ROUTE_PATHS.commercial,
+        component: 'Layout',
+        name: 'commercial',
+        redirect: FRONTEND_ROUTE_PATHS.commercial,
+        meta: {
+          title: '商业支持与 Pro',
+          icon: 'ri:shield-star-line',
+          // 授权状态与人工服务说明本身是只读信息，与详情接口的 system:read 对齐：
+          // 有只读权限的账号也该看得到「我买的授权还有多久到期」
+          auth: SYSTEM_READ_PERMISSION,
+        },
+        children: [
+          {
+            path: '',
+            name: 'systemCommercial',
+            component: 'system/commercial.vue',
+            meta: {
+              title: '商业支持与 Pro',
+              icon: 'ri:shield-star-line',
+              auth: SYSTEM_READ_PERMISSION,
+              menu: false,
+              breadcrumb: false,
+              activeMenu: FRONTEND_ROUTE_PATHS.commercial,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    meta: {
+      title: '系统设置',
+      icon: 'ri:settings-3-line',
+    },
+    children: [
+      // 这一组**不再有 Layout 中间层**：它只有一个页面，套一层同名容器会让二级导航
+      // 在图标栏已经写了「系统设置」的情况下再画一遍「系统设置」，看起来就是两个嵌套的同名菜单。
+      // 直接以页面作模块唯一入口后，侧边栏里只剩图标栏那一处（`MainSidebar` 用 children 渲染它）。
+      {
+        path: FRONTEND_ROUTE_PATHS.systemSettings,
+        name: 'systemSettings',
+        component: 'system/settings.vue',
+        meta: {
+          title: '系统设置',
+          icon: 'ri:settings-3-line',
+          auth: SYSTEM_MANAGE_PERMISSION,
+          breadcrumb: false,
+          activeMenu: FRONTEND_ROUTE_PATHS.systemSettings,
+          // 单页模块的页面在菜单里保持隐藏：容器已经没有了，若让它可见，
+          // 二级导航又会画出第二个「系统设置」（`Menu/index.vue` 的单项分支）。
+          // 图标栏那一项照样可点：`MainSidebar` 只要求模块的 children 非空。
+          menu: false,
+        },
       },
     ],
   },

@@ -4,7 +4,10 @@ import { h } from 'vue'
 import { NAlert, NCollapse, NCollapseItem, NInputNumber, NSelect, NSpin, useDialog } from 'naive-ui'
 import AdminSettingsSection from '@/components/AdminSettingsSection.vue'
 import ConfigActionBar from '@/components/ConfigActionBar.vue'
+import NotifyPanel from './notify.vue'
+import OperationAuditSection from './OperationAuditSection.vue'
 import SelfCheckCard from './SelfCheckCard.vue'
+import SystemSettingsTabs from './SystemSettingsTabs.vue'
 import apiSystem from '@/api/modules/system'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
 import { buildPanelUpdatePresentation, MANUAL_UPDATE_NOTE } from './panelUpdatePresentation'
@@ -15,15 +18,7 @@ defineOptions({
 
 const loading = ref(false)
 const dialog = useDialog()
-const router = useRouter()
 
-/**
- * 通知渠道是独立页面：后端菜单把它标为隐藏（menu: false），此前没有任何界面入口，
- * 用户只能手输 URL 才能打开，而文档还在指引「系统设置 → 通知」。这里给出明确入口。
- */
-function openNotifyChannels() {
-  void router.push('/system/notify')
-}
 const appSettingsStore = useAppSettingsStore()
 const settingsLoaded = ref(false)
 const settingsLoadError = ref<string | null>(null)
@@ -434,11 +429,6 @@ onMounted(async () => {
   await Promise.all([loadSettings(), loadUpdateStatus()])
   await resumeUpdatePollingIfNeeded()
 })
-
-onActivated(async () => {
-  await Promise.all([loadSettings({ silent: true }), loadUpdateStatus()])
-  await resumeUpdatePollingIfNeeded()
-})
 </script>
 
 <template>
@@ -452,179 +442,180 @@ onActivated(async () => {
         重试加载
       </FaButton>
     </div>
-    <div v-else class="space-y-6">
-      <AdminSettingsSection
-        :title="portFieldTitle"
-        :description="portFieldDescription"
-      >
-        <!-- 只在「保存的端口还没生效」时提示；两者一致时不必多言 -->
-        <p
-          v-if="activePort !== null && activePort !== form.panelPort"
-          class="text-sm text-muted-foreground"
-        >
-          当前实际端口：{{ activePort }}
-        </p>
-        <NInputNumber v-model:value="form.panelPort" :min="1" :max="65535" class="max-w-80 mt-3" placeholder="请输入端口号" />
-        <p class="text-xs text-muted-foreground mt-2">
-          {{ portRestartHint }}
-        </p>
-      </AdminSettingsSection>
-
-      <AdminSettingsSection
-        title="界面主题"
-        description="保存后立即生效。"
-      >
-        <NSelect v-model:value="form.theme" :options="themeOptions" class="max-w-80" />
-      </AdminSettingsSection>
-
-      <AdminSettingsSection
-        title="面板与游戏版本"
-      >
-        <div v-if="updateStatus" class="space-y-2 text-sm">
-          <p class="font-medium">
-            {{ updateView.versionLine }}
-          </p>
-          <p v-if="updateView.progressText" class="text-xs text-muted-foreground tabular-nums">
-            {{ updateView.progressText }}
-          </p>
-          <p
-            v-if="updateView.phaseLine"
-            class="text-xs whitespace-pre-wrap"
-            :class="updateView.updateFailed ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'"
-          >
-            {{ updateView.phaseLine }}
-          </p>
-          <p v-if="targetImageHint" class="text-xs text-muted-foreground">
-            {{ targetImageHint }}
-          </p>
-          <p v-if="releaseMetaLine" class="text-xs text-muted-foreground">
-            {{ releaseMetaLine }}
-            <a
-              v-if="releaseUrl"
-              :href="releaseUrl"
-              target="_blank"
-              rel="noopener"
-              class="ml-1 text-primary hover:underline"
+    <template v-else>
+      <SystemSettingsTabs>
+        <template #settings>
+          <div class="space-y-6">
+            <AdminSettingsSection
+              :title="portFieldTitle"
+              :description="portFieldDescription"
             >
-              更新说明
-            </a>
-          </p>
-          <p v-if="normalizedCheckError" class="text-xs text-amber-600 dark:text-amber-400">
-            检查提示：{{ normalizedCheckError }}
-          </p>
-        </div>
-        <div v-else class="text-sm text-muted-foreground">
-          暂时无法获取版本信息，点「检查更新」重试
-        </div>
-
-        <div class="space-y-2 pt-1">
-          <div class="flex flex-wrap gap-2">
-            <FaButton
-              :loading="updateButtonLoading"
-              :disabled="updateButtonDisabled"
-              @click="handleUpdateAction"
-            >
-              {{ updateView.actionLabel }}
-            </FaButton>
-            <FaButton variant="outline" :loading="updateStatusLoading" @click="checkHubUpdate">
-              检查更新
-            </FaButton>
-          </div>
-          <div v-if="needsManualUpdate" class="space-y-2 text-xs">
-            <p class="text-amber-600 dark:text-amber-400">{{ MANUAL_UPDATE_NOTE }}</p>
-            <div v-if="manualUpdateCommand" class="flex flex-wrap gap-2 items-start">
-              <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ manualUpdateCommand }}</pre>
-              <FaButton
-                variant="outline"
-                size="sm"
-                @click="copyUpdateCommand(manualUpdateCommand ?? '', '更新命令')"
+              <!-- 只在「保存的端口还没生效」时提示；两者一致时不必多言 -->
+              <p
+                v-if="activePort !== null && activePort !== form.panelPort"
+                class="text-sm text-muted-foreground"
               >
-                复制
-              </FaButton>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="updateStatus?.runtimeMode !== 'native'" class="space-y-2 max-w-80 pt-1">
-          <label class="text-sm text-muted-foreground">更新下载源</label>
-          <NSelect v-model:value="form.updateSource" :options="updateSourceOptions" />
-          <p class="text-xs text-muted-foreground">
-            {{ updateSourceHint }}
-          </p>
-        </div>
-
-        <NCollapse v-if="offlineUpdateCommand" class="pt-1">
-          <NCollapseItem title="面板下载失败？手动导入更新包" name="offline-update">
-            <div class="space-y-2 text-sm">
-              <p class="text-xs text-muted-foreground">
-                在能联网的电脑上下载更新包，再导入这台服务器：
+                当前实际端口：{{ activePort }}
               </p>
-              <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ offlineUpdateCommand }}</pre>
-              <div class="flex flex-wrap gap-2 items-center">
-                <FaButton
-                  variant="outline"
-                  size="sm"
-                  @click="copyUpdateCommand(offlineUpdateCommand ?? '', '离线更新命令')"
+              <NInputNumber v-model:value="form.panelPort" :min="1" :max="65535" class="max-w-80 mt-3" placeholder="请输入端口号" />
+              <p class="text-xs text-muted-foreground mt-2">
+                {{ portRestartHint }}
+              </p>
+            </AdminSettingsSection>
+
+            <AdminSettingsSection
+              title="界面主题"
+              description="保存后立即生效。"
+            >
+              <NSelect v-model:value="form.theme" :options="themeOptions" class="max-w-80" />
+            </AdminSettingsSection>
+
+            <AdminSettingsSection
+              title="面板与游戏版本"
+            >
+              <div v-if="updateStatus" class="space-y-2 text-sm">
+                <p class="font-medium">
+                  {{ updateView.versionLine }}
+                </p>
+                <p v-if="updateView.progressText" class="text-xs text-muted-foreground tabular-nums">
+                  {{ updateView.progressText }}
+                </p>
+                <p
+                  v-if="updateView.phaseLine"
+                  class="text-xs whitespace-pre-wrap"
+                  :class="updateView.updateFailed ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'"
                 >
-                  复制
-                </FaButton>
-                <span class="text-xs text-muted-foreground">
-                  导入后点「下载更新」即可安装。
-                </span>
+                  {{ updateView.phaseLine }}
+                </p>
+                <p v-if="targetImageHint" class="text-xs text-muted-foreground">
+                  {{ targetImageHint }}
+                </p>
+                <p v-if="releaseMetaLine" class="text-xs text-muted-foreground">
+                  {{ releaseMetaLine }}
+                  <a
+                    v-if="releaseUrl"
+                    :href="releaseUrl"
+                    target="_blank"
+                    rel="noopener"
+                    class="ml-1 text-primary hover:underline"
+                  >
+                    更新说明
+                  </a>
+                </p>
+                <p v-if="normalizedCheckError" class="text-xs text-amber-600 dark:text-amber-400">
+                  检查提示：{{ normalizedCheckError }}
+                </p>
               </div>
-            </div>
-          </NCollapseItem>
-        </NCollapse>
-      </AdminSettingsSection>
+              <div v-else class="text-sm text-muted-foreground">
+                暂时无法获取版本信息，点「检查更新」重试
+              </div>
 
-      <AdminSettingsSection
-        title="自动检查更新"
-      >
-        <div class="flex gap-3 items-center">
-          <FaSwitch v-model="form.autoUpdate" />
-        </div>
-        <div class="space-y-2 max-w-80">
-          <label class="text-sm text-muted-foreground">检查间隔（小时）</label>
-          <NInputNumber v-model:value="form.updateCheckIntervalHours" :min="1" :max="168" placeholder="1-168" class="w-full" />
-        </div>
-      </AdminSettingsSection>
+              <div class="space-y-2 pt-1">
+                <div class="flex flex-wrap gap-2">
+                  <FaButton
+                    :loading="updateButtonLoading"
+                    :disabled="updateButtonDisabled"
+                    @click="handleUpdateAction"
+                  >
+                    {{ updateView.actionLabel }}
+                  </FaButton>
+                  <FaButton variant="outline" :loading="updateStatusLoading" @click="checkHubUpdate">
+                    检查更新
+                  </FaButton>
+                </div>
+                <div v-if="needsManualUpdate" class="space-y-2 text-xs">
+                  <p class="text-amber-600 dark:text-amber-400">{{ MANUAL_UPDATE_NOTE }}</p>
+                  <div v-if="manualUpdateCommand" class="flex flex-wrap gap-2 items-start">
+                    <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ manualUpdateCommand }}</pre>
+                    <FaButton
+                      variant="outline"
+                      size="sm"
+                      @click="copyUpdateCommand(manualUpdateCommand ?? '', '更新命令')"
+                    >
+                      复制
+                    </FaButton>
+                  </div>
+                </div>
+              </div>
 
-      <AdminSettingsSection
-        title="启动前检查游戏更新"
-      >
-        <div class="flex gap-3 items-center">
-          <FaSwitch v-model="form.checkUpdateBeforeStart" />
-        </div>
-      </AdminSettingsSection>
+              <div v-if="updateStatus?.runtimeMode !== 'native'" class="space-y-2 max-w-80 pt-1">
+                <label class="text-sm text-muted-foreground">更新下载源</label>
+                <NSelect v-model:value="form.updateSource" :options="updateSourceOptions" />
+                <p class="text-xs text-muted-foreground">
+                  {{ updateSourceHint }}
+                </p>
+              </div>
 
-      <AdminSettingsSection
-        title="环境自检"
-      >
-        <SelfCheckCard />
-      </AdminSettingsSection>
+              <NCollapse v-if="offlineUpdateCommand" class="pt-1">
+                <NCollapseItem title="面板下载失败？手动导入更新包" name="offline-update">
+                  <div class="space-y-2 text-sm">
+                    <p class="text-xs text-muted-foreground">
+                      在能联网的电脑上下载更新包，再导入这台服务器：
+                    </p>
+                    <pre class="text-xs bg-muted overflow-x-auto p-3 rounded-md">{{ offlineUpdateCommand }}</pre>
+                    <div class="flex flex-wrap gap-2 items-center">
+                      <FaButton
+                        variant="outline"
+                        size="sm"
+                        @click="copyUpdateCommand(offlineUpdateCommand ?? '', '离线更新命令')"
+                      >
+                        复制
+                      </FaButton>
+                      <span class="text-xs text-muted-foreground">
+                        导入后点「下载更新」即可安装。
+                      </span>
+                    </div>
+                  </div>
+                </NCollapseItem>
+              </NCollapse>
+            </AdminSettingsSection>
 
-      <AdminSettingsSection
-        title="通知渠道"
-      >
-        <div class="space-y-2">
-          <div class="text-sm text-muted-foreground">
-            配置实例异常退出、内存阈值等事件的推送渠道。
+            <AdminSettingsSection
+              title="自动检查更新"
+            >
+              <div class="flex gap-3 items-center">
+                <FaSwitch v-model="form.autoUpdate" />
+              </div>
+              <div class="space-y-2 max-w-80">
+                <label class="text-sm text-muted-foreground">检查间隔（小时）</label>
+                <NInputNumber v-model:value="form.updateCheckIntervalHours" :min="1" :max="168" placeholder="1-168" class="w-full" />
+              </div>
+            </AdminSettingsSection>
+
+            <AdminSettingsSection
+              title="启动前检查游戏更新"
+            >
+              <div class="flex gap-3 items-center">
+                <FaSwitch v-model="form.checkUpdateBeforeStart" />
+              </div>
+            </AdminSettingsSection>
+
+            <AdminSettingsSection
+              title="环境自检"
+            >
+              <SelfCheckCard />
+            </AdminSettingsSection>
+
+            <ConfigActionBar
+              :dirty="settingsDirty"
+              :busy="saveLoading"
+              :saving="saveLoading"
+              :show-restart="false"
+              save-label="保存设置"
+              @reset="loadSettings"
+              @save="saveSettings"
+            />
           </div>
-          <FaButton variant="outline" @click="openNotifyChannels">
-            打开通知渠道设置
-          </FaButton>
-        </div>
-      </AdminSettingsSection>
+        </template>
 
-        <ConfigActionBar
-          :dirty="settingsDirty"
-          :busy="saveLoading"
-          :saving="saveLoading"
-          :show-restart="false"
-          save-label="保存设置"
-          @reset="loadSettings"
-          @save="saveSettings"
-        />
-    </div>
+        <template #notify>
+          <NotifyPanel />
+        </template>
+
+        <template #audit>
+          <OperationAuditSection />
+        </template>
+      </SystemSettingsTabs>
+    </template>
   </FaPageMain>
 </template>

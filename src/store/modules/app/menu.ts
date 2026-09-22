@@ -14,6 +14,22 @@ export const useAppMenuStore = defineStore(
       const returnMenus: MenuRecordMainRaw[] = []
       routes.forEach((item) => {
         if (item.children.length > 0) {
+          /**
+           * 以 `meta.menu === false` 隐藏整个模块（后端 `menuRouteList` 里就能这样声明）。
+           *
+           * 为什么在这里过滤，而不是像子菜单那样带着 `menu` 标记交给渲染层判断：
+           * 框架类型把主导航的 meta 限制成 `Pick<RouteMetaRaw, 'auth' | 'title' | 'icon'>`
+           * （见 `packages/types/types.ts` 的 `MenuRecordMainRaw`），**`menu` 在这个层级
+           * 根本无法用类型表达**。硬塞需要断言，而断言会让下一个人以为这是类型疏忽，
+           * 再顺手删掉——那样菜单又会自己冒出来，且编译、单测都不会报错。
+           *
+           * 由此产生的行为差异要记住：模块只是从**前端菜单**里消失，路由本身仍在
+           * `routesRaw` 中，所以直接输地址照样打得开；代价是该页面不会有主导航项高亮
+           * （`setActived` 找不到对应的菜单索引，会保持当前索引不变）。
+           */
+          if ((item.meta as { menu?: boolean } | undefined)?.menu === false) {
+            return
+          }
           if (appSettingsStore.settings.menu.mode === 'single') {
             returnMenus.length === 0 && returnMenus.push({
               meta: {},

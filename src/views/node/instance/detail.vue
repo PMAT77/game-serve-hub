@@ -9,13 +9,12 @@ import apiMod from '@/api/modules/mod'
 import apiShard from '@/api/modules/shard'
 import { NButton, NSpin } from 'naive-ui'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { routeToInstanceConsole, routeToNodeInstance } from '@/navigation/game-routes'
+import { routeToDstPlayerManage, routeToInstanceConsole, routeToNodeInstance } from '@/navigation/game-routes'
 import { statusBadgeClass } from '@/constants/statusDictionary'
 import { getInstanceState } from './instanceDisplay'
 import CommandCenterCard from './components/detail/CommandCenterCard.vue'
 import InstanceFilesCard from './components/detail/InstanceFilesCard.vue'
 import InstanceControlCard from './components/detail/InstanceControlCard.vue'
-import OnlinePlayersCard from './components/detail/OnlinePlayersCard.vue'
 import RoomOverviewCard from './components/detail/RoomOverviewCard.vue'
 import WorldOverviewCard, { type InstanceWorldState } from './components/detail/WorldOverviewCard.vue'
 import { instanceSupportsDstRoom } from '@/composables/useGameInstance'
@@ -137,6 +136,13 @@ function goConsole() {
   }
 }
 
+/** 房间玩家页按实例打开：在线玩家、踢人封禁与三份名单都在那里 */
+function goPlayerManage() {
+  if (instance.value) {
+    router.push(routeToDstPlayerManage(instance.value.id))
+  }
+}
+
 function stopPolling() {
   if (pollTimer) {
     clearInterval(pollTimer)
@@ -229,6 +235,14 @@ onBeforeUnmount(() => {
           >
             控制台
           </NButton>
+          <NButton
+            v-if="instance && instanceSupportsDstRoom(instance) && instance.status !== 'pending_install' && instance.status !== 'installing'"
+            size="small"
+            secondary
+            @click="goPlayerManage"
+          >
+            玩家管理
+          </NButton>
           <NButton size="small" secondary :loading="loading" @click="() => loadDetail()">
             <template #icon>
               <FaIcon name="i-lucide:refresh-cw" />
@@ -245,12 +259,6 @@ onBeforeUnmount(() => {
         :mod-list="modList"
         :connect-info="connectInfo"
         :loading="loading"
-      />
-
-      <OnlinePlayersCard
-        v-if="instance && instanceSupportsDstRoom(instance)"
-        :instance="instance"
-        :online-players="onlinePlayers"
       />
 
       <div class="grid gap-4 lg:grid-cols-2">

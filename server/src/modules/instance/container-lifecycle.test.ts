@@ -7,6 +7,7 @@ import { after, afterEach, describe, it } from 'node:test'
 import type { FastifyInstance } from 'fastify'
 import { resolveDockerStatus } from '../../infra/docker.ts'
 import type { ContainerRef } from '../../infra/container/types.ts'
+import { isSteamcmdImagePresent } from '../../infra/container/steamcmd-runner.ts'
 import { resolveShardRoot } from '../../infra/game-adapter/dst/shard-layout.ts'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store.ts'
 import {
@@ -46,7 +47,18 @@ describe('ensureContainerRuntimeReady', () => {
     assert.match(result.message ?? '', /Docker/)
   })
 
-  it('returns structured readiness result', async () => {
+  /**
+   * 这一条在有 Docker、但没有本地 SteamCMD 镜像的开发机上会变成一次真实的镜像拉取：
+   * `ensureContainerRuntimeReady()` 走完 Docker 探测后调用 `ensureSteamcmdImage()`，
+   * 后者按候选仓库重试拉取，在拉不动镜像的网络里会长时间挂住（实测让整个 test:unit 卡死，
+   * 且看不到任何输出）。单测不该联网，因此这里以「镜像已在本地」为前置条件，
+   * 不满足就跳过——镜像存在时这条路径依然是真实走通的。
+   */
+  it('returns structured readiness result', async (t) => {
+    if (!(await isSteamcmdImagePresent())) {
+      t.skip('本地没有 SteamCMD 镜像，跳过：这条路径会触发真实拉取')
+      return
+    }
     const result = await ensureContainerRuntimeReady()
     assert.equal(typeof result.ok, 'boolean')
     if (!result.ok) {

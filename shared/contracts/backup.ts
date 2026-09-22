@@ -144,3 +144,28 @@ export const saveImportResultSchema = z.object({
   warnings: z.array(z.string()),
 })
 export type SaveImportResult = z.infer<typeof saveImportResultSchema>
+
+// ---------------------------------------------------------------------------
+// 迁移包导出（把本面板实例的存档整理成可交给另一台机器导入的包）
+// ---------------------------------------------------------------------------
+
+export const migrationExportRequestSchema = z.object({
+  instanceId: z.string().trim().min(1).max(128),
+  /** true 时只返回体检报告与文件名，不打包（界面先展示风险项，用户确认后再下载） */
+  reportOnly: z.boolean().optional(),
+})
+export type MigrationExportRequest = z.infer<typeof migrationExportRequestSchema>
+
+export const migrationExportResultSchema = z.object({
+  /** 迁移包文件名（不含路径），与下载接口返回的一致 */
+  fileName: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  /** 迁移报告全文，与包内报告同源；界面直接展示，也可复制给人 */
+  reportText: z.string(),
+  /** 迁移前必须确认的风险项（报告第四节同源，便于界面单独强调） */
+  warnings: z.array(z.string()),
+  /** 本次是否真的产出了压缩包（reportOnly 时为 false） */
+  packaged: z.boolean(),
+})
+export type MigrationExportResult = z.infer<typeof migrationExportResultSchema>
+

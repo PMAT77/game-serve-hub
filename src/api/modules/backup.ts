@@ -2,6 +2,7 @@ import type {
   BackupItem,
   BackupMutationResult,
   BackupRestoreResult,
+  MigrationExportResult,
   SaveImportCandidate,
   SaveImportProbeResult,
   SaveImportRequest,
@@ -14,6 +15,7 @@ export type {
   BackupItem,
   BackupMutationResult,
   BackupRestoreResult,
+  MigrationExportResult,
   SaveImportCandidate,
   SaveImportProbeResult,
   SaveImportRequest,
@@ -59,4 +61,14 @@ export default {
   createDbBackup: () => api.post('app/system/db/backup', {}, { timeout: 0 }) as Promise<{ data: BackupMutationResult }>,
   /** 数据库快照列表 */
   getDbBackupList: () => api.get('app/system/db/backup') as Promise<{ data: BackupItem[] }>,
+  /**
+   * 生成并下载「迁移包」：把实例存档 + 配置 + Mod 清单整理成另一台机器可直接导入的 tar.gz。
+   * 打包耗时取决于存档大小，因此与备份下载一样关闭请求超时。
+   */
+  exportMigrationPack: (instanceId: string) => api.post('app/instance/migration/export', { instanceId }, {
+    responseType: 'blob',
+    timeout: 0,
+  }) as Promise<{ data: Blob }>,
+  /** 先取迁移报告（不打包）：分片端口、Mod、名单与迁移前必须确认的风险项 */
+  getMigrationReport: (instanceId: string) => api.post('app/instance/migration/report', { instanceId, reportOnly: true }) as Promise<{ data: MigrationExportResult }>,
 }

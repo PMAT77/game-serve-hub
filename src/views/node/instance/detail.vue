@@ -14,6 +14,7 @@ import { statusBadgeClass } from '@/constants/statusDictionary'
 import { getInstanceState } from './instanceDisplay'
 import CommandCenterCard from './components/detail/CommandCenterCard.vue'
 import InstanceFilesCard from './components/detail/InstanceFilesCard.vue'
+import InstanceMigrationCard from './components/detail/InstanceMigrationCard.vue'
 import InstanceControlCard from './components/detail/InstanceControlCard.vue'
 import RoomOverviewCard from './components/detail/RoomOverviewCard.vue'
 import WorldOverviewCard, { type InstanceWorldState } from './components/detail/WorldOverviewCard.vue'
@@ -283,6 +284,11 @@ onBeforeUnmount(() => {
 
       <InstanceFilesCard
         v-if="instance"
+        :instance-id="instance.id"
+      />
+
+      <InstanceMigrationCard
+        v-if="instance && instanceSupportsDstRoom(instance)"
         :instance-id="instance.id"
       />
 

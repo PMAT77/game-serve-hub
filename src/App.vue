@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import dayjs from '@/utils/dayjs'
 import { APP_TITLE } from '@/utils/app-title'
-import { ua } from '@/utils/ua'
 import Provider from './ui/provider/index.vue'
 import 'dayjs/locale/zh-cn'
 
@@ -11,8 +10,6 @@ const appSettingsStore = useAppSettingsStore()
 
 const { auth } = useAppAuth()
 const { generateTitle } = useAppMenu()
-
-document.body.setAttribute('data-os', ua.getOS().name || '')
 
 function resolveDynamicPageTitle() {
   if (!appSettingsStore.title) {

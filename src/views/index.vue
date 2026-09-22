@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import type { CapabilityCard } from './home-capabilities'
 import { routeToNodeInstance } from '@/navigation/game-routes'
+import { HOME_CAPABILITIES } from './home-capabilities'
+
 const router = useRouter()
 
 const LINKS = {
@@ -7,61 +10,8 @@ const LINKS = {
   github: 'https://github.com/PMAT77/game-serve-hub',
 } as const
 
-const products = ref([
-  {
-    name: '实例管理',
-    tagline: '从开服到日常管理，一个页面搞定',
-    url: LINKS.docs,
-    features: [
-      '一键安装与更新游戏服务端',
-      '创建、启动、停止实例，随时看运行状态',
-      '安装进度与资源占用',
-      '多开自动分配端口',
-      '一条命令部署到自己的服务器',
-    ],
-  },
-  {
-    name: '监控台',
-    tagline: '机器负载一目了然，不用登录服务器查',
-    url: LINKS.docs,
-    features: [
-      'CPU、内存、磁盘占用',
-      '游戏服务运行状态',
-      '实时网络流量',
-      '和实例状态一起看',
-    ],
-  },
-  {
-    name: '游戏控制台',
-    tagline: '在面板里看日志、发指令，不用切终端',
-    url: LINKS.docs,
-    features: [
-      '实时查看运行日志',
-      '游戏内命令',
-      '直连邀请码',
-    ],
-  },
-  {
-    name: 'DST 房间 / 世界',
-    tagline: '可视化编辑房间与地上、洞穴世界',
-    url: LINKS.docs,
-    features: [
-      '房间名称、密码与联网方式',
-      '地上与洞穴两个世界',
-      '地图与规则可视化调整',
-    ],
-  },
-  {
-    name: '备份与恢复',
-    tagline: '存档随时能找回',
-    url: LINKS.docs,
-    features: [
-      '存档一键备份与恢复',
-      '更新、删除实例前自动备份',
-      '面板数据备份',
-    ],
-  },
-])
+/** 卡片数据在 `home-capabilities.ts`：顺序与菜单一致，且每张卡片跳面板内的对应页面 */
+const capabilities = HOME_CAPABILITIES
 
 const useCases = ref([
   { title: '个人开服', description: '在自己电脑或云服务器上一键开服' },
@@ -75,6 +25,27 @@ function open(url: string) {
 }
 
 const appAccountStore = useAppAccountStore()
+// 复用统一的权限判定（它同时处理「面板关闭登录」的场景），不要自己读 permissions 数组
+const { auth: hasPermission } = useAppAuth()
+
+/** 没登录就没有权限概念，点进页面只会被守卫弹到登录页——这里直接引导登录 */
+function canOpen(card: CapabilityCard): boolean {
+  if (!appAccountStore.isLogin) {
+    return true
+  }
+  return card.permission ? hasPermission(card.permission) : true
+}
+
+function openCapability(card: CapabilityCard) {
+  if (!appAccountStore.isLogin) {
+    router.push('/login')
+    return
+  }
+  if (!canOpen(card)) {
+    return
+  }
+  router.push(card.route)
+}
 
 function goLogin() {
   // 已登录时原跳 /login 会被守卫弹回主页，直接进入实例管理
@@ -200,12 +171,11 @@ function goLogin() {
           <h2 class="text-xs text-muted-foreground tracking-widest font-semibold uppercase">
             核心能力
           </h2>
-          <span class="text-xs text-muted-foreground hidden md-block">v1 已支持模块一览</span>
         </div>
         <div class="gap-4 grid md-grid-cols-2">
           <div
-            v-for="(product, i) in products"
-            :key="product.name"
+            v-for="(capability, i) in capabilities"
+            :key="capability.name"
             class="group card-enter border rounded-xl bg-neutral-950/[.012] dark:bg-white/5"
             :style="{ animationDelay: `${i * 80}ms` }"
           >
@@ -214,10 +184,10 @@ function goLogin() {
                 <AppLogoMark size-class="h-10 w-10" />
                 <div>
                   <div class="text-sm tracking-tight font-semibold">
-                    {{ product.name }}
+                    {{ capability.name }}
                   </div>
                   <div class="text-xs text-muted-foreground leading-relaxed mt-1">
-                    {{ product.tagline }}
+                    {{ capability.tagline }}
                   </div>
                 </div>
               </div>
@@ -225,7 +195,7 @@ function goLogin() {
                 <div class="mb-5 flex-1">
                   <ul class="space-y-1.5">
                     <li
-                      v-for="feature in product.features"
+                      v-for="feature in capability.features"
                       :key="feature"
                       class="text-xs text-muted-foreground flex gap-2 items-start"
                     >
@@ -238,9 +208,10 @@ function goLogin() {
                   variant="link"
                   size="sm"
                   class="mt-auto active-scale-98"
-                  @click="open(product.url)"
+                  :disabled="!canOpen(capability)"
+                  @click="openCapability(capability)"
                 >
-                  查看文档 →
+                  {{ !appAccountStore.isLogin ? '登录后打开' : canOpen(capability) ? '打开页面 →' : '当前账号无权限' }}
                 </FaButton>
               </div>
             </div>

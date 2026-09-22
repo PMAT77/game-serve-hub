@@ -22,6 +22,7 @@ import { getCachedDockerStatus } from './infra/docker'
 import { getCachedRuntimeStatus, isSteamcmdRuntimeReady } from './infra/runtime'
 import { success } from './shared/http/response'
 import { sanitizeRequestUrlForLog } from './shared/http/request-url'
+import { registerOperationAudit } from './shared/audit/operation-audit'
 import { resolveRepoRoot } from './shared/repo-root'
 
 /**
@@ -104,6 +105,12 @@ export async function createServerApp(config: Pick<ServerConfig, 'mode' | 'logLe
       done()
     })
   }
+
+  /**
+   * 用户操作审计：写操作留痕（含被拒的写操作）。
+   * 只在生产路径注册；测试可以单独调用 registerOperationAudit，避免每条测试请求都写盘。
+   */
+  registerOperationAudit(app)
 
   app.get('/api/meta/runtime', async () => {
     const dockerStatus = config.runtimeMode === 'docker' ? getCachedDockerStatus() : 'stopped'

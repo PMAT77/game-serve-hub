@@ -64,6 +64,14 @@ server/.env.*
 panel.env
 .dev/
 
+# 授权签发的密钥与产物：私钥与客户许可都不能进仓库。
+# 公钥（*.public.pem）不在此列——它本来就要随构建分发，公钥不是秘密。
+*.gsh-key
+*.gsh-key.public.pem
+license-private*.pem
+license.json
+migration-exports/
+
 # IDE & local tooling
 .agents/
 .skills/

@@ -26,11 +26,11 @@ import {
   updateBackupStatus,
 } from '../../shared/db/index'
 import type { DbBackup } from '../../shared/db/index'
-import { loadServerConfig } from '../../shared/config'
 import { sendFileDownload } from '../../shared/http/file-download'
 import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from '../system/auth'
 import { createInstanceBackup, restoreInstanceBackup } from './backup-service'
+import { isInsideBackupsRoot } from './backup-ops'
 import { importSaveToInstance, probeSaveImportSource } from './import-service'
 import {
   cleanStaleSaveImportUploads,
@@ -58,12 +58,6 @@ function toBackupItem(record: DbBackup): BackupItem {
     createdBy: record.createdBy,
     createdAt: record.createdAt,
   }
-}
-
-/** 备份文件必须位于备份根目录下（防记录被篡改后的路径穿越） */
-function isInsideBackupsRoot(filePath: string): boolean {
-  const root = path.resolve(loadServerConfig().backupsRoot)
-  return path.resolve(filePath).startsWith(root + path.sep)
 }
 
 interface BackupAuth {

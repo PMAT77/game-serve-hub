@@ -82,11 +82,13 @@ import {
 } from './install-service'
 import { prepareInstallPathForRuntime, prepareInstallPathForSteamcmd } from './install-path'
 import { registerInstanceScheduledOps } from './scheduled-entry'
+import { buildInternalInstanceRequest, registerPluginInstanceOps } from './instance-plugin-ops'
 import { startInstanceExitWatch } from './exit-watch'
 import { businessError, success } from '../../shared/http/response'
 import { hostMemoryPressureError } from '../../shared/http/host-memory-pressure-error'
 import { instanceConsoleLogStore } from '../../shared/instance-runtime/console-log-store'
 import { registerInstanceMetricsRoute } from './metrics'
+import { registerMigrationExportRoutes } from './migration-export-routes'
 import { registerInstanceRoutes } from './instance-routes'
 import { getDstInstanceSummaries } from './dst-summary'
 import type { InstanceUpdateCheckJobStatus } from './update-check'
@@ -468,6 +470,8 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
     sendInstanceContainerCommand,
   })
   registerInstanceMetricsRoute(app)
+  // 迁移包导出：把实例存档整理成另一台机器可直接导入的包（报告与打包共用集群迁移模块）
+  registerMigrationExportRoutes(app)
   app.post('/app/instance/list', async (request) => {
     const body = instanceListQuerySchema.safeParse(request.body ?? {})
     if (!body.success) {
@@ -1252,8 +1256,68 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
   startInstanceExitWatch(app)
 
   // 计划任务内部通道：schedule 模块经注册表调用重启，无需构造带用户 token 的 HTTP 请求
+  async function performScheduledRestart(_app: FastifyInstance, instanceId: string): Promise<{ ok: boolean, message?: string }> {
+    const current = await getGameInstanceById(instanceId)
+    if (!current) {
+      return { ok: false, message: '实例不存在' }
+    }
+    if (current.nodeId !== LOCAL_NODE_ID) {
+      return { ok: false, message: '当前仅支持本地节点执行实例命令' }
+    }
+    if (current.status === 'pending_install' || current.status === 'installing' || isInstallJobActive(instanceId)) {
+      return { ok: false, message: '实例正在安装中，无法按计划重启' }
+    }
+    const runtimeReady = await ensureContainerRuntimeReady()
+    if (!runtimeReady.ok) {
+      return { ok: false, message: runtimeReady.message ?? '游戏运行时未就绪' }
+    }
+    if (current.status === 'running' || current.containerId) {
+      try {
+        await stopInstanceContainer(instanceId)
+      }
+      catch (error) {
+        const message = error instanceof Error ? error.message : '计划重启时停止实例失败'
+        await updateGameInstanceRuntime(instanceId, { status: 'error', lastError: message })
+        return { ok: false, message }
+      }
+    }
+    const syntheticRequest = {
+      id: 'schedule-internal',
+      url: '/internal/schedule/restart',
+      headers: {},
+      body: { id: instanceId },
+    } as unknown as FastifyRequest
+    const result = await handleInstanceStart(syntheticRequest, { skipAuth: true })
+    if ('error' in result && result.error) {
+      return { ok: false, message: result.error }
+    }
+    return { ok: true }
+  }
+
   registerInstanceScheduledOps({
-    restart: async (_app, instanceId) => {
+    restart: performScheduledRestart,
+  })
+
+  /**
+   * 插件实例操作通道：能力服务经此执行 start / stop / restart。
+   *
+   * 三个动作都复用面板自身的内部逻辑（启动走 `handleInstanceStart`，停止走
+   * `stopInstanceContainer` + 状态回写，重启复用计划任务那条已验证的路径），
+   * 而不是另写一份"给插件用的"实现——两份实现迟早会在状态回写或安装互斥上出现分歧。
+   * 权限由能力服务把关（清单声明 + 宿主授予 + 每次调用记审计），
+   * 因此这里按内部请求处理，不需要登录令牌。
+   */
+  registerPluginInstanceOps({
+    start: async (currentApp, instanceId) => {
+      const syntheticRequest = buildInternalInstanceRequest(instanceId, 'start')
+      const result = await handleInstanceStart(syntheticRequest, { skipAuth: true })
+      if ('error' in result && result.error) {
+        return { ok: false, message: result.error }
+      }
+      currentApp.log.info({ instanceId, source: 'plugin' }, '插件请求启动实例')
+      return { ok: true, message: '启动命令已受理' }
+    },
+    stop: async (currentApp, instanceId) => {
       const current = await getGameInstanceById(instanceId)
       if (!current) {
         return { ok: false, message: '实例不存在' }
@@ -1261,34 +1325,30 @@ function registerInstanceRouteHandlers(app: FastifyInstance) {
       if (current.nodeId !== LOCAL_NODE_ID) {
         return { ok: false, message: '当前仅支持本地节点执行实例命令' }
       }
-      if (current.status === 'pending_install' || current.status === 'installing' || isInstallJobActive(instanceId)) {
-        return { ok: false, message: '实例正在安装中，无法按计划重启' }
+      if (current.status === 'stopped') {
+        return { ok: true, message: '实例本就处于停止状态' }
       }
-      const runtimeReady = await ensureContainerRuntimeReady()
-      if (!runtimeReady.ok) {
-        return { ok: false, message: runtimeReady.message ?? '游戏运行时未就绪' }
+      if (current.status === 'pending_install' || current.status === 'installing') {
+        return { ok: false, message: '实例正在安装中，请先取消安装再停止' }
       }
-      if (current.status === 'running' || current.containerId) {
-        try {
-          await stopInstanceContainer(instanceId)
-        }
-        catch (error) {
-          const message = error instanceof Error ? error.message : '计划重启时停止实例失败'
-          await updateGameInstanceRuntime(instanceId, { status: 'error', lastError: message })
-          return { ok: false, message }
-        }
+      try {
+        await stopInstanceContainer(instanceId)
       }
-      const syntheticRequest = {
-        id: 'schedule-internal',
-        url: '/internal/schedule/restart',
-        headers: {},
-        body: { id: instanceId },
-      } as unknown as FastifyRequest
-      const result = await handleInstanceStart(syntheticRequest, { skipAuth: true })
-      if ('error' in result && result.error) {
-        return { ok: false, message: result.error }
+      catch (error) {
+        const message = error instanceof Error ? error.message : '停止实例失败'
+        await updateGameInstanceRuntime(instanceId, { status: 'error', lastError: message })
+        return { ok: false, message }
       }
-      return { ok: true }
+      currentApp.log.info({ instanceId, source: 'plugin' }, '插件请求停止实例')
+      return { ok: true, message: '已发送停止命令' }
+    },
+    restart: async (currentApp, instanceId) => {
+      const result = await performScheduledRestart(currentApp, instanceId)
+      if (result.ok) {
+        currentApp.log.info({ instanceId, source: 'plugin' }, '插件请求重启实例')
+        return { ok: true, message: '重启已完成' }
+      }
+      return result
     },
   })
 

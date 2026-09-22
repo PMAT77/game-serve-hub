@@ -94,7 +94,12 @@ import { applyPanelPortToDeployment, resolveActualPanelPortFromRequest } from '.
 import { syncDevComposeWebPort } from './dev-compose-env'
 import type { PanelPortSyncResult } from './panel-port-deploy'
 import { registerDatabaseBackupRoutes } from './db-backup-routes'
+import { registerCommercialSupportRoutes } from './commercial'
+import { registerPluginRoutes } from './plugin-routes'
 import { collectSelfCheckReport } from './self-check'
+import { createPluginRuntime } from '../../plugins/host'
+import type { PluginRuntime } from '../../plugins/host'
+import { PLUGIN_HOST_API_VERSION } from '../../../../shared/contracts/plugin'
 
 /**
  * system 模块注册入口
@@ -102,8 +107,38 @@ import { collectSelfCheckReport } from './self-check'
 export function registerSystemModule(app: FastifyInstance) {
   setImmediate(warmSystemMetricsCaches)
 
+  /**
+   * 插件运行时：在面板启动后拉起已启用的插件，退出时全部停掉。
+   *
+   * 顺序上刻意放在 `onReady` 之后：能力服务要监听回环端口，插件进程需要拿到它的地址；
+   * 面板本身不必等插件启动完成——插件起不来只影响它自己。
+   */
+  let pluginRuntime: PluginRuntime | null = null
+  let pluginRuntimeReady: Promise<void> | null = null
+
   app.addHook('onReady', async () => {
     schedulePanelUpdateChecks(app)
+    pluginRuntimeReady = createPluginRuntime({
+      hostApiVersion: PLUGIN_HOST_API_VERSION,
+      onLog: ({ pluginId, message }) => app.log.info({ pluginId }, message),
+    })
+      .then((runtime) => {
+        pluginRuntime = runtime
+        try {
+          runtime.sync()
+        }
+        catch (error) {
+          app.log.warn({ error }, '插件同步失败')
+        }
+      })
+      .catch((error) => {
+        app.log.warn({ error }, '插件运行时初始化失败，插件将被跳过')
+      })
+  })
+
+  app.addHook('onClose', async () => {
+    await pluginRuntimeReady
+    await pluginRuntime?.shutdown()
   })
 
   app.get('/app/system/settings', async (request): Promise<ApiSuccessResponse<ReturnType<typeof getDefaultPanelSettings> & {
@@ -728,4 +763,7 @@ export function registerSystemModule(app: FastifyInstance) {
   // 比不提供它更容易误导集成方，因此移除；网络暴露方式（反向代理、TLS）
   // 在文档中给出，面板自身不做网关编排。
   registerDatabaseBackupRoutes(app)
+  registerCommercialSupportRoutes(app)
+  // 运行时对象在 onReady 里才创建，因此传一个读取函数而不是实例本身
+  registerPluginRoutes(app, () => pluginRuntime)
 }

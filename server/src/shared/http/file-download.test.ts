@@ -86,7 +86,34 @@ describe('sendFileDownload', () => {
     const response = await app.inject({ method: 'GET', url: '/download' })
 
     assert.equal(response.headers['content-type'], 'application/gzip')
-    assert.equal(response.headers['content-disposition'], 'attachment; filename="backup-2026-09-16.tar.gz"')
+    // 头部同时给出 ASCII 回退与 RFC 5987 编码名，客户端优先取后者
+    assert.equal(
+      response.headers['content-disposition'],
+      'attachment; filename="backup-2026-09-16.tar.gz"; filename*=UTF-8\'\'backup-2026-09-16.tar.gz',
+    )
+  })
+
+  /**
+   * 回归：房间名是中文时，迁移包名也带中文，而 HTTP 头只允许 latin1，
+   * 直接拼进 `filename="..."` 会让 Node 抛 `ERR_INVALID_CHAR` —— 接口 500、点了导出什么都没下到。
+   */
+  it('serves a download whose file name contains non-ASCII characters', async () => {
+    const dir = createTempDir()
+    const filePath = path.join(dir, 'archive.tar.gz')
+    fs.writeFileSync(filePath, 'gzip-ish bytes', 'utf8')
+
+    const app = await buildDownloadApp({
+      filePath,
+      fileName: '迁移测试房.tar.gz',
+      contentType: 'application/gzip',
+    })
+    const response = await app.inject({ method: 'GET', url: '/download' })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.rawPayload.length, Buffer.byteLength('gzip-ish bytes', 'utf8'))
+    const disposition = String(response.headers['content-disposition'] ?? '')
+    assert.match(disposition, /filename="[^"]*\.tar\.gz"/)
+    assert.match(disposition, /filename\*=UTF-8''%E8%BF%81%E7%A7%BB/)
   })
 
   it('still serves an empty file as an empty download', async () => {

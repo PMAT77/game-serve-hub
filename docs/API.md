@@ -51,6 +51,123 @@
 
 地标是增值层：游戏侧读不到实体表时，地形照常出图，只在 `message` 里说明这次导出不含地标。
 
+## 商业支持接口
+
+面板自身如何被支持、以及 Pro 能力的真实状态，集成方不必去翻仓库文档：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/app/system/commercial` | 返回版本形态（`edition`）、核心是否免费、Pro 状态与能力清单、可选的付费人工服务（名称、交付内容、参考价区间）、不含项、联系方式与仓库地址。需 `system:read` 权限 |
+
+契约见 `shared/contracts/commercial.ts`。两点口径需要注意：
+
+- 这是**只读**接口，面板没有任何下单或支付能力，付款与合同都在面板之外完成；
+- `proLicensed` 恒为 `false`：Pro 插件尚未开发，本字段是为将来的授权机制预留的，任何界面与集成都不应据此显示「可升级」。
+
+## 迁移包导出接口
+
+把某个实例的存档整理成「另一台机器可以直接导入」的包。等价于仓库里的 `scripts/export-cluster-archive.ts`（那个用于从**别的机器**上整理），两者共用同一套集群识别、体检与报告实现，报告与包不会互相打架。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/app/instance/migration/report` | 只出报告，不打包。body：`{ instanceId, reportOnly? }`，返回 `fileName`、`reportText`、`warnings` |
+| `POST` | `/app/instance/migration/export` | 打包并**直接返回文件流**（`application/gzip`）。body：`{ instanceId }`。打包耗时随存档大小增长，客户端需要关掉请求超时 |
+| `POST` | `/app/instance/migration/download` | 重新下载已生成的包：body `{ instanceId, fileName }`。包只保留 24 小时，过期返回 `BACKUP_FILE_MISSING` |
+
+约定与边界：
+
+- 三个接口都要求 `pages.node.instance:manage` 权限；
+- **包内顶层就是集群目录**（含 `cluster.ini`），这是面板「导入存档」的识别口径；包内**不含游戏本体与 Mod 文件**，导入后由目标机器自行下载；
+- 导出目录默认在面板数据目录下的 `migration-exports/`（可用 `GSH_MIGRATION_EXPORT_ROOT` 覆盖），按实例保留 24 小时；
+- 实例**没开过服**（缺 `cluster.ini`）时明确拒绝，不会创建空集群目录；
+- 响应头按 RFC 5987 给出文件名（ASCII 回退 + `filename*=UTF-8''`），文件名本身是纯 ASCII 的 `migration-<实例后缀>-<集群目录>.tar.gz`；
+- 报告里**不含集群令牌与房间密码**，可以贴进群里或交给接手的人。
+
+## 插件接口
+
+插件是独立进程，宿主负责「装载校验 + 启用状态 + 按声明授予能力 + 进程生命周期」。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/app/system/plugins` | 返回宿主接口版本、插件根目录、**商店货架说明**与插件列表（状态、进程状态、来源、申请的权限）。列表里既有本机已装的插件（`installed: true`），也有官方目录里尚未安装的条目（`installed: false`，版本为 `-`、目录为空串）。需 `system:read` |
+| `POST` | `/app/system/plugins/toggle` | 启用或停用：body `{ pluginId, enabled, acknowledgeDangerous? }`；启用/停用会同步拉起或终止插件进程。需 `system:manage` |
+| `GET` | `/app/system/plugins/audit` | 插件调用审计（最近的在前）：query `{ pluginId?, limit? }`（limit ≤ 500）。需 `system:read` |
+| `POST` | `/app/system/plugins/import/inspect` | **导入第一步**：以专属内容类型 `application/x-gsh-plugin-package` 直接上传包体，服务端解压到临时目录并做装载校验（清单 / 入口 / 接口版本 / 签名），返回 `{ uploadId, analysis }`。**此步不写插件目录**。体积上限 64 MB。需 `system:manage` |
+| `POST` | `/app/system/plugins/import` | **导入第二步**：body `{ uploadId }`，凭第一步的记录落位。写入前会**重跑一次校验**，导入后插件默认停用。需 `system:manage` |
+| `GET` | `/app/system/audit/operations` | **用户操作审计**（谁在什么时候对面板做了什么，含被拒的写操作）：query `{ account?, limit? }`。需 `system:read` |
+
+### 商店字段怎么读
+
+`GET /app/system/plugins` 的每一项都带 `installed`，以及 `store`（可能为 `null`）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `store.summary` / `store.detail` | 官方目录给的产品说明。已安装的插件也以目录文案为准，因为清单里的 `description` 由插件自己写、不受发布方控制 |
+| `store.access.state` | `bundled`（随面板分发）/ `obtainable`（人工渠道获取）/ `planned`（**尚未开发，没有获取方式**） |
+| `store.requiredLicense` | 这项能力要哪一份商业授权；`null` 表示不需要 |
+| `store.licenseSatisfied` | 仅未安装的条目有值：当前许可是否已覆盖它需要的授权。为 `false` 时界面显示「未获取」并给出订阅入口；为 `true` 时显示「已订阅 · 待导入」，因为**许可与插件包是两件分开交付的东西**，这个中间态很常见 |
+
+三条边界：
+
+- **本页不下单、不支付、不自动下载**：插件包由用户从面板之外拿到，面板只负责校验并放对位置；
+- **尚未开发的能力不给入口**：`access.state` 为 `planned` 的条目在任何界面都不得出现订阅或获取按钮；
+- **许可与插件包是两道独立校验**：导入只校验插件包签名，授权只影响**启用**。所以「有包没许可」与「有许可没包」都是合法中间态，界面分别用「缺少授权」与「已订阅 · 待导入」表示。
+
+### 插件侧的能力 API（插件调用宿主）
+
+宿主在 `127.0.0.1` 上以随机端口提供一个能力服务，插件必须用它自己的令牌访问：
+
+| 方法 | 路径 | 需要的能力 | 说明 |
+| --- | --- | --- | --- |
+| `GET` | `/capabilities/ping` | 无需 | 探活，用于排障 |
+| `POST` | `/capabilities/instances` | `instances:read` | 实例列表（id、名称、状态、端口） |
+| `POST` | `/capabilities/metrics` | `metrics:read` | 主机 CPU / 内存 / 磁盘快照 |
+| `POST` | `/capabilities/console` | `console:read` | 某实例最近的控制台日志（body：`{ instanceId, lines? }`，上限 500 行） |
+| `POST` | `/capabilities/lifecycle` | `instances:lifecycle` | 启停重启实例（body：`{ instanceId, operation: start\|stop\|restart }`）。**写能力**：会让线上玩家掉线，启用插件时管理员必须确认过危险能力 |
+| `POST` | `/capabilities/backups` | `backups:read` | 备份记录列表（含备份包绝对路径与文件是否存在）；body：`{ instanceId? }`。**只给路径不给内容**：插件与面板同机，几百 MB 的包由插件自己流式读取 |
+| `POST` | `/capabilities/backups/create` | `backups:write` | 触发一次实例备份；body：`{ instanceId, note? }` |
+| `POST` | `/capabilities/backups/delete` | `backups:delete` | 删除一条备份记录及其文件；body：`{ backupId }`。**危险能力**，用于插件的保留策略 |
+| `POST` | `/capabilities/operations` | `operations:read` | **用户操作审计**（谁在什么时候改了什么，含被拒的写操作）；body：`{ account?, limit? }`。对应商业能力 `audit-log` |
+| `POST` | `/capabilities/audit` | `instances:read` | 插件查看自己的调用记录（body：`{ limit? }`，上限 200 条） |
+
+所有请求都需带请求头 `x-gsh-plugin-token`，body 里带 `pluginId`。失败时返回 `{ ok: false, error, outcome }`，HTTP 状态码为 401（令牌无效）/ 403（能力未授予）/ 400（参数或执行错误）。**每一次调用（含被拒的越权尝试）都会写入宿主侧审计**：`<数据目录>/plugin-audit/<插件>.ndjson`。
+
+插件从这几个环境变量拿到约定：
+
+| 环境变量 | 含义 |
+| --- | --- |
+| `GSH_PLUGIN_ID` | 插件标识（与清单一致） |
+| `GSH_PLUGIN_DIR` | 插件所在目录 |
+| `GSH_PLUGIN_API_VERSION` | 宿主实现的插件接口版本 |
+| `GSH_CAPABILITY_URL` | 能力服务地址（`http://127.0.0.1:<随机端口>`） |
+| `GSH_PLUGIN_TOKEN` | 一次性令牌，**只在环境变量里传递**，不落盘、不进命令行 |
+
+### 写一个插件
+
+仓库里有一个可直接运行的示例：`examples/plugins/audit-reporter`（复制到面板数据目录的 `plugins/` 后启用即可）。它演示了清单字段、环境变量约定、能力调用、退出语义与日志去向，并附了一节常见坑。最小骨架长这样：
+
+```js
+const pluginId = process.env.GSH_PLUGIN_ID
+const baseUrl = process.env.GSH_CAPABILITY_URL
+const token = process.env.GSH_PLUGIN_TOKEN
+
+const response = await fetch(`${baseUrl}/capabilities/instances`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', 'x-gsh-plugin-token': token },
+  body: JSON.stringify({ pluginId }),
+})
+const { ok, data, error } = await response.json()
+```
+
+### 约定与边界
+
+- 插件目录默认 `<面板数据目录>/plugins`，可用 `GSH_PLUGINS_ROOT` 覆盖；每个插件一个子目录，内含 `plugin.json` 清单，商业插件还必须带 `plugin.signature.json`；
+- 清单契约见 `shared/contracts/plugin.ts`：`id`（小写字母、数字、连字符）、`version`（语义化）、`apiVersion`、`kind`（`community` / `commercial`）、`entry`（目录内相对路径）、`capabilities`；
+- **启用声明了危险能力**（`instances:lifecycle`、`console:write`、`backups:write`、`network:outbound`）的插件，必须带 `acknowledgeDangerous: true`，否则接口返回业务错误；
+- 插件状态：`ready` / `disabled` / `invalid`（清单、签名或版本不通过，`message` 说明原因）/ `missing_license`（商业插件但当前授权不含对应能力）；
+- 进程状态单独给出（`stopped` / `starting` / `running` / `finished` / `crashed`）：**退出码 0 记为 `finished` 且不重启**，非零退出按退避重启、连续 5 次后停在 `crashed`；插件输出见其目录下的 `plugin.log`；
+- 插件装载失败**不会**让接口报错，坏插件会以 `invalid` 出现在列表里并给出原因——否则一个坏插件会让管理员连"停用"都点不到。
+
 ## 新增或修改接口
 
 1. 在 `shared/contracts/<模块>.ts` 定义请求与响应类型；

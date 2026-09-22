@@ -187,6 +187,22 @@ git diff --exit-code -- server/drizzle      # 迁移漂移检查：无输出即�
 | `pnpm test:server` | 后端测试 |
 | `pnpm run build` | 生产构建（仅前端 `dist/`；服务端 bundle 用 `pnpm run build:server`） |
 
+`pnpm` 不可用（或不想让它访问系统级 store）时，可以用同一套检查的替代入口：`node scripts/run-local-checks.mjs [步骤名...]`。它用仓库内的 Node 直接调起 `vue-tsc`、`vite`、各检查脚本与测试运行器，日志写到 `logs/verify/`，终端只打印每步的通过情况；不带参数即跑全部。改动脚本与门禁命令时应保持两者一致。
+
+测试不需要 Docker：本机没有 Docker 或没有本地 SteamCMD 镜像时，`container-lifecycle` 里依赖真实容器运行时的那一条会**跳过并说明原因**（结果里的 `skipped 1`），其余用例照常执行。早先它会在「Docker 可用但镜像不在本地」时真的去拉镜像，镜像拉不动的网络下整轮测试会长时间无输出地挂住。
+
+### 迁移导出工具
+
+`scripts/export-cluster-archive.ts` 把一台机器上的饥荒集群存档整理成可直接导入的包（`tar.gz` + `.sha256` + 迁移报告）：
+
+```bash
+pnpm exec tsx scripts/export-cluster-archive.ts --source <源目录> --out <输出目录>
+```
+
+`--source` 可以指向实例安装目录、`klei-storage`、其上层目录或玩家客户端的存档目录；工具会自行找出含 `cluster.ini` 的集群。它只读源目录，报告里不打印集群令牌与房间密码，可用于迁移服务交付与故障复现。
+
+面板里的「实例详情 → 迁移到其他机器」做的是同一件事（报告 + 直接下载包），用于从**本面板管理的实例**导出。两者共用 `server/src/infra/game-adapter/dst/cluster-migration.ts` 的识别、体检与报告实现——**改动这个模块时两个入口一起受影响**，改完请同时跑脚本与 `migration-export-routes.test.ts`。
+
 ### 面板后端环境变量（`server/.env.*`）
 
 | 变量 | 用途 |
@@ -274,7 +290,7 @@ game-server-hub/
 
 | 路径 | 内容 | 说明文档 |
 | --- | --- | --- |
-| `src/views/` | 前端页面：`console/monitor`（监控台）、`node/instance`（实例列表 / 详情 / 控制台）、`games/dst`（房间 / 世界 / Mod）、`ops`（备份 / 计划任务）、`system`（系统设置 / 通知） | — |
+| `src/views/` | 前端页面：`console/monitor`（监控台）、`node/instance`（实例列表 / 详情 / 控制台）、`games/dst`（房间 / 世界 / Mod）、`ops`（备份 / 计划任务）、`system`（系统设置，含面板设置 / 通知渠道 / 操作记录三个页内 tab；单页模块直接以页面作菜单入口，没有二级导航）、`system/plugins.vue` 与 `system/commercial.vue`（插件与商业支持，各自是一级菜单） | — |
 | `src/api/` | 前端请求层与接口封装 | — |
 | `shared/contracts/` | 前后端共享契约与校验规则 | [shared/README.md](../shared/README.md) |
 | `shared/constants/` | 共享常量与错误码 | 同上 |

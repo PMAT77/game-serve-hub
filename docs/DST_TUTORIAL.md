@@ -311,7 +311,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.7.0/script
 - **实例管理**：实例列表 / 详情 / 控制台
 - **房间管理**、**世界管理**、**玩家管理**、**模组管理**：DST 的房间、世界、玩家名单与 Mod 配置
 - **备份与恢复**、**计划任务**：存档备份、数据库快照与定时任务
-- **系统设置**：面板与游戏版本、通知、网络与端口
+- **系统设置**：面板与游戏版本、网络与端口；告警渠道在它的「通知渠道」tab 里
 
 ### 7.1 监控台
 
@@ -325,7 +325,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.7.0/script
 
 ### 7.2 通知设置
 
-**系统设置 → 通知** 用来配置事件通知渠道（钉钉、企业微信、飞书、Server酱、PushPlus、通用 Webhook、Telegram），接收实例异常退出、内存阈值等事件。其中：
+**系统设置 → 通知渠道** 用来配置事件通知渠道（钉钉、企业微信、飞书、Server酱、PushPlus、通用 Webhook、Telegram），接收实例异常退出、内存阈值等事件。其中：
 
 - **通用 Webhook**：面板向你的 https 地址 POST 一段 JSON，字段为 `source`、`severity`、`title`、`message`、`text`、`at`，方便接自建告警或中转；
 - **Telegram**：填写 @BotFather 给的 Bot Token 与接收消息的 Chat ID（群组 ID 为负数，频道可用 `@频道名`）；

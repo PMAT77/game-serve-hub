@@ -1,0 +1,17 @@
+{
+  "id": "pro-audit-log",
+  "name": "操作审计日志",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "commercial",
+  "entry": "plugin.mjs",
+  "capabilities": [
+    "operations:read",
+    "network:outbound",
+    "storage:kv"
+  ],
+  "description": "把面板的用户操作审计（谁在什么时候改了什么，含被拒的写操作）定期归档到本机文件，可选推送到远端与告警。",
+  "author": "Game Server Hub",
+  "license": "商业授权",
+  "requiresLicense": true
+}

@@ -1,0 +1,19 @@
+{
+  "id": "pro-remote-backup",
+  "name": "异地与云备份",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "commercial",
+  "entry": "plugin.mjs",
+  "capabilities": [
+    "backups:read",
+    "backups:write",
+    "backups:delete",
+    "network:outbound",
+    "storage:kv"
+  ],
+  "description": "把实例存档备份自动同步到另一台机器、WebDAV 或对象存储：定时检查、按保留份数清理远端、失败时告警。",
+  "author": "Game Server Hub",
+  "license": "商业授权",
+  "requiresLicense": true
+}

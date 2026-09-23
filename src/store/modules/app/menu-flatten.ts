@@ -24,7 +24,7 @@ export function flattenModuleChildrenForSingleMode(
   children: RouteRecordRaw[],
   basePath: string,
   mode: MenuLayoutMode,
-  moduleTitle?: string,
+  moduleTitle?: string | (() => string),
 ): MenuRecordRaw[] {
   const singlePageModule = mode === 'single'
     && children.length > 0
@@ -42,9 +42,18 @@ export function flattenModuleChildrenForSingleMode(
     meta: {
       ...menu.meta,
       menu: true as const,
-      title: moduleTitle ?? menu.meta?.title,
+      title: resolveMenuTitle(moduleTitle ?? menu.meta?.title),
     },
   }))
+}
+
+/**
+ * 菜单项文字归一化：`RouteMetaRaw.title` 允许函数式动态标题（`string | (() => string)`），
+ * 而菜单项 meta 只接受字符串。调用方（以及未来接手的调用方）漏掉这一步时，
+ * 这里兜住，别把函数本身当成标题渲染出去。
+ */
+function resolveMenuTitle(title: string | (() => string) | undefined) {
+  return typeof title === 'function' ? title() : title
 }
 
 /** 将原始路由的子项转换成菜单项（`meta` 保留引用，供 `convertRouteToMenu` 做模块级过滤） */

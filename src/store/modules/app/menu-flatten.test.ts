@@ -122,4 +122,30 @@ describe('单栏菜单模式下的模块入口', () => {
     flattenForSingleMode()
     assert.equal(JSON.stringify(menuRouteList), before, '菜单转换不得修改共享的菜单定义')
   })
+
+  it('函数式动态标题会被求值成字符串，而不是把函数本身渲染出去', () => {
+    // `RouteMetaRaw.title` 允许 `string | (() => string)`。此前既没有在纯函数内归一化，
+    // 调用方也直接传了 `item.meta.title`，全量类型检查（CI 的 Type check 步骤）会报 TS2345；
+    // 而增量构建缓存能把这条错误藏起来，所以这里在运行期也钉一条。
+    const menus = flattenModuleChildrenForSingleMode(
+      [
+        {
+          path: '/system/settings',
+          name: 'systemSettings',
+          component: 'system/settings.vue',
+          meta: { title: '系统设置', menu: false },
+        } as never,
+      ],
+      '/system/settings',
+      'single',
+      (() => '系统设置') as never,
+    )
+
+    assert.equal(
+      typeof menus[0]!.meta?.title,
+      'string',
+      '入口文字必须是求值后的字符串，不能把函数本身交出去',
+    )
+    assert.equal(menus[0]!.meta?.title, '系统设置')
+  })
 })

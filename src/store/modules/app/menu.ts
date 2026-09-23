@@ -44,7 +44,9 @@ export const useAppMenuStore = defineStore(
               item.children,
               item.path ?? '',
               appSettingsStore.settings.menu.mode,
-              item.meta.title,
+              // `RouteMetaRaw.title` 允许函数式动态标题（`string | (() => string)`），
+              // 而菜单项文字只接受字符串：取函数时退回可用值，别把函数当标题传下去。
+              typeof item.meta?.title === 'string' ? item.meta.title : item.meta?.title?.(),
             ))
           }
           else {

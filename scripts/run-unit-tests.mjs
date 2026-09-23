@@ -14,6 +14,7 @@ const args = [
   'scripts/**/*.test.ts',
   'src/api/**/*.test.ts',
   'src/composables/**/*.test.ts',
+  'src/store/**/*.test.ts',
   'src/views/**/*.test.ts',
 ]
 

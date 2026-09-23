@@ -314,7 +314,7 @@ game-server-hub/
 
 | 路径 | 内容 | 说明文档 |
 | --- | --- | --- |
-| `src/views/` | 前端页面：`console/monitor`（监控台）、`node/instance`（实例列表 / 详情 / 控制台）、`games/dst`（房间 / 世界 / Mod）、`ops`（备份 / 计划任务）、`system`（系统设置，含面板设置 / 通知渠道 / 操作记录三个页内 tab；单页模块直接以页面作菜单入口，没有二级导航）、`system/plugins.vue` 与 `system/commercial.vue`（插件与商业支持，各自是一级菜单） | — |
+| `src/views/` | 前端页面：`console/monitor`（监控台）、`node/instance`（实例列表 / 详情 / 控制台）、`games/dst`（房间 / 世界 / Mod）、`ops`（备份 / 计划任务）、`system`（系统设置，含面板设置 / 通知渠道 / 操作记录三个页内 tab；单页模块靠图标栏那一项进入，没有二级导航，单栏布局下由 `src/store/modules/app/menu-flatten.ts` 平铺成可见项——不要为了"让它可见"去改页面的 `meta.menu`）、`system/plugins.vue` 与 `system/commercial.vue`（插件与商业支持，各自是一级菜单） | — |
 | `src/api/` | 前端请求层与接口封装 | — |
 | `shared/contracts/` | 前后端共享契约与校验规则 | [shared/README.md](../shared/README.md) |
 | `shared/constants/` | 共享常量与错误码 | 同上 |

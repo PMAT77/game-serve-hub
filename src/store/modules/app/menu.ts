@@ -1,6 +1,6 @@
 import type { MenuRecordMainRaw, MenuRecordRaw, RouteRecordMainRaw } from '@fantastic-admin/types'
-import type { RouteRecordRaw } from 'vue-router'
 import { cloneDeep } from 'es-toolkit'
+import { convertRouteToMenuRecursive, flattenModuleChildrenForSingleMode } from './menu-flatten'
 import { resolveRoutePath } from '@/utils'
 
 export const useAppMenuStore = defineStore(
@@ -37,8 +37,15 @@ export const useAppMenuStore = defineStore(
             })
             // 必须以模块容器 path 作为 basePath：否则子菜单项 path 是相对值
             // （如 'instance'、''），router.push 时会相对当前页面解析，
-            // 从深层页面（实例详情等）点击菜单会解析出错误 URL
-            returnMenus[0].children.push(...convertRouteToMenuRecursive(item.children, item.path))
+            // 从深层页面（实例详情等）点击菜单会解析出错误 URL。
+            // 单页模块（系统设置）在这里被标记为可见——single 模式没有图标栏兜底，
+            // 详见 flattenModuleChildrenForSingleMode 的注释。
+            returnMenus[0].children.push(...flattenModuleChildrenForSingleMode(
+              item.children,
+              item.path ?? '',
+              appSettingsStore.settings.menu.mode,
+              item.meta.title,
+            ))
           }
           else {
             const menuItem: MenuRecordMainRaw = {
@@ -53,27 +60,6 @@ export const useAppMenuStore = defineStore(
             returnMenus.push(menuItem)
           }
         }
-      })
-      return returnMenus
-    }
-    function convertRouteToMenuRecursive(routes: RouteRecordRaw[], basePath = ''): MenuRecordRaw[] {
-      const returnMenus: MenuRecordRaw[] = []
-      routes.forEach((item) => {
-        const menuItem: MenuRecordRaw = {
-          path: resolveRoutePath(basePath, item.path),
-          meta: {
-            auth: item?.meta?.auth,
-            title: item?.meta?.title,
-            icon: item?.meta?.icon,
-            menu: item?.meta?.menu,
-            expand: item?.meta?.expand,
-            link: item?.meta?.link,
-          },
-        }
-        if (item.children) {
-          menuItem.children = convertRouteToMenuRecursive(item.children, menuItem.path)
-        }
-        returnMenus.push(menuItem)
       })
       return returnMenus
     }

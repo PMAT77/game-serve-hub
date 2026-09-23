@@ -61,23 +61,13 @@ const hiddenModule = {
 } as unknown as RouteRecordMainRaw
 
 /**
- * 走一遍 `formatBackRoutes` 的收尾动作：把 `'Layout'` 换成组件引用。
+ * 布局组件占位符。
  *
- * 刻意用占位函数而不是 `() => import('@/layouts/index.vue')`：真实布局组件在单测里会被加载，
- * 进而拖进 `virtual:fantastic-admin/*` 这类只有 Vite 能解析的虚拟模块而报
- * `ERR_UNSUPPORTED_ESM_URL_SCHEME`。这里只需要知道「那一层是不是布局」。
+ * 生产代码把真实的 `() => import('@/layouts/index.vue')` 传进注入函数；单测里换成字符串
+ * 占位：真实布局组件一旦被加载会拖进 `virtual:fantastic-admin/*`（只有 Vite 能解析），
+ * 而这里只需要断言「容器上的 component 是调用方传进来的那个」。
  */
-const LAYOUT_STUB = 'LayoutStub'
-function formatLayoutComponents(route: RouteRecordRaw): RouteRecordRaw {
-  const walk = (item: RouteRecordRaw): RouteRecordRaw => {
-    if (item.component === 'Layout') {
-      item.component = LAYOUT_STUB as unknown as RouteRecordRaw['component']
-    }
-    item.children = item.children?.map(walk)
-    return item
-  }
-  return walk(route)
-}
+const LAYOUT_STUB = 'LayoutStub' as unknown as RouteRecordRaw['component']
 
 /** 取模块下的第一层子项（容器或页面） */
 function firstChild(module: RouteRecordMainRaw) {
@@ -95,13 +85,19 @@ describe('单页模块的布局容器', () => {
       '真实菜单数据里单页模块自身没有 path，容器路径要由页面路径推导',
     )
 
-    const [mounted] = mountLayoutForSinglePageModules([systemModule])
+    const [mounted] = mountLayoutForSinglePageModules([systemModule], LAYOUT_STUB)
     const container = firstChild(mounted!)
 
     assert.equal(mounted!.children!.length, 1, '单页模块下应当只剩容器这一项')
     assert.equal(container.path, FRONTEND_ROUTE_PATHS.systemSettings, '容器用页面的绝对路径')
-    assert.equal(container.component, 'Layout', '容器必须是布局组件，否则页面仍会脱离侧栏')
-    assert.equal(container.meta?.menu, false, '容器在菜单里应当被跳过')
+    assert.equal(
+      container.component,
+      LAYOUT_STUB,
+      '容器必须带上真正的布局组件——写字符串 `Layout` 会让 vue-router 报 "not a valid component"，'
+      + '这一页就会整个打不开（注册发生在 formatBackRoutes 之后，没人再翻译那个字符串）',
+    )
+    assert.equal(container.meta?.menu, false, '容器不该在侧栏占一格')
+    assert.equal(container.meta?.layoutContainer, true, '容器要能被菜单层识别出来')
 
     const page = container.children![0]!
     assert.equal(page.path, '', '子页面用相对空路径挂载，解析结果仍是模块自身的绝对路径')
@@ -128,7 +124,7 @@ describe('单页模块的布局容器', () => {
       }
       return item
     }
-    const mounted = mountLayoutForSinglePageModules([systemModule]).map(formatLayoutComponents)
+    const mounted = mountLayoutForSinglePageModules([systemModule], LAYOUT_STUB)
     const routes = mounted.flatMap(route => (route.children ?? []) as RouteRecordRaw[]).map(walk)
     const matcher = createRouterMatcher(routes, {})
 
@@ -141,12 +137,12 @@ describe('单页模块的布局容器', () => {
   })
 
   it('多页模块逐字段不变，不会被重复包装', () => {
-    const [mounted] = mountLayoutForSinglePageModules([multiPageModule])
+    const [mounted] = mountLayoutForSinglePageModules([multiPageModule], LAYOUT_STUB)
     assert.deepEqual(JSON.parse(JSON.stringify(mounted)), JSON.parse(JSON.stringify(multiPageModule)))
   })
 
   it('模块级 menu: false（暂时隐藏的插件）保持原样', () => {
-    const [mounted] = mountLayoutForSinglePageModules([hiddenModule])
+    const [mounted] = mountLayoutForSinglePageModules([hiddenModule], LAYOUT_STUB)
     assert.deepEqual(JSON.parse(JSON.stringify(mounted)), JSON.parse(JSON.stringify(hiddenModule)))
     assert.equal(isSinglePageModule(hiddenModule), false, '模块级 menu: false 不属于「单页模块」')
   })
@@ -154,20 +150,19 @@ describe('单页模块的布局容器', () => {
   it('补容器不就地改写传入的路由数据', () => {
     const routes = [systemModule, multiPageModule, hiddenModule]
     const before = JSON.stringify(routes)
-    mountLayoutForSinglePageModules(routes)
+    mountLayoutForSinglePageModules(routes, LAYOUT_STUB)
     assert.equal(JSON.stringify(routes), before, '路由数据是共享单例，注入必须复制对象')
   })
 
-  it('容器层与「隐藏的叶子页面」可区分（判定条件写反过一次，钉住它）', () => {
-    const [mounted] = mountLayoutForSinglePageModules([systemModule])
+  it('只有注入的容器会被菜单层跳过（不能凭 menu: false 误伤被隐藏的页面）', () => {
+    const [mounted] = mountLayoutForSinglePageModules([systemModule], LAYOUT_STUB)
     const container = firstChild(mounted!)
 
     assert.equal(isRouteOnlyLayoutContainer(container), true, '注入出来的容器应当被识别')
     assert.equal(
       isRouteOnlyLayoutContainer(firstChild(hiddenModule)),
       false,
-      '后端菜单数据里的容器不带 menu 标记（模块级 menu: false 才是它隐藏的方式），'
-      + '形状与注入容器不同——真实数据里不该出现「没有 menu 标记的纯容器」被误跳过',
+      '后端菜单数据里的 Layout 容器没有这个标记——它在菜单里靠模块级 menu: false 整块隐藏',
     )
     assert.equal(
       isRouteOnlyLayoutContainer({ path: '/x', component: 'x.vue', meta: { menu: false } } as unknown as RouteRecordRaw),

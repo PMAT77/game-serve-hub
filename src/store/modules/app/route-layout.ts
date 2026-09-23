@@ -1,3 +1,5 @@
+import type { RouteComponent } from 'vue-router'
+
 /**
  * 单页模块的布局容器注入（纯函数）。
  *
@@ -6,11 +8,9 @@
  * store 会直接 `ERR_UNSUPPORTED_ESM_URL_SCHEME`。放在这里既好测，也让「路由结构整形」
  * 与「store 接线」各归各位。
  *
- * 这里用自己的一小套类型、而不是 `vue-router` 的 `RouteRecordRaw`：后端菜单数据（以及
- * 注册前的原始路由）在这个阶段本来就是「字符串 component  + meta 带 menu」的形状——
- * 那是 `RouteRecordRaw` 明确不允许的（它的 component 是 `RawRouteComponent`），硬套会在
- * 比较 `component === 'Layout'` 时被 TS2367 判定为「无意义比较」。转换发生在
- * `formatBackRoutes`（把 `'Layout'` 换成真实组件），那之后的数据结构就交给 vue-router 管。
+ * 这里用自己的一小套类型、而不是 `vue-router` 的 `RouteRecordRaw`：后端菜单数据在这个
+ * 阶段本来就是「字符串 component + meta 带 menu」的形状——那是 `RouteRecordRaw` 明确
+ * 不允许的（它的 component 是 `RawRouteComponent`）。
  */
 
 /** 菜单/路由项的 meta（后端菜单数据与前端页面的并集，字段都按需声明以免与框架类型冲突） */
@@ -21,6 +21,14 @@ export interface MenuRouteMetaLike {
   sort?: number
   /** 是否在菜单里渲染这一项；容器与「单页模块的页面」都会标 `false` */
   menu?: boolean
+  /**
+   * 布局容器标记：由 `mountLayoutForSinglePageModules` 注入。
+   *
+   * 用标记而不是「`component === 'Layout'`」来判定容器：容器在注册前会被换成真正的
+   * 布局组件（懒加载函数），字符串形态只在后端原始数据里出现——靠字符串比较判定的
+   * 第一版修复因此在注册后把所有容器都判成「不是容器」。
+   */
+  layoutContainer?: boolean
   expand?: boolean
   link?: string
   activeMenu?: string
@@ -28,11 +36,11 @@ export interface MenuRouteMetaLike {
   keepAlive?: boolean
 }
 
-/** 菜单/路由项（component 此时还是 `views/` 下的相对路径或 `Layout`） */
+/** 菜单/路由项（`formatBackRoutes` 之前 component 是 `views/` 下的相对路径或 `Layout`） */
 export interface MenuRouteItemLike {
   path?: string
   name?: string
-  component?: string
+  component?: RouteComponent | null
   redirect?: string
   meta?: MenuRouteMetaLike
   children?: MenuRouteItemLike[]
@@ -44,15 +52,22 @@ export interface MenuRouteModuleLike extends MenuRouteItemLike {
 }
 
 /**
- * 判断一个路由项是不是「布局容器层」——我们注入出来的那种。
+ * 判断一个路由项是不是布局容器层。
  *
- * 形状是 `component: 'Layout'` + `meta.menu: false`：容器本身不该在侧栏占一格，
- * 它的可见性由子页面决定。注意这个判定要在 `formatBackRoutes` **之前**的形态上做
- * （那时 component 还是字符串 `'Layout'`）。
+ * 容器是为「页面必须挂在布局容器下」这条约束补出来的（见 `mountLayoutForSinglePageModules`），
+ * 本身不该在侧栏占一格：它的可见性由子页面决定。
  */
 export function isRouteOnlyLayoutContainer(route: MenuRouteItemLike) {
-  return route.meta?.menu === false
-    && route.component === 'Layout'
+  return route.meta?.layoutContainer === true
+}
+
+/**
+ * 后端原始菜单数据里 component 是字符串（`'Layout'` 或 `'system/settings.vue'`）。
+ * `RouteComponent` 类型不含字符串，所以判定前先归一化类型，别让 TS2367 逼着我们把
+ * 真实的运行时形态从判断里删掉。
+ */
+function asStringComponent(component: MenuRouteItemLike['component']): string | undefined {
+  return typeof component === 'string' ? component : undefined
 }
 
 /**
@@ -66,7 +81,7 @@ export function isSinglePageModule(module: MenuRouteModuleLike) {
   const pages = module.children
   return module.meta?.menu !== false
     && pages.length > 0
-    && pages.every(page => !!page.component && page.component !== 'Layout' && !page.children)
+    && pages.every(page => !!asStringComponent(page.component) && !page.children)
 }
 
 /**
@@ -79,13 +94,19 @@ export function isSinglePageModule(module: MenuRouteModuleLike) {
  * 页面自渲染、左侧栏与顶栏整条不渲染——用户看到的就是「进入系统设置后侧栏消失」。
  *
  * 为什么只补这一种形状：多页模块本来就有 `component: 'Layout'` 的容器（后端菜单数据里
- * 就写着），这里逐项原样返回，绝不重复包装；模块级 `menu: false`（暂时隐藏的「插件」）
- * 也保持原样，让菜单层继续按老规矩把它整块过滤掉。
+ * 就写着，并且会被 `formatBackRoutes` 翻译成组件），这里逐项原样返回，绝不重复包装；
+ * 模块级 `menu: false`（暂时隐藏的「插件」）也保持原样，让菜单层继续整块过滤掉。
  *
- * 补出来的容器带 `meta.menu: false`：它只在路由层有意义，菜单层（`convertRouteToMenu`）
- * 会跳过它，避免侧栏出现「容器 + 同页面」两个同名入口。
+ * `layout` 由调用方注入真实的布局组件（`() => import('@/layouts/index.vue')`）：这个补丁
+ * 发生在 `formatBackRoutes` **之后**，那时 `'Layout'` 字符串已经没人再翻译，写字符串会让
+ * vue-router 报 `Component "default" in record with path "/system/settings" is not a valid
+ * component. Received "Layout"`。反过来，纯函数里若自己 import 布局组件，单测会连带加载
+ * `virtual:fantastic-admin/*` 而跑不起来——所以组件从外面传进来。
  */
-export function mountLayoutForSinglePageModules<T extends MenuRouteModuleLike>(routes: T[]): T[] {
+export function mountLayoutForSinglePageModules<T extends MenuRouteModuleLike>(
+  routes: T[],
+  layout: RouteComponent,
+): T[] {
   return routes.map((module) => {
     if (!isSinglePageModule(module)) {
       return module
@@ -103,8 +124,8 @@ export function mountLayoutForSinglePageModules<T extends MenuRouteModuleLike>(r
       ...module,
       children: [{
         path: containerPath,
-        component: 'Layout',
-        meta: { menu: false },
+        component: layout,
+        meta: { menu: false, layoutContainer: true },
         children: module.children.map(page => ({
           ...page,
           // 子路由用相对空路径挂载，解析结果仍是这条绝对路径：

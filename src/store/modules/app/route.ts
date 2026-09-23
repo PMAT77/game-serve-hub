@@ -7,6 +7,14 @@ import { systemRoutes as systemRoutesRaw } from '@/router/routes'
 import { mountLayoutForSinglePageModules } from './route-layout'
 import type { MenuRouteModuleLike } from './route-layout'
 
+/**
+ * 布局组件：与 `formatBackRoutes` 里翻译 `'Layout'` 用的是同一个引用。
+ *
+ * 单页模块的容器是在 `formatBackRoutes` 之后补上的，`'Layout'` 那时没人再翻译，所以要把
+ * 真实的组件传进注入函数（见 `mountLayoutForSinglePageModules` 的注释）。
+ */
+const layoutComponent = () => import('@/layouts/index.vue')
+
 export const useAppRouteStore = defineStore(
   'appRoute',
   () => {
@@ -88,7 +96,10 @@ export const useAppRouteStore = defineStore(
     function generateRoutesAtFront(asyncRoutes: RouteRecordMainRaw[]) {
       // 设置 routes 数据
       routesRaw.value = sortAsyncRoutes(
-        mountLayoutForSinglePageModules(cloneDeep(asyncRoutes) as unknown as MenuRouteModuleLike[]) as RouteRecordMainRaw[],
+        mountLayoutForSinglePageModules(
+          cloneDeep(asyncRoutes) as unknown as MenuRouteModuleLike[],
+          layoutComponent,
+        ) as RouteRecordMainRaw[],
       )
       // 创建路由匹配器
       const routes: RouteRecordRaw[] = []
@@ -105,7 +116,7 @@ export const useAppRouteStore = defineStore(
       return routes.map((route: any) => {
         switch (route.component) {
           case 'Layout':
-            route.component = () => import('@/layouts/index.vue')
+            route.component = layoutComponent
             break
           default:
             if (route.component) {
@@ -128,7 +139,10 @@ export const useAppRouteStore = defineStore(
         // 单页模块（系统设置）在格式化后补一层布局容器：菜单数据里它没有容器，
         // 页面若直接注册成顶层路由就会脱离 `layouts/index.vue`，侧栏与顶栏整条消失。
         routesRaw.value = sortAsyncRoutes(
-          mountLayoutForSinglePageModules(formatBackRoutes(res.data) as unknown as MenuRouteModuleLike[]) as RouteRecordMainRaw[],
+          mountLayoutForSinglePageModules(
+            formatBackRoutes(res.data) as unknown as MenuRouteModuleLike[],
+            layoutComponent,
+          ) as RouteRecordMainRaw[],
         )
         // 创建路由匹配器
         const routes: RouteRecordRaw[] = []

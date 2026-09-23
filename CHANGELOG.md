@@ -6,6 +6,8 @@
 
 （下次发版前把变更记在这里）
 
+## [0.8.1] - 2026-09-23
+
 ### Changed
 
 - **`dev:compose` 的容器内依赖安装可以换 npm 源了**：Docker Compose 开发栈的 panel 与 web 容器此前固定走官方 registry，lockfile 一变动就要在容器里把整套依赖（含 Linux 平台二进制）重新下一遍，网络不稳时刷出大量 `WARN GET … ECONNRESET` 重试、前端迟迟不到 ready。现在两个容器都读 `GSH_DEV_NPM_REGISTRY`，可指向任意 npm 兼容源；**不设置时仍是官方源，行为与之前完全一致**。排查方法见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 的已知问题一节。

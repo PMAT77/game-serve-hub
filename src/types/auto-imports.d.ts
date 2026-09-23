@@ -9,6 +9,7 @@ declare global {
   const EffectScope: typeof import('vue').EffectScope
   const acceptHMRUpdate: typeof import('pinia').acceptHMRUpdate
   const computed: typeof import('vue').computed
+  const convertRouteToMenuRecursive: typeof import('../store/modules/app/menu-flatten').convertRouteToMenuRecursive
   const createApp: typeof import('vue').createApp
   const createPinia: typeof import('pinia').createPinia
   const customRef: typeof import('vue').customRef
@@ -17,6 +18,7 @@ declare global {
   const defineStore: typeof import('pinia').defineStore
   const effectScope: typeof import('vue').effectScope
   const faToast: typeof import('@fantastic-admin/components').faToast
+  const flattenModuleChildrenForSingleMode: typeof import('../store/modules/app/menu-flatten').flattenModuleChildrenForSingleMode
   const getActivePinia: typeof import('pinia').getActivePinia
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
@@ -122,6 +124,9 @@ declare global {
   // @ts-ignore
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
+  // @ts-ignore
+  export type { MenuLayoutMode } from '../store/modules/app/menu-flatten'
+  import('../store/modules/app/menu-flatten')
   // @ts-ignore
   export type { PanelVersionMismatch } from '../composables/panelVersionGuard'
   import('../composables/panelVersionGuard')

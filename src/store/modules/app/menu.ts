@@ -33,10 +33,14 @@ export const useAppMenuStore = defineStore(
             return
           }
           /**
-           * 跳过路由层为单页模块补出来的**纯容器层**（`src/store/modules/app/route.ts` 的
+           * 跳过路由层为单页模块补出来的**纯容器层**（`src/store/modules/app/route-layout.ts` 的
            * `mountLayoutForSinglePageModules`）：它只为把页面放进布局容器，自身没有意义，
            * 若照常渲染，侧栏会同时出现容器与页面两个同名入口——正是这个单页模块当初被
            * 改成扁平结构的原因。页面本身仍是模块下唯一的可见项（见下方 single 分支）。
+           *
+           * 注入出来的容器实际落在**模块的 children 里**，到不了这一层；真正剥掉它的是
+           * `flattenModuleChildrenForSingleMode`（单栏模式）与 Menu 的 `menu === false` 过滤
+           * （side / head 模式）。这里保留判断，是为了模块自己哪天真的成了一个容器层。
            */
           if (isRouteOnlyLayoutContainer(item as unknown as MenuRouteItemLike)) {
             return

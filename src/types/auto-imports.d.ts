@@ -8,6 +8,7 @@ export {}
 declare global {
   const EffectScope: typeof import('vue').EffectScope
   const acceptHMRUpdate: typeof import('pinia').acceptHMRUpdate
+  const buildRoutesFromBackend: typeof import('../store/modules/app/route-layout').buildRoutesFromBackend
   const computed: typeof import('vue').computed
   const convertRouteToMenuRecursive: typeof import('../store/modules/app/menu-flatten').convertRouteToMenuRecursive
   const createApp: typeof import('vue').createApp
@@ -131,7 +132,7 @@ declare global {
   export type { MenuLayoutMode } from '../store/modules/app/menu-flatten'
   import('../store/modules/app/menu-flatten')
   // @ts-ignore
-  export type { MenuRouteMetaLike, MenuRouteItemLike, MenuRouteModuleLike } from '../store/modules/app/route-layout'
+  export type { MenuRouteMetaLike, MenuRouteItemLike, MenuRouteModuleLike, BackendRouteItemLike, BackendRoutesContext } from '../store/modules/app/route-layout'
   import('../store/modules/app/route-layout')
   // @ts-ignore
   export type { PanelVersionMismatch } from '../composables/panelVersionGuard'

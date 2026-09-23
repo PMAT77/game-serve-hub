@@ -1,6 +1,8 @@
 import type { MenuRecordRaw } from '@fantastic-admin/types'
 import type { RouteRecordRaw } from 'vue-router'
 import { resolveRoutePath } from '@/utils'
+import { isRouteOnlyLayoutContainer } from './route-layout'
+import type { MenuRouteItemLike } from './route-layout'
 
 /** 菜单布局模式（与 `packages/settings` 的 `MenuMode` 一致） */
 export type MenuLayoutMode = 'side' | 'head' | 'single'
@@ -26,11 +28,21 @@ export function flattenModuleChildrenForSingleMode(
   mode: MenuLayoutMode,
   moduleTitle?: string | (() => string),
 ): MenuRecordRaw[] {
+  /**
+   * 路由层给单页模块补出来的布局容器（`route-layout.ts` 的 `mountLayoutForSinglePageModules`）
+   * 在菜单里是**透明层**：它只为让页面落进 `layouts/index.vue`，入口必须由页面自己承担。
+   *
+   * 不剥掉的话，单栏模式的侧栏会多出一个「可展开、展开后为空」的项——`Menu/index.vue` 按
+   * `children.length` 把它渲染成 `SubMenu`，而 `initItems` 又按「有可见子项」把它登记成叶子项，
+   * 两边对不上；何况容器本身没有面向用户的标题与图标。
+   */
+  const unwrapped = unwrapInjectedLayoutContainer(children, basePath)
+  const pages = unwrapped.children
   const singlePageModule = mode === 'single'
-    && children.length > 0
-    && children.every(item => item.meta?.menu === false)
+    && pages.length > 0
+    && pages.every(item => item.meta?.menu === false)
 
-  const menus = convertRouteToMenuRecursive(children, basePath)
+  const menus = convertRouteToMenuRecursive(pages, unwrapped.basePath)
   if (!singlePageModule) {
     return menus
   }
@@ -45,6 +57,26 @@ export function flattenModuleChildrenForSingleMode(
       title: resolveMenuTitle(moduleTitle ?? menu.meta?.title),
     },
   }))
+}
+
+/**
+ * 剥掉 `mountLayoutForSinglePageModules` 注入的布局容器，返回真正的页面项与它们该用的 basePath。
+ *
+ * 容器路径就是页面原有的绝对路径（注入时按它建的容器），子页面则用相对空路径挂载——
+ * 所以 basePath 必须换成容器路径，否则菜单项的 path 会解析成空串、点进去无处可去。
+ */
+function unwrapInjectedLayoutContainer(
+  children: RouteRecordRaw[],
+  basePath: string,
+): { children: RouteRecordRaw[], basePath: string } {
+  const container = children.length === 1 ? children[0] : undefined
+  if (!container || !isRouteOnlyLayoutContainer(container as unknown as MenuRouteItemLike)) {
+    return { children, basePath }
+  }
+  return {
+    children: container.children ?? [],
+    basePath: container.path ?? basePath,
+  }
 }
 
 /**

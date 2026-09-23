@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { MenuRecordRaw } from '@fantastic-admin/types'
 import { FRONTEND_ROUTE_PATHS } from '../../../../shared/constants/frontend-routes.ts'
+import { SYSTEM_MANAGE_PERMISSION } from '../../../../shared/constants/permissions.ts'
 import { menuRouteList } from '../../../../server/src/shared/menu-routes.ts'
 import type { MenuRouteItem } from '../../../../server/src/shared/menu-routes.ts'
 import { flattenModuleChildrenForSingleMode } from './menu-flatten.ts'
@@ -22,6 +23,9 @@ import { flattenModuleChildrenForSingleMode } from './menu-flatten.ts'
  *   3. side / head 模式的输出与改造前一致，单页模块的页面必须继续 `menu: false`
  *      （否则图标栏与二级导航会各画一个同名「系统设置」，那是已修过的回归）；
  *   4. 平铺不就地改写菜单数据（`menuRouteList` 是前后端共享的单例）。
+ *
+ * 另有一条用**路由层整形后**的形状（模块下多了一层注入的布局容器）钉住容器被剥掉，
+ * 那条不能用原始菜单数据——原始数据里没有容器，也就覆盖不到真实输入。
  */
 
 /** 模拟 `convertRouteToMenu` 的模块级过滤：模块自己 `menu: false` 时整个模块从菜单里消失 */
@@ -115,6 +119,43 @@ describe('单栏菜单模式下的模块入口', () => {
       )
       assert.equal(menus[0]!.meta?.title, '系统设置', `${mode} 模式下页面标题不应被改写`)
     }
+  })
+
+  it('模块下已被路由层补上布局容器时，平铺出的是页面自己', () => {
+    /**
+     * 菜单层读的是 `routesRaw`，而路由层已经给单页模块补了一层布局容器
+     * （`route-layout.ts` 的 `mountLayoutForSinglePageModules`），所以真实输入是这个形状。
+     * 容器必须被剥掉：否则侧栏会多出一个「可展开、展开后为空」的项——`Menu/index.vue`
+     * 按 `children.length` 渲染成 `SubMenu`，而 `initItems` 又按「有可见子项」把它登记成
+     * 叶子项，两边对不上。
+     */
+    const container = {
+      path: FRONTEND_ROUTE_PATHS.systemSettings,
+      name: 'systemSettingsContainer',
+      component: () => null,
+      meta: { title: '系统设置', icon: 'ri:settings-3-line', menu: false, layoutContainer: true },
+      children: [{
+        path: '',
+        name: 'systemSettings',
+        component: () => null,
+        meta: {
+          title: '系统设置',
+          auth: SYSTEM_MANAGE_PERMISSION,
+          menu: false,
+          breadcrumb: false,
+          activeMenu: FRONTEND_ROUTE_PATHS.systemSettings,
+        },
+      }],
+    }
+
+    const menus = flattenModuleChildrenForSingleMode([container] as never, '', 'single', '系统设置')
+
+    assert.equal(menus.length, 1, '容器不该在侧栏占一格')
+    assert.equal(menus[0]!.path, FRONTEND_ROUTE_PATHS.systemSettings, '入口仍是设置页地址，不能解析成空串')
+    assert.equal(menus[0]!.children, undefined, '入口必须是叶子项，不能带出可展开的空子菜单')
+    assert.notEqual(menus[0]!.meta?.menu, false, '入口必须可见')
+    assert.equal(menus[0]!.meta?.title, '系统设置', '入口文字取模块名')
+    assert.equal(menus[0]!.meta?.auth, SYSTEM_MANAGE_PERMISSION, '权限点原样保留')
   })
 
   it('平铺不就地改写菜单数据（menuRouteList 是前后端共享的单例）', () => {

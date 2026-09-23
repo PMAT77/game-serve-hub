@@ -4,16 +4,19 @@ import { cloneDeep } from 'es-toolkit'
 import { createRouterMatcher } from 'vue-router'
 import apiApp from '@/api/modules/app'
 import { systemRoutes as systemRoutesRaw } from '@/router/routes'
-import { mountLayoutForSinglePageModules } from './route-layout'
+import { buildRoutesFromBackend, mountLayoutForSinglePageModules } from './route-layout'
 import type { MenuRouteModuleLike } from './route-layout'
 
 /**
- * 布局组件：与 `formatBackRoutes` 里翻译 `'Layout'` 用的是同一个引用。
+ * 布局组件：与 `buildRoutesFromBackend` 里翻译 `'Layout'` 用的是同一个引用。
  *
  * 单页模块的容器是在 `formatBackRoutes` 之后补上的，`'Layout'` 那时没人再翻译，所以要把
  * 真实的组件传进注入函数（见 `mountLayoutForSinglePageModules` 的注释）。
  */
 const layoutComponent = () => import('@/layouts/index.vue')
+
+/** 后端菜单数据里的页面组件表（`'system/settings.vue'` → 组件），交给 `buildRoutesFromBackend` 翻译 */
+const viewsGlob = import.meta.glob('@/views/**/*.vue')
 
 export const useAppRouteStore = defineStore(
   'appRoute',
@@ -111,38 +114,18 @@ export const useAppRouteStore = defineStore(
       routesMatcher.value = createRouterMatcher(routes, {})
       isGenerate.value = true
     }
-    // 格式化后端路由数据
-    function formatBackRoutes(routes: any, views = import.meta.glob('@/views/**/*.vue')): RouteRecordMainRaw[] {
-      return routes.map((route: any) => {
-        switch (route.component) {
-          case 'Layout':
-            route.component = layoutComponent
-            break
-          default:
-            if (route.component) {
-              route.component = views[`/src/views/${route.component}`]
-            }
-            else {
-              delete route.component
-            }
-        }
-        if (route.children) {
-          route.children = formatBackRoutes(route.children, views)
-        }
-        return route
-      })
-    }
     // 生成路由（后端获取）
     async function generateRoutesAtBack() {
       await apiApp.routeList().then((res) => {
         // 设置 routes 数据
-        // 单页模块（系统设置）在格式化后补一层布局容器：菜单数据里它没有容器，
-        // 页面若直接注册成顶层路由就会脱离 `layouts/index.vue`，侧栏与顶栏整条消失。
+        // 格式化与「给单页模块补布局容器」合并在一处（`buildRoutesFromBackend`），
+        // 顺序不能拆：菜单数据里的系统设置模块没有容器，页面若直接注册成顶层路由
+        // 就会脱离 `layouts/index.vue`，侧栏与顶栏整条消失。
         routesRaw.value = sortAsyncRoutes(
-          mountLayoutForSinglePageModules(
-            formatBackRoutes(res.data) as unknown as MenuRouteModuleLike[],
-            layoutComponent,
-          ) as RouteRecordMainRaw[],
+          buildRoutesFromBackend(
+            res.data,
+            { views: viewsGlob, layout: layoutComponent },
+          ) as unknown as RouteRecordMainRaw[],
         )
         // 创建路由匹配器
         const routes: RouteRecordRaw[] = []

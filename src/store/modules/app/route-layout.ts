@@ -1,7 +1,7 @@
 import type { RouteComponent } from 'vue-router'
 
 /**
- * 单页模块的布局容器注入（纯函数）。
+ * 后端路由数据整形与单页模块的布局容器注入（纯函数）。
  *
  * 这些函数刻意不放在 store 里：`route.ts` 会拉进请求层（`@/api` → `@/router` → `guards`
  * → `virtual:fantastic-admin/turbo-console`），而虚拟模块只有 Vite 能解析，单测里导入
@@ -36,7 +36,7 @@ export interface MenuRouteMetaLike {
   keepAlive?: boolean
 }
 
-/** 菜单/路由项（`formatBackRoutes` 之前 component 是 `views/` 下的相对路径或 `Layout`） */
+/** 菜单/路由项（`formatBackRoutes` 之后 component 已是组件） */
 export interface MenuRouteItemLike {
   path?: string
   name?: string
@@ -52,6 +52,30 @@ export interface MenuRouteModuleLike extends MenuRouteItemLike {
 }
 
 /**
+ * 后端菜单数据的原始形状：`component` 在这一步还是字符串（`'Layout'`，或 `views/` 下的相对路径）。
+ *
+ * 单独声明而不是复用 `MenuRouteItemLike`：后者按 vue-router 的要求把 `component` 定成
+ * `RouteComponent`，字符串在那里表达不出来，判定「是不是 `'Layout'`」就成了「无重叠比较」，
+ * 只剩断言一条路。
+ */
+export interface BackendRouteItemLike {
+  path?: string
+  name?: string
+  component?: RouteComponent | string | null
+  redirect?: string
+  meta?: MenuRouteMetaLike
+  children?: BackendRouteItemLike[]
+}
+
+/** `buildRoutesFromBackend` 需要从外面拿到的东西：页面组件表与布局组件 */
+export interface BackendRoutesContext {
+  /** `import.meta.glob` 扫 `@/views` 目录得到的页面组件表，把 `'system/settings.vue'` 映射成组件 */
+  views: Record<string, RouteComponent | undefined>
+  /** 真实的布局组件（`() => import('@/layouts/index.vue')`） */
+  layout: RouteComponent
+}
+
+/**
  * 判断一个路由项是不是布局容器层。
  *
  * 容器是为「页面必须挂在布局容器下」这条约束补出来的（见 `mountLayoutForSinglePageModules`），
@@ -62,12 +86,22 @@ export function isRouteOnlyLayoutContainer(route: MenuRouteItemLike) {
 }
 
 /**
- * 后端原始菜单数据里 component 是字符串（`'Layout'` 或 `'system/settings.vue'`）。
- * `RouteComponent` 类型不含字符串，所以判定前先归一化类型，别让 TS2367 逼着我们把
- * 真实的运行时形态从判断里删掉。
+ * 模块的「直接叶子页面」：没有 children、component 已接线、且路径是绝对路径。
+ *
+ * 判定刻意**不看 component 的类型**。第一版要求它是字符串（后端原始数据确实如此），
+ * 但唯一的调用方 `buildRoutesFromBackend` 先跑 `formatBackRoutes`——那时字符串早已被换成
+ * 懒加载组件函数，判定在真实链路上永远为 `false`：容器注入变成空操作，`/system/settings`
+ * 仍按顶层路由注册，页面自渲染而不经过 `layouts/index.vue`，于是进入这一页后左侧菜单栏、
+ * 顶栏、标签栏整条不渲染（用户看到的就是「进设置页后菜单栏没了」）。
+ *
+ * 路径要求绝对路径也有原因：单页模块自身没有 `path`，容器路径只能由子项推导，
+ * 相对路径推出来的路由注册不上去——宁可不注入，也不猜。
  */
-function asStringComponent(component: MenuRouteItemLike['component']): string | undefined {
-  return typeof component === 'string' ? component : undefined
+function isDirectLeafPage(page: MenuRouteItemLike) {
+  return !!page.component
+    && !page.children?.length
+    && typeof page.path === 'string'
+    && page.path.startsWith('/')
 }
 
 /**
@@ -81,7 +115,7 @@ export function isSinglePageModule(module: MenuRouteModuleLike) {
   const pages = module.children
   return module.meta?.menu !== false
     && pages.length > 0
-    && pages.every(page => !!asStringComponent(page.component) && !page.children)
+    && pages.every(page => isDirectLeafPage(page))
 }
 
 /**
@@ -96,6 +130,10 @@ export function isSinglePageModule(module: MenuRouteModuleLike) {
  * 为什么只补这一种形状：多页模块本来就有 `component: 'Layout'` 的容器（后端菜单数据里
  * 就写着，并且会被 `formatBackRoutes` 翻译成组件），这里逐项原样返回，绝不重复包装；
  * 模块级 `menu: false`（暂时隐藏的「插件」）也保持原样，让菜单层继续整块过滤掉。
+ *
+ * 容器的 `meta` 从页面继承，只覆盖 `menu` 与 `layoutContainer` 两项：容器对用户不可见，
+ * 但面包屑、标签栏仍要能读到标题；`breadcrumb: false` 之类也随页面一并生效，
+ * 免得面包屑里多出一层同名层级。
  *
  * `layout` 由调用方注入真实的布局组件（`() => import('@/layouts/index.vue')`）：这个补丁
  * 发生在 `formatBackRoutes` **之后**，那时 `'Layout'` 字符串已经没人再翻译，写字符串会让
@@ -125,7 +163,7 @@ export function mountLayoutForSinglePageModules<T extends MenuRouteModuleLike>(
       children: [{
         path: containerPath,
         component: layout,
-        meta: { menu: false, layoutContainer: true },
+        meta: { ...module.children[0]?.meta, menu: false, layoutContainer: true },
         children: module.children.map(page => ({
           ...page,
           // 子路由用相对空路径挂载，解析结果仍是这条绝对路径：
@@ -134,5 +172,47 @@ export function mountLayoutForSinglePageModules<T extends MenuRouteModuleLike>(
         })),
       }],
     } as unknown as T
+  })
+}
+
+/**
+ * 后端菜单数据 → 可直接注册的路由：**先翻译 component，再补布局容器**。
+ *
+ * 顺序只有这一处，既不拆开调用也不反过来：
+ * - 反过来（先补容器再翻译）会让容器的组件被 `views['/src/views/' + 函数]` 换成
+ *   `undefined`，vue-router 判定「不是有效组件」，这一页整个打不开；
+ * - 拆开、由调用方分别调用（第一版就是这样）时，只要有人调整两行的先后，注入就会
+ *   看到已经格式化过的数据而静默失效——`isDirectLeafPage` 的判定与这里的顺序是一对，
+ *   由 `route.test.ts` 的「真实顺序」用例钉住。
+ *
+ * 就地改写传入的 `routes`（后端刚返回的 JSON，没有第二处持有者），与旧实现一致。
+ */
+export function buildRoutesFromBackend(
+  routes: BackendRouteItemLike[],
+  context: BackendRoutesContext,
+): MenuRouteModuleLike[] {
+  formatBackRoutes(routes, context)
+  return mountLayoutForSinglePageModules(
+    routes as unknown as MenuRouteModuleLike[],
+    context.layout,
+  )
+}
+
+/** 把字符串 component 翻译成真正的组件：`'Layout'` → 布局组件，相对路径 → `views/` 下的页面 */
+function formatBackRoutes(routes: BackendRouteItemLike[], context: BackendRoutesContext): BackendRouteItemLike[] {
+  return routes.map((route) => {
+    if (route.component === 'Layout') {
+      route.component = context.layout
+    }
+    else if (typeof route.component === 'string') {
+      route.component = context.views[`/src/views/${route.component}`]
+    }
+    else if (!route.component) {
+      delete route.component
+    }
+    if (route.children) {
+      route.children = formatBackRoutes(route.children, context)
+    }
+    return route
   })
 }

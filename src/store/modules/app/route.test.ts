@@ -8,6 +8,7 @@ import { resolveRoutePath } from '../../../utils/index.ts'
 import { menuRouteList } from '../../../../server/src/shared/menu-routes.ts'
 import { flattenModuleChildrenForSingleMode } from './menu-flatten.ts'
 import {
+  buildRoutesFromBackend,
   isRouteOnlyLayoutContainer,
   isSinglePageModule,
   mountLayoutForSinglePageModules,
@@ -21,12 +22,15 @@ import {
  * 是一个**没有容器**的单页模块（为修掉侧栏两个同名入口而改的），它的页面是绝对路径，
  * 直接注册就成了顶层路由：进入这一页后整条左侧栏与顶栏都不渲染。
  *
- * 这里钉住五件事：
+ * 这里钉住六件事：
  *   1. 单页模块会被补上容器，且**地址不变**（子路由走相对空路径）；
  *   2. 容器确实处于页面与布局之间（vue-router 解析出两层），这是「侧栏在不在」的判定依据；
- *   3. 多页模块（后端本来就写了 `component: 'Layout'`）逐字段不变，不重复包装；
- *   4. 模块级 `menu: false`（暂时隐藏的「插件」）保持原样，菜单层继续按老规矩过滤；
- *   5. 补出来的容器在菜单里被跳过：侧栏仍然只有一处「系统设置」。
+ *   3. **真实顺序**（先 `formatBackRoutes` 再注入，即 `buildRoutesFromBackend`）下同样生效：
+ *      判定看的是结构，不是 `component` 是字符串还是组件函数——第一版正因为要求字符串
+ *      而在真实链路上静默失效，本文件此前只喂原始数据，所以没拦住；
+ *   4. 多页模块（后端本来就写了 `component: 'Layout'`）逐字段不变，不重复包装；
+ *   5. 模块级 `menu: false`（暂时隐藏的「插件」）保持原样，菜单层继续按老规矩过滤；
+ *   6. 补出来的容器在菜单里被剥掉：侧栏仍然只有一处「系统设置」（`menu-flatten.test.ts` 钉渲染侧）。
  */
 
 /** 真实菜单数据里的系统设置模块（单页、绝对路径、没有容器） */
@@ -68,6 +72,12 @@ const hiddenModule = {
  * 而这里只需要断言「容器上的 component 是调用方传进来的那个」。
  */
 const LAYOUT_STUB = 'LayoutStub' as unknown as RouteRecordRaw['component']
+
+/**
+ * 页面组件占位符：`buildRoutesFromBackend` 里的 `formatBackRoutes` 会把字符串 component
+ * 换成它在 `views` 表里的引用，这里只需要断言「换成了传进去的那一个」。
+ */
+const PAGE_STUB = 'SettingsPageStub' as unknown as RouteRecordRaw['component']
 
 /** 取模块下的第一层子项（容器或页面） */
 function firstChild(module: RouteRecordMainRaw) {
@@ -145,6 +155,73 @@ describe('单页模块的布局容器', () => {
     const [mounted] = mountLayoutForSinglePageModules([hiddenModule], LAYOUT_STUB)
     assert.deepEqual(JSON.parse(JSON.stringify(mounted)), JSON.parse(JSON.stringify(hiddenModule)))
     assert.equal(isSinglePageModule(hiddenModule), false, '模块级 menu: false 不属于「单页模块」')
+  })
+
+  it('真实顺序（先翻译 component、再注入）下仍认得出单页模块', () => {
+    /**
+     * 这一条钉的是真实缺陷：判定曾要求 `component` 是**字符串**，而唯一的生产调用点
+     * （`generateRoutesAtBack`）先跑 `formatBackRoutes`——那时字符串早已被换成组件函数，
+     * 判定恒为 `false`，注入变成空操作：`/system/settings` 仍按顶层路由注册，页面自渲染
+     * 而不经过 `layouts/index.vue`，进入这一页后左侧菜单栏与顶栏整条不渲染。
+     */
+    const backendRoutes = structuredClone(menuRouteList) as never
+    const routes = buildRoutesFromBackend(backendRoutes, {
+      views: { '/src/views/system/settings.vue': PAGE_STUB },
+      layout: LAYOUT_STUB,
+    })
+
+    const system = routes.find(module => module.meta?.title === '系统设置')
+    assert.ok(system, '路由数据里应当有系统设置模块')
+
+    const container = firstChild(system as unknown as RouteRecordMainRaw)
+    assert.equal(container.meta?.layoutContainer, true, '真实顺序下也必须补上容器，否则页面会脱离布局')
+    assert.equal(container.component, LAYOUT_STUB, '容器必须带真正的布局组件')
+    assert.equal(container.path, FRONTEND_ROUTE_PATHS.systemSettings, '地址不漂移')
+    assert.equal(container.children?.[0]?.path, '', '子页面仍走相对空路径')
+    assert.equal(container.children?.[0]?.component, PAGE_STUB, '页面组件从 views 表里取')
+    assert.equal(
+      menuRouteList.find(module => module.meta.title === '系统设置')?.children?.[0]?.component,
+      'system/settings.vue',
+      '共享的菜单定义不能被就地改写（整形只作用于后端返回的那份数据）',
+    )
+
+    // 最终判据同第 2 条：解析出来必须是「布局容器 + 页面」两层，页面才落在 layouts/index.vue 里
+    const matcher = createRouterMatcher([container], {})
+    const matched = matcher.resolve({ path: FRONTEND_ROUTE_PATHS.systemSettings }, undefined!)?.matched ?? []
+    assert.equal(matched.length, 2, `真实顺序下也应当匹配两层，实际 ${matched.length} 层`)
+    assert.equal(matched[0]!.components?.default, LAYOUT_STUB, '最外层必须是布局组件')
+    assert.equal(matched.at(-1)!.components?.default, PAGE_STUB, '最内层是设置页本身')
+  })
+
+  it('判定只看结构，不看 component 的类型', () => {
+    /** 单页模块的最简形状：模块 + 一个直接叶子页面 */
+    const moduleWith = (page: Record<string, unknown>) => ({ meta: { title: 'X' }, children: [page] }) as never
+
+    assert.equal(
+      isSinglePageModule(moduleWith({ path: '/x', component: PAGE_STUB, meta: { menu: false } })),
+      true,
+      '格式化之后的组件函数形态',
+    )
+    assert.equal(
+      isSinglePageModule(moduleWith({ path: '/x', component: 'x.vue', meta: { menu: false } })),
+      true,
+      '后端原始数据的字符串形态——两种形态必须得到同一个结论',
+    )
+    assert.equal(
+      isSinglePageModule(moduleWith({ path: 'x', component: PAGE_STUB, meta: { menu: false } })),
+      false,
+      '相对路径推不出容器路径，宁可不注入',
+    )
+    assert.equal(
+      isSinglePageModule(moduleWith({ path: '/x', meta: { menu: false } })),
+      false,
+      '没有拼上组件的项不是页面',
+    )
+    assert.equal(
+      isSinglePageModule(moduleWith({ path: '/x', component: PAGE_STUB, meta: { menu: false }, children: [] })),
+      true,
+      '空 children 仍是叶子页面',
+    )
   })
 
   it('补容器不就地改写传入的路由数据', () => {

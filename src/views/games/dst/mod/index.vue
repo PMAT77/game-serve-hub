@@ -1658,7 +1658,7 @@ onMounted(async () => {
     <FaPageMain
       title="DST Mod 订阅"
       class="flex min-h-0 flex-1 flex-col overflow-hidden !m-0 h-full"
-      main-class="flex min-h-0 flex-1 flex-col"
+      main-class="flex min-h-0 flex-1 flex-col overflow-y-auto"
     >
     <p class="mb-4 shrink-0 text-sm text-muted-foreground">
       订阅服务器 Mod：在「Mod 市场」浏览 Steam 创意工坊，或在「已订阅」页签管理当前实例的 Mod 并控制开启状态。开启后需重启实例生效。
@@ -1701,7 +1701,7 @@ onMounted(async () => {
     <NCard
       size="small"
       title="Steam 创意工坊"
-      class="dst-mod-workshop-card flex min-h-0 flex-1 flex-col"
+      class="dst-mod-workshop-card flex flex-1 flex-col"
       content-class="flex min-h-0 flex-1 flex-col"
     >
       <div class="flex min-h-0 flex-1 flex-col gap-3">
@@ -2083,6 +2083,15 @@ onMounted(async () => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+/*
+ * 表格所在卡片的兜底高度：矮屏下工具栏会换行、卡片被 flex 压扁，
+ * 表格只剩表头甚至完全不可见。给一个下限后内容区改为滚动，
+ * 表格始终保有约 300px 可用高度（表头 + 分页 + 4~5 行）。
+ */
+.dst-mod-workshop-card {
+  min-height: 480px;
 }
 
 .dst-mod-workshop-card :deep(.n-card-header) {

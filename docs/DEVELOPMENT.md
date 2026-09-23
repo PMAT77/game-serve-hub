@@ -129,6 +129,30 @@ pino 输出是 UTF-8，PowerShell 默认按系统区域（GBK）解码显示。�
 - **所有新终端**：把上面两行写进 PowerShell 配置文件（`notepad $PROFILE`；文件不存在先 `New-Item -Force $PROFILE`）。
 - **系统级一劳永逸**：设置 → 时间和语言 → 语言和区域 → 管理语言设置 → 更改系统区域设置 → 勾选 **“Beta: 使用 Unicode UTF-8 提供全球语言支持”** 后重启。副作用：极少数依赖 GBK 的旧程序可能反向乱码。
 
+### `dev:compose` 启动时刷出大量 `WARN GET … ECONNRESET`
+
+这些警告来自**容器内**的依赖安装，不是面板或启动脚本报错：panel 与 web 容器启动时都会执行 `scripts/dev-deps-guard.sh`，它在 `pnpm-lock.yaml` 指纹变化（或卷里还没有依赖）时跑一次 `pnpm install --frozen-lockfile`（见 `docker-compose.dev.yml`）。警告里的包全是 Linux 平台二进制（`@esbuild/linux-x64`、`@img/sharp-linux-x64`、`sass-embedded-linux-x64` 等），宿主机装的 `node_modules` 与之无关。
+
+pnpm 会自己重试，所以这类警告通常只是变慢：期间 `[dev:compose] 等待 前端…` 会一直停在同一行——前端容器还在装依赖，Vite 尚未 ready。网络不稳时换一个 npm 源：
+
+```bash
+GSH_DEV_NPM_REGISTRY=https://registry.npmmirror.com pnpm run dev:compose
+```
+
+也可以写进 `panel.env`（`dev:compose` 用 `--env-file panel.env` 读取）：
+
+```bash
+GSH_DEV_NPM_REGISTRY=https://registry.npmmirror.com
+```
+
+该变量只影响容器内的依赖安装，不改变面板运行时行为；**不设置时仍用官方源 `https://registry.npmjs.org/`**，仓库不默认写入任何第三方镜像。想确认容器实际用的源：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec panel pnpm config get registry
+```
+
+换源后若某个包取不到，`pnpm install --frozen-lockfile` 会失败并卡住启动，去掉该变量重跑即可。安装确实失败时用 `docker compose -f docker-compose.yml -f docker-compose.dev.yml logs panel web` 看 `[dev-deps]` 段落。
+
 ### `dev:compose` 下前端容器冷启动慢
 
 Rancher Desktop（WSL2 后端）把 Windows 源码目录 bind mount 进容器，文件 IO 走跨 VM 通道（实测同目录遍历慢约 35 倍）。vite 冷启动 ready 需要 70~80 秒，期间浏览器打开 `localhost:9527` 无响应**属正常现象**，等日志出现 `VITE ready in ...` 再访问。日常改前端代码建议直接用 `pnpm run dev`（原生 NTFS，约 13 秒 ready，HMR 也更可靠）。

@@ -1,5 +1,6 @@
 # Development overlay: bind-mount 源码，容器内 pnpm install，避免 Windows 下 Docker build context 扫 node_modules。
-# node_modules 挂在命名卷上，依赖是否要重装由 scripts/dev-deps-guard.sh 按 pnpm-lock.yaml 指纹判断。
+# node_modules 挂在命名卷上，依赖是否要重装由 scripts/dev-deps-guard.sh 按 pnpm-lock.yaml 指纹判断；
+# 容器内安装用的 npm 源由 GSH_DEV_NPM_REGISTRY 控制，默认官方源。
 # 内存：panel(tsx watch)+web(Vite) 双容器，宿主机看到 ~1GiB+ 为开发常态；生产见 PANEL_IMAGE 单容器。
 services:
   panel:
@@ -17,6 +18,8 @@ services:
       GSH_PANEL_CONTAINER_NAME: game-server-hub-panel
       GSH_DEV_COMPOSE_QUIET: "1"
       NODE_NO_WARNINGS: "1"
+      # 容器内 pnpm install 的 npm 源（默认官方源，行为不变）：网络不稳时换国内镜像可显著减少 ECONNRESET 重试
+      npm_config_registry: ${GSH_DEV_NPM_REGISTRY:-https://registry.npmjs.org/}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "8888"
@@ -75,6 +78,8 @@ services:
       VITE_ENABLE_PROXY: "true"
       VITE_DEV_WEB_PORT: ${VITE_DEV_WEB_PORT:-9527}
       GSH_DEV_COMPOSE_QUIET: "1"
+      # 与 panel 保持一致：两个容器都要装依赖，漏掉一个就只加速一半
+      npm_config_registry: ${GSH_DEV_NPM_REGISTRY:-https://registry.npmjs.org/}
     volumes:
       - .:/app
       - web-node-modules:/app/node_modules

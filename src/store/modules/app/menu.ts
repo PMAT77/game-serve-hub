@@ -1,6 +1,8 @@
 import type { MenuRecordMainRaw, MenuRecordRaw, RouteRecordMainRaw } from '@fantastic-admin/types'
 import { cloneDeep } from 'es-toolkit'
+import type { MenuRouteItemLike } from './route-layout'
 import { convertRouteToMenuRecursive, flattenModuleChildrenForSingleMode } from './menu-flatten'
+import { isRouteOnlyLayoutContainer } from './route-layout'
 import { resolveRoutePath } from '@/utils'
 
 export const useAppMenuStore = defineStore(
@@ -28,6 +30,15 @@ export const useAppMenuStore = defineStore(
            * （`setActived` 找不到对应的菜单索引，会保持当前索引不变）。
            */
           if ((item.meta as { menu?: boolean } | undefined)?.menu === false) {
+            return
+          }
+          /**
+           * 跳过路由层为单页模块补出来的**纯容器层**（`src/store/modules/app/route.ts` 的
+           * `mountLayoutForSinglePageModules`）：它只为把页面放进布局容器，自身没有意义，
+           * 若照常渲染，侧栏会同时出现容器与页面两个同名入口——正是这个单页模块当初被
+           * 改成扁平结构的原因。页面本身仍是模块下唯一的可见项（见下方 single 分支）。
+           */
+          if (isRouteOnlyLayoutContainer(item as unknown as MenuRouteItemLike)) {
             return
           }
           if (appSettingsStore.settings.menu.mode === 'single') {

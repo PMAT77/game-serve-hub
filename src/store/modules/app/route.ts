@@ -4,6 +4,8 @@ import { cloneDeep } from 'es-toolkit'
 import { createRouterMatcher } from 'vue-router'
 import apiApp from '@/api/modules/app'
 import { systemRoutes as systemRoutesRaw } from '@/router/routes'
+import { mountLayoutForSinglePageModules } from './route-layout'
+import type { MenuRouteModuleLike } from './route-layout'
 
 export const useAppRouteStore = defineStore(
   'appRoute',
@@ -85,7 +87,9 @@ export const useAppRouteStore = defineStore(
     // 生成路由（前端生成）
     function generateRoutesAtFront(asyncRoutes: RouteRecordMainRaw[]) {
       // 设置 routes 数据
-      routesRaw.value = sortAsyncRoutes(cloneDeep(asyncRoutes) as any)
+      routesRaw.value = sortAsyncRoutes(
+        mountLayoutForSinglePageModules(cloneDeep(asyncRoutes) as unknown as MenuRouteModuleLike[]) as RouteRecordMainRaw[],
+      )
       // 创建路由匹配器
       const routes: RouteRecordRaw[] = []
       routesRaw.value.forEach((route) => {
@@ -121,7 +125,11 @@ export const useAppRouteStore = defineStore(
     async function generateRoutesAtBack() {
       await apiApp.routeList().then((res) => {
         // 设置 routes 数据
-        routesRaw.value = sortAsyncRoutes(formatBackRoutes(res.data) as any)
+        // 单页模块（系统设置）在格式化后补一层布局容器：菜单数据里它没有容器，
+        // 页面若直接注册成顶层路由就会脱离 `layouts/index.vue`，侧栏与顶栏整条消失。
+        routesRaw.value = sortAsyncRoutes(
+          mountLayoutForSinglePageModules(formatBackRoutes(res.data) as unknown as MenuRouteModuleLike[]) as RouteRecordMainRaw[],
+        )
         // 创建路由匹配器
         const routes: RouteRecordRaw[] = []
         routesRaw.value.forEach((route) => {

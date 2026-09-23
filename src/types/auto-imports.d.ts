@@ -32,13 +32,16 @@ declare global {
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
   const isRef: typeof import('vue').isRef
+  const isRouteOnlyLayoutContainer: typeof import('../store/modules/app/route-layout').isRouteOnlyLayoutContainer
   const isShallow: typeof import('vue').isShallow
+  const isSinglePageModule: typeof import('../store/modules/app/route-layout').isSinglePageModule
   const mapActions: typeof import('pinia').mapActions
   const mapGetters: typeof import('pinia').mapGetters
   const mapState: typeof import('pinia').mapState
   const mapStores: typeof import('pinia').mapStores
   const mapWritableState: typeof import('pinia').mapWritableState
   const markRaw: typeof import('vue').markRaw
+  const mountLayoutForSinglePageModules: typeof import('../store/modules/app/route-layout').mountLayoutForSinglePageModules
   const nextTick: typeof import('vue').nextTick
   const normalizePanelVersion: typeof import('../composables/panelVersionGuard').normalizePanelVersion
   const onActivated: typeof import('vue').onActivated
@@ -127,6 +130,9 @@ declare global {
   // @ts-ignore
   export type { MenuLayoutMode } from '../store/modules/app/menu-flatten'
   import('../store/modules/app/menu-flatten')
+  // @ts-ignore
+  export type { MenuRouteMetaLike, MenuRouteItemLike, MenuRouteModuleLike } from '../store/modules/app/route-layout'
+  import('../store/modules/app/route-layout')
   // @ts-ignore
   export type { PanelVersionMismatch } from '../composables/panelVersionGuard'
   import('../composables/panelVersionGuard')

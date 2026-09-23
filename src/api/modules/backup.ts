@@ -40,8 +40,19 @@ export default {
   }, { timeout: 0 }) as Promise<{ data: BackupMutationResult }>,
   /** 备份列表；instanceId 缺省返回全部（含数据库快照） */
   getBackupList: (instanceId?: string) => api.post('app/instance/backup/list', instanceId ? { instanceId } : {}) as Promise<{ data: BackupItem[] }>,
-  /** 流式下载备份包 */
-  downloadBackup: ({ backupId }: BackupDownloadOptions) => api.post('app/instance/backup/download', { backupId }, { responseType: 'blob', timeout: 0 }) as Promise<{ data: Blob }>,
+  /**
+   * 流式下载备份包。
+   *
+   * `onProgress` 只回传已接收字节数：响应是 chunked 的（后端不设 Content-Length），
+   * 浏览器量不出总量，进度分母由调用方用列表里的备份大小给出。
+   */
+  downloadBackup: ({ backupId }: BackupDownloadOptions, onProgress?: (loadedBytes: number) => void) => api.post('app/instance/backup/download', { backupId }, {
+    responseType: 'blob',
+    timeout: 0,
+    onDownloadProgress: (event: { loaded: number }) => {
+      onProgress?.(event.loaded)
+    },
+  }) as Promise<{ data: Blob }>,
   deleteBackup: (backupId: string) => api.post('app/instance/backup/delete', { backupId }) as Promise<{ data: BackupMutationResult }>,
   /** 恢复实例存档（要求实例已停止；自动生成恢复前安全备份） */
   restoreBackup: (backupId: string) => api.post('app/instance/backup/restore', { backupId }, { timeout: 0 }) as Promise<{ data: BackupRestoreResult }>,

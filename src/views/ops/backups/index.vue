@@ -8,6 +8,7 @@ import apiBackup from '@/api/modules/backup'
 import apiInstance from '@/api/modules/instance'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 import SaveImportModal from './components/SaveImportModal.vue'
+import { describeDownloadProgress, formatSize } from './downloadProgress'
 
 defineOptions({
   name: 'OpsBackups',
@@ -56,19 +57,6 @@ const statusMeta: Record<BackupItem['status'], { label: string, type: 'default' 
   completed: { label: '可用', type: 'success' },
   failed: { label: '失败', type: 'error' },
   stale: { label: '文件丢失', type: 'error' },
-}
-
-function formatSize(bytes: number): string {
-  if (bytes <= 0) {
-    return '—'
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`
-  }
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  }
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 function formatTime(iso: string): string {
@@ -125,16 +113,57 @@ function saveBlob(blob: Blob, fileName: string) {
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = fileName
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
   anchor.click()
-  URL.revokeObjectURL(url)
+  anchor.remove()
+  // 立刻回收会让浏览器在大文件真正开始写盘前丢掉数据源，延后释放
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
-function handleDownload(row: BackupItem) {
-  apiBackup.downloadBackup({ backupId: row.id }).then((response) => {
-    saveBlob(response.data, row.fileName)
-  }).catch(() => {
-    faToast.error('下载失败，请稍后重试')
+/** 正在下载的备份 id：非空即表示已有一次下载在途 */
+const downloadingBackupId = ref<string | null>(null)
+
+/** 进度事件每个 chunk 都触发，按 1 MB 粒度刷新同一条提示，避免高频重渲染 */
+const DOWNLOAD_PROGRESS_STEP_BYTES = 1024 * 1024
+
+/**
+ * 下载备份包。
+ *
+ * 备份包要等整个响应体收完才开始保存到本地，大包耗时以分钟计；此前既没有「下载中」
+ * 状态也不阻止重复点击，表现为「点了没反应，点几下过一会又重复下载」——
+ * 每次点击都是一次独立请求，各自完成时再各触发一次浏览器下载。
+ */
+async function handleDownload(row: BackupItem) {
+  if (downloadingBackupId.value) {
+    return
+  }
+  downloadingBackupId.value = row.id
+  const pendingToastId = faToast.loading('正在读取备份包，请稍候…', {
+    description: describeDownloadProgress(0, row.sizeBytes),
   })
+  let shownBytes = 0
+  try {
+    const response = await apiBackup.downloadBackup({ backupId: row.id }, (loadedBytes) => {
+      if (loadedBytes - shownBytes < DOWNLOAD_PROGRESS_STEP_BYTES) {
+        return
+      }
+      shownBytes = loadedBytes
+      faToast.loading('正在读取备份包，请稍候…', {
+        id: pendingToastId,
+        description: describeDownloadProgress(loadedBytes, row.sizeBytes),
+      })
+    })
+    saveBlob(response.data, row.fileName)
+    faToast.success('备份已开始下载', { id: pendingToastId })
+  }
+  catch {
+    // 失败原因由请求层统一提示（含后端给的中文原因），这里只收起进度提示，不再叠一条
+    faToast.dismiss(pendingToastId)
+  }
+  finally {
+    downloadingBackupId.value = null
+  }
 }
 
 const createDialogVisible = ref(false)
@@ -305,10 +334,13 @@ const columns = computed<DataTableColumns<BackupItem>>(() => [
     render: (row) => {
       const buttons = []
       if (row.status === 'completed') {
+        // 一次只下一个包：并发下载会互相抢磁盘与带宽，也更容易触发浏览器的多文件下载拦截
         buttons.push(h(NButton, {
           size: 'small',
           quaternary: true,
           type: 'primary',
+          loading: downloadingBackupId.value === row.id,
+          disabled: downloadingBackupId.value !== null && downloadingBackupId.value !== row.id,
           onClick: () => handleDownload(row),
         }, { default: () => '下载' }))
       }

@@ -7,6 +7,15 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    # 只收 minor / patch：major 升级（如 @vueuse 14→15、@types/dockerode 3→4）
+    # 需要连带改代码，得由人判断时机，不适合自动开 PR。
+    # 另外 Dependabot 生成的 pnpm-lock.yaml 会把 catalog: 依赖写成具体版本号，
+    # 在 CI 的 pnpm install --frozen-lockfile 下必然报 ERR_PNPM_OUTDATED_LOCKFILE，
+    # 这类 PR 目前无法直接合并，改由人工在 pnpm-workspace.yaml 里升级。
+    ignore:
+      - dependency-name: '*'
+        update-types:
+          - version-update:semver-major
     groups:
       production-dependencies:
         patterns:

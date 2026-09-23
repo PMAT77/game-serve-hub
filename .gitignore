@@ -72,6 +72,9 @@ license-private*.pem
 license.json
 migration-exports/
 
+# Agent 指令文件（AGENTS.md）随仓库发布：它不匹配任何忽略模式，
+# 所以没有例外规则。若将来新增 .agents/ 之类的通配规则，别让它把 AGENTS.md 卷进去。
+
 # IDE & local tooling
 .agents/
 .skills/

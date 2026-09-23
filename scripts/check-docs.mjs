@@ -9,7 +9,7 @@ import path from 'node:path'
 const repoRoot = path.resolve(import.meta.dirname, '..')
 const docsDir = path.join(repoRoot, 'docs')
 
-const rootDocs = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'MIGRATION.md', 'CHANGELOG.md']
+const rootDocs = ['README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'MIGRATION.md', 'CHANGELOG.md']
 const docsFiles = fs.readdirSync(docsDir).filter(f => f.endsWith('.md')).map(f => `docs/${f}`)
 const targets = [...rootDocs, ...docsFiles].filter(f => fs.existsSync(path.join(repoRoot, f)))
 

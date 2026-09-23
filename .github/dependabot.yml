@@ -6,12 +6,13 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 10
-    # 只收 minor / patch：major 升级（如 @vueuse 14→15、@types/dockerode 3→4）
-    # 需要连带改代码，得由人判断时机，不适合自动开 PR。
-    # 另外 Dependabot 生成的 pnpm-lock.yaml 会把 catalog: 依赖写成具体版本号，
-    # 在 CI 的 pnpm install --frozen-lockfile 下必然报 ERR_PNPM_OUTDATED_LOCKFILE，
-    # 这类 PR 目前无法直接合并，改由人工在 pnpm-workspace.yaml 里升级。
+    # 0 = 只保留 security updates，不再自动开版本更新 PR。
+    # 原因：本仓库的依赖版本集中在 pnpm-workspace.yaml 的 catalog，Dependabot 重算
+    # pnpm-lock.yaml 时与这套结构不兼容——实测出现过两类故障：把 catalog: 写成具体版本号
+    # 导致 CI 报 ERR_PNPM_OUTDATED_LOCKFILE；以及把 @vue/runtime-core 拆成 3.5.34 与
+    # 3.5.43 两个实例，导致 vue-tsc 类型检查失败。依赖升级改由人工在 catalog 里做。
+    # 下面的 ignore 与 groups 保留：将来若要重新开启自动更新，把本行改回 >0 即可。
+    open-pull-requests-limit: 0
     ignore:
       - dependency-name: '*'
         update-types:

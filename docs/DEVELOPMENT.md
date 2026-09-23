@@ -211,6 +211,14 @@ git diff --exit-code -- server/drizzle      # 迁移漂移检查：无输出即�
 | `pnpm test:server` | 后端测试 |
 | `pnpm run build` | 生产构建（仅前端 `dist/`；服务端 bundle 用 `pnpm run build:server`） |
 
+**`pnpm run lint` 走增量构建（`vue-tsc -b`），会吃掉构建缓存。** 改动涉及类型边界（菜单数据、跨目录 import、`RouteMetaRaw` 这类 `string | (() => string)` 的联合类型）后，务必强制全量重跑一次：
+
+```bash
+pnpm exec vue-tsc -b --force     # 或先删掉 node_modules/.tmp 下的 *.tsbuildinfo
+```
+
+否则会出现「本地 exit 0、CI 的 Type check 步骤却报错」的假绿——v0.8.2 的第一次推送就是这样变红的：`item.meta.title` 可能是 `undefined` 或函数，本地增量检查没重新验那个文件，推上去才暴露。
+
 `pnpm` 不可用（或不想让它访问系统级 store）时，可以用同一套检查的替代入口：`node scripts/run-local-checks.mjs [步骤名...]`。它用仓库内的 Node 直接调起 `vue-tsc`、`vite`、各检查脚本与测试运行器，日志写到 `logs/verify/`，终端只打印每步的通过情况；不带参数即跑全部。改动脚本与门禁命令时应保持两者一致。
 
 测试不需要 Docker：本机没有 Docker 或没有本地 SteamCMD 镜像时，`container-lifecycle` 里依赖真实容器运行时的那一条会**跳过并说明原因**（结果里的 `skipped 1`），其余用例照常执行。早先它会在「Docker 可用但镜像不在本地」时真的去拉镜像，镜像拉不动的网络下整轮测试会长时间无输出地挂住。

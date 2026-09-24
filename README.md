@@ -36,7 +36,7 @@
 - **多用户与权限隔离**：后端已有账号与权限点，成员管理界面尚未提供，目前实际上只能单人使用。
 - **操作审计日志**：查不到「谁在什么时候重启了世界」。
 - **玩家事件统计**：聊天日志与在线时长统计仍在规划中（在线玩家列表、踢出与封禁已经可用）。
-- **多语言界面、插件宿主、面板数据库快照的恢复**：均未提供。
+- **多语言界面、插件宿主**：均未提供。
 - **按种子试算地形**：未提供，且**不在规划内**——DST 没有这种接口，地形只在游戏生成地图时才产生，唯一的办法是开服生成一次。作为替代，面板提供「**地形图**」：把**已经生成的世界**的地形导出成一张图（含当前 Mod 影响，不含玩家位置），带图例并标出猪王、洞穴入口、远古大门等关键地标，见 [DST 开服教程 · 地形图](docs/DST_TUTORIAL.md#126-地形图)。
 
 另外三项属于产品边界，不在规划内：
@@ -67,7 +67,7 @@
 
 ## 快速开始
 
-当前为 `v0.8.3` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
+当前为 `v0.9.0` 公测线。要求 Ubuntu 22.04 / 24.04 或 Debian 12，root/sudo，至少 4 GiB 内存和 4 GiB 空闲磁盘（离线镜像包约 227 MB，导入后本地镜像约 560 MB；游戏本体与存档另需数 GB）；Native 正式支持 x86_64，Docker 的 ARM64 支持仍为实验性。
 
 > **4 GiB 内存的机器请先加 swap**：分片加载整套 Mod 时内存会短时冲高，4 GiB 物理内存同时承载主世界与洞穴会很紧张。执行 `sudo gsh setup-swap` 创建 2 GiB swapfile（同时设置 `vm.swappiness=20`）即可；启动前的内存守卫会按「分片数 ×（512 MiB + 每个 Mod 32 MiB）」估算并把可用 swap 计入余量，不够时直接拒绝启动并给出建议，而不是启动到一半被内核杀掉。
 
@@ -87,14 +87,14 @@
 > Native 模式不拉取任何容器镜像，不需要这一步。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.8.3/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.9.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode docker
 ```
 
 ### Native systemd 模式
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.8.3/scripts/install.linux.sh \
+curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.9.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native
 ```
 
@@ -105,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/PMAT77/game-serve-hub/v0.8.3/script
 若 GitHub Raw 不稳定，可从 jsDelivr 获取同版本脚本，并启用国内网络档位（`--mode` 按你选的模式改）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.8.3/scripts/install.linux.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/PMAT77/game-serve-hub@v0.9.0/scripts/install.linux.sh \
   | sudo bash -s -- --mode native --network cn
 ```
 

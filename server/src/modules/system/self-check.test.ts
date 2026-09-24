@@ -41,11 +41,70 @@ describe('buildSelfCheckReport', () => {
   it('reports an all-clear environment', () => {
     const report = buildSelfCheckReport(baseInput(), new Date('2026-09-15T12:00:00.000Z'))
     assert.equal(report.summary.fail, 0)
-    assert.equal(report.summary.warn, 0)
+    // 未提供 steamUpstream 时「Mod 市场上游」是 warn（还没采集到，不能说没问题），
+    // 除此之外不该有别的告警
+    assert.equal(report.summary.warn, 1)
     assert.equal(report.generatedAt, '2026-09-15T12:00:00.000Z')
     assert.equal(report.releaseVersion, 'v0.5.0')
     assert.equal(itemOf(baseInput(), 'runtime').status, 'ok')
     assert.match(itemOf(baseInput(), 'version').detail, /v0\.5\.0/)
+  })
+
+  it('summarizes the mod market upstream chain', () => {
+    const healthy = itemOf(baseInput({
+      steamUpstream: {
+        configuredSources: ['official', 'html'],
+        sourceOrder: ['official', 'html'],
+        openSources: [],
+        lastSuccessSource: 'official',
+        lastSuccessAt: '2026-09-15T11:30:00.000Z',
+        proxyEnabled: true,
+        proxySource: 'GSH_STEAM_HTTPS_PROXY',
+        proxyHost: 'proxy:7890',
+        webApiBaseConfigured: false,
+        relayConfigured: false,
+      },
+    }), 'steam-workshop')
+    assert.equal(healthy.status, 'ok')
+    assert.match(healthy.detail, /official → html/)
+    assert.match(healthy.detail, /代理已生效/)
+    assert.ok(!healthy.detail.includes('secret'))
+
+    const openCircuit = itemOf(baseInput({
+      steamUpstream: {
+        configuredSources: ['html'],
+        sourceOrder: ['html'],
+        openSources: ['html'],
+        lastSuccessSource: null,
+        lastSuccessAt: null,
+        proxyEnabled: false,
+        proxySource: null,
+        proxyHost: null,
+        webApiBaseConfigured: false,
+        relayConfigured: false,
+      },
+    }), 'steam-workshop')
+    assert.equal(openCircuit.status, 'warn')
+    assert.match(openCircuit.detail, /熔断/)
+
+    // 没配代理也从没成功过：这是国内服务器的典型现场，必须给出可照做的建议
+    const neverWorked = itemOf(baseInput({
+      steamUpstream: {
+        configuredSources: ['html'],
+        sourceOrder: ['html'],
+        openSources: [],
+        lastSuccessSource: null,
+        lastSuccessAt: null,
+        proxyEnabled: false,
+        proxySource: null,
+        proxyHost: null,
+        webApiBaseConfigured: false,
+        relayConfigured: false,
+      },
+    }), 'steam-workshop')
+    assert.equal(neverWorked.status, 'warn')
+    assert.match(neverWorked.hint ?? '', /GSH_STEAM_HTTPS_PROXY/)
+    assert.match(neverWorked.hint ?? '', /host\.docker\.internal/)
   })
 
   it('flags a broken runtime in both deployment modes', () => {

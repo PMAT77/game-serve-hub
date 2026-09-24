@@ -7,6 +7,7 @@ import { collectHostResourceSnapshot } from '../../shared/host-metrics'
 import { loadServerConfig } from '../../shared/config'
 import { getCachedDockerStatus } from '../../infra/docker'
 import { getCachedRuntimeStatus, isSteamcmdRuntimeReady } from '../../infra/runtime'
+import { getSteamUpstreamStatus } from '../../infra/game-adapter/dst/steam-workshop'
 import { getNotifySettings, listGameInstances, listNotifyChannels } from '../../shared/db/index'
 import { resolveConsoleLogsDir } from '../../shared/instance-runtime/console-log-file'
 
@@ -18,6 +19,25 @@ export interface SelfCheckWritableProbe {
   label: string
   path: string
   writable: boolean
+}
+
+/**
+ * Mod 市场上游链路快照。
+ *
+ * 这一项不主动打上游：它读的是「上次真实请求留下的状态」，所以自检本身不会
+ * 变慢，也不会因为面板刚好在断网而把自检卡住。
+ */
+export interface SelfCheckSteamUpstreamProbe {
+  configuredSources: string[]
+  sourceOrder: string[]
+  openSources: string[]
+  lastSuccessSource: string | null
+  lastSuccessAt: string | null
+  proxyEnabled: boolean
+  proxySource: string | null
+  proxyHost: string | null
+  webApiBaseConfigured: boolean
+  relayConfigured: boolean
 }
 
 /**
@@ -40,6 +60,8 @@ export interface SelfCheckInput {
   errorInstanceCount: number
   notifyEnabled: boolean
   failingChannelCount: number
+  /** Mod 市场上游链路；未提供时这一项按「跳过」展示 */
+  steamUpstream?: SelfCheckSteamUpstreamProbe | null
 }
 
 function countByStatus(items: SelfCheckItem[]): SelfCheckReport['summary'] {
@@ -205,12 +227,77 @@ export function buildSelfCheckReport(input: SelfCheckInput, now = new Date()): S
     hint: null,
   })
 
+  // Mod 市场上游链路
+  items.push(buildSteamUpstreamItem(input.steamUpstream ?? null))
+
   return {
     generatedAt: now.toISOString(),
     releaseVersion: input.releaseVersion,
     runtimeMode: input.runtimeMode,
     items,
     summary: countByStatus(items),
+  }
+}
+
+/**
+ * Mod 市场能不能拉到列表，取决于「哪条链路在用」和「代理有没有生效」。
+ *
+ * 国内服务器上最常见的情况是：没配代理、Steam 连不上，但用户只看到列表加载不出来，
+ * 不知道该改什么。这一项把这两个事实直接摆出来，并给出可复制的配置写法。
+ */
+function buildSteamUpstreamItem(probe: SelfCheckSteamUpstreamProbe | null): SelfCheckItem {
+  const hintForProxy = '配置一个能直连 Steam 的代理后重启面板：'
+    + 'Docker 部署写 GSH_STEAM_HTTPS_PROXY=http://host.docker.internal:7890，'
+    + 'Native 部署写 http://127.0.0.1:7890；'
+    + '也可以把 Steam 接口反代到自己的域名并配置 GSH_STEAM_WEBAPI_BASE_URL。'
+
+  if (!probe) {
+    return {
+      id: 'steam-workshop',
+      label: 'Mod 市场上游',
+      status: 'warn',
+      detail: '尚未采集到上游状态（面板启动后还没拉取过 Mod 市场）',
+      hint: '打开一次「Mod 市场」后重新自检，即可看到实际生效的链路与代理状态。',
+    }
+  }
+
+  const sourceText = probe.sourceOrder.length > 0
+    ? probe.sourceOrder.join(' → ')
+    : '无可用源'
+  const proxyText = probe.proxyEnabled
+    ? `代理已生效（${probe.proxySource}${probe.proxyHost ? ` @ ${probe.proxyHost}` : ''}）`
+    : '未配置代理'
+  const lastSuccessText = probe.lastSuccessAt
+    ? `最近成功：${probe.lastSuccessAt}${probe.lastSuccessSource ? `（${probe.lastSuccessSource}）` : ''}`
+    : '尚无成功记录'
+
+  if (probe.openSources.length > 0) {
+    return {
+      id: 'steam-workshop',
+      label: 'Mod 市场上游',
+      status: 'warn',
+      detail: `部分源暂时熔断：${probe.openSources.join('、')}；链路 ${sourceText}；${proxyText}`,
+      hint: '熔断会在冷却后自动恢复。若反复出现，说明该链路不通，按下面的代理方式处理。'
+        + `（${lastSuccessText}）`,
+    }
+  }
+
+  if (!probe.proxyEnabled && !probe.webApiBaseConfigured && !probe.relayConfigured && !probe.lastSuccessAt) {
+    return {
+      id: 'steam-workshop',
+      label: 'Mod 市场上游',
+      status: 'warn',
+      detail: `链路 ${sourceText}；未配置代理，且还没有成功拉到过创意工坊数据`,
+      hint: hintForProxy,
+    }
+  }
+
+  return {
+    id: 'steam-workshop',
+    label: 'Mod 市场上游',
+    status: 'ok',
+    detail: `链路 ${sourceText}；${proxyText}；${lastSuccessText}`,
+    hint: null,
   }
 }
 
@@ -253,6 +340,23 @@ export async function collectSelfCheckReport(releaseVersion: string): Promise<Se
     errorInstanceCount: instances.filter(instance => instance.status === 'error').length,
     notifyEnabled: notifySettings.enabled,
     failingChannelCount: channels.filter(channel => channel.healthStatus === 'failing').length,
+    steamUpstream: collectSteamUpstreamProbe(),
   }
   return buildSelfCheckReport(input)
+}
+
+function collectSteamUpstreamProbe(): SelfCheckSteamUpstreamProbe {
+  const status = getSteamUpstreamStatus()
+  return {
+    configuredSources: status.configuredSources,
+    sourceOrder: status.sourceOrder,
+    openSources: status.openSources,
+    lastSuccessSource: status.lastSuccessSource,
+    lastSuccessAt: status.lastSuccessAt,
+    proxyEnabled: status.proxy.enabled,
+    proxySource: status.proxy.source,
+    proxyHost: status.proxy.host,
+    webApiBaseConfigured: Boolean(process.env.GSH_STEAM_WEBAPI_BASE_URL?.trim()),
+    relayConfigured: Boolean(process.env.GSH_STEAM_RELAY_URL?.trim()),
+  }
 }

@@ -289,6 +289,15 @@ export interface SteamModListMeta {
   /** 降级时的友好提示，供前端 inline 展示 */
   upstreamMessage?: string
   steamErrorCode?: SteamModFetchErrorCode
+  /**
+   * 命中的是离线兜底数据：上游不可达，内容来自最后一次成功拉取。
+   *
+   * 与 `stale` 的区别是「还能不能刷新」——stale 只说明内容不新鲜但后台正在刷新，
+   * offline 说明上游根本连不上，列表只能停在这个版本。前端据此提示用户。
+   */
+  offline?: boolean
+  /** 离线数据的最后成功拉取时间（ISO）；配合 offline 展示「最后更新于」 */
+  dataFetchedAt?: string
 }
 
 const workshopIdSchema = z.string().trim().min(1).max(64)

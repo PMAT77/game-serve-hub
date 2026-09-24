@@ -302,9 +302,10 @@ const enableAppSetting = import.meta.env.VITE_APP_SETTING
 
     .main {
       position: relative;
-      flex: auto;
+      // 内容区高度由页面内容决定，不吸收 .main-container 的剩余高度
+      // 此前是 flex: auto + height: 100%，短内容页面（如监控台）会被拉到整屏，底部留出大片空白
+      flex: none;
       width: 100%;
-      height: 100%;
       padding-top: var(--g-main-container-padding-top, 0);
       margin: 0 auto;
       overflow: hidden;
@@ -316,6 +317,8 @@ const enableAppSetting = import.meta.env.VITE_APP_SETTING
     .copyright {
       position: relative;
       width: 100%;
+      // 内容不足一屏时，版权信息仍贴在底部
+      margin-top: auto;
       margin-inline: auto;
       background-color: oklch(var(--background));
       box-shadow: -1px 0 0 0 oklch(var(--border)), 1px 0 0 0 oklch(var(--border)), 0 -1px 0 0 oklch(var(--border));

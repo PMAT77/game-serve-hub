@@ -109,11 +109,12 @@ function goWorldSettings() {
   <NCard title="世界概览" size="small">
     <NSpin v-if="loading && !shardList" class="block mx-auto my-6" />
     <template v-else-if="instance && shardList">
-      <p
-        v-if="worldStateText"
-        class="mb-3 text-xs text-muted-foreground"
-      >
-        世界进程：<span class="text-foreground">{{ worldStateText }}</span>
+      <!--
+        这一行始终占位：读数在刷新与轮询之间会短暂为空（实例未运行、查询失败或还没回来），
+        用 v-if 把整行收掉会让卡片高度塌一下再弹回来。
+      -->
+      <p class="mb-3 text-xs text-muted-foreground">
+        世界进程：<span class="text-foreground">{{ worldStateText ?? '—' }}</span>
         <span v-if="worldState && !worldState.available && worldState.message" class="ml-1">{{ worldState.message }}</span>
       </p>
 

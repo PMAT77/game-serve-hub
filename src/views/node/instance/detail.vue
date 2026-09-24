@@ -9,7 +9,7 @@ import apiMod from '@/api/modules/mod'
 import apiShard from '@/api/modules/shard'
 import { NButton, NSpin } from 'naive-ui'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { routeToDstPlayerManage, routeToInstanceConsole, routeToNodeInstance } from '@/navigation/game-routes'
+import { routeToNodeInstance } from '@/navigation/game-routes'
 import { statusBadgeClass } from '@/constants/statusDictionary'
 import { getInstanceState } from './instanceDisplay'
 import CommandCenterCard from './components/detail/CommandCenterCard.vue'
@@ -105,16 +105,25 @@ async function loadDetail(options?: { silent?: boolean }) {
     modList.value = modRes.status === 'fulfilled' ? modRes.value.data : null
     connectInfo.value = connectRes.status === 'fulfilled' ? connectRes.value.data : null
 
-    // P1：运行中实例查询世界状态（天数/季节），失败静默
-    worldState.value = null
+    /**
+     * P1：运行中实例查询世界状态（天数/季节），失败静默。
+     *
+     * 刷新时**不清空**旧读数：清空会让「世界进程」那行在每次手动刷新与 30 秒轮询时消失一瞬，
+     * 卡片高度塌一下再弹回来。只有实例停止（读数已无意义）或切实例时才真正清掉。
+     */
     if (target.status === 'running') {
       try {
         const res = await apiInstance.getInstanceWorldState(targetId, 'master')
-        worldState.value = res.data
+        if (targetId === instanceId.value) {
+          worldState.value = res.data
+        }
       }
       catch {
-        // 世界状态查询失败不阻塞详情页
+        // 查询失败不阻塞详情页：保留上一次的读数，比清空更有用
       }
+    }
+    else {
+      worldState.value = null
     }
   }
   catch {
@@ -129,19 +138,6 @@ async function loadDetail(options?: { silent?: boolean }) {
 
 function goBack() {
   router.push(routeToNodeInstance())
-}
-
-function goConsole() {
-  if (instance.value) {
-    router.push(routeToInstanceConsole(instance.value.id))
-  }
-}
-
-/** 房间玩家页按实例打开：在线玩家、踢人封禁与三份名单都在那里 */
-function goPlayerManage() {
-  if (instance.value) {
-    router.push(routeToDstPlayerManage(instance.value.id))
-  }
 }
 
 function stopPolling() {
@@ -228,22 +224,6 @@ onBeforeUnmount(() => {
           </template>
         </div>
         <div class="flex flex-wrap gap-2">
-          <NButton
-            v-if="instance && instance.status !== 'pending_install' && instance.status !== 'installing'"
-            size="small"
-            secondary
-            @click="goConsole"
-          >
-            控制台
-          </NButton>
-          <NButton
-            v-if="instance && instanceSupportsDstRoom(instance) && instance.status !== 'pending_install' && instance.status !== 'installing'"
-            size="small"
-            secondary
-            @click="goPlayerManage"
-          >
-            玩家管理
-          </NButton>
           <NButton size="small" secondary :loading="loading" @click="() => loadDetail()">
             <template #icon>
               <FaIcon name="i-lucide:refresh-cw" />

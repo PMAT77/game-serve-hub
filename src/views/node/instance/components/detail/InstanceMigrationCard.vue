@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { NAlert, NButton, NCard, NSpin, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NSpin, NTooltip, useMessage } from 'naive-ui'
 import { computed, ref } from 'vue'
 import apiBackup from '@/api/modules/backup'
+import { routeToOpsBackups } from '@/navigation/game-routes'
 import { copyTextToClipboard } from '@/utils/copyToClipboard'
+import { OPS_READ_PERMISSION } from '../../../../../../shared/constants/permissions'
 
 defineOptions({
   name: 'InstanceMigrationCard',
@@ -13,6 +15,15 @@ const props = defineProps<{
 }>()
 
 const message = useMessage()
+const router = useRouter()
+const { auth: hasPermission } = useAppAuth()
+
+/** 备份页需要 ops:read 才注册路由，没权限时不给这个入口，避免点进找不到的页面 */
+const canViewBackups = computed(() => hasPermission(OPS_READ_PERMISSION))
+
+function goBackups() {
+  router.push(routeToOpsBackups(props.instanceId))
+}
 
 const loadingReport = ref(false)
 const exporting = ref(false)
@@ -89,9 +100,23 @@ async function copyReport() {
 
 <template>
   <NCard title="迁移到其他机器" size="small">
+    <template #header-extra>
+      <NTooltip :style="{ maxWidth: '300px' }">
+        <template #trigger>
+          <NButton text>
+            <FaIcon name="i-lucide:info" class="size-4" />
+          </NButton>
+        </template>
+        <p>
+          把这个实例的存档、房间配置与 Mod 清单整理成压缩包，在新机器上创建实例后用「备份与恢复 → 导入存档」导入。<br>
+          包内不含游戏本体与 Mod 文件，导入后由目标机器自行下载；导出 24 小时后自动清理，也不会进入备份列表。
+        </p>
+      </NTooltip>
+    </template>
+
     <div class="space-y-3">
       <p class="text-sm text-muted-foreground">
-        把这个实例的存档、房间配置与 Mod 清单整理成一个压缩包，在另一台机器上创建实例后用「备份与恢复 → 导入存档」导入即可。压缩包里不含游戏本体与 Mod 文件，导入后由目标机器自行下载。
+        搬到另一台机器用；它不能用来回档。
       </p>
 
       <div class="flex flex-wrap items-center gap-2">
@@ -103,6 +128,9 @@ async function copyReport() {
         </NButton>
         <NButton v-if="reportText" size="small" @click="copyReport">
           复制报告
+        </NButton>
+        <NButton v-if="canViewBackups" size="small" @click="goBackups">
+          查看本实例的备份
         </NButton>
       </div>
 

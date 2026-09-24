@@ -81,8 +81,11 @@ export function routeToDstModDetail(workshopId: string, instanceId: string): Rou
   }
 }
 
-export function routeToOpsBackups(): RouteLocationRaw {
-  return { name: ROUTE_NAMES.opsBackups }
+/** 传 instanceId 时备份页会预选该实例（实例详情 →「查看本实例的备份」） */
+export function routeToOpsBackups(instanceId?: string): RouteLocationRaw {
+  return instanceId
+    ? { name: ROUTE_NAMES.opsBackups, query: { instanceId } }
+    : { name: ROUTE_NAMES.opsBackups }
 }
 
 export function routeToOpsSchedules(): RouteLocationRaw {

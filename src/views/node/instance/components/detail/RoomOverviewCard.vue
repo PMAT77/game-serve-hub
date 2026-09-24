@@ -5,7 +5,13 @@ import type { ModListDto } from '@/api/modules/mod'
 import type { InstanceConnectInfo } from '@/api/modules/instance'
 import { NButton, NCard, NEmpty, NSpin, NStatistic, NTag } from 'naive-ui'
 import { computed } from 'vue'
-import { routeToDstModList, routeToDstRoomSettings, routeToDstWorldSettings } from '@/navigation/game-routes'
+import {
+  routeToDstModList,
+  routeToDstPlayerManage,
+  routeToDstRoomSettings,
+  routeToDstWorldSettings,
+  routeToInstanceConsole,
+} from '@/navigation/game-routes'
 import { instanceSupportsDstRoom } from '@/composables/useGameInstance'
 import { dstGameModeLabel } from '../../instanceCommandShortcuts'
 
@@ -93,6 +99,19 @@ const cavesText = computed(() => {
   return enabled ? '已开启' : '未开启'
 })
 
+function goConsole() {
+  if (props.instance) {
+    router.push(routeToInstanceConsole(props.instance.id))
+  }
+}
+
+/** 房间玩家页按实例打开：在线玩家、踢人封禁与三份名单都在那里 */
+function goPlayerManage() {
+  if (props.instance) {
+    router.push(routeToDstPlayerManage(props.instance.id))
+  }
+}
+
 function goRoomSettings() {
   if (props.instance) {
     router.push(routeToDstRoomSettings(props.instance.id))
@@ -113,8 +132,11 @@ function goMods() {
 <template>
   <NCard title="房间概览" size="small">
     <NSpin v-if="loading && !instance" class="block mx-auto my-6" />
-    <template v-else-if="instance && isDst && installed">
-      <div class="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-4 lg:grid-cols-6">
+    <template v-else-if="instance">
+      <div
+        v-if="isDst && installed"
+        class="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-4 lg:grid-cols-6"
+      >
         <NStatistic label="房间名" :value="roomName" />
         <NStatistic label="游戏模式">
           {{ dstGameModeLabel(cluster?.gameMode) }}
@@ -145,23 +167,36 @@ function goMods() {
           </NTag>
         </NStatistic>
       </div>
-      <div class="mt-4 flex flex-wrap gap-2">
-        <NButton size="small" secondary @click="goRoomSettings">
-          房间设置
+      <NEmpty
+        v-else-if="isDst"
+        description="实例尚未完成安装，安装完成后可在此查看房间信息"
+        size="small"
+      />
+      <NEmpty
+        v-else
+        description="当前游戏暂不支持房间配置，仅饥荒（DST）实例提供房间概览"
+        size="small"
+      />
+      <!-- 快捷入口对已安装实例统一展示：非 DST 游戏没有房间/世界设置，但控制台照样要进得去 -->
+      <div v-if="installed" class="mt-4 flex flex-wrap gap-2">
+        <NButton size="small" secondary @click="goConsole">
+          控制台
         </NButton>
-        <NButton size="small" secondary @click="goWorldSettings">
-          世界设置
+        <NButton v-if="isDst" size="small" secondary @click="goPlayerManage">
+          玩家管理
         </NButton>
-        <NButton size="small" secondary @click="goMods">
-          Mod 管理
-        </NButton>
+        <template v-if="isDst">
+          <NButton size="small" secondary @click="goRoomSettings">
+            房间设置
+          </NButton>
+          <NButton size="small" secondary @click="goWorldSettings">
+            世界设置
+          </NButton>
+          <NButton size="small" secondary @click="goMods">
+            Mod 管理
+          </NButton>
+        </template>
       </div>
-    </template>
-    <template v-else-if="instance && isDst">
-      <NEmpty description="实例尚未完成安装，安装完成后可在此查看房间信息" size="small" />
-    </template>
-    <template v-else-if="instance">
-      <NEmpty description="当前游戏暂不支持房间配置，仅饥荒（DST）实例提供房间概览" size="small" />
     </template>
     <NEmpty v-else description="未找到实例" size="small" />
   </NCard>

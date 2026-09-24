@@ -8,7 +8,6 @@ import type {
   ModInstallStatus,
   ModLocalizedTextMap,
   SteamModDetailDto,
-  SteamModFetchErrorCode,
   SteamModListMeta,
   SteamModListQueryResult,
   SteamModSort,
@@ -19,11 +18,48 @@ import {
   DEFAULT_MOD_CONTENT_LOCALE,
   resolveModLocalizedText,
 } from '../../../../../shared/contracts/mod'
+import {
+  describeSteamProxy,
+  isSteamWorkshopFetchError,
+  resolveSteamProxyConfig,
+  SteamWorkshopFetchError,
+  steamHttpRequest,
+} from './steam-http'
 
-const WORKSHOP_BROWSE_URL = 'https://steamcommunity.com/workshop/browse/'
+export { isSteamWorkshopFetchError, SteamWorkshopFetchError } from './steam-http'
+
 /** DST 专用服务器 Mod 标签，与 Steam 创意工坊「server_only_mod」筛选一致 */
 const DST_SERVER_ONLY_MOD_TAG = 'server_only_mod'
-const STEAM_API_BASE_URL = process.env.GSH_STEAM_WEBAPI_BASE_URL?.trim() || 'https://api.steampowered.com'
+
+/**
+ * 反代地址归一化：**必须以 `/` 结尾**才算作「带路径前缀」。
+ *
+ * 早先这里直接用 `new URL('/IPublishedFileService/...', base)`，前导斜杠会把反代的
+ * 路径前缀整段吃掉（`https://proxy.example/steam` 会打到 `https://proxy.example/...`）。
+ */
+function normalizeBaseUrl(raw: string, fallback: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return fallback
+  }
+  try {
+    const parsed = new URL(trimmed)
+    const pathname = parsed.pathname.endsWith('/') ? parsed.pathname : `${parsed.pathname}/`
+    return `${parsed.origin}${pathname}${parsed.search}`
+  }
+  catch {
+    return fallback
+  }
+}
+
+const STEAM_API_BASE_URL = normalizeBaseUrl(
+  process.env.GSH_STEAM_WEBAPI_BASE_URL ?? '',
+  'https://api.steampowered.com/',
+)
+const WORKSHOP_BROWSE_URL = normalizeBaseUrl(
+  process.env.GSH_STEAM_COMMUNITY_BASE_URL ?? '',
+  'https://steamcommunity.com/',
+)
 const STEAM_WEBAPI_KEY = process.env.GSH_STEAM_WEBAPI_KEY?.trim() || ''
 const STEAM_RELAY_URL = process.env.GSH_STEAM_RELAY_URL?.trim() || ''
 const STEAM_RELAY_TOKEN = process.env.GSH_STEAM_RELAY_TOKEN?.trim() || ''
@@ -31,12 +67,35 @@ const IS_UNIT_TEST = process.env.GSH_UNIT_TEST === '1'
 const FETCH_TIMEOUT_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_FETCH_TIMEOUT_MS', 12_000)
 const FETCH_RETRY_TIMES = readPositiveIntEnv('GSH_STEAM_WORKSHOP_FETCH_RETRY_TIMES', 2)
 const FETCH_RETRY_BASE_DELAY_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_FETCH_RETRY_BASE_DELAY_MS', 300)
+/**
+ * 按源拆分的超时。
+ *
+ * 官方 API 与 relay 都是小 JSON，3～5 秒足够；创意工坊列表页是整页 HTML，给宽一点。
+ * 一个源失败之后，后面的源用 FAST_FAIL 超时且只试一次——被墙时「快速拿到一个能渲染的
+ * 结果」比「多试几次」重要得多。
+ */
+const OFFICIAL_TIMEOUT_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_OFFICIAL_TIMEOUT_MS', 5_000)
+const RELAY_TIMEOUT_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RELAY_TIMEOUT_MS', 5_000)
+const FAST_FAIL_TIMEOUT_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_FAST_FAIL_TIMEOUT_MS', 3_500)
+/** 单次列表拉取的总预算：耗尽即降到缓存/离线兜底，不再继续等上游 */
+const TOTAL_BUDGET_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_TOTAL_BUDGET_MS', 10_000)
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 50
 const DEFAULT_SORT: SteamModSort = 'trend'
 const DEFAULT_TREND_DAYS: SteamModTrendDays = 7
 const CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_CACHE_TTL_MS', 2 * 60 * 1000)
 const STALE_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_STALE_TTL_MS', 30 * 60 * 1000)
+/**
+ * 离线缓存窗口：Steam 完全不可达时还能退回多久以前的那份列表。
+ *
+ * 与 `STALE_CACHE_TTL_MS` 的区别是「要不要立刻刷新」和「有没有内容可看」：
+ * 30 分钟的 stale 窗口内会顺手后台刷新；超过之后就只剩这份离线数据，
+ * 面板照常把列表渲染出来并标注「离线数据」，而不是白屏。
+ */
+const OFFLINE_CACHE_TTL_MS = readPositiveIntEnv(
+  'GSH_STEAM_WORKSHOP_OFFLINE_TTL_MS',
+  7 * 24 * 60 * 60 * 1000,
+)
 const WORKSHOP_DETAIL_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_DETAIL_CACHE_TTL_MS', 5 * 60 * 1000)
 const WORKSHOP_RATING_CACHE_TTL_MS = readPositiveIntEnv('GSH_STEAM_WORKSHOP_RATING_CACHE_TTL_MS', 10 * 60 * 1000)
 /** Mod 元数据（标题/缩略图/版本时间）缓存：版本检测与名称补全共用同一份响应 */
@@ -90,6 +149,8 @@ interface SteamModCacheEntry {
   fetchedAt: number
   expiresAt: number
   staleExpiresAt: number
+  /** 离线兜底窗口的截止时间；超过之后这份缓存才真正作废 */
+  offlineExpiresAt: number
   data: SteamModRawResult
 }
 
@@ -105,11 +166,37 @@ interface NormalizedSteamQuery {
   trendDays: SteamModTrendDays
 }
 
+/**
+ * 交给某个上游源的查询：除筛选条件外还带上这次调用允许花多久。
+ *
+ * 超时随对象传递而不是存在模块变量里——列表请求可能并发，用共享状态会让
+ * 一个用户的失败影响另一个用户的超时预算。
+ */
+interface SourceQuery extends NormalizedSteamQuery {
+  timeoutMs: number
+  /** 已有一个源失败过：后续源不重试 */
+  fastFail: boolean
+}
+
 interface SteamWorkshopSource {
   name: SteamModUpstreamSource
   enabled: boolean
-  queryMods: (query: NormalizedSteamQuery) => Promise<SteamModRawResult>
+  /** 该源的请求超时；失败过一次之后会改用 FAST_FAIL 超时 */
+  timeoutMs: number
+  /** 健康状态下允许的额外重试次数 */
+  retryTimes: number
+  queryMods: (query: SourceQuery) => Promise<SteamModRawResult>
 }
+
+/** 每个上游源各自的健康状态：一个源挂掉不该连坐其他源 */
+interface SourceHealth {
+  consecutiveFailures: number
+  openUntil: number
+  lastSuccessAt: number | null
+}
+
+/** 调用来源。后台预热/定时检查与用户前台请求分开统计，避免互相污染熔断计数 */
+type SteamCallChannel = 'user' | 'background'
 
 interface SteamVoteData {
   score?: number
@@ -151,7 +238,7 @@ interface SteamFetchMetrics {
   steam_last_success_at: number | null
 }
 
-const CACHE_SCHEMA_VERSION = 9
+const CACHE_SCHEMA_VERSION = 10
 const steamModCache = new Map<string, SteamModCacheEntry>()
 const WORKSHOP_DETAIL_CACHE_SCHEMA = 3
 
@@ -198,28 +285,9 @@ const steamFetchMetrics: SteamFetchMetrics = {
   steam_last_success_source: null,
   steam_last_success_at: null,
 }
-const steamCircuitState = {
-  failedCount: 0,
-  openUntil: 0,
-}
+const steamCircuitState = new Map<SteamModUpstreamSource, SourceHealth>()
 let diskCacheLoaded = false
 let diskPersistTimer: NodeJS.Timeout | null = null
-
-export class SteamWorkshopFetchError extends Error {
-  code: SteamModFetchErrorCode
-  retryAfterMs?: number
-
-  constructor(code: SteamModFetchErrorCode, message: string, retryAfterMs?: number) {
-    super(message)
-    this.name = 'SteamWorkshopFetchError'
-    this.code = code
-    this.retryAfterMs = retryAfterMs
-  }
-}
-
-export function isSteamWorkshopFetchError(error: unknown): error is SteamWorkshopFetchError {
-  return error instanceof SteamWorkshopFetchError
-}
 
 function readPositiveIntEnv(key: string, fallback: number): number {
   const rawValue = process.env[key]
@@ -290,7 +358,7 @@ function buildBrowseUrl(
   trendDays: SteamModTrendDays,
 ): string {
   const browseSort = resolveBrowseSort(sort)
-  const url = new URL(WORKSHOP_BROWSE_URL)
+  const url = new URL('workshop/browse/', WORKSHOP_BROWSE_URL)
   url.searchParams.set('appid', '322330')
   url.searchParams.append('requiredtags[]', DST_SERVER_ONLY_MOD_TAG)
   url.searchParams.set('section', 'readytouseitems')
@@ -591,13 +659,13 @@ function resolveHtmlPaginationMeta(html: string, page: number, pageSize: number)
   })
 }
 
-async function fetchWorkshopHtmlByPowerShell(sourceUrl: string): Promise<string> {
+async function fetchWorkshopHtmlByPowerShell(sourceUrl: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<string> {
   if (process.platform !== 'win32') {
     throw new Error('native fetch failed')
   }
-  const script = buildPowerShellWorkshopFetchScript(sourceUrl)
+  const script = buildPowerShellWorkshopFetchScript(sourceUrl, timeoutMs)
   const result = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    timeout: FETCH_TIMEOUT_MS + 3000,
+    timeout: timeoutMs + 3000,
     maxBuffer: 20 * 1024 * 1024,
   })
   const output = result.stdout?.trim()
@@ -688,13 +756,14 @@ function sanitizeSteamUserFacingMessage(message: string, fallback = STEAM_UPSTRE
   return normalized
 }
 
-function buildPowerShellWorkshopFetchScript(sourceUrl: string): string {
+function buildPowerShellWorkshopFetchScript(sourceUrl: string, timeoutMs = FETCH_TIMEOUT_MS): string {
   const escapedUrl = escapePowerShellSingleQuotedString(sourceUrl)
+  const timeoutSeconds = Math.max(1, Math.round(timeoutMs / 1000))
   return [
     '$ProgressPreference = \'SilentlyContinue\'',
     '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
     '$headers = @{ \'Accept-Language\' = \'zh-CN,zh;q=0.9,en;q=0.8\'; \'User-Agent\' = \'game-server-hub-mod-fetcher/1.0\' }',
-    `(Invoke-WebRequest -UseBasicParsing -Uri '${escapedUrl}' -TimeoutSec 12 -Headers $headers).Content`,
+    `(Invoke-WebRequest -UseBasicParsing -Uri '${escapedUrl}' -TimeoutSec ${timeoutSeconds} -Headers $headers).Content`,
   ].join('; ')
 }
 
@@ -753,29 +822,64 @@ function assertRateLimit(cacheKey: string) {
   }
 }
 
-function assertCircuitBreaker() {
+/** 单个上游源是否还在熔断冷却中 */
+function isSourceOpen(name: SteamModUpstreamSource, now = Date.now()): boolean {
+  const state = steamCircuitState.get(name)
+  return Boolean(state && state.openUntil > now)
+}
+
+/**
+ * 源健康度排序：按「最近成功过的排前面」。
+ *
+ * 之前是写死的 official → relay → html，于是配了代理/反代之后，每次请求仍要先撞一遍
+ * 不可达的 official 源；现在让上次成功的源优先，命中缓存之外还能少等几秒。
+ */
+function healthRank(name: SteamModUpstreamSource): number {
+  const state = steamCircuitState.get(name)
+  if (!state || state.lastSuccessAt === null) {
+    return 1
+  }
+  return 0
+}
+
+function assertCircuitBreaker(name: SteamModUpstreamSource) {
   const now = Date.now()
-  if (steamCircuitState.openUntil > now) {
+  const state = steamCircuitState.get(name)
+  if (state && state.openUntil > now) {
     throw new SteamWorkshopFetchError(
       'STEAM_UPSTREAM_UNAVAILABLE',
       'Steam 创意工坊暂时不可用，请稍后重试',
-      steamCircuitState.openUntil - now,
+      state.openUntil - now,
     )
   }
 }
 
-function markCircuitSuccess() {
-  steamCircuitState.failedCount = 0
-  steamCircuitState.openUntil = 0
+function markCircuitSuccess(name: SteamModUpstreamSource) {
+  steamCircuitState.set(name, {
+    consecutiveFailures: 0,
+    openUntil: 0,
+    lastSuccessAt: Date.now(),
+  })
 }
 
-function markCircuitFailure() {
-  steamCircuitState.failedCount += 1
-  if (steamCircuitState.failedCount >= CIRCUIT_BREAKER_FAIL_THRESHOLD) {
-    steamCircuitState.openUntil = Date.now() + CIRCUIT_BREAKER_OPEN_MS
-    steamCircuitState.failedCount = 0
+/**
+ * 记一次失败。`channel === 'background'` 时只记录不计入熔断——预热和 6 小时一次的
+ * 定时检查不该让用户前台打开市场时撞上「暂时不可用」。
+ */
+function markCircuitFailure(name: SteamModUpstreamSource, channel: SteamCallChannel = 'user') {
+  const state = steamCircuitState.get(name)
+    ?? { consecutiveFailures: 0, openUntil: 0, lastSuccessAt: null }
+  if (channel === 'background') {
+    steamCircuitState.set(name, state)
+    return
+  }
+  state.consecutiveFailures += 1
+  if (state.consecutiveFailures >= CIRCUIT_BREAKER_FAIL_THRESHOLD) {
+    state.openUntil = Date.now() + CIRCUIT_BREAKER_OPEN_MS
+    state.consecutiveFailures = 0
     steamFetchMetrics.steam_circuit_open_total += 1
   }
+  steamCircuitState.set(name, state)
 }
 
 function scheduleCachePersist() {
@@ -821,12 +925,16 @@ function loadDiskCacheOnce() {
     const payload = JSON.parse(raw) as PersistedCachePayload
     const now = Date.now()
     for (const [cacheKey, entry] of Object.entries(payload.entries ?? {})) {
-      if (entry?.staleExpiresAt && entry.staleExpiresAt > now && entry.data) {
+      // 只要还在离线窗口内就留着：过期条目还有离线兜底的价值，
+      // 以前按 staleExpiresAt（30 分钟）过滤，重启后面板就彻底没有列表可显示了
+      const offlineExpiresAt = entry?.offlineExpiresAt ?? entry?.staleExpiresAt ?? 0
+      if (offlineExpiresAt > now && entry.data) {
         if (!isPersistedCacheEntryCompatible(cacheKey, entry)) {
           continue
         }
         const normalizedEntry: SteamModCacheEntry = {
           ...entry,
+          offlineExpiresAt,
           data: {
             ...entry.data,
             upstreamSource: entry.data.upstreamSource ?? 'html',
@@ -1060,22 +1168,20 @@ async function fetchSteamPersonaName(steamId: string): Promise<string | null> {
   if (!normalizedId) {
     return null
   }
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
-    const summaryUrl = new URL(`${STEAM_API_BASE_URL}/ISteamUser/GetPlayerSummaries/v0002/`)
+    const summaryUrl = new URL('ISteamUser/GetPlayerSummaries/v0002/', STEAM_API_BASE_URL)
     summaryUrl.searchParams.set('steamids', normalizedId)
     if (STEAM_WEBAPI_KEY) {
       summaryUrl.searchParams.set('key', STEAM_WEBAPI_KEY)
     }
-    const summaryResponse = await fetch(summaryUrl, {
+    const summaryResponse = await steamHttpRequest(summaryUrl.toString(), {
       headers: {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'User-Agent': 'game-server-hub-mod-fetcher/1.0',
       },
-      signal: controller.signal,
+      timeoutMs: FETCH_TIMEOUT_MS,
     })
-    if (summaryResponse.ok) {
+    if (summaryResponse.status >= 200 && summaryResponse.status < 300) {
       const payload = await summaryResponse.json() as {
         response?: {
           players?: Array<{ personaname?: string }>
@@ -1086,14 +1192,17 @@ async function fetchSteamPersonaName(steamId: string): Promise<string | null> {
         return personaName
       }
     }
-    const profileResponse = await fetch(`https://steamcommunity.com/profiles/${normalizedId}/?xml=1`, {
-      headers: {
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'User-Agent': 'game-server-hub-mod-fetcher/1.0',
+    const profileResponse = await steamHttpRequest(
+      new URL(`profiles/${normalizedId}/?xml=1`, WORKSHOP_BROWSE_URL).toString(),
+      {
+        headers: {
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'User-Agent': 'game-server-hub-mod-fetcher/1.0',
+        },
+        timeoutMs: FETCH_TIMEOUT_MS,
       },
-      signal: controller.signal,
-    })
-    if (!profileResponse.ok) {
+    )
+    if (profileResponse.status < 200 || profileResponse.status >= 300) {
       return null
     }
     const xml = await profileResponse.text()
@@ -1101,9 +1210,6 @@ async function fetchSteamPersonaName(steamId: string): Promise<string | null> {
   }
   catch {
     return null
-  }
-  finally {
-    clearTimeout(timeout)
   }
 }
 
@@ -1115,32 +1221,30 @@ async function requestPublishedFileDetails(
   if (uniqueIds.length === 0) {
     return []
   }
-  const url = `${STEAM_API_BASE_URL}/ISteamRemoteStorage/GetPublishedFileDetails/v1/`
+  const url = new URL('ISteamRemoteStorage/GetPublishedFileDetails/v1/', STEAM_API_BASE_URL).toString()
   const body = new URLSearchParams()
   body.set('itemcount', String(uniqueIds.length))
   for (let index = 0; index < uniqueIds.length; index++) {
     body.set(`publishedfileids[${index}]`, uniqueIds[index])
   }
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/x-www-form-urlencoded',
       'User-Agent': 'game-server-hub-mod-fetcher/1.0',
       'Accept-Language': acceptLanguageForLocale(options?.locale ?? DEFAULT_MOD_CONTENT_LOCALE),
     }
-    const response = await fetch(url, {
+    const response = await steamHttpRequest(url, {
       method: 'POST',
       headers,
-      body,
-      signal: controller.signal,
+      body: body.toString(),
+      timeoutMs: FETCH_TIMEOUT_MS,
     })
     if (response.status === 429) {
       const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
       const retryAfterMs = Number.isFinite(retryAfterSeconds) ? Math.max(1000, retryAfterSeconds * 1000) : 0
       throw new SteamWorkshopFetchError('STEAM_RATE_LIMIT', 'Steam 返回限流，请稍后重试', retryAfterMs || undefined)
     }
-    if (!response.ok) {
+    if (response.status >= 400) {
       throw new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', `Steam 返回 ${response.status}`)
     }
     const payload = await response.json() as {
@@ -1151,16 +1255,7 @@ async function requestPublishedFileDetails(
     return payload.response?.publishedfiledetails ?? []
   }
   catch (error) {
-    if (isSteamWorkshopFetchError(error)) {
-      throw error
-    }
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new SteamWorkshopFetchError('STEAM_TIMEOUT', '请求 Steam 超时')
-    }
     throw mapUnknownToSteamError(error)
-  }
-  finally {
-    clearTimeout(timeout)
   }
 }
 
@@ -1276,26 +1371,21 @@ function enrichMeta(
   }
 }
 
-async function fetchWorkshopHtmlByNative(sourceUrl: string): Promise<string> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+async function fetchWorkshopHtmlByNative(sourceUrl: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<string> {
   try {
-    const response = await fetch(sourceUrl, {
+    const response = await steamHttpRequest(sourceUrl, {
       headers: {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'User-Agent': 'game-server-hub-mod-fetcher/1.0',
       },
-      signal: controller.signal,
+      timeoutMs,
     })
     if (response.status === 429) {
       const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
       const retryAfterMs = Number.isFinite(retryAfterSeconds) ? Math.max(1000, retryAfterSeconds * 1000) : 0
       throw new SteamWorkshopFetchError('STEAM_RATE_LIMIT', 'Steam 返回限流，请稍后重试', retryAfterMs || undefined)
     }
-    if (response.status >= 500) {
-      throw new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', `Steam 返回 ${response.status}`)
-    }
-    if (!response.ok) {
+    if (response.status >= 400) {
       throw new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', `Steam 返回 ${response.status}`)
     }
     const html = await response.text()
@@ -1305,67 +1395,37 @@ async function fetchWorkshopHtmlByNative(sourceUrl: string): Promise<string> {
     return html
   }
   catch (error) {
-    if (error instanceof SteamWorkshopFetchError) {
-      throw error
-    }
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new SteamWorkshopFetchError('STEAM_TIMEOUT', '请求 Steam 超时')
-    }
-    if (error instanceof Error && error.message.includes('fetch failed')) {
-      throw new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', '无法连接 Steam 创意工坊')
-    }
     throw mapUnknownToSteamError(error)
-  }
-  finally {
-    clearTimeout(timeout)
   }
 }
 
-async function fetchJsonWithTimeout(url: string, headers?: Record<string, string>): Promise<unknown> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'User-Agent': 'game-server-hub-mod-fetcher/1.0',
-        ...headers,
-      },
-      signal: controller.signal,
-    })
-    if (response.status === 429) {
-      const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
-      const retryAfterMs = Number.isFinite(retryAfterSeconds) ? Math.max(1000, retryAfterSeconds * 1000) : 0
-      throw new SteamWorkshopFetchError('STEAM_RATE_LIMIT', 'Steam 返回限流，请稍后重试', retryAfterMs || undefined)
-    }
-    if (response.status >= 500) {
-      throw new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', `Steam 返回 ${response.status}`)
-    }
-    if (!response.ok) {
-      throw new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', `Steam 返回 ${response.status}`)
-    }
-    return await response.json()
+async function fetchJsonWithTimeout(
+  url: string,
+  headers?: Record<string, string>,
+  timeoutMs = FETCH_TIMEOUT_MS,
+): Promise<unknown> {
+  const response = await steamHttpRequest(url, {
+    headers: {
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'User-Agent': 'game-server-hub-mod-fetcher/1.0',
+      ...headers,
+    },
+    timeoutMs,
+  })
+  if (response.status === 429) {
+    const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    const retryAfterMs = Number.isFinite(retryAfterSeconds) ? Math.max(1000, retryAfterSeconds * 1000) : 0
+    throw new SteamWorkshopFetchError('STEAM_RATE_LIMIT', 'Steam 返回限流，请稍后重试', retryAfterMs || undefined)
   }
-  catch (error) {
-    if (isSteamWorkshopFetchError(error)) {
-      throw error
-    }
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new SteamWorkshopFetchError('STEAM_TIMEOUT', '请求 Steam 超时')
-    }
-    if (error instanceof Error && error.message.includes('fetch failed')) {
-      throw new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', '无法连接 Steam 创意工坊')
-    }
-    throw mapUnknownToSteamError(error)
+  if (response.status >= 400) {
+    throw new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', `Steam 返回 ${response.status}`)
   }
-  finally {
-    clearTimeout(timeout)
-  }
+  return await response.json()
 }
 
-async function fetchSteamWorkshopHtml(sourceUrl: string): Promise<string> {
+async function fetchSteamWorkshopHtml(sourceUrl: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<string> {
   try {
-    return await fetchWorkshopHtmlByNative(sourceUrl)
+    return await fetchWorkshopHtmlByNative(sourceUrl, timeoutMs)
   }
   catch (error) {
     if (process.platform !== 'win32' || process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK === '1') {
@@ -1375,7 +1435,7 @@ async function fetchSteamWorkshopHtml(sourceUrl: string): Promise<string> {
       throw error
     }
     try {
-      return await fetchWorkshopHtmlByPowerShell(sourceUrl)
+      return await fetchWorkshopHtmlByPowerShell(sourceUrl, timeoutMs)
     }
     catch (fallbackError) {
       throw mapUnknownToSteamError(fallbackError)
@@ -1465,7 +1525,7 @@ async function fetchSteamDetailsMap(workshopIds: string[]): Promise<Map<string, 
   if (!apiKey || workshopIds.length === 0) {
     return new Map()
   }
-  const detailsUrl = new URL('/IPublishedFileService/GetDetails/v1/', STEAM_API_BASE_URL)
+  const detailsUrl = new URL('IPublishedFileService/GetDetails/v1/', STEAM_API_BASE_URL)
   detailsUrl.searchParams.set('key', apiKey)
   detailsUrl.searchParams.set('includevotes', 'true')
   detailsUrl.searchParams.set('return_vote_data', 'true')
@@ -1473,7 +1533,7 @@ async function fetchSteamDetailsMap(workshopIds: string[]): Promise<Map<string, 
   for (let index = 0; index < workshopIds.length; index++) {
     detailsUrl.searchParams.set(`publishedfileids[${index}]`, workshopIds[index])
   }
-  const payload = await fetchJsonWithTimeout(detailsUrl.toString())
+  const payload = await fetchJsonWithTimeout(detailsUrl.toString(), undefined, OFFICIAL_TIMEOUT_MS)
   const items = normalizeQueryFilesItems(payload)
   const ratingMap = mapPublishedFileDetailsToRatingMap(items)
   const fullItems = mapQueryFilesItems(items)
@@ -1514,7 +1574,7 @@ async function fetchWorkshopRatingsByGetDetails(workshopIds: string[]): Promise<
     }
     return result
   }
-  const detailsUrl = new URL('/IPublishedFileService/GetDetails/v1/', STEAM_API_BASE_URL)
+  const detailsUrl = new URL('IPublishedFileService/GetDetails/v1/', STEAM_API_BASE_URL)
   detailsUrl.searchParams.set('key', apiKey)
   detailsUrl.searchParams.set('includevotes', 'true')
   detailsUrl.searchParams.set('return_vote_data', 'true')
@@ -1522,7 +1582,7 @@ async function fetchWorkshopRatingsByGetDetails(workshopIds: string[]): Promise<
   for (let index = 0; index < uniqueIds.length; index++) {
     detailsUrl.searchParams.set(`publishedfileids[${index}]`, uniqueIds[index])
   }
-  const payload = await fetchJsonWithTimeout(detailsUrl.toString())
+  const payload = await fetchJsonWithTimeout(detailsUrl.toString(), undefined, OFFICIAL_TIMEOUT_MS)
   const ratingMap = mapPublishedFileDetailsToRatingMap(normalizeQueryFilesItems(payload))
   for (const workshopId of uniqueIds) {
     result.set(workshopId, ratingMap.get(workshopId) ?? null)
@@ -1587,11 +1647,11 @@ function parseRelayItems(payload: unknown): SteamModRawItem[] {
   return result
 }
 
-async function queryByOfficialApi(query: NormalizedSteamQuery): Promise<SteamModRawResult> {
+async function queryByOfficialApi(query: SourceQuery): Promise<SteamModRawResult> {
   if (query.sort === 'relevance' && !query.keyword) {
     throw new SteamWorkshopFetchError('STEAM_PARSE_FAILED', '相关性排序需要搜索关键词')
   }
-  const queryFilesUrl = new URL('/IPublishedFileService/QueryFiles/v1/', STEAM_API_BASE_URL)
+  const queryFilesUrl = new URL('IPublishedFileService/QueryFiles/v1/', STEAM_API_BASE_URL)
   queryFilesUrl.searchParams.set('key', STEAM_WEBAPI_KEY)
   const inputJson: Record<string, unknown> = {
     query_type: resolveQueryType(query.sort),
@@ -1625,7 +1685,11 @@ async function queryByOfficialApi(query: NormalizedSteamQuery): Promise<SteamMod
     })
   }
   queryFilesUrl.searchParams.set('input_json', JSON.stringify(inputJson))
-  const payload = await fetchJsonWithTimeout(queryFilesUrl.toString())
+  const payload = await fetchJsonWithTimeout(
+    queryFilesUrl.toString(),
+    undefined,
+    query.timeoutMs,
+  )
   const items = mapQueryFilesItems(normalizeQueryFilesItems(payload))
   const total = resolveTotalFromQueryFiles(payload)
   const totalCount = total
@@ -1686,7 +1750,7 @@ async function queryByOfficialApi(query: NormalizedSteamQuery): Promise<SteamMod
   }
 }
 
-async function queryByRelayApi(query: NormalizedSteamQuery): Promise<SteamModRawResult> {
+async function queryByRelayApi(query: SourceQuery): Promise<SteamModRawResult> {
   const relayUrl = new URL('/query-files', STEAM_RELAY_URL.endsWith('/') ? STEAM_RELAY_URL : `${STEAM_RELAY_URL}/`)
   relayUrl.searchParams.set('keyword', query.keyword)
   relayUrl.searchParams.set('page', String(query.page))
@@ -1698,7 +1762,7 @@ async function queryByRelayApi(query: NormalizedSteamQuery): Promise<SteamModRaw
     ? {
         Authorization: `Bearer ${STEAM_RELAY_TOKEN}`,
       }
-    : undefined)
+    : undefined, query.timeoutMs)
   const relayItems = parseRelayItems(payload)
   const items = relayItems.length > 0 ? relayItems : mapQueryFilesItems(normalizeQueryFilesItems(payload))
   if (items.length === 0) {
@@ -1751,7 +1815,7 @@ async function queryByRelayApi(query: NormalizedSteamQuery): Promise<SteamModRaw
   }
 }
 
-async function queryByHtml(query: NormalizedSteamQuery): Promise<SteamModRawResult> {
+async function queryByHtml(query: SourceQuery): Promise<SteamModRawResult> {
   const sourceUrl = buildBrowseUrl(
     query.keyword,
     query.page,
@@ -1759,7 +1823,7 @@ async function queryByHtml(query: NormalizedSteamQuery): Promise<SteamModRawResu
     query.sort,
     query.trendDays,
   )
-  const html = await fetchSteamWorkshopHtml(sourceUrl)
+  const html = await fetchSteamWorkshopHtml(sourceUrl, query.timeoutMs)
   const items = parseWorkshopItems(html)
   if (items.length === 0 && !isKnownEmptyWorkshopBrowse(html) && !hasRecognizableWorkshopBrowsePayload(html)) {
     throw new SteamWorkshopFetchError('STEAM_PARSE_FAILED', 'Steam 页面结构变更，解析失败')
@@ -1785,49 +1849,87 @@ const steamSources: SteamWorkshopSource[] = [
   {
     name: 'official',
     enabled: Boolean(STEAM_WEBAPI_KEY),
+    timeoutMs: OFFICIAL_TIMEOUT_MS,
+    retryTimes: FETCH_RETRY_TIMES,
     queryMods: queryByOfficialApi,
   },
   {
     name: 'relay',
     enabled: Boolean(STEAM_RELAY_URL),
+    timeoutMs: RELAY_TIMEOUT_MS,
+    retryTimes: FETCH_RETRY_TIMES,
     queryMods: queryByRelayApi,
   },
   {
     name: 'html',
     enabled: true,
+    timeoutMs: FETCH_TIMEOUT_MS,
+    retryTimes: FETCH_RETRY_TIMES,
     queryMods: queryByHtml,
   },
 ]
 
 function resolveSteamSourcesForQuery(query: NormalizedSteamQuery): SteamWorkshopSource[] {
-  const enabled = steamSources.filter(source => source.enabled)
+  const now = Date.now()
+  // 熔断中的源直接跳过：以前会先撞一遍再失败，白等一个超时
+  const usable = steamSources.filter(source => source.enabled && !isSourceOpen(source.name, now))
+  const byHealth = (list: SteamWorkshopSource[]) => [...list].sort((a, b) => {
+    const rankDiff = healthRank(a.name) - healthRank(b.name)
+    if (rankDiff !== 0) {
+      return rankDiff
+    }
+    return steamSources.indexOf(a) - steamSources.indexOf(b)
+  })
   if (query.sort === 'relevance' && query.keyword) {
+    // 相关性排序只能靠搜索结果页，Steam 的 QueryFiles 给不出同样的排序
     const preferredOrder = ['html', 'official', 'relay']
-    return preferredOrder
-      .map(name => enabled.find(source => source.name === name))
-      .filter((source): source is SteamWorkshopSource => Boolean(source))
+    return byHealth(preferredOrder
+      .map(name => usable.find(source => source.name === name))
+      .filter((source): source is SteamWorkshopSource => Boolean(source)))
   }
-  return enabled
+  return byHealth(usable)
 }
 
-async function fetchLiveWithPolicy(query: NormalizedSteamQuery, cacheKey: string, traceId: string): Promise<SteamModRawResult> {
+async function fetchLiveWithPolicy(
+  query: NormalizedSteamQuery,
+  cacheKey: string,
+  traceId: string,
+  channel: SteamCallChannel = 'user',
+): Promise<SteamModRawResult> {
   let lastError: SteamWorkshopFetchError | null = null
   const enabledSources = resolveSteamSourcesForQuery(query)
+  const deadline = Date.now() + TOTAL_BUDGET_MS
+  let failedSourceSeen = false
+
   for (const source of enabledSources) {
-    for (let attempt = 0; attempt <= FETCH_RETRY_TIMES; attempt++) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) {
+      // 预算耗尽：不再继续试下一个源，直接交给缓存/离线兜底
+      break
+    }
+    // 已有源失败过 → 后面的源快速失败且不重试
+    const sourceQuery: SourceQuery = {
+      ...query,
+      timeoutMs: failedSourceSeen
+        ? Math.min(FAST_FAIL_TIMEOUT_MS, remaining)
+        : Math.min(source.timeoutMs, remaining),
+      fastFail: failedSourceSeen,
+    }
+    const retryTimes = failedSourceSeen ? 0 : source.retryTimes
+    for (let attempt = 0; attempt <= retryTimes; attempt++) {
       try {
-        assertCircuitBreaker()
+        assertCircuitBreaker(source.name)
         assertRateLimit(cacheKey)
         const startedAt = Date.now()
-        const payload = await source.queryMods(query)
+        const payload = await source.queryMods(sourceQuery)
         steamFetchMetrics.steam_fetch_success_total += 1
         steamFetchMetrics.steam_fetch_success_by_source[source.name] += 1
         steamFetchMetrics.steam_fetch_latency_ms.push(Date.now() - startedAt)
         steamFetchMetrics.steam_last_success_source = source.name
         steamFetchMetrics.steam_last_success_at = Date.now()
-        markCircuitSuccess()
+        markCircuitSuccess(source.name)
         if (process.env.NODE_ENV !== 'test') {
-          console.info(`[steam-workshop] fetch_success trace=${traceId} key=${cacheKey} source=${source.name}`)
+          console.info(`[steam-workshop] fetch_success trace=${traceId} key=${cacheKey} source=${source.name} channel=${channel}`)
         }
         return payload
       }
@@ -1836,8 +1938,8 @@ async function fetchLiveWithPolicy(query: NormalizedSteamQuery, cacheKey: string
         lastError = steamError
         steamFetchMetrics.steam_fetch_fail_total[steamError.code] = (steamFetchMetrics.steam_fetch_fail_total[steamError.code] ?? 0) + 1
         steamFetchMetrics.steam_fetch_fail_by_source[source.name] += 1
-        markCircuitFailure()
-        const shouldRetry = isRetryableSteamError(steamError) && attempt < FETCH_RETRY_TIMES
+        markCircuitFailure(source.name, channel)
+        const shouldRetry = isRetryableSteamError(steamError) && attempt < retryTimes
         if (!shouldRetry) {
           break
         }
@@ -1847,6 +1949,7 @@ async function fetchLiveWithPolicy(query: NormalizedSteamQuery, cacheKey: string
         await waitFor(Math.max(backoff, retryAfter))
       }
     }
+    failedSourceSeen = true
   }
   throw (lastError ?? new SteamWorkshopFetchError('STEAM_UPSTREAM_UNAVAILABLE', 'Steam 上游不可用'))
 }
@@ -1857,18 +1960,24 @@ function setCacheEntry(cacheKey: string, raw: SteamModRawResult) {
     fetchedAt: now,
     expiresAt: now + CACHE_TTL_MS,
     staleExpiresAt: now + STALE_CACHE_TTL_MS,
+    offlineExpiresAt: now + OFFLINE_CACHE_TTL_MS,
     data: raw,
   })
   scheduleCachePersist()
 }
 
-async function getOrCreateLiveFetchTask(cacheKey: string, query: NormalizedSteamQuery, traceId: string): Promise<SteamModRawResult> {
+async function getOrCreateLiveFetchTask(
+  cacheKey: string,
+  query: NormalizedSteamQuery,
+  traceId: string,
+  channel: SteamCallChannel = 'user',
+): Promise<SteamModRawResult> {
   const currentTask = steamModInFlight.get(cacheKey)
   if (currentTask) {
     return await currentTask
   }
   const task = (async () => {
-    const raw = await fetchLiveWithPolicy(query, cacheKey, traceId)
+    const raw = await fetchLiveWithPolicy(query, cacheKey, traceId, channel)
     setCacheEntry(cacheKey, raw)
     return raw
   })()
@@ -1887,7 +1996,7 @@ function scheduleBackgroundRefresh(cacheKey: string, query: NormalizedSteamQuery
   }
   steamBackgroundRefreshing.add(cacheKey)
   const traceId = randomUUID()
-  void getOrCreateLiveFetchTask(cacheKey, query, traceId)
+  void getOrCreateLiveFetchTask(cacheKey, query, traceId, 'background')
     .catch(() => {
       // 后台刷新失败不影响本次请求
     })
@@ -1947,14 +2056,31 @@ export async function fetchDstSteamWorkshopMods(input: {
   }
   catch (error) {
     const stale = steamModCache.get(cacheKey)
-    if (stale && stale.staleExpiresAt > Date.now()) {
+    const failedAt = Date.now()
+    if (stale && stale.staleExpiresAt > failedAt) {
       const steamError = mapUnknownToSteamError(error)
       return toSteamResult(stale.data, subscribedModStatusByWorkshopId, pendingWorkshopIds, enrichMeta({
         cached: true,
         stale: true,
-        cacheAgeMs: Date.now() - stale.fetchedAt,
+        cacheAgeMs: failedAt - stale.fetchedAt,
         source: 'cache-stale',
         retryAfterMs: steamError.retryAfterMs,
+        fetchTraceId: traceId,
+      }, stale.data.upstreamSource))
+    }
+    // 过了 stale 窗口但还在离线窗口内：照常把列表渲染出来并标注离线，
+    // 这比给用户一个空白页有用得多（丢的只是「新鲜度」，不是「能不能用」）
+    if (stale && stale.offlineExpiresAt > failedAt) {
+      const steamError = mapUnknownToSteamError(error)
+      return toSteamResult(stale.data, subscribedModStatusByWorkshopId, pendingWorkshopIds, enrichMeta({
+        cached: true,
+        stale: true,
+        offline: true,
+        dataFetchedAt: new Date(stale.fetchedAt).toISOString(),
+        cacheAgeMs: failedAt - stale.fetchedAt,
+        source: 'cache-stale',
+        retryAfterMs: steamError.retryAfterMs,
+        steamErrorCode: steamError.code,
         fetchTraceId: traceId,
       }, stale.data.upstreamSource))
     }
@@ -2196,6 +2322,39 @@ export async function fetchWorkshopRatings(workshopIds: string[]): Promise<Map<s
   return result
 }
 
+/** 上游链路快照：面板「环境自检」据此说明 Mod 市场为什么连不上、该配什么 */
+export interface SteamUpstreamStatus {
+  configuredSources: SteamModUpstreamSource[]
+  /** 当前源顺序（健康度排序后的实际尝试顺序） */
+  sourceOrder: SteamModUpstreamSource[]
+  /** 处于熔断冷却中的源 */
+  openSources: SteamModUpstreamSource[]
+  lastSuccessSource: SteamModUpstreamSource | null
+  lastSuccessAt: string | null
+  proxy: { enabled: boolean, source: string | null, host: string | null }
+}
+
+export function getSteamUpstreamStatus(): SteamUpstreamStatus {
+  const now = Date.now()
+  const enabled = steamSources.filter(source => source.enabled)
+  return {
+    configuredSources: enabled.map(source => source.name),
+    sourceOrder: resolveSteamSourcesForQuery({
+      keyword: '',
+      page: 1,
+      requestedPageSize: DEFAULT_PAGE_SIZE,
+      sort: DEFAULT_SORT,
+      trendDays: DEFAULT_TREND_DAYS,
+    }).map(source => source.name),
+    openSources: enabled.filter(source => isSourceOpen(source.name, now)).map(source => source.name),
+    lastSuccessSource: steamFetchMetrics.steam_last_success_source,
+    lastSuccessAt: steamFetchMetrics.steam_last_success_at
+      ? new Date(steamFetchMetrics.steam_last_success_at).toISOString()
+      : null,
+    proxy: describeSteamProxy(resolveSteamProxyConfig()),
+  }
+}
+
 export function getSteamWorkshopMetricsSnapshot(): Readonly<SteamFetchMetrics> {
   return {
     steam_fetch_success_total: steamFetchMetrics.steam_fetch_success_total,
@@ -2219,8 +2378,7 @@ function resetSteamWorkshopRuntimeForTests() {
   workshopMetadataCache.clear()
   perKeyRequestBuckets.clear()
   globalRequestBucket.length = 0
-  steamCircuitState.failedCount = 0
-  steamCircuitState.openUntil = 0
+  steamCircuitState.clear()
   if (diskPersistTimer) {
     clearTimeout(diskPersistTimer)
     diskPersistTimer = null
@@ -2257,6 +2415,46 @@ export const __steamWorkshopTestUtils = {
     steamModCache.clear()
     steamModInFlight.clear()
     steamBackgroundRefreshing.clear()
+  },
+  /**
+   * 直接往列表缓存里塞一条记录，用来验证「过期但还在离线窗口内」的兜底行为。
+   * 真实路径要写磁盘缓存 + 重启进程才能造出这个状态，测试里不必绕那一圈。
+   */
+  seedCacheEntry: (query: {
+    keyword?: string
+    page?: number
+    pageSize?: number
+    sort?: string
+    trendDays?: number
+  }, ageMs: number) => {
+    const normalized = normalizeQuery(query)
+    const cacheKey = createCacheKey(normalized)
+    const fetchedAt = Date.now() - ageMs
+    steamModCache.set(cacheKey, {
+      fetchedAt,
+      expiresAt: fetchedAt + CACHE_TTL_MS,
+      staleExpiresAt: fetchedAt + STALE_CACHE_TTL_MS,
+      offlineExpiresAt: fetchedAt + OFFLINE_CACHE_TTL_MS,
+      data: {
+        keyword: normalized.keyword,
+        page: normalized.page,
+        pageSize: normalized.requestedPageSize,
+        sort: normalized.sort,
+        trendDays: normalized.trendDays,
+        hasMore: false,
+        totalCount: 1,
+        totalPages: 1,
+        sourceUrl: 'https://steamcommunity.com/workshop/browse/',
+        upstreamSource: 'html',
+        items: [{
+          workshopId: '1234567890',
+          title: 'Cached Mod',
+          previewImage: null,
+          detailUrl: buildWorkshopDetailUrl('1234567890'),
+          rating: null,
+        }],
+      },
+    })
   },
   resetRuntimeForTests: resetSteamWorkshopRuntimeForTests,
 }

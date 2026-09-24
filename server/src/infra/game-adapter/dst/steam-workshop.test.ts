@@ -8,6 +8,7 @@ import {
   fetchDstSteamWorkshopMods,
   fetchWorkshopFileDetail,
   fetchWorkshopModMetadata,
+  getSteamUpstreamStatus,
   getSteamWorkshopMetricsSnapshot,
 } from './steam-workshop.ts'
 
@@ -122,7 +123,7 @@ describe('steam workshop parser', () => {
       trendDays: 7,
     }))
     const parsed = JSON.parse(key) as { schemaVersion?: number, pageSize?: number, page?: number }
-    assert.equal(parsed.schemaVersion, 9)
+    assert.equal(parsed.schemaVersion, 10)
     assert.equal(parsed.pageSize, 20)
     assert.equal(parsed.page, 2)
   })
@@ -303,6 +304,88 @@ describe('fetchDstSteamWorkshopMods', () => {
         process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK = previousFallbackFlag
       }
     }
+  })
+
+  it('falls back to the offline window instead of an empty list', async () => {
+    __steamWorkshopTestUtils.clearSteamModListCache()
+    const keyword = `offline-${Date.now()}`
+    const previousFallbackFlag = process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK
+    process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK = '1'
+    // 8 天前拉到过、早已过了 30 分钟的 stale 窗口，但还在 7 天离线窗口…… 这里用 8 天
+    // 之内的值：默认离线窗口是 7 天，所以取 3 天前，确保仍在窗口内
+    __steamWorkshopTestUtils.seedCacheEntry(
+      { keyword, page: 1, pageSize: 20, sort: 'trend', trendDays: 7 },
+      3 * 24 * 60 * 60 * 1000,
+    )
+    globalThis.fetch = async () => new Response('upstream down', { status: 503 })
+    try {
+      const result = await fetchDstSteamWorkshopMods({
+        keyword,
+        page: 1,
+        pageSize: 20,
+        sort: 'trend',
+        trendDays: 7,
+        subscribedModStatusByWorkshopId: new Map(),
+      })
+      // 关键：有内容（不是空白页），并且明确标注为离线数据
+      assert.equal(result.items.length, 1)
+      assert.equal(result.items[0]?.title, 'Cached Mod')
+      assert.equal(result.meta.offline, true)
+      assert.equal(result.meta.stale, true)
+      assert.ok(result.meta.dataFetchedAt)
+      // 有数据就不该同时报「上游不可用」，否则前端会把列表清掉
+      assert.notEqual(result.meta.upstreamUnavailable, true)
+    }
+    finally {
+      if (previousFallbackFlag === undefined) {
+        delete process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK
+      }
+      else {
+        process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK = previousFallbackFlag
+      }
+    }
+  })
+
+  it('still reports upstream unavailable when the cache is older than the offline window', async () => {
+    __steamWorkshopTestUtils.clearSteamModListCache()
+    const keyword = `expired-${Date.now()}`
+    const previousFallbackFlag = process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK
+    process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK = '1'
+    // 30 天前：超出默认 7 天离线窗口，此时只能老实降级
+    __steamWorkshopTestUtils.seedCacheEntry(
+      { keyword, page: 1, pageSize: 20, sort: 'trend', trendDays: 7 },
+      30 * 24 * 60 * 60 * 1000,
+    )
+    globalThis.fetch = async () => new Response('upstream down', { status: 503 })
+    try {
+      const result = await fetchDstSteamWorkshopMods({
+        keyword,
+        page: 1,
+        pageSize: 20,
+        sort: 'trend',
+        trendDays: 7,
+        subscribedModStatusByWorkshopId: new Map(),
+      })
+      assert.equal(result.items.length, 0)
+      assert.equal(result.meta.upstreamUnavailable, true)
+      assert.notEqual(result.meta.offline, true)
+    }
+    finally {
+      if (previousFallbackFlag === undefined) {
+        delete process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK
+      }
+      else {
+        process.env.GSH_STEAM_WORKSHOP_DISABLE_POWERSHELL_FALLBACK = previousFallbackFlag
+      }
+    }
+  })
+
+  it('reports the upstream source chain without hitting the network', () => {
+    const status = getSteamUpstreamStatus()
+    assert.ok(Array.isArray(status.configuredSources))
+    assert.ok(status.sourceOrder.length > 0, '至少 HTML 源应当可用')
+    assert.ok(Array.isArray(status.openSources))
+    assert.equal(typeof status.proxy.enabled, 'boolean')
   })
 })
 

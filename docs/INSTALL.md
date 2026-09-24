@@ -129,7 +129,18 @@ docker ps   # game-server-hub-panel 应为 Up；起不来或反复重启 → 问
 
 浏览器 `http://<服务器公网IP>:<PANEL_PORT>` 登录，首登强制改密。若之后「检查更新」超时，panel.env 追加 `GSH_GITHUB_API_BASE` 指向兼容反代后 `docker compose up -d panel` 重建即可。
 
-模组管理里的「检查更新」走的是 Steam 创意工坊接口（`https://api.steampowered.com`），在同样连不上 Steam 的网络里会一直取不到版本信息——面板此时会老实显示「无法判断版本」，不会谎报「已是最新」。要恢复判定，在 panel.env 追加 `GSH_STEAM_WEBAPI_BASE_URL` 指向一个可用的 Steam Web API 兼容反代（例如自建代理），再 `docker compose up -d panel` 重建面板即可；留空则使用官方地址。
+模组管理里的 Mod 市场列表走的是 Steam 创意工坊接口（`https://api.steampowered.com` 与 `https://steamcommunity.com`），在连不上 Steam 的网络里会一直取不到列表。面板的这类请求与 SteamCMD 用的是**两套代理配置**：前者由面板进程自己发起，后者是 SteamCMD 子容器的环境变量。给面板配代理（推荐）：
+
+```bash
+# panel.env
+GSH_STEAM_HTTPS_PROXY=http://host.docker.internal:7890
+```
+
+容器里的 `127.0.0.1` 指的是容器自己，代理跑在宿主机上时必须写 `host.docker.internal`（compose 已配好 `extra_hosts` 映射）；Native 部署直接写 `127.0.0.1`。改完 `docker compose up -d panel` 重建面板生效。
+
+也可以把接口反代到自己的域名：`GSH_STEAM_WEBAPI_BASE_URL=https://your-proxy.example/steam/`（**带路径前缀时结尾必须加 `/`**），以及 `GSH_STEAM_COMMUNITY_BASE_URL` 用于创意工坊页面。`GSH_STEAM_WEBAPI_KEY` 可让列表改走官方 Web API（稳定性高于页面抓取）。
+
+不配任何代理时面板也不会一片空白：列表会退回最近一次成功拉取的内容（默认 7 天内，`GSH_STEAM_WORKSHOP_OFFLINE_TTL_MS` 可调），界面上标注「离线数据 · 最后更新于 X」；单个请求最多等 10 秒就会返回结果。要确认当前实际生效的链路与代理状态，看 **系统设置 → 环境自检** 里的「Mod 市场上游」一项。
 
 ---
 

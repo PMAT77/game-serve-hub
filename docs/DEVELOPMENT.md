@@ -178,6 +178,34 @@ STEAMCMD_ARCHIVE_URL=https://media.steampowered.com/client/installer/steamcmd_li
   docker compose build
 ```
 
+### 构建在下载 docker CLI 时中断
+
+面板内「一键更新」需要镜像自带 docker CLI 与 compose 插件，这两个静态二进制合计约 150MB，国内链路实测只有 60~100 KB/s，慢到会撞上链路上的 HTTP/2 故障：
+
+```text
+curl: (92) HTTP/2 stream 1 was not closed cleanly: PROTOCOL_ERROR (err 1)
+```
+
+构建已内置两件事：统一按 HTTP/1.1 下载（这类错误来自中间设备处理 HTTP/2 有误，单流下载用不到多路复用），以及下载中断后**断点续传**——重跑构建时日志里的百分比会从上次的位置接着涨，不是从 0 重来。仍然下不动就把地址指向可达的镜像站或内网制品库（`docker-compose.yml` 用的是构建参数默认值，需在构建时显式传入）：
+
+```bash
+docker compose build \
+  --build-arg DOCKER_CLI_URL=https://mirror.example.com/docker-29.8.0.tgz \
+  --build-arg COMPOSE_PLUGIN_URL=https://mirror.example.com/docker-compose-linux-x86_64
+```
+
+### 构建时刷出 `WARN GET … ECONNRESET`
+
+这是 `deps` 层在装依赖，不是代码问题。`@iconify/json`（约 60MB 的图标数据，`uno.config.ts` 的 `presetIcons` 必需）最容易被打断；构建已把 pnpm 的重试次数与超时调高，网络不稳时可再换个 npm 源（默认仍是官方源，仓库不写入任何第三方镜像）：
+
+```bash
+NPM_REGISTRY=https://registry.npmmirror.com docker compose build
+```
+
+构建失败不必从头再来：docker CLI 段位于 `runtime` 层最后一步，前面成功的层都在缓存里，重跑只重下这一小段。
+
+> 改过 `docker-compose.yml` 后要跑一次 `pnpm run release:verify`：安装器内置了该文件的校验和，不同步就会让门禁失败（新值会打印在报错里）。
+
 > 仅仅开发功能并不需要构建镜像：`pnpm run dev`（宿主机 Node）与 `pnpm run dev:compose`（容器开发栈）都跳过了这一步。发布用的镜像由 CI 构建，见 [RELEASE.md](RELEASE.md)。
 
 ---
@@ -248,16 +276,32 @@ pnpm exec tsx scripts/export-cluster-archive.ts --source <源目录> --out <输�
 
 ### Steam / Mod 相关环境变量（开发排查）
 
+面板访问 Steam 的请求（Mod 市场列表、评分、版本、工坊页面）与 SteamCMD 的下载是两条独立链路，
+代理要分别配置：`GSH_STEAM_*_PROXY` 管面板自己，`GSH_STEAMCMD_*` 管 SteamCMD 子容器。
+
 | 变量 | 用途 |
 |------|------|
+| `GSH_STEAM_HTTPS_PROXY` / `GSH_STEAM_HTTP_PROXY` | 面板访问 Steam 的代理；留空时回退读进程的 `HTTPS_PROXY` / `HTTP_PROXY`。Docker 部署指向宿主机时写 `host.docker.internal` |
+| `GSH_STEAM_NO_PROXY` | 不走代理的主机后缀（逗号分隔）；环回地址与 `host.docker.internal` 始终绕过 |
+| `GSH_STEAM_WEBAPI_BASE_URL` | `api.steampowered.com` 的反代基址，**带路径前缀时结尾必须加 `/`** |
+| `GSH_STEAM_COMMUNITY_BASE_URL` | `steamcommunity.com` 的反代基址，供 HTML 源使用 |
 | `GSH_STEAM_WEBAPI_KEY` | Mod 市场走 Steam 官方 Web API（推荐，比 HTML 抓取稳定） |
 | `GSH_STEAM_RELAY_URL` / `GSH_STEAM_RELAY_TOKEN` | 无法直连 Steam 时的中继 |
 | `GSH_STEAMCMD_DOWNLOAD_REGION` | SteamCMD 下载区域（如 `cn`），影响实例安装与 Mod 订阅下载 |
-| `GSH_STEAM_WORKSHOP_FETCH_TIMEOUT_MS` | Mod 市场 live 拉取超时，默认 12s |
+| `GSH_STEAM_WORKSHOP_FETCH_TIMEOUT_MS` | 工坊页面（HTML 源）单次超时，默认 12s |
+| `GSH_STEAM_WORKSHOP_OFFICIAL_TIMEOUT_MS` / `_RELAY_TIMEOUT_MS` | 官方 API 与中继的单次超时，默认各 5s |
+| `GSH_STEAM_WORKSHOP_FAST_FAIL_TIMEOUT_MS` | 一个源失败后，其余源改用的短超时且只试一次，默认 3.5s |
+| `GSH_STEAM_WORKSHOP_TOTAL_BUDGET_MS` | 单次列表拉取总预算，用满即退回缓存/离线数据，默认 10s |
+| `GSH_STEAM_WORKSHOP_OFFLINE_TTL_MS` | 上游不可达时列表可退回的缓存窗口，默认 7 天（界面标注「离线数据」） |
+| `GSH_STEAM_WORKSHOP_STALE_TTL_MS` | 过期但立即返回并后台刷新的窗口，默认 30 分钟 |
+| `GSH_STEAM_WORKSHOP_CACHE_TTL_MS` | fresh 缓存窗口，默认 2 分钟 |
 | `GSH_STEAM_WORKSHOP_METADATA_CACHE_TTL_MS` | Mod 名称/缩略图/版本时间的内存缓存时长，默认 10 分钟 |
 | `GSH_STEAM_WORKSHOP_METADATA_BATCH_SIZE` | 单次批量查询工坊元数据的 ID 数，默认 100（超出分批串行） |
 | `GSH_MOD_DOWNLOAD_COALESCE_LIMIT` | 单次 SteamCMD 调用顺带补齐的缺失 Mod 上限，默认 50 |
 | `GSH_STEAM_WORKSHOP_WARM_CACHE=0` | 关闭面板启动时 Mod 市场列表后台预热 |
+
+排查「列表加载不出来」时先看 **系统设置 → 环境自检 → Mod 市场上游**：它会给出实际生效的源顺序、
+代理是否生效（只显示来源变量与主机，不回显凭据）、哪些源在熔断、以及最近一次成功的时间。
 
 完整示例见 [`panel.env.example`](../panel.env.example)。
 

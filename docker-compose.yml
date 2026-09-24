@@ -6,8 +6,12 @@ services:
       dockerfile: docker/unified/Dockerfile
       # SteamCMD 下载源可覆盖：国内直连 steamcdn-a.akamaihd.net 常被中断，
       # 可改用 Steam 的另一条官方 CDN（见 docs/DEVELOPMENT.md）。默认值不变。
+      # NPM_REGISTRY 留空即官方源（与 GSH_DEV_NPM_REGISTRY 同一口径）；依赖包
+      # （@iconify/json 约 60MB）在国内链路上常被 ECONNRESET 打断，可指向 npm 镜像源：
+      #   NPM_REGISTRY=https://registry.npmmirror.com docker compose build
       args:
         STEAMCMD_ARCHIVE_URL: ${STEAMCMD_ARCHIVE_URL:-https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
     container_name: game-server-hub-panel
     restart: unless-stopped
     # 统一镜像保持中性（无 ENTRYPOINT/HEALTHCHECK/USER）：面板入口在此显式指定；
@@ -72,6 +76,38 @@ services:
       GSH_PANEL_UPDATE_SOURCE: ${GSH_PANEL_UPDATE_SOURCE:-auto}
       # Release 离线镜像包的 GitHub 加速代理前缀；留空走内置代理池 + 直连
       GSH_GITHUB_PROXY: ${GSH_GITHUB_PROXY:-}
+      # GitHub API 基址（更新检查）；国内可指向兼容反代
+      GSH_GITHUB_API_BASE: ${GSH_GITHUB_API_BASE:-}
+      # ── Mod 市场（Steam 创意工坊）出站：以下变量同样必须显式映射，否则 panel.env 里配了也不生效 ──
+      # 面板访问 Steam 的代理；容器内要指向宿主机得用 host.docker.internal（见 extra_hosts）
+      GSH_STEAM_HTTPS_PROXY: ${GSH_STEAM_HTTPS_PROXY:-}
+      GSH_STEAM_HTTP_PROXY: ${GSH_STEAM_HTTP_PROXY:-}
+      GSH_STEAM_NO_PROXY: ${GSH_STEAM_NO_PROXY:-}
+      # Steam Web API 反代（带路径前缀时必须以 / 结尾）
+      GSH_STEAM_WEBAPI_BASE_URL: ${GSH_STEAM_WEBAPI_BASE_URL:-}
+      GSH_STEAM_WEBAPI_KEY: ${GSH_STEAM_WEBAPI_KEY:-}
+      # 创意工坊页面反代（HTML 源）
+      GSH_STEAM_COMMUNITY_BASE_URL: ${GSH_STEAM_COMMUNITY_BASE_URL:-}
+      # 自建中继
+      GSH_STEAM_RELAY_URL: ${GSH_STEAM_RELAY_URL:-}
+      GSH_STEAM_RELAY_TOKEN: ${GSH_STEAM_RELAY_TOKEN:-}
+      # 超时与缓存窗口
+      GSH_STEAM_WORKSHOP_FETCH_TIMEOUT_MS: ${GSH_STEAM_WORKSHOP_FETCH_TIMEOUT_MS:-}
+      GSH_STEAM_WORKSHOP_OFFICIAL_TIMEOUT_MS: ${GSH_STEAM_WORKSHOP_OFFICIAL_TIMEOUT_MS:-}
+      GSH_STEAM_WORKSHOP_RELAY_TIMEOUT_MS: ${GSH_STEAM_WORKSHOP_RELAY_TIMEOUT_MS:-}
+      GSH_STEAM_WORKSHOP_FAST_FAIL_TIMEOUT_MS: ${GSH_STEAM_WORKSHOP_FAST_FAIL_TIMEOUT_MS:-}
+      GSH_STEAM_WORKSHOP_TOTAL_BUDGET_MS: ${GSH_STEAM_WORKSHOP_TOTAL_BUDGET_MS:-}
+      GSH_STEAM_WORKSHOP_OFFLINE_TTL_MS: ${GSH_STEAM_WORKSHOP_OFFLINE_TTL_MS:-}
+      GSH_STEAM_WORKSHOP_STALE_TTL_MS: ${GSH_STEAM_WORKSHOP_STALE_TTL_MS:-}
+      GSH_STEAM_WORKSHOP_CACHE_TTL_MS: ${GSH_STEAM_WORKSHOP_CACHE_TTL_MS:-}
+      GSH_STEAM_WORKSHOP_WARM_CACHE: ${GSH_STEAM_WORKSHOP_WARM_CACHE:-}
+      GSH_STEAM_WORKSHOP_DISABLE_DISK_CACHE: ${GSH_STEAM_WORKSHOP_DISABLE_DISK_CACHE:-}
+      GSH_STEAM_WORKSHOP_CACHE_FILE: ${GSH_STEAM_WORKSHOP_CACHE_FILE:-}
+      # 宿主机内存判定阈值：面板据此决定是否放行安装/启动，漏映射会让 panel.env 里的值失效
+      GSH_HOST_MIN_AVAILABLE_MB: ${GSH_HOST_MIN_AVAILABLE_MB:-}
+      GSH_HOST_MEMORY_HEADROOM_MB: ${GSH_HOST_MEMORY_HEADROOM_MB:-}
+      GSH_HOST_STEAMCMD_PLANNING_MB: ${GSH_HOST_STEAMCMD_PLANNING_MB:-}
+      GSH_HOST_DST_PLANNING_MB: ${GSH_HOST_DST_PLANNING_MB:-}
       # 初始管理员凭证与首登策略：docker compose --env-file panel.env 只做 compose 文件插值，
       # panel.env 里的值必须在这里显式映射才会进入容器，否则容器会以为没配密码而随机生成一个。
       ADMIN_USERNAME: ${ADMIN_USERNAME:-superadmin}
@@ -90,6 +126,11 @@ services:
       - gsh-instances:/var/lib/game-server-hub/instances
       - gsh-backups:/var/lib/game-server-hub/backups
       - /var/run/docker.sock:/var/run/docker.sock
+    # 让面板容器能用 host.docker.internal 指向宿主机：容器里的 127.0.0.1 是它自己，
+    # 代理跑在宿主机时（GSH_STEAM_HTTPS_PROXY=http://host.docker.internal:7890）
+    # 少这一行就连不上代理。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test:
         - CMD-SHELL

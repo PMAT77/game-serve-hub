@@ -16,6 +16,31 @@ import path from 'node:path'
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PRESET_NAMES = ['small.env', 'medium.env', 'large.env']
 
+/**
+ * 不需要映射进 panel 容器的变量。
+ *
+ * 三类：① compose 文件插值专用（如 GSH_STACK_DIR 供安装器定位面板目录）；
+ * ② 面板容器自己不做这件事、只由别的组件消费的（如 SteamCMD 子容器代理）；
+ * ③ 只在宿主机 / 安装器 / 开发机上生效的调试开关。
+ */
+const COMPOSE_EXEMPT = new Set([
+  // ② SteamCMD 子容器专用：由面板透传给孩子容器，面板自身不读
+  'GSH_STEAMCMD_HTTP_PROXY',
+  'GSH_STEAMCMD_HTTPS_PROXY',
+  'GSH_STEAMCMD_NO_PROXY',
+  // ① compose / 安装器插值
+  'GSH_STACK_DIR',
+  'GSH_COMPOSE_FILES',
+  'GSH_PANEL_MEMORY_LIMIT',
+  'GSH_WEB_MEMORY_LIMIT',
+  // ③ 安装器与开发机
+  'GSH_INSTALL_DIR',
+  'GSH_DEV_NPM_REGISTRY',
+  'GSH_DEV_AUTO_SEED',
+  'GSH_DEV_COMPOSE_QUIET',
+  'GSH_UNIT_TEST',
+])
+
 function readText(relativePath) {
   return readFileSync(path.join(repoRoot, relativePath), 'utf8')
 }
@@ -97,13 +122,31 @@ function main() {
     }
   }
 
+  // 反向检查：panel.env.example 里说明过的变量，必须在 docker-compose.yml 的 panel 服务
+  // environment 段里被显式映射。compose 的 --env-file 只做文件插值，不映射就进不了容器——
+  // 历史上 GSH_STEAM_WEBAPI_KEY / GSH_GITHUB_API_BASE 就是这样「文档写了、配了没用」。
+  const composeVars = new Set(
+    [...readText('docker-compose.yml').matchAll(/^\s{6}([A-Z][A-Z0-9_]*):\s/gm)].map(match => match[1]),
+  )
+  for (const key of [...documented].sort()) {
+    if (!key.startsWith('GSH_')) {
+      continue
+    }
+    if (COMPOSE_EXEMPT.has(key)) {
+      continue
+    }
+    if (!composeVars.has(key)) {
+      failures.push(`[compose] ${key} 在 panel.env.example 里有说明，但 docker-compose.yml 的 environment 段没有映射它（配了也不会生效）`)
+    }
+  }
+
   if (failures.length > 0) {
     for (const failure of failures) {
       console.error(failure)
     }
     process.exit(1)
   }
-  console.log(`[presets] ${PRESET_NAMES.length} 份内存预设与安装器内置拷贝一致，变量均有文档`)
+  console.log(`[presets] ${PRESET_NAMES.length} 份内存预设与安装器内置拷贝一致，变量均有文档且已映射进 panel 容器`)
 }
 
 main()

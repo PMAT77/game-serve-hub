@@ -117,15 +117,22 @@ export async function createInstanceBackupUnlocked(options: CreateInstanceBackup
     return { ok: false, message: '实例尚未生成存档目录，无法备份（首次启动实例后即可备份）' }
   }
 
-  if (saveBeforeArchive) {
+  /**
+   * 运行中才谈得上热备份：停止的实例没有可发送命令的进程，直接打包即可。
+   * 此前不看状态、对 manual 一律「c_save 失败就报错」，结果是**已停止的实例反而
+   * 无法手动备份**，提示还自相矛盾（「可停止实例后重试」，而它已经停止了）；
+   * 定时备份与自动钩子本来就是「失败则按最近保存点打包」，这里统一成同一种口径。
+   */
+  if (saveBeforeArchive && instance.status === 'running') {
     const saveResult = await sendInstanceContainerCommand(instanceId, 'c_save()', 'master')
     if (!saveResult.ok && kind === 'manual') {
-      return { ok: false, message: '实例未运行或保存失败，无法创建热备份；可停止实例后重试' }
+      return { ok: false, message: '实例运行中但让世界保存失败，无法创建一致的备份；请稍后重试' }
     }
     if (!saveResult.ok) {
       app?.log.warn({ instanceId, kind }, '自动备份前 c_save 失败，按最近保存点打包')
     }
-    if (hotSaveDelayMs > 0) {
+    // 只有真的保存成功才值得等它落盘，失败时白等 3 秒没有意义
+    if (saveResult.ok && hotSaveDelayMs > 0) {
       await new Promise(resolve => setTimeout(resolve, hotSaveDelayMs))
     }
   }

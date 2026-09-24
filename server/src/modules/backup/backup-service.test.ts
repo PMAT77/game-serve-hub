@@ -80,6 +80,23 @@ describe('backup service', () => {
     assert.equal(fetched.shards, '["master"]')
   })
 
+  // 回归：停止的实例此前反而无法手动备份——c_save() 在没运行的实例上必然失败，
+  // 而手动备份把它当致命错误，提示还写着「可停止实例后重试」（它已经停止了）。
+  it('creates a manual backup for a stopped instance without hot save', async () => {
+    await updateGameInstanceRuntime(instance.id, { status: 'stopped' })
+    const result = await createInstanceBackup({
+      instanceId: instance.id,
+      kind: 'manual',
+      note: '停止状态下备份',
+      createdBy: 'tester',
+      hotSaveDelayMs: 0,
+    })
+    assert.equal(result.ok, true)
+    assert.ok(result.backup)
+    assert.ok(fs.existsSync(result.backup.filePath))
+    assert.equal(result.backup.kind, 'manual')
+  })
+
   // 回归：恢复流程会先把存档目录改名让位再重建，此时并发打包会读到半删除的目录，
   // 产出不完整的 tar 包却被记为 completed —— 用户以为有备份，实际没有。
   it('refuses to create a backup while another archive operation holds the instance lock', async () => {

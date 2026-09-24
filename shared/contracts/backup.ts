@@ -169,3 +169,21 @@ export const migrationExportResultSchema = z.object({
 })
 export type MigrationExportResult = z.infer<typeof migrationExportResultSchema>
 
+// ---------------------------------------------------------------------------
+// 面板数据库快照恢复（用某份快照替换面板自身的数据库）
+// ---------------------------------------------------------------------------
+
+/**
+ * 恢复面板数据必须手工输入的确认短语。
+ * 前后端共用一份：这类「输入点什么才能点确认」的交互，两边各写一遍文案迟早对不上，
+ * 表现是用户照着界面提示输入却被服务端拒绝。
+ */
+export const DB_SNAPSHOT_RESTORE_CONFIRM_TEXT = '恢复面板数据'
+
+export const dbSnapshotRestoreRequestSchema = z.object({
+  backupId: z.string().trim().min(1).max(128),
+  /** 必须等于 DB_SNAPSHOT_RESTORE_CONFIRM_TEXT */
+  confirmText: z.string().trim().max(64),
+})
+export type DbSnapshotRestoreRequest = z.infer<typeof dbSnapshotRestoreRequestSchema>
+

@@ -3,9 +3,10 @@ import type { DataTableColumns, SelectOption } from 'naive-ui'
 import type { BackupItem } from '@/api/modules/backup'
 import type { InstanceItem } from '@/api/modules/instance'
 import { NAlert, NButton, NDataTable, NEmpty, NInput, NModal, NSpace, NSelect, NTag, NTooltip, useDialog } from 'naive-ui'
-import { computed, h, onMounted, ref } from 'vue'
-import apiBackup from '@/api/modules/backup'
+import { computed, h, onActivated, onMounted, ref } from 'vue'
+import apiBackup, { DB_SNAPSHOT_RESTORE_CONFIRM_TEXT } from '@/api/modules/backup'
 import apiInstance from '@/api/modules/instance'
+import { resolveApiBaseUrl, withTrailingSlash } from '@/api/base-url'
 import { useAdminPageState } from '@/composables/useAdminPageState'
 import SaveImportModal from './components/SaveImportModal.vue'
 import { describeDownloadProgress, formatSize } from './downloadProgress'
@@ -15,6 +16,7 @@ defineOptions({
 })
 
 const dialog = useDialog()
+const route = useRoute()
 const appSettingsStore = useAppSettingsStore()
 
 const rows = ref<BackupItem[]>([])
@@ -50,7 +52,7 @@ const kindMeta: Record<BackupItem['kind'], { label: string, type: 'default' | 'i
   pre_import: { label: '导入前', type: 'warning' },
   pre_rollback: { label: '回档前', type: 'warning' },
   pre_reset: { label: '重置前', type: 'warning' },
-  database: { label: '面板数据备份', type: 'success' },
+  database: { label: '面板快照', type: 'success' },
 }
 
 const statusMeta: Record<BackupItem['status'], { label: string, type: 'default' | 'info' | 'warning' | 'error' | 'success' }> = {
@@ -95,7 +97,7 @@ function loadDbBackups() {
   })
 }
 
-// 「刷新」与「备份面板数据」都走这里，因此两个列表区块会一起刷新。
+// 「刷新」与「创建面板数据库快照」都走这里，因此两个列表区块会一起刷新。
 function triggerLoad() {
   runLoad(async () => {
     const [backupResponse, instanceResponse] = await Promise.all([
@@ -106,6 +108,19 @@ function triggerLoad() {
     instances.value = instanceResponse.data ?? []
   })
   loadDbBackups()
+}
+
+/**
+ * 消费 ?instanceId=：实例详情页的「查看本实例的备份」跳过来时预选该实例。
+ * 返回是否真的换了实例，调用方据此决定要不要重新拉列表。
+ */
+function applyInstanceFromQuery(): boolean {
+  const value = typeof route.query.instanceId === 'string' ? route.query.instanceId.trim() : ''
+  if (!value || value === selectedInstanceId.value) {
+    return false
+  }
+  selectedInstanceId.value = value
+  return true
 }
 
 function saveBlob(blob: Blob, fileName: string) {
@@ -206,24 +221,150 @@ async function submitCreateBackup() {
 
 function handleCreateDbBackup() {
   dialog.warning({
-    title: '备份面板数据',
-    content: '备份面板账号与设置，期间请勿关闭面板。',
-    positiveText: '开始备份',
+    title: '创建面板数据库快照',
+    content: '将为面板自身数据库生成一致性快照，不含游戏存档。期间请勿关闭面板。',
+    positiveText: '开始创建',
     negativeText: '取消',
     onPositiveClick: async () => {
       // 快照同样要等一会儿：先给进行中的提示，完成后再换成结果
-      const pendingToastId = faToast.loading('正在备份面板数据，请稍候…')
+      const pendingToastId = faToast.loading('正在创建面板数据库快照，请稍候…')
       try {
         await apiBackup.createDbBackup()
-        faToast.success('面板数据备份已创建', { id: pendingToastId })
+        faToast.success('面板快照已创建', { id: pendingToastId })
         triggerLoad()
       }
       catch (err) {
-        const message = err instanceof Error ? err.message : '面板数据备份失败'
+        const message = err instanceof Error ? err.message : '面板快照创建失败'
         faToast.error(message, { id: pendingToastId })
       }
     },
   })
+}
+
+/* ------------------------------ 导入外部快照 ------------------------------ */
+
+const importingSnapshot = ref(false)
+const uploadPercent = ref(0)
+const snapshotInputRef = ref<HTMLInputElement | null>(null)
+
+function openSnapshotPicker() {
+  if (importingSnapshot.value) {
+    return
+  }
+  snapshotInputRef.value?.click()
+}
+
+/** 上传本地 .sqlite 快照：只入库，是否恢复由用户在列表里另行确认 */
+async function handleSnapshotFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) {
+    return
+  }
+  importingSnapshot.value = true
+  uploadPercent.value = 0
+  const pendingToastId = faToast.loading('正在上传快照，请稍候…')
+  try {
+    await apiBackup.uploadDbSnapshot(file, (percent) => {
+      uploadPercent.value = percent
+    })
+    faToast.success('快照已导入，可在列表中恢复', { id: pendingToastId })
+    triggerLoad()
+  }
+  catch (err) {
+    const message = err instanceof Error ? err.message : '快照导入失败'
+    faToast.error(message, { id: pendingToastId })
+  }
+  finally {
+    importingSnapshot.value = false
+    uploadPercent.value = 0
+  }
+}
+
+/* --------------------------- 用快照恢复面板数据 --------------------------- */
+
+/**
+ * 恢复后面板会替换数据库并退出进程，请求多半以连接中断收场——那不是失败。
+ * 因此提交之后一律进入 /health 轮询：必须**先看到面板断开、再看到它回来**才算成功，
+ * 否则面板还没退出时的那次探测会被误判成「已经恢复」。
+ */
+const restoreDialogVisible = ref(false)
+const restoreTarget = ref<BackupItem | null>(null)
+const restoreConfirmText = ref('')
+const restoreSubmitting = ref(false)
+
+const RESTORE_HEALTH_INTERVAL_MS = 3000
+/** 6 分钟：容器/服务重启通常几秒，留足余量给慢机器 */
+const RESTORE_HEALTH_MAX_FAILURES = 120
+
+let restoreSawPanelDown = false
+let restoreHealthFailures = 0
+
+async function probePanelHealth(): Promise<boolean> {
+  const baseUrl = resolveApiBaseUrl({
+    dev: import.meta.env.DEV,
+    proxyEnabled: import.meta.env.VITE_ENABLE_PROXY,
+    configured: import.meta.env.VITE_APP_API_BASEURL,
+  })
+  try {
+    const response = await fetch(`${withTrailingSlash(baseUrl)}health`, { cache: 'no-store' })
+    return response.ok
+  }
+  catch {
+    return false
+  }
+}
+
+const restoreHealthPoller = usePollingTask(async () => {
+  const reachable = await probePanelHealth()
+  if (!reachable) {
+    restoreSawPanelDown = true
+    restoreHealthFailures += 1
+    if (restoreHealthFailures >= RESTORE_HEALTH_MAX_FAILURES) {
+      restoreHealthPoller.stop()
+      faToast.warning('等待面板重启超时，请刷新页面查看结果（开发环境需要手动重启面板）。')
+    }
+    return
+  }
+  if (!restoreSawPanelDown) {
+    return
+  }
+  restoreHealthPoller.stop()
+  faToast.success('面板数据已恢复，正在重新加载…')
+  window.setTimeout(() => window.location.reload(), 1500)
+}, { intervalMs: RESTORE_HEALTH_INTERVAL_MS, immediate: false })
+
+function openRestoreDialog(row: BackupItem) {
+  restoreTarget.value = row
+  restoreConfirmText.value = ''
+  restoreDialogVisible.value = true
+}
+
+async function submitRestore() {
+  const target = restoreTarget.value
+  if (!target || restoreSubmitting.value) {
+    return
+  }
+  if (restoreConfirmText.value.trim() !== DB_SNAPSHOT_RESTORE_CONFIRM_TEXT) {
+    faToast.warning(`请手工输入「${DB_SNAPSHOT_RESTORE_CONFIRM_TEXT}」以确认`)
+    return
+  }
+  restoreDialogVisible.value = false
+  restoreSubmitting.value = true
+  const pendingToastId = faToast.loading('正在恢复面板数据，请稍候…', { duration: 0 })
+  try {
+    await apiBackup.restoreDbSnapshot(target.id, DB_SNAPSHOT_RESTORE_CONFIRM_TEXT)
+  }
+  catch {
+    // 面板正在替换数据库并退出，连接中断是预期结果；成败交给 /health 轮询判定
+  }
+  faToast.dismiss(pendingToastId)
+  restoreSawPanelDown = false
+  restoreHealthFailures = 0
+  faToast.info('面板正在重启，恢复完成后本页会自动刷新。')
+  restoreHealthPoller.start()
+  restoreSubmitting.value = false
 }
 
 function handleRestore(row: BackupItem) {
@@ -409,20 +550,63 @@ const dbColumns = computed<DataTableColumns<BackupItem>>(() => [
     width: 180,
     render: row => formatTime(row.createdAt),
   },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 190,
+    render: (row) => {
+      const buttons = []
+      if (row.status === 'completed') {
+        buttons.push(h(NButton, {
+          size: 'small',
+          quaternary: true,
+          type: 'primary',
+          loading: downloadingBackupId.value === row.id,
+          disabled: downloadingBackupId.value !== null && downloadingBackupId.value !== row.id,
+          onClick: () => handleDownload(row),
+        }, { default: () => '下载' }))
+        buttons.push(h(NTooltip, { trigger: 'hover' }, {
+          trigger: () => h(NButton, {
+            size: 'small',
+            quaternary: true,
+            type: 'warning',
+            onClick: () => openRestoreDialog(row),
+          }, { default: () => '恢复' }),
+          default: () => '用该快照替换面板数据（面板会重启，当前登录会失效）',
+        }))
+      }
+      buttons.push(h(NButton, {
+        size: 'small',
+        quaternary: true,
+        type: 'error',
+        onClick: () => handleDelete(row),
+      }, { default: () => '删除' }))
+      return h('div', { style: 'display:flex;gap:4px' }, buttons)
+    },
+  },
 ])
 
 onMounted(() => {
+  applyInstanceFromQuery()
   triggerLoad()
+})
+
+// 本页被 keepAlive 缓存：再次从实例详情跳进来时组件不会重新挂载，只能在激活时消费预选参数
+onActivated(() => {
+  if (applyInstanceFromQuery()) {
+    triggerLoad()
+  }
 })
 </script>
 
 <template>
   <div class="page-container" :class="{ mobile: isMobileMode }">
-    <div class="page-header">
-      <h2>备份与恢复</h2>
-      <p class="page-description">
-        备份实例存档与面板数据，可恢复、下载与清理旧备份。
-        恢复会整体替换实例存档，请先停止实例。
+    <div>
+      <h2 class="m-0 text-lg font-semibold">
+        备份与恢复
+      </h2>
+      <p class="mt-1 text-sm text-muted-foreground">
+        备份实例存档与面板数据，可恢复、下载与清理旧备份。 恢复会整体替换实例存档，请先停止实例。 
       </p>
     </div>
 
@@ -455,9 +639,6 @@ onMounted(() => {
       >
         导入外部存档
       </NButton>
-      <NButton @click="handleCreateDbBackup">
-        备份面板数据
-      </NButton>
       <NButton :loading="loading" @click="triggerLoad">
         刷新
       </NButton>
@@ -485,11 +666,29 @@ onMounted(() => {
     </NDataTable>
 
     <section class="db-snapshot-section">
-      <div class="section-header">
-        <h3>面板数据库快照</h3>
-        <p class="section-description">
-          由「备份面板数据」创建，包含面板账号与设置，不属于任何游戏实例。
+      <div>
+        <h2 class="m-0 text-lg font-semibold">
+          面板数据库快照
+        </h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          由「备份面板数据」创建，包含面板账号与设置，不属于任何游戏实例。 
         </p>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <NButton type="warning" strong secondary @click="handleCreateDbBackup">
+            创建面板数据库快照
+          </NButton>
+          <NButton :loading="importingSnapshot" @click="openSnapshotPicker">
+            导入快照
+          </NButton>
+          <span v-if="importingSnapshot" class="text-xs text-muted-foreground">已上传 {{ uploadPercent }}%</span>
+          <input
+            ref="snapshotInputRef"
+            type="file"
+            accept=".sqlite,.db"
+            class="hidden"
+            @change="handleSnapshotFile"
+          >
+        </div>
       </div>
 
       <div v-if="showDbError" class="space-y-3" role="alert">
@@ -505,11 +704,11 @@ onMounted(() => {
         :columns="dbColumns"
         :data="dbRows"
         :loading="dbLoading"
-        :scroll-x="940"
+        :scroll-x="1130"
         :row-key="(row: BackupItem) => row.id"
       >
         <template #empty>
-          <NEmpty size="large" description="还没有面板数据快照，点击上方「备份面板数据」创建" />
+          <NEmpty size="large" description="还没有面板快照，点击「创建面板数据库快照」生成" />
         </template>
       </NDataTable>
     </section>
@@ -538,6 +737,30 @@ onMounted(() => {
       </div>
     </NModal>
 
+    <NModal
+      v-model:show="restoreDialogVisible"
+      preset="dialog"
+      type="error"
+      title="恢复面板数据"
+      positive-text="确认恢复"
+      negative-text="取消"
+      :positive-button-props="{ disabled: restoreConfirmText.trim() !== DB_SNAPSHOT_RESTORE_CONFIRM_TEXT }"
+      @positive-click="submitRestore"
+    >
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <p style="margin: 0">
+          将用快照「{{ restoreTarget?.fileName }}」替换面板当前的数据。
+        </p>
+        <p style="margin: 0; color: #909090">
+          面板会自动重启，当前登录会失效；正在运行的游戏实例不受影响。
+        </p>
+        <NInput
+          v-model:value="restoreConfirmText"
+          :placeholder="`请输入「${DB_SNAPSHOT_RESTORE_CONFIRM_TEXT}」以确认`"
+        />
+      </div>
+    </NModal>
+
     <SaveImportModal
       v-model:show="importModalVisible"
       :instance-id="selectedInstanceId && selectedInstanceId !== 'panel-db' ? selectedInstanceId : null"
@@ -559,30 +782,9 @@ onMounted(() => {
   padding: 12px;
 }
 
-.page-header h2 {
-  margin: 0;
-}
-
-.page-description {
-  margin: 4px 0 0;
-  color: var(--custom-text-color-secondary, #909090);
-  font-size: 13px;
-}
-
 .db-snapshot-section {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.section-header h3 {
-  margin: 0;
-  font-size: 16px;
-}
-
-.section-description {
-  margin: 4px 0 0;
-  color: var(--custom-text-color-secondary, #909090);
-  font-size: 13px;
 }
 </style>

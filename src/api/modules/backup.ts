@@ -9,6 +9,7 @@ import type {
   SaveImportResult,
   SaveImportTokenSource,
 } from '../../../shared/contracts/backup'
+import { DB_SNAPSHOT_RESTORE_CONFIRM_TEXT } from '../../../shared/contracts/backup'
 import api from '../index'
 
 export type {
@@ -22,6 +23,8 @@ export type {
   SaveImportResult,
   SaveImportTokenSource,
 }
+
+export { DB_SNAPSHOT_RESTORE_CONFIRM_TEXT }
 
 export interface BackupDownloadOptions {
   backupId: string
@@ -72,6 +75,26 @@ export default {
   createDbBackup: () => api.post('app/system/db/backup', {}, { timeout: 0 }) as Promise<{ data: BackupMutationResult }>,
   /** 数据库快照列表 */
   getDbBackupList: () => api.get('app/system/db/backup') as Promise<{ data: BackupItem[] }>,
+  /** 上传外部面板数据库快照（.sqlite）：只入库，是否恢复由用户在列表里另行确认 */
+  uploadDbSnapshot: (file: File, onProgress?: (percent: number) => void) => api.post(`app/system/db/backup/import?fileName=${encodeURIComponent(file.name)}`, file, {
+    headers: { 'Content-Type': 'application/octet-stream' },
+    timeout: 0,
+    onUploadProgress: (event: { loaded: number, total?: number }) => {
+      if (onProgress && event.total) {
+        onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)))
+      }
+    },
+  }) as Promise<{ data: BackupMutationResult }>,
+  /**
+   * 用快照恢复面板数据。
+   *
+   * 服务端替换数据库后会让面板进程退出、由部署侧拉起，因此这个请求之后连接会断——
+   * 调用方不能把「请求失败」当作「恢复失败」，而要按 /health 是否可达来判断结果。
+   */
+  restoreDbSnapshot: (backupId: string, confirmText: string) => api.post('app/system/db/backup/restore', {
+    backupId,
+    confirmText,
+  }, { timeout: 0 }) as Promise<{ data: BackupMutationResult }>,
   /**
    * 生成并下载「迁移包」：把实例存档 + 配置 + Mod 清单整理成另一台机器可直接导入的 tar.gz。
    * 打包耗时取决于存档大小，因此与备份下载一样关闭请求超时。

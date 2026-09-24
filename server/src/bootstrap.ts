@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
-import path from 'node:path'
 import process from 'node:process'
 import { createServerApp } from './app'
 import { startScheduleScheduler } from './modules/schedule/scheduler'
+import { finalizePendingDatabaseRestore, resolveMigrationsFolder } from './modules/system/db-restore-service'
 import { syncPanelPortSettingIfStale } from './modules/system/panel-port'
 import type { AdminCredentialOutcome } from './shared/config/credentials-file'
 import { shouldWriteAdminCredentialsFile, writeAdminCredentialsFile } from './shared/config/credentials-file'
@@ -10,7 +10,6 @@ import { ensureServerRuntimeDirs, loadServerConfig } from './shared/config'
 import { InstanceConsoleLogFile, resolveConsoleLogsDir, setActiveConsoleLogFile } from './shared/instance-runtime/console-log-file'
 import { instanceConsoleLogStore } from './shared/instance-runtime/console-log-store'
 import { initDatabase } from './shared/db/index'
-import { resolveRepoRoot } from './shared/repo-root'
 
 /**
  * 后端启动入口。
@@ -51,7 +50,10 @@ export async function bootstrap() {
   bindProcessLifecycle(app, gracefulShutdown)
 
   // 打包后 bundle 位于 dist-server/，固定相对路径失效；改从仓库根定位（server/drizzle）
-  const migrationsFolder = path.resolve(resolveRepoRoot(), 'server/drizzle')
+  const migrationsFolder = resolveMigrationsFolder()
+  // 上一次「恢复面板数据」的收尾：恢复后的库不可用时要在这里回退，必须在打开数据库之前判完，
+  // 否则面板会卡在「启动即崩」的重启循环里，而用户没有任何界面可用。
+  await finalizePendingDatabaseRestore({ app, dbPath: config.dbPath, migrationsFolder })
   let adminCredentialOutcome: AdminCredentialOutcome = 'absent'
   const dbFilePath = await initDatabase(config.dbPath, migrationsFolder, {
     forcePasswordChange: config.forcePasswordChange,

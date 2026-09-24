@@ -19,16 +19,22 @@ import path from 'node:path'
 import { ErrorCode } from '../../../../shared/constants/error-code'
 import { OPS_MANAGE_PERMISSION } from '../../shared/menu-routes'
 import {
+  createBackupRecord,
   deleteBackupRecord,
   getBackupById,
   getGameInstanceById,
   listBackups,
+  newBackupId,
   updateBackupStatus,
 } from '../../shared/db/index'
 import type { DbBackup } from '../../shared/db/index'
+import { loadServerConfig } from '../../shared/config'
 import { sendFileDownload } from '../../shared/http/file-download'
 import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from '../system/auth'
+import { DB_BACKUP_INSTANCE_ID, formatTimestampForFile } from '../system/db-snapshot-service'
+import { resolveMigrationsFolder } from '../system/db-restore-service'
+import { verifyPanelDatabaseFile } from '../system/db-snapshot-verify'
 import { createInstanceBackup, restoreInstanceBackup } from './backup-service'
 import { isInsideBackupsRoot } from './backup-ops'
 import { importSaveToInstance, probeSaveImportSource } from './import-service'
@@ -118,10 +124,16 @@ export function registerBackupModule(app: FastifyInstance) {
     if (!body.success) {
       return businessError('请求参数无效', request)
     }
-    const records = await listBackups(body.data.instanceId)
+    /**
+     * 面板数据库快照（instanceId 为哨兵值 panel-db）不属于任何实例，有独立的接口与列表，
+     * 这里必须排除：否则「备份与恢复」页上方那张实例存档表会把同一条快照再列一遍，
+     * 用户看到的是「面板快照」混在一堆实例存档里、且与下方区块重复。
+     */
+    const records = (await listBackups(body.data.instanceId))
+      .filter(record => record.instanceId !== DB_BACKUP_INSTANCE_ID)
     const items: BackupItem[] = []
     for (const record of records) {
-      // 磁盘对账：文件丢失的已完成备份标记 stale（数据库快照丢失同样标记）
+      // 磁盘对账：文件丢失的已完成备份标记 stale
       if (record.status === 'completed' && !fs.existsSync(record.filePath)) {
         await updateBackupStatus(record.id, 'stale')
         items.push(toBackupItem({ ...record, status: 'stale' }))
@@ -293,5 +305,69 @@ export function registerBackupModule(app: FastifyInstance) {
     // 导入成功后清理上传记录（压缩包本体 + 解压目录）
     removeUploadDirectory(body.data.uploadId)
     return success(result.result, request)
+  })
+
+  /**
+   * 导入外部的面板数据库快照（.sqlite）。
+   *
+   * 只入库、不自动恢复：快照一旦生效就是整套面板数据回退，必须由用户在列表里确认后
+   * 再单独点「恢复」。放在 backup 模块是因为这里已经注册了 octet-stream 的接收器与
+   * 临时目录，另起一套只会多出一份相似但细节不同的上传实现。
+   */
+  app.post('/app/system/db/backup/import', { bodyLimit: maxUploadBytes }, async (request, reply): Promise<void> => {
+    const auth = await authorize(request)
+    if (auth.error) {
+      reply.status(401).send(auth.error)
+      return
+    }
+    const received = request.body as ReceiveUploadResult | undefined
+    if (!received?.ok || !received.filePath) {
+      reply.status(received?.tooLarge === true ? 413 : 400).send(businessError(received?.error ?? '快照上传失败', request, ErrorCode.BACKUP_IMPORT_UPLOAD_INVALID))
+      return
+    }
+    const uploadId = received.uploadId ?? ''
+    const verified = verifyPanelDatabaseFile(received.filePath, resolveMigrationsFolder())
+    if (!verified.ok) {
+      removeUploadDirectory(uploadId)
+      reply.status(400).send(businessError(verified.message ?? '快照校验未通过', request, ErrorCode.BACKUP_IMPORT_SOURCE_INVALID))
+      return
+    }
+
+    const query = request.query as { fileName?: string }
+    const sourceName = sanitizeUploadFileName(query.fileName)
+    const dbDir = path.join(loadServerConfig().backupsRoot, 'db')
+    fs.mkdirSync(dbDir, { recursive: true })
+    const targetPath = path.join(dbDir, `db-${formatTimestampForFile(new Date())}-${Math.random().toString(36).slice(2, 8)}.sqlite`)
+    try {
+      // 上传临时目录在系统 temp 下，与备份目录多半不同卷，因此不用 rename（会 EXDEV）
+      fs.copyFileSync(received.filePath, targetPath)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      removeUploadDirectory(uploadId)
+      reply.status(400).send(businessError(`保存快照失败：${message}`, request, ErrorCode.BACKUP_IMPORT_FAILED))
+      return
+    }
+    removeUploadDirectory(uploadId)
+
+    let sizeBytes = 0
+    try {
+      sizeBytes = fs.statSync(targetPath).size
+    }
+    catch {
+      sizeBytes = 0
+    }
+    const record = await createBackupRecord({
+      id: newBackupId(),
+      instanceId: DB_BACKUP_INSTANCE_ID,
+      filePath: targetPath,
+      sizeBytes,
+      note: `导入自 ${sourceName}`,
+      kind: 'database',
+      status: 'completed',
+      createdBy: auth.operatorAccount,
+    })
+    app.log.info({ backupId: record.id, sourceName, sizeBytes }, '外部面板数据库快照已导入')
+    return reply.send(success({ isSuccess: true, backupId: record.id }, request))
   })
 }

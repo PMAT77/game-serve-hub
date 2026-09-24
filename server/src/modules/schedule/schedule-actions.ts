@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { DB_BACKUP_INSTANCE_ID, createDatabaseSnapshot } from '../system/db-backup-routes'
+import { DB_BACKUP_INSTANCE_ID, createDatabaseSnapshot } from '../system/db-snapshot-service'
 import { createInstanceBackup } from '../backup/backup-service'
 import { enqueueInstanceUpdateCheck, resolveSteamcmdCommandForUpdateCheck } from '../instance/update-check'
 import { restartInstanceBySchedule } from '../instance/scheduled-entry'

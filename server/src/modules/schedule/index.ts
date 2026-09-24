@@ -25,7 +25,7 @@ import {
 import type { DbScheduledTask } from '../../shared/db/index'
 import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from '../system/auth'
-import { DB_BACKUP_INSTANCE_ID } from '../system/db-backup-routes'
+import { DB_BACKUP_INSTANCE_ID } from '../system/db-snapshot-service'
 import { computeNextRunAtIso, describeSchedule } from './next-run'
 import { executeScheduleAction } from './schedule-actions'
 

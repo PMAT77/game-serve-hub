@@ -1,106 +1,22 @@
 import type { FastifyInstance } from 'fastify'
 import type { ApiErrorResponse, ApiSuccessResponse } from '../../../../shared/contracts/api'
 import type { BackupItem, BackupMutationResult } from '../../../../shared/contracts/backup'
-import fs from 'node:fs'
 import path from 'node:path'
+import process from 'node:process'
+import {
+  DB_SNAPSHOT_RESTORE_CONFIRM_TEXT,
+  dbSnapshotRestoreRequestSchema,
+} from '../../../../shared/contracts/backup'
 import { ErrorCode } from '../../../../shared/constants/error-code'
 import { OPS_MANAGE_PERMISSION } from '../../shared/menu-routes'
-import {
-  createBackupRecord,
-  deleteBackupRecord,
-  getSystemBackupSettings,
-  listBackupsByKindAsc,
-  newBackupId,
-} from '../../shared/db/index'
-import { ensureDb } from '../../shared/db/connection'
-import { loadServerConfig } from '../../shared/config'
+import { listBackupsByKindAsc } from '../../shared/db/index'
 import { businessError, success } from '../../shared/http/response'
 import { resolveAuthorizedContext } from './auth'
-
-/** 数据库快照记录在 backups 表中的 instanceId 哨兵值 */
-export const DB_BACKUP_INSTANCE_ID = 'panel-db'
-
-function formatTimestampForFile(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
-}
-
-/** 淘汰超出保留上限的最旧数据库快照 */
-async function enforceDbSnapshotRetention(app: FastifyInstance, retention: number): Promise<void> {
-  if (retention <= 0) {
-    return
-  }
-  const rows = await listBackupsByKindAsc(DB_BACKUP_INSTANCE_ID, ['database'])
-  if (rows.length <= retention) {
-    return
-  }
-  for (const item of rows.slice(0, rows.length - retention)) {
-    try {
-      if (fs.existsSync(item.filePath)) {
-        fs.rmSync(item.filePath, { force: true })
-      }
-      await deleteBackupRecord(item.id)
-      app.log.info({ backupId: item.id }, '保留策略淘汰旧数据库快照')
-    }
-    catch (error) {
-      app.log.warn({ backupId: item.id, error }, '淘汰旧数据库快照失败')
-    }
-  }
-}
-
-export interface DatabaseSnapshotResult {
-  ok: boolean
-  backupId?: string
-  message?: string
-}
+import { DB_BACKUP_INSTANCE_ID, createDatabaseSnapshot } from './db-snapshot-service'
+import { requestDatabaseRestore } from './db-restore-service'
 
 /**
- * 创建面板数据库一致性快照（VACUUM INTO）。
- * 手动路由与计划任务 db_snapshot 共用；retention 沿用备份设置。
- */
-export async function createDatabaseSnapshot(app: FastifyInstance, createdBy: string): Promise<DatabaseSnapshotResult> {
-  const { sqliteDb } = ensureDb()
-  const settings = await getSystemBackupSettings()
-  const dbDir = path.join(loadServerConfig().backupsRoot, 'db')
-  fs.mkdirSync(dbDir, { recursive: true })
-  // 同秒重复创建时加随机后缀防撞名；VACUUM INTO 要求目标文件不存在
-  const fileName = `db-${formatTimestampForFile(new Date())}-${Math.random().toString(36).slice(2, 8)}.sqlite`
-  const targetPath = path.join(dbDir, fileName)
-
-  try {
-    sqliteDb.exec(`VACUUM INTO '${targetPath.replace(/'/g, "''")}'`)
-  }
-  catch (error) {
-    const message = error instanceof Error ? error.message : 'VACUUM INTO 失败'
-    app.log.error({ error: message }, '数据库快照创建失败')
-    return { ok: false, message: `数据库快照创建失败: ${message}` }
-  }
-
-  let sizeBytes = 0
-  try {
-    sizeBytes = fs.statSync(targetPath).size
-  }
-  catch {
-    sizeBytes = 0
-  }
-
-  const record = await createBackupRecord({
-    id: newBackupId(),
-    instanceId: DB_BACKUP_INSTANCE_ID,
-    filePath: targetPath,
-    sizeBytes,
-    note: '面板数据库一致性快照',
-    kind: 'database',
-    status: 'completed',
-    createdBy,
-  })
-
-  await enforceDbSnapshotRetention(app, settings.dbSnapshotRetention)
-  return { ok: true, backupId: record.id }
-}
-
-/**
- * 数据库备份路由：SQLite 一致性快照（VACUUM INTO）。
+ * 面板数据库快照路由：创建、列表与恢复。
  * 快照记录 kind=database，由 backup 模块的 list/download/delete 统一管理。
  */
 export function registerDatabaseBackupRoutes(app: FastifyInstance) {
@@ -134,5 +50,48 @@ export function registerDatabaseBackupRoutes(app: FastifyInstance) {
       createdBy: record.createdBy,
       createdAt: record.createdAt,
     })), request)
+  })
+
+  /**
+   * 用快照恢复面板数据。
+   *
+   * 这是全站唯一会替换面板自身数据库的操作：服务端先留退路（当前库快照 + 旧库改名保留），
+   * 再把新库就位，然后退出进程由部署侧拉起。要求请求体带上确认短语——前端据此让用户
+   * 手工输入一次，避免误点。
+   */
+  app.post('/app/system/db/backup/restore', async (request, reply): Promise<ApiSuccessResponse<BackupMutationResult> | ApiErrorResponse> => {
+    const auth = await resolveAuthorizedContext(request, { permissions: OPS_MANAGE_PERMISSION })
+    if (auth.error || !auth.context) {
+      return auth.error ?? businessError('登录状态失效，请重新登录', request)
+    }
+    const body = dbSnapshotRestoreRequestSchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return businessError('请求参数无效', request)
+    }
+    if (body.data.confirmText.trim() !== DB_SNAPSHOT_RESTORE_CONFIRM_TEXT) {
+      return businessError(`请手工输入「${DB_SNAPSHOT_RESTORE_CONFIRM_TEXT}」以确认`, request)
+    }
+
+    const result = await requestDatabaseRestore({
+      app,
+      backupId: body.data.backupId,
+      createdBy: auth.context.user.account,
+    })
+    if (!result.ok) {
+      return businessError(result.message ?? '恢复面板数据失败', request, ErrorCode.BACKUP_RESTORE_FAILED)
+    }
+
+    /**
+     * 响应发完之后再退出：立刻退出会让前端只看到一次网络中断，拿不到「恢复已开始」的确认。
+     * 退出码必须非零——Docker 的 restart 策略与 Native 的 systemd（Restart=on-failure）
+     * 才会把面板拉起来；开发环境跑的是 tsx watch，需要手动重启。
+     */
+    reply.raw.once('finish', () => {
+      setTimeout(() => process.exit(1), 200)
+    })
+    return success({
+      isSuccess: true,
+      ...(result.preRestoreBackupId ? { backupId: result.preRestoreBackupId } : {}),
+    }, request)
   })
 }

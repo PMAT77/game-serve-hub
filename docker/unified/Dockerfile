@@ -28,12 +28,21 @@ RUN corepack enable
 WORKDIR /app
 
 FROM base AS deps
+# 可选：npm 兼容源，留空走官方 registry。国内链路拉 @iconify/json（约 60MB）常被
+# ECONNRESET 打断，docker-compose.yml 已透传该参数：
+#   NPM_REGISTRY=https://registry.npmmirror.com docker compose build
+# 用 RUN 内 export 而非顶层 ENV：registry 只在安装期生效，不写进生产镜像的环境。
+ARG NPM_REGISTRY=
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages ./packages
 # pnpm-workspace.yaml 的 patchedDependencies 指向 patches/；缺这个目录会让
 # `pnpm install --frozen-lockfile` 以 ENOENT 失败（exit 254）。
 COPY patches ./patches
-RUN pnpm install --frozen-lockfile
+RUN if [ -n "$NPM_REGISTRY" ]; then export npm_config_registry="$NPM_REGISTRY"; fi; \
+    export npm_config_fetch_retries=5 \
+           npm_config_fetch_retry_maxtimeout=300000 \
+           npm_config_fetch_timeout=300000; \
+    pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
@@ -88,16 +97,43 @@ ARG DOCKER_CLI_VERSION=29.8.0
 ARG COMPOSE_VERSION=v5.5.1
 ARG DOCKER_CLI_URL=
 ARG COMPOSE_PLUGIN_URL=
+# 这两个静态二进制合计约 150MB，国内链路实测只有 60~100 KB/s：curl 的 --retry 对
+# `HTTP/2 stream ... PROTOCOL_ERROR`（err 92）这类错误不重试，就算重试也是从 0 字节
+# 重来（curl(1)：重试前会删掉已收到的数据），一条 82MB 的链接根本重试不起。
+# 所以这里两层兜底：
+#   1) 统一加 --http1.1：这类 PROTOCOL_ERROR 来自链路上的中间设备处理 HTTP/2 有误，
+#      单流下载本来也用不到多路复用；--retry-all-errors 让协议错误能在连接层就地重试；
+#   2) 外层 for 循环每轮都带 -C -：连接断了、这轮用尽重试后 sleep 再试，下一轮从已下载
+#      的字节续传（两个源都是标准 CDN，支持 Range），重跑时不必再花十几分钟重下前半段。
+# gzip -t / docker compose version 兼作完整性校验：拿到截断的文件就删掉重来。
+# compose 插件必须是可执行的（0755）：docker CLI 判定子命令是否存在，靠的就是执行
+# 这个二进制；少了可执行位它不报权限错误，而是报 `unknown command: docker compose`。
+# 同款做法见 scripts/install.linux.sh 与 docs/INSTALL.md 的手动补装步骤。
 RUN set -eux; \
   docker_cli_url="${DOCKER_CLI_URL:-https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz}"; \
   compose_url="${COMPOSE_PLUGIN_URL:-https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64}"; \
-  curl --fail --location --retry 3 --retry-delay 2 --output /tmp/docker-cli.tgz "$docker_cli_url"; \
+  curl_flags="--fail --location --http1.1 --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20"; \
+  download() { \
+    for attempt in 1 2 3 4 5; do \
+      if curl ${curl_flags} -C - --output "$2" "$1"; then return 0; fi; \
+      if [ "${attempt}" = 5 ]; then echo "download failed after 5 attempts: $1" >&2; return 1; fi; \
+      sleep 5; \
+    done; \
+  }; \
+  download "$docker_cli_url" /tmp/docker-cli.tgz; \
+  for attempt in 1 2; do \
+    if gzip -t /tmp/docker-cli.tgz; then break; fi; \
+    if [ "${attempt}" = 2 ]; then echo "corrupt archive: $docker_cli_url" >&2; exit 1; fi; \
+    rm -f /tmp/docker-cli.tgz; \
+    download "$docker_cli_url" /tmp/docker-cli.tgz; \
+  done; \
   mkdir -p /tmp/docker-cli; \
   tar --extract --gzip --file /tmp/docker-cli.tgz --directory /tmp/docker-cli --strip-components 1 docker/docker; \
   install -m 0755 /tmp/docker-cli/docker /usr/local/bin/docker; \
   mkdir -p /usr/local/lib/docker/cli-plugins; \
-  curl --fail --location --retry 3 --retry-delay 2 --output /usr/local/lib/docker/cli-plugins/docker-compose "$compose_url"; \
-  chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose; \
+  compose_plugin=/usr/local/lib/docker/cli-plugins/docker-compose; \
+  download "$compose_url" "$compose_plugin"; \
+  chmod 0755 "$compose_plugin"; \
   docker --version; \
   docker compose version; \
   rm -rf /tmp/docker-cli /tmp/docker-cli.tgz

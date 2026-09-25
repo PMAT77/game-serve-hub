@@ -16,6 +16,8 @@ defineOptions({
   name: 'ConsoleMonitor',
 })
 
+const route = useRoute()
+
 const MONITOR_POLL_STORAGE_KEY = 'gsh-monitor-poll-settings'
 const DEFAULT_SYSTEM_POLL_MS = 10_000
 const DEFAULT_NETWORK_POLL_MS = 5_000
@@ -297,6 +299,23 @@ function restartNetworkPolling() {
   startNetworkPolling()
 }
 
+function stopAllPolling() {
+  stopSystemPolling()
+  stopNetworkPolling()
+}
+
+/**
+ * 关停不能只挂在 KeepAlive 的生命周期上：`deactivated` 只在「缓存迁移」时触发，
+ * 而 v-show 隐藏、整页转场卡住、KeepAlive 缓存被 prune 这三种情况都会绕过它——
+ * 表现出来就是用户已经离开监控台，系统信息与网卡两组轮询还在后台继续发请求。
+ * 路由变化是唯一不会漏的信号：当前路由不再是本页，立刻全停。
+ */
+watch(() => route.name, (name) => {
+  if (name !== 'consoleMonitor') {
+    stopAllPolling()
+  }
+})
+
 onMounted(() => {
   startSystemPolling()
   startNetworkPolling()
@@ -307,15 +326,9 @@ onActivated(() => {
   startNetworkPolling()
 })
 
-onDeactivated(() => {
-  stopSystemPolling()
-  stopNetworkPolling()
-})
+onDeactivated(stopAllPolling)
 
-onUnmounted(() => {
-  stopSystemPolling()
-  stopNetworkPolling()
-})
+onUnmounted(stopAllPolling)
 </script>
 
 <template>

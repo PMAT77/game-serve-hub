@@ -178,6 +178,19 @@ watch(instanceId, () => {
   void loadDetail()
 })
 
+/**
+ * 关停不能只挂在 KeepAlive 的生命周期上：`deactivated` 只在「缓存迁移」时触发，
+ * 而 v-show 隐藏、整页转场卡住、KeepAlive 缓存被 prune 这三种情况都会绕过它——
+ * 表现出来就是用户已经离开详情页，后台轮询还在按 30 秒一次发请求。
+ * 路由变化是唯一不会漏的信号：当前路由不再是本页，立刻停掉轮询。
+ */
+watch(() => route.name, (name) => {
+  if (name !== 'nodeInstanceDetail') {
+    pageActive = false
+    stopPolling()
+  }
+})
+
 onMounted(() => {
   pageActive = true
   void loadDetail()

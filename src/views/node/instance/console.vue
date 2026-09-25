@@ -721,6 +721,19 @@ watch(instanceId, async (nextId, prevId) => {
   await activateConsole()
 })
 
+/**
+ * 关停不能只挂在 KeepAlive 的生命周期上：`deactivated` 只在「缓存迁移」时触发，
+ * 而 v-show 隐藏、整页转场卡住、KeepAlive 缓存被 prune 这三种情况都会绕过它——
+ * 表现出来就是用户已经离开控制台，日志流却在后台一直重连。
+ * 路由变化是唯一不会漏的信号：当前路由不再是本页，立刻停掉重连与轮询。
+ */
+watch(() => route.name, (name) => {
+  if (name !== 'nodeInstanceConsole') {
+    pageActive = false
+    stopRealtimeJobs()
+  }
+})
+
 onMounted(() => {
   pageActive = true
   void activateConsole()

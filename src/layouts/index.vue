@@ -48,6 +48,9 @@ const { height: layoutTopHeight } = useElementSize(layoutTopRef)
 const layoutBottomRef = useTemplateRef('layoutBottomRef')
 const { height: layoutBottomHeight } = useElementSize(layoutBottomRef)
 
+/** 主内容区（真正的滚动容器）：路由变化时把滚动位置归零 */
+const mainContainerRef = useTemplateRef('mainContainerRef')
+
 // 头部是否显示
 const isHeaderEnable = computed(() => {
   return appSettingsStore.mode === 'pc'
@@ -128,6 +131,12 @@ watch(() => routeInfo.path, () => {
       state.settings.menu.subMenuCollapse = true
     })
   }
+  /**
+   * 主内容区才是真正的滚动容器（`.main-container` 是 `overflow: auto`）：
+   * 不同步归零的话，从长页面切到短页面会继承上一个页面的滚动位置、停在页面下方，
+   * 看起来就是一片空白。`guards.ts` 里那句 `documentElement.scrollTop = 0` 打不到这里。
+   */
+  mainContainerRef.value?.scrollTo({ top: 0 })
 })
 
 const { y } = useScroll(window)
@@ -177,7 +186,7 @@ const enableAppSetting = import.meta.env.VITE_APP_SETTING
       <!-- 移动端下，展开侧边栏时的遮罩层 -->
       <div :class="cn('invisible fixed inset-0 z-1009 bg-black/50 op-0 backdrop-blur-sm transition-opacity', { 'op-100 visible': appSettingsStore.mode === 'mobile' && !appSettingsStore.settings.menu.subMenuCollapse })" @click="appSettingsStore.toggleSidebarCollapse()" />
       <FloatingSidebarMenuButton />
-      <div class="main-container pb-[calc(var(--g-slots-layout-bottom-height)+var(--g-main-container-padding-bottom,0px))] pt-[calc(var(--g-slots-layout-top-height)+var(--g-header-actual-height)+var(--g-topbar-actual-height))]">
+      <div ref="mainContainerRef" class="main-container pb-[calc(var(--g-slots-layout-bottom-height)+var(--g-main-container-padding-bottom,0px))] pt-[calc(var(--g-slots-layout-top-height)+var(--g-header-actual-height)+var(--g-topbar-actual-height))]">
         <div
           class="fixed-content-around-area w-full inset-t-[calc(var(--g-slots-layout-top-height)+var(--g-header-actual-height))] inset-inline-1/2 fixed z-1005" :style="{
             ...(appSettingsStore.settings.topbar.mode === 'static' && { marginTop: `calc(min(var(--g-topbar-actual-height), ${y}px) * -1)` }),
@@ -189,7 +198,30 @@ const enableAppSetting = import.meta.env.VITE_APP_SETTING
         </div>
         <div id="app-content" class="main">
           <RouterView v-slot="{ Component, route }">
-            <Transition :name="!appSettingsStore.isReloading ? 'fade' : ''" mode="out-in">
+            <!--
+              这里不能写 mode="out-in"（也不能写 "in-out"），原因是它与本项目的 keepAlive 页面结构性冲突，
+              不是“概率上偶尔撞上”，而是每次切走一个 keepAlive 页面都必然触发、且无法自愈的白屏：
+
+              1. out-in（Vue 3.5 `runtime-core` BaseTransition）把“等上一页离场”记在一个布尔 `state.isLeaving` 上，
+                 而它的 render 第一步就是 `if (state.isLeaving) return emptyPlaceholder(child)`——
+                 这个分支排在所有其他判断之前，一旦为真，RouterView 区域从此只渲染一个空占位符，
+                 后续任何导航都不会再 patch 页面组件，只有整页刷新能恢复。
+              2. 清除它的唯一出口是 `leavingHooks.afterLeave`，而 `afterLeave` 全库唯一的调用点在
+                 renderer 的 `remove()` 里——也就是**DOM 元素真的被移除**的那一刻。
+              3. 但被 KeepAlive 缓存的页面切走时，`unmount` 会在 `shapeFlag & COMPONENT_SHOULD_KEEP_ALIVE`
+                 分支直接 `deactivate(vnode); return`，deactivate 只是把节点 `move` 进一个隐藏容器：
+                 没有 `hostRemove`，也就永远没有 `afterLeave`——开关就此永久卡在“正在离场”。
+
+              `menu-routes.ts` 里有 5 个页面开了 `keepAlive`（监控台、实例详情、实例控制台、备份与恢复、计划任务），
+              所以 out-in 在这个应用里没有可用场景。默认模式（交叉淡入淡出）根本不会置位 `state.isLeaving`
+              ——整个 BaseTransition 里只有 out-in 一个分支写它，上面那类死锁在结构上不可能发生。
+              in-out 不置位 `state.isLeaving`，但它同样把「旧节点何时从 DOM 移除」交给 `remove()`
+              （`delayLeave` 的唯一调用点在那里），keepAlive 页面切走时这段时序也走不到：旧节点先被搬进隐藏
+              容器，再在看不见的地方移除，离场动画等于没有。一并禁掉，别留下这种半失效的写法。
+              离场节点靠 `.fade-leave-active` 的 `position: absolute` 脱离文档流，避免与入场节点叠出双倍高度。
+              改这段之前请先看 `scripts/check-page-transition.mjs`：它会拦住 `KeepAlive` 与 out-in/in-out 同文件出现。
+            -->
+            <Transition :name="!appSettingsStore.isReloading ? 'fade' : ''" :duration="{ enter: 200, leave: 150 }">
               <KeepAlive :include="appKeepAliveStore.list">
                 <Component :is="Component" v-show="!isLink" :key="resolveRouterViewKey(route)" />
               </KeepAlive>
@@ -302,9 +334,15 @@ const enableAppSetting = import.meta.env.VITE_APP_SETTING
 
     .main {
       position: relative;
-      // 内容区高度由页面内容决定，不吸收 .main-container 的剩余高度
-      // 此前是 flex: auto + height: 100%，短内容页面（如监控台）会被拉到整屏，底部留出大片空白
+      /* 内容区高度由页面内容决定，不吸收 .main-container 的剩余高度；
+         此前是 flex: auto + height: 100%，短内容页面（如监控台）会被拉到整屏，底部留出大片空白 */
       flex: none;
+      /*
+       * 铺满内容区的整屏页面（Mod 市场、Mod 详情）用这个变量自撑高度。
+       * 主内容区高度既然由页面内容决定，页面就不能再靠 `absolute inset-0` 拿高度——
+       * 那种写法的父级高度是 0，整页会被这里的 overflow: hidden 裁没。
+       */
+      --g-main-content-height: calc(100vh - var(--g-slots-layout-top-height) - var(--g-header-actual-height) - var(--g-topbar-actual-height));
       width: 100%;
       padding-top: var(--g-main-container-padding-top, 0);
       margin: 0 auto;
@@ -317,7 +355,7 @@ const enableAppSetting = import.meta.env.VITE_APP_SETTING
     .copyright {
       position: relative;
       width: 100%;
-      // 内容不足一屏时，版权信息仍贴在底部
+      /* 内容不足一屏时，版权信息仍贴在底部 */
       margin-top: auto;
       margin-inline: auto;
       background-color: oklch(var(--background));
@@ -332,7 +370,12 @@ const enableAppSetting = import.meta.env.VITE_APP_SETTING
 }
 
 .fade-leave-active {
+  /* 进出场同时进行：离场节点若留在文档流里，会跟进场节点叠出双倍高度，等它卸载时容器高度骤然收缩，
+     看起来就是切页时那一下生硬的“上挤”。绝对定位后离场节点只负责淡出，不再参与高度计算。 */
+  position: absolute;
+  width: 100%;
   transition: 0.15s;
+  pointer-events: none;
 }
 
 .fade-enter-from {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { InstanceItem } from '@/api/modules/instance'
 import { NButton, NCard, NProgress, NStatistic, NTooltip } from 'naive-ui'
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { routeToInstanceConsole } from '@/navigation/game-routes'
 import { statusBadgeClass } from '@/constants/statusDictionary'
 import {
@@ -56,6 +56,14 @@ const {
 
 watch(() => props.instance?.status, () => syncRuntimeObservabilityPolling())
 onMounted(() => syncRuntimeObservabilityPolling())
+/**
+ * 本卡片挂在「实例详情」页内，而详情页开了 `keepAlive`：从详情页切走时父页面只会 `deactivate`，
+ * 卡片自身不会 unmount，只写 `onBeforeUnmount` 的话两个定时器（指标轮询 + 每秒一次的运行时长 tick）
+ * 会留在后台一直跑——用户看到的是「人都走了，这个实例的请求还在发」。
+ * 激活与停用必须成对补齐，`syncRuntimeObservabilityPolling` 自身是幂等的，重复调用安全。
+ */
+onActivated(() => syncRuntimeObservabilityPolling())
+onDeactivated(() => stopRuntimeObservability())
 onBeforeUnmount(() => stopRuntimeObservability())
 
 const state = computed(() => (props.instance ? getInstanceState(props.instance) : null))

@@ -59,6 +59,11 @@ jobs:
       - name: panel.env preset consistency
         run: pnpm run check:presets
 
+      # 整页转场的结构性护栏：KeepAlive 与 out-in/in-out 同处会让切页永久空白，
+      # 而在代码里只体现为一个属性值，本地 release:check 跑不代表 main 有门禁。
+      - name: Page transition guard
+        run: pnpm run check:transition
+
       - name: Unit tests
         env:
           GSH_UNIT_TEST: '1'

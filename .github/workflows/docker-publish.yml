@@ -53,6 +53,9 @@ jobs:
       - name: gsh CLI checks
         run: pnpm run check:gsh
 
+      - name: Page transition guard
+        run: pnpm run check:transition
+
       - name: Release consistency
         run: pnpm run release:verify
 

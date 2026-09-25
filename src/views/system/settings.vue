@@ -432,7 +432,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <FaPageMain title="系统设置" class="h-full">
+  <FaPageMain class="h-full gap-4">
     <NSpin v-if="loading" size="large" class="block mx-auto my-8" />
     <div v-else-if="settingsLoadError || !settingsLoaded" class="space-y-4" role="alert">
       <NAlert type="error" title="无法加载系统设置">
@@ -443,6 +443,11 @@ onMounted(async () => {
       </FaButton>
     </div>
     <template v-else>
+      <div>
+        <h2 class="m-0 text-lg font-semibold">
+          系统设置
+        </h2> 
+      </div>
       <SystemSettingsTabs>
         <template #settings>
           <div class="space-y-6">

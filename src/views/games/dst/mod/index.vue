@@ -1708,16 +1708,18 @@ onMounted(async () => {
   <div class="dst-mod-page flex h-[var(--g-main-content-height)] flex-col overflow-hidden p-3 md:p-4">
     <FaPageMain 
       class="flex min-h-0 flex-1 flex-col overflow-hidden !m-0 h-full"
-      main-class="dst-mod-main flex min-h-0 flex-1 flex-col overflow-y-auto"
+      main-class="dst-mod-main flex min-h-0 flex-1 flex-col overflow-y-auto gap-4"
     >
-      <h2 class="m-0 text-lg font-semibold">
-        Mod 订阅
-      </h2>
-      <p class="mt-1 text-sm text-muted-foreground">
-        订阅服务器 Mod：在「Mod 市场」浏览 Steam 创意工坊，或在「已订阅」页签管理当前实例的 Mod 并控制开启状态。开启后需重启实例生效。
-      </p>
+      <div>
+        <h2 class="m-0 text-lg font-semibold">
+          Mod 订阅
+        </h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          订阅服务器 Mod：在「Mod 市场」浏览 Steam 创意工坊，或在「已订阅」页签管理当前实例的 Mod 并控制开启状态。开启后需重启实例生效。
+        </p>
+      </div>
 
-      <NCard size="small" title="实例选择" class="mb-3 mt-2 shrink-0 md:mb-4">
+      <NCard size="small" title="实例选择" class="mb-0 shrink-0">
         <div class="flex flex-wrap items-center gap-3">
           <NSelect
             class="w-full md:w-80"

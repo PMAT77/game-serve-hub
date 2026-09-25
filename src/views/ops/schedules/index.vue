@@ -423,11 +423,17 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
 </script>
 
 <template>
-  <FaPageMain title="计划任务" main-class="flex flex-col gap-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="text-sm opacity-70">
+  <FaPageMain class="gap-4" main-class="flex flex-col gap-4">
+    <div>
+      <h2 class="m-0 text-lg font-semibold">
+        计划任务
+      </h2>
+      <p class="mt-1 text-sm text-muted-foreground">
         单机定时任务；错过的执行不会补跑。
-      </div>
+      </p>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-start gap-3"> 
       <NButton type="primary" @click="openCreateDialog">
         新建任务
       </NButton>

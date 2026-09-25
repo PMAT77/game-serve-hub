@@ -7,7 +7,12 @@ defineOptions({
 </script>
 
 <template>
-  <FaPageMain title="商业支持与 Pro" class="h-full">
+  <FaPageMain class="h-full gap-4"> 
+    <div>
+      <h2 class="m-0 text-lg font-semibold">
+        商业支持与 Pro
+      </h2> 
+    </div>
     <CommercialSupportSection />
   </FaPageMain>
 </template>

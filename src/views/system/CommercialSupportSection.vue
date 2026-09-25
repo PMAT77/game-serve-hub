@@ -108,6 +108,9 @@ onMounted(loadSupport)
           <p class="text-xs text-muted-foreground">
             参考价按常规环境估算，实际报价沟通后确认；面板里没有下单入口，付款与合同都在面板之外。
           </p>
+          <p v-if="support.sponsorNote" class="text-xs text-muted-foreground">
+            {{ support.sponsorNote }}
+          </p>
         </div>
 
         <div class="rounded-md border px-3 py-2 text-sm">

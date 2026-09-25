@@ -1704,7 +1704,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="dst-mod-page absolute inset-0 flex flex-col overflow-hidden p-3 md:p-4">
+  <!-- 整屏工作台：高度用 layout 的内容区高度变量自撑，不再用 `absolute inset-0`（父级高度为 0 会把整页裁掉） -->
+  <div class="dst-mod-page flex h-[var(--g-main-content-height)] flex-col overflow-hidden p-3 md:p-4">
     <FaPageMain 
       class="flex min-h-0 flex-1 flex-col overflow-hidden !m-0 h-full"
       main-class="dst-mod-main flex min-h-0 flex-1 flex-col overflow-y-auto"
@@ -1716,7 +1717,7 @@ onMounted(async () => {
         订阅服务器 Mod：在「Mod 市场」浏览 Steam 创意工坊，或在「已订阅」页签管理当前实例的 Mod 并控制开启状态。开启后需重启实例生效。
       </p>
 
-      <NCard size="small" title="实例选择" class="mb-3 shrink-0 md:mb-4">
+      <NCard size="small" title="实例选择" class="mb-3 mt-2 shrink-0 md:mb-4">
         <div class="flex flex-wrap items-center gap-3">
           <NSelect
             class="w-full md:w-80"

@@ -172,6 +172,8 @@ function setupKeepAlive(router: Router) {
 // 其他
 function setupOther(router: Router) {
   router.afterEach(() => {
+    // 页面本体并不滚动（滚动发生在 layout 的主内容区 `.main-container`），这句只是兜底：
+    // 主内容区的滚动归零在 `layouts/index.vue` 里随路由变化执行，别只依赖这一句。
     document.documentElement.scrollTop = 0
   })
 }

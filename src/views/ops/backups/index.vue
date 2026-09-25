@@ -17,13 +17,11 @@ defineOptions({
 
 const dialog = useDialog()
 const route = useRoute()
-const appSettingsStore = useAppSettingsStore()
 
 const rows = ref<BackupItem[]>([])
 const instances = ref<InstanceItem[]>([])
 const dbRows = ref<BackupItem[]>([])
 const selectedInstanceId = ref<string | null>(null)
-const isMobileMode = computed(() => appSettingsStore.mode === 'mobile')
 
 const {
   loading,
@@ -600,7 +598,7 @@ onActivated(() => {
 </script>
 
 <template>
-  <div class="page-container" :class="{ mobile: isMobileMode }">
+  <FaPageMain main-class="flex flex-col gap-4">
     <div>
       <h2 class="m-0 text-lg font-semibold">
         备份与恢复
@@ -671,7 +669,7 @@ onActivated(() => {
           面板数据库快照
         </h2>
         <p class="mt-1 text-sm text-muted-foreground">
-          由「备份面板数据」创建，包含面板账号与设置，不属于任何游戏实例。 
+          由「创建面板数据库快照」生成，包含面板账号与设置，不属于任何游戏实例。
         </p>
         <div class="mt-3 flex flex-wrap items-center gap-2">
           <NButton type="warning" strong secondary @click="handleCreateDbBackup">
@@ -767,21 +765,10 @@ onActivated(() => {
       :instance-name="instanceName(selectedInstanceId ?? '')"
       @imported="triggerLoad"
     />
-  </div>
+  </FaPageMain>
 </template>
 
 <style scoped>
-.page-container {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px;
-}
-
-.page-container.mobile {
-  padding: 12px;
-}
-
 .db-snapshot-section {
   display: flex;
   flex-direction: column;

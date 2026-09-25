@@ -423,7 +423,7 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 p-4">
+  <FaPageMain title="计划任务" main-class="flex flex-col gap-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="text-sm opacity-70">
         单机定时任务；错过的执行不会补跑。
@@ -505,7 +505,7 @@ const columns = computed<DataTableColumns<ScheduleTaskItem>>(() => {
         </NSpace>
       </NForm>
     </NModal>
-  </div>
+  </FaPageMain>
 </template>
 
 <style scoped>

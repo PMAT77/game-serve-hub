@@ -3,6 +3,10 @@ import type { CapabilityCard } from './home-capabilities'
 import { routeToNodeInstance } from '@/navigation/game-routes'
 import { HOME_CAPABILITIES } from './home-capabilities'
 
+defineOptions({
+  name: 'Home',
+})
+
 const router = useRouter()
 
 const LINKS = {
@@ -58,7 +62,12 @@ function goLogin() {
 </script>
 
 <template>
-  <div class="bg-background size-full absolute overflow-auto">
+  <!--
+    这里不要再加 `absolute size-full`：主内容区（layout 的 .main）的高度由页面内容决定，
+    绝对定位的根元素不贡献高度，会被 .main 的 overflow: hidden 整块裁掉——
+    0.9.0 的「主页一片空白」就是这么来的。滚动由主内容区承担，与其他页面一致。
+  -->
+  <div class="bg-background">
     <div class="mx-auto px-4 py-6 max-w-7xl md-px-8 md-py-10">
       <!-- Top Bar -->
       <div class="mb-6 flex items-center justify-between">

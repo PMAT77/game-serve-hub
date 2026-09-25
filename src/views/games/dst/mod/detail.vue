@@ -351,7 +351,8 @@ watch(contentLocale, () => {
 </script>
 
 <template>
-  <div class="dst-mod-detail-page absolute inset-0 flex flex-col overflow-hidden p-4">
+  <!-- 整屏工作台：高度用 layout 的内容区高度变量自撑，不再用 `absolute inset-0`（父级高度为 0 会把整页裁掉） -->
+  <div class="dst-mod-detail-page flex h-[var(--g-main-content-height)] flex-col overflow-hidden p-4">
     <FaPageMain
       class="flex min-h-0 flex-1 flex-col overflow-hidden !m-0 h-full"
       main-class="flex min-h-0 flex-1 flex-col"

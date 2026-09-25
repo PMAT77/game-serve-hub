@@ -219,7 +219,7 @@ async function fetchStatusCounts() {
       nodeId: selectedNodeId.value !== 'all' ? selectedNodeId.value : undefined,
       keyword: keywordFilter.value.trim() || undefined,
     })
-    statusCounts.value = res.data
+    statusCounts.value = res.data && typeof res.data === 'object' ? res.data : statusCounts.value
   }
   catch {
     // 全局拦截器已提示错误原因；失败时保留旧计数
@@ -1035,7 +1035,9 @@ async function fetchInstances(options?: { silent?: boolean }) {
       }),
       fetchStatusCounts(),
     ])
-    instances.value = res.data
+    // 接口异常时 data 可能不是数组：这里兜一次，否则下游 .filter/.some 会抛错，
+    // 而页面组件渲染抛错会让整个内容区停止更新（只能刷新恢复）
+    instances.value = Array.isArray(res.data) ? res.data : []
     syncInstallTerminalNotifications(instances.value)
     syncRuntimeObservabilityPolling()
   }

@@ -18,7 +18,7 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0))
 }
 
-const cpuPercent = computed(() => clampPercent(props.info?.cpu.usageRate ?? 0))
+const cpuPercent = computed(() => clampPercent(props.info?.cpu?.usageRate ?? 0))
 </script>
 
 <template>
@@ -29,10 +29,10 @@ const cpuPercent = computed(() => clampPercent(props.info?.cpu.usageRate ?? 0))
 
     <div>
       <div class="font-semibold">
-        {{ info?.cpu.cores ?? '--' }} 核
+        {{ info?.cpu?.cores ?? '--' }} 核
       </div>
       <div class="text-xs text-muted-foreground mt-1">
-        {{ info?.cpu.model ?? '--' }}
+        {{ info?.cpu?.model ?? '--' }}
       </div>
     </div>
   </div>

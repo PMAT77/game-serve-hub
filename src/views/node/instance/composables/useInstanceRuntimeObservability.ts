@@ -40,7 +40,8 @@ export function useInstanceRuntimeObservability(instances: Ref<InstanceItem[]>) 
     }
     try {
       const res = await apiInstance.getInstanceMetrics(runningIds)
-      instanceMetrics.value = res.data.items
+      // data 形状异常时兜成空表：instanceMetrics 若变成 undefined，下游取值会抛错
+      instanceMetrics.value = res.data?.items ?? {}
     }
     catch {
       if (!options?.silent) {
